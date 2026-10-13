@@ -16,6 +16,7 @@
 import '@tabler/core';
 import Alpine from '@alpinejs/csp';
 
+import installer from './components/installer.js';
 import installerToken from './components/installer-token.js';
 import localeSwitcher from './components/locale-switcher.js';
 import toasts from './components/toasts.js';
@@ -25,6 +26,7 @@ window.Alpine = Alpine;
 
 Alpine.store('toasts', createToastsStore());
 
+Alpine.data('installer', installer);
 Alpine.data('installerToken', installerToken);
 Alpine.data('localeSwitcher', localeSwitcher);
 Alpine.data('toasts', toasts);

@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Install\FinalizeController;
 use App\Http\Controllers\Install\InstallController;
+use App\Http\Controllers\Install\InstallStepController;
 use App\Http\Controllers\Install\TokenController;
 use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Middleware\AbortIfInstalled;
+use App\Http\Middleware\AuthorizeSetupToken;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home')->name('home');
@@ -24,4 +27,17 @@ Route::prefix('install')->name('install.')->middleware(AbortIfInstalled::class)-
     Route::get('/', [InstallController::class, 'show'])->name('show');
 
     Route::post('/token', TokenController::class)->middleware('throttle:installer-token')->name('token');
+
+    Route::middleware(AuthorizeSetupToken::class)->group(function (): void {
+        Route::get('/requirements', [InstallController::class, 'requirements'])->name('requirements');
+
+        Route::post('/database', [InstallStepController::class, 'database'])->defaults('step', 'database')->name('database');
+        Route::post('/application', [InstallStepController::class, 'application'])->defaults('step', 'application')->name('application');
+        Route::post('/mail', [InstallStepController::class, 'mail'])->defaults('step', 'mail')->middleware('throttle:installer-mail')->name('mail');
+        Route::post('/mail/verify', [InstallStepController::class, 'verifyMail'])->name('mail.verify');
+        Route::post('/storage', [InstallStepController::class, 'storage'])->defaults('step', 'storage')->name('storage');
+        Route::post('/documenso', [InstallStepController::class, 'documenso'])->defaults('step', 'documenso')->name('documenso');
+        Route::post('/documenso/skip', [InstallStepController::class, 'skipDocumenso'])->name('documenso.skip');
+        Route::post('/finalize', FinalizeController::class)->name('finalize');
+    });
 });

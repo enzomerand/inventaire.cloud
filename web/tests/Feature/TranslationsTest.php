@@ -27,7 +27,7 @@ function translatedStringsInCode(): array
     }
 
     foreach ($files as $path) {
-        preg_match_all("/(?:__\\(|new InstallationException\\()\\s*(?:'((?:[^'\\\\\\\\]|\\\\\\\\.)*)'|\"((?:[^\"\\\\\\\\]|\\\\\\\\.)*)\")/s", (string) file_get_contents($path), $matches, PREG_SET_ORDER);
+        preg_match_all("/(?:__\\(|trans_choice\\(|new InstallationException\\()\\s*(?:'((?:[^'\\\\\\\\]|\\\\\\\\.)*)'|\"((?:[^\"\\\\\\\\]|\\\\\\\\.)*)\")/s", (string) file_get_contents($path), $matches, PREG_SET_ORDER);
 
         foreach ($matches as $match) {
             $text = ($match[1] ?? '') !== '' ? str_replace(["\\'", '\\\\'], ["'", '\\'], $match[1]) : stripcslashes($match[2] ?? '');

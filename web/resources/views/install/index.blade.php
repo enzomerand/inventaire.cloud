@@ -48,4 +48,8 @@
             </div>
         </div>
     @endunless
+
+    @if ($authorized)
+        @include('install.wizard')
+    @endif
 @endsection
