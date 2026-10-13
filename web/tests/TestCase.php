@@ -33,6 +33,13 @@ abstract class TestCase extends BaseTestCase
     protected bool $withAppKey = true;
 
     /**
+     * Interface language forced for this test, or null for the configured default (French).
+     * Installer tests assert on English source messages and switch to it with
+     * {@see self::useLanguage()}.
+     */
+    protected ?string $language = null;
+
+    /**
      * What the installer sees as the process environment (Docker variables).
      * Empty by default: the variables phpunit.xml defines are not "imposed".
      *
@@ -63,6 +70,10 @@ abstract class TestCase extends BaseTestCase
 
         $app->beforeBootstrapping(RegisterProviders::class, function (Application $app): void {
             $this->sandbox?->apply($app, $this->installed, $this->withAppKey);
+
+            if ($this->language !== null) {
+                $app->make('config')->set('app.locale', $this->language);
+            }
         });
 
         $app->make(Kernel::class)->bootstrap();
@@ -83,12 +94,23 @@ abstract class TestCase extends BaseTestCase
      * @param  bool  $installed  False simulates a fresh instance.
      * @param  bool  $appKey  False also removes the application key.
      */
-    protected function bootInstaller(bool $installed = true, bool $appKey = true): void
+    public function bootInstaller(bool $installed = true, bool $appKey = true): void
     {
         $this->installed = $installed;
         $this->withAppKey = $appKey;
 
         $this->refreshApplication();
+    }
+
+    /**
+     * Answers in another language for the rest of the test, surviving reboots.
+     */
+    public function useLanguage(string $locale): void
+    {
+        $this->language = $locale;
+
+        config(['app.locale' => $locale]);
+        app()->setLocale($locale);
     }
 
     /**

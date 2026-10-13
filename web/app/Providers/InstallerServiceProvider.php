@@ -9,7 +9,10 @@ use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\InstallationState;
+use App\Installer\InstallerSettings;
 use App\Installer\PreInstallRuntime;
+use App\Installer\Probes\FilesystemStorageProbe;
+use App\Installer\Probes\StorageProbe;
 use App\Installer\SetupToken;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Application;
@@ -53,7 +56,9 @@ final class InstallerServiceProvider extends ServiceProvider
             static fn (): array => getenv(),
         ));
 
+        $this->app->singleton(InstallerSettings::class);
         $this->app->singleton(SetupToken::class);
+        $this->app->bind(StorageProbe::class, FilesystemStorageProbe::class);
         $this->app->singleton(ApplicationKey::class);
         $this->app->singleton(PreInstallRuntime::class);
 
