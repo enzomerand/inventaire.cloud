@@ -112,13 +112,15 @@ return [
     | Source Repository
     |--------------------------------------------------------------------------
     |
-    | Public location of the project's source code. The AGPL-3.0 requires that
-    | users interacting with the application over a network can obtain its
-    | source, so the page footer links here.
+    | Public location of the source code this instance runs. The AGPL-3.0
+    | (section 13) requires that users interacting with the application over a
+    | network can obtain its source, so the page footer links here. Forks and
+    | modified deployments must set APP_REPOSITORY_URL to where their own
+    | source is published; the footer's licence link is derived from it.
     |
     */
 
-    'repository_url' => 'https://github.com/enzomerand/inventaire.cloud',
+    'repository_url' => env('APP_REPOSITORY_URL', 'https://github.com/enzomerand/inventaire.cloud'),
 
     /*
     |--------------------------------------------------------------------------

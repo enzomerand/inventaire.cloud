@@ -161,4 +161,4 @@ The language switcher and the `PUT /locale` endpoint pick the new locale up from
 
 ## License
 
-Released under the [GNU Affero General Public License v3.0](../LICENSE) (AGPL-3.0). If you run a modified version as a network service, you must offer its source code to your users.
+Released under the [GNU Affero General Public License v3.0](../LICENSE) (AGPL-3.0). If you run a modified version as a network service, you must offer its source code to your users (section 13): set `APP_REPOSITORY_URL` in `.env` to where your fork's source is published. The page footer links to that URL, and to its `LICENSE` file, instead of the upstream repository.

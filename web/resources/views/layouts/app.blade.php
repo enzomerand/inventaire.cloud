@@ -46,19 +46,21 @@
                 </div>
             </main>
 
+            @php($repository = rtrim(config()->string('app.repository_url'), '/'))
+
             <footer class="footer footer-transparent d-print-none">
                 <div class="container-xl">
                     <div class="row text-center align-items-center flex-row-reverse">
                         <div class="col-lg-auto ms-lg-auto">
                             <ul class="list-inline list-inline-dots mb-0">
                                 <li class="list-inline-item">
-                                    <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ config('app.repository_url') }}" target="_blank" rel="noopener">
-                                        <x-tabler-brand-github aria-hidden="true" />
-                                        GitHub
+                                    <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ $repository }}" target="_blank" rel="noopener">
+                                        <x-tabler-code aria-hidden="true" />
+                                        {{ __('Source code') }}
                                     </a>
                                 </li>
                                 <li class="list-inline-item">
-                                    <a class="link-secondary" href="{{ config('app.repository_url') }}/blob/main/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a>
+                                    <a class="link-secondary" href="{{ $repository }}/blob/HEAD/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a>
                                 </li>
                             </ul>
                         </div>
