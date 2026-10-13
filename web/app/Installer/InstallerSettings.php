@@ -24,11 +24,80 @@ final class InstallerSettings
     ) {}
 
     /**
-     * Whether the field's value is imposed by the process environment.
+     * Whether the field's value is out of the wizard's hands: imposed by the
+     * process environment, or replaced by a connection URL.
      */
     public function isLocked(Field $field): bool
     {
-        return $field->envKey !== null && $this->locks->isLocked($field->envKey);
+        return ($field->envKey !== null && $this->locks->isLocked($field->envKey)) || $this->isProvidedByUrl($field);
+    }
+
+    /**
+     * The connection URL (DB_URL, MAIL_URL) provided for a step, from the
+     * environment or from .env, or null when there is none.
+     */
+    public function providedUrl(InstallStep $step): ?string
+    {
+        $key = $step->urlKey();
+        $url = $key === null ? null : $this->raw($key);
+
+        return $url === null || $url === '' ? null : $url;
+    }
+
+    /**
+     * Whether a connection URL stands in for this field. Such fields are shown
+     * masked (a URL often contains a password) and never written.
+     */
+    public function isProvidedByUrl(Field $field): bool
+    {
+        if ($field->urlKey === null) {
+            return false;
+        }
+
+        $url = $this->raw($field->urlKey);
+
+        return $url !== null && $url !== '';
+    }
+
+    /**
+     * Validation rules of a step: the step's own, minus the fields a connection
+     * URL replaces (their values are not the ones in use).
+     *
+     * @return array<string, list<mixed>>
+     */
+    public function rules(InstallStep $step): array
+    {
+        $rules = $step->rules();
+
+        foreach ($step->fields() as $field) {
+            if ($this->isProvidedByUrl($field)) {
+                unset($rules[$field->name]);
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Whether every setting the installation needs is provided by the
+     * environment, so that nothing has to be written to .env (the typical
+     * container: variables only, read-only application folder).
+     */
+    public function isEnvironmentOnly(): bool
+    {
+        foreach (InstallStep::required() as $step) {
+            $values = $this->current($step);
+
+            foreach ($step->fields() as $field) {
+                $visible = $field->showWhen === null || ($values[$field->showWhen['field']] ?? null) === $field->showWhen['value'];
+
+                if ($field->envKey !== null && $field->required && $visible && ! $this->isLocked($field)) {
+                    return false;
+                }
+            }
+        }
+
+        return $this->locks->isLocked('MAIL_MAILER');
     }
 
     /**
@@ -125,11 +194,23 @@ final class InstallerSettings
                 continue;
             }
 
+            // A setting that does not apply (S3 details for local storage) is not stored.
+            if ($field->showWhen !== null && (string) ($values[$field->showWhen['field']] ?? '') !== $field->showWhen['value']) {
+                continue;
+            }
+
             $updates[$field->envKey] = $this->toEnvValue($field, $values[$field->name]);
         }
 
         if ($step === InstallStep::Mail && ! $this->locks->isLocked('MAIL_MAILER')) {
             $updates['MAIL_MAILER'] = 'smtp';
+        }
+
+        // Only what changes is written: a configuration that already lives in the environment needs no .env at all.
+        $updates = array_filter($updates, fn (string $text, string $key): bool => ($this->raw($key) ?? '') !== ($text === 'null' ? '' : $text), ARRAY_FILTER_USE_BOTH);
+
+        if ($updates === []) {
+            return;
         }
 
         if (! $this->file->isWritable()) {

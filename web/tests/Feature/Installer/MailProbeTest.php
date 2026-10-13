@@ -22,22 +22,6 @@ function mailSettings(array $override = []): MailSettings
     ]);
 }
 
-/**
- * Whether something listens on the local Mailpit SMTP port of compose.dev.yaml.
- */
-function mailpitIsUp(): bool
-{
-    $socket = @fsockopen('127.0.0.1', 1025, $errno, $error, 0.5);
-
-    if ($socket === false) {
-        return false;
-    }
-
-    fclose($socket);
-
-    return true;
-}
-
 it('sends the code to the recipient with the tested sender', function (): void {
     Mail::fake();
 

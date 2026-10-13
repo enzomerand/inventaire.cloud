@@ -14,30 +14,20 @@ use Closure;
  * a value to .env would appear to work but change nothing, so those values are
  * "locked": shown read-only and never written.
  *
- * Laravel copies the .env values into the process environment too, so presence
- * alone proves nothing. A variable is imposed when it is set in the environment
- * and is either absent from the .env file or different from it.
- *
- * The .env contents are captured when this object is created, before the
- * request writes anything: once a step has rewritten the file, the process
- * environment still holds the old values and every written key would
- * otherwise look imposed.
+ * A variable is imposed when it was in the environment the process started
+ * with (see {@see ProcessEnvironment}), whatever the .env file says, even when
+ * the value is identical.
  */
 final class EnvironmentLocks
 {
     /** @var array<string, string> */
-    private readonly array $file;
-
-    /** @var array<string, string> */
     private readonly array $process;
 
     /**
-     * @param  Closure(): array<array-key, mixed>  $processEnvironment  Returns the environment variables (getenv in production).
+     * @param  Closure(): array<array-key, mixed>  $processEnvironment  Returns the variables the process started with.
      */
-    public function __construct(EnvironmentFile $file, Closure $processEnvironment)
+    public function __construct(Closure $processEnvironment)
     {
-        $this->file = $file->all();
-
         $process = [];
 
         foreach ($processEnvironment() as $key => $value) {
@@ -54,11 +44,7 @@ final class EnvironmentLocks
      */
     public function isLocked(string $key): bool
     {
-        if (! array_key_exists($key, $this->process)) {
-            return false;
-        }
-
-        return ! array_key_exists($key, $this->file) || $this->file[$key] !== $this->process[$key];
+        return array_key_exists($key, $this->process);
     }
 
     /**
@@ -66,6 +52,6 @@ final class EnvironmentLocks
      */
     public function value(string $key): ?string
     {
-        return $this->isLocked($key) ? $this->process[$key] : null;
+        return $this->process[$key] ?? null;
     }
 }

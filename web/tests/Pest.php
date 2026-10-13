@@ -42,3 +42,39 @@ function testDatabaseSettings(array $override = []): DatabaseSettings
         'password' => $connection['password'],
     ], $override));
 }
+
+/**
+ * Whether something listens on the local Mailpit SMTP port of compose.dev.yaml.
+ */
+function mailpitIsUp(): bool
+{
+    $socket = @fsockopen('127.0.0.1', 1025, $errno, $error, 0.5);
+
+    if ($socket === false) {
+        return false;
+    }
+
+    fclose($socket);
+
+    return true;
+}
+
+/**
+ * The process environment of a container configured only through variables,
+ * pointing at the test database.
+ *
+ * @return array<string, string>
+ */
+function containerEnvironment(): array
+{
+    $db = testDatabaseSettings();
+
+    return [
+        'APP_ENV' => 'production', 'APP_DEBUG' => 'false',
+        'DB_CONNECTION' => $db->driver, 'DB_HOST' => $db->host, 'DB_PORT' => (string) $db->port, 'DB_DATABASE' => $db->database,
+        'DB_USERNAME' => $db->username, 'DB_PASSWORD' => $db->password,
+        'APP_URL' => 'https://inventory.example.test', 'APP_LOCALE' => 'fr', 'APP_TIMEZONE' => 'UTC',
+        'MAIL_MAILER' => 'smtp', 'MAIL_HOST' => 'smtp.example.test', 'MAIL_PORT' => '587',
+        'MAIL_FROM_ADDRESS' => 'hello@example.test', 'MAIL_FROM_NAME' => 'My Shop', 'FILESYSTEM_DISK' => 'local',
+    ];
+}

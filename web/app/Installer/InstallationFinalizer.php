@@ -84,7 +84,7 @@ final class InstallationFinalizer
      */
     private function migrate(): void
     {
-        $settings = DatabaseSettings::fromArray($this->settings->current(InstallStep::Database));
+        $settings = DatabaseSettings::fromArray($this->settings->current(InstallStep::Database), $this->settings->providedUrl(InstallStep::Database));
         $base = $this->config->get('database.connections.'.$settings->driver);
 
         if (! is_array($base)) {

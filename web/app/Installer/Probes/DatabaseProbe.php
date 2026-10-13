@@ -10,6 +10,7 @@ use Illuminate\Config\Repository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\ConfigurationUrlParser;
 use Illuminate\Support\Str;
 use PDO;
 use Throwable;
@@ -47,14 +48,22 @@ final class DatabaseProbe
             return ProbeResult::failure(__('This database engine is not supported.'), 'driver');
         }
 
-        $extension = $settings->driver === 'pgsql' ? 'pdo_pgsql' : 'pdo_mysql';
+        // Exactly what the application will open: with a DB_URL, Laravel parses it over the connection's own settings.
+        $config = (new ConfigurationUrlParser)->parseConfiguration($settings->connectionConfig($base));
+        $driver = is_string($config['driver'] ?? null) ? $config['driver'] : $settings->driver;
+
+        if (! in_array($driver, DatabaseSettings::DRIVERS, true)) {
+            return ProbeResult::failure(__('This database engine is not supported.'), 'driver');
+        }
+
+        $extension = $driver === 'pgsql' ? 'pdo_pgsql' : 'pdo_mysql';
 
         if (! extension_loaded($extension)) {
             return ProbeResult::failure(__('The PHP extension :name is not installed.', ['name' => $extension]), 'driver');
         }
 
         try {
-            $connection = $this->db->connectUsing(self::CONNECTION, $settings->connectionConfig($base), true);
+            $connection = $this->db->connectUsing(self::CONNECTION, $config, true);
 
             if (! $connection instanceof Connection) {
                 return ProbeResult::failure(__('This database engine is not supported.'), 'driver');
@@ -68,7 +77,7 @@ final class DatabaseProbe
         }
 
         try {
-            return $this->inspect($connection, $settings, $base);
+            return $this->inspect($connection, $driver, $config);
         } catch (Throwable $exception) {
             return ProbeResult::failure(__('The database check failed: :reason', ['reason' => $this->reason($exception, $settings)]));
         } finally {
@@ -77,21 +86,21 @@ final class DatabaseProbe
     }
 
     /**
-     * @param  array<string, mixed>  $base
+     * @param  array<string, mixed>  $config  The connection configuration, URL already parsed.
      */
-    private function inspect(Connection $connection, DatabaseSettings $settings, array $base): ProbeResult
+    private function inspect(Connection $connection, string $driver, array $config): ProbeResult
     {
-        $server = ServerVersion::parse($settings->driver, (string) $connection->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION));
+        $server = ServerVersion::parse($driver, (string) $connection->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION));
 
-        if ($settings->driver === 'mysql' && $server->flavor === 'mariadb') {
+        if ($driver === 'mysql' && $server->flavor === 'mariadb') {
             return ProbeResult::failure(__('This server is MariaDB, not MySQL: choose MariaDB as the database engine.'), 'driver');
         }
 
-        if ($settings->driver === 'mariadb' && $server->flavor !== 'mariadb') {
+        if ($driver === 'mariadb' && $server->flavor !== 'mariadb') {
             return ProbeResult::failure(__('This server is MySQL, not MariaDB: choose MySQL as the database engine.'), 'driver');
         }
 
-        $minimum = $this->config->string('installer.minimum_versions.'.$settings->driver);
+        $minimum = $this->config->string('installer.minimum_versions.'.$driver);
 
         if (version_compare($server->version, $minimum, '<')) {
             return ProbeResult::failure(__(':engine :minimum or newer is required, this server runs :found.', [
@@ -102,7 +111,7 @@ final class DatabaseProbe
         }
 
         $foreign = array_values(array_filter(
-            $this->tableNames($connection, $settings->driver, $base),
+            $this->tableNames($connection, $driver, $config),
             static fn (string $table): bool => ! ApplicationTables::owns($table),
         ));
 
@@ -191,8 +200,10 @@ final class DatabaseProbe
     {
         $message = (string) preg_replace('/\s+/', ' ', $exception->getMessage());
 
-        if ($settings->password !== '') {
-            $message = str_replace($settings->password, '***', $message);
+        foreach ([$settings->password, $settings->url, parse_url((string) $settings->url, PHP_URL_PASS) ?: null] as $secret) {
+            if (is_string($secret) && $secret !== '') {
+                $message = str_replace($secret, '***', $message);
+            }
         }
 
         return Str::limit(trim($message), 240);

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests;
 
-use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
@@ -80,8 +79,7 @@ abstract class TestCase extends BaseTestCase
 
         TestDatabaseGuard::assertSafe($app->make('config'));
 
-        $app->singleton(EnvironmentLocks::class, fn (Application $app): EnvironmentLocks => new EnvironmentLocks(
-            $app->make(EnvironmentFile::class),
+        $app->singleton(EnvironmentLocks::class, fn (): EnvironmentLocks => new EnvironmentLocks(
             fn (): array => $this->processEnvironment,
         ));
 

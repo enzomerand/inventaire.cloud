@@ -29,6 +29,7 @@ final class RequirementsChecker
     public function __construct(
         private readonly Application $app,
         private readonly EnvironmentFile $environment,
+        private readonly InstallerSettings $settings,
         ?Closure $extensionLoaded = null,
         private readonly ?string $phpVersion = null,
     ) {
@@ -58,8 +59,12 @@ final class RequirementsChecker
         $requirements[] = $this->anyOf('image-library', __('Image library: GD (gd) or Imagick (imagick)'), ['gd', 'imagick']);
 
         $requirements[] = $this->writable('storage', __('Writable folder: :path', ['path' => 'storage/']), $this->app->storagePath(), is_dir($this->app->storagePath()) && is_writable($this->app->storagePath()));
-        $requirements[] = $this->writable('bootstrap-cache', __('Writable folder: :path', ['path' => 'bootstrap/cache/']), $this->app->bootstrapPath('cache'), is_dir($this->app->bootstrapPath('cache')) && is_writable($this->app->bootstrapPath('cache')));
-        $requirements[] = $this->writable('env', __('Writable file: :path', ['path' => '.env']), $this->environment->path(), $this->environment->isWritable());
+
+        // A container configured only through variables writes neither .env nor the framework caches.
+        $notNeeded = $this->settings->isEnvironmentOnly();
+
+        $requirements[] = $this->writable('bootstrap-cache', __('Writable folder: :path', ['path' => 'bootstrap/cache/']), $this->app->bootstrapPath('cache'), is_dir($this->app->bootstrapPath('cache')) && is_writable($this->app->bootstrapPath('cache')), $notNeeded);
+        $requirements[] = $this->writable('env', __('Writable file: :path', ['path' => '.env']), $this->environment->path(), $this->environment->isWritable(), $notNeeded);
 
         return $requirements;
     }
@@ -142,10 +147,14 @@ final class RequirementsChecker
         );
     }
 
-    private function writable(string $id, string $label, string $path, bool $ok): Requirement
+    private function writable(string $id, string $label, string $path, bool $ok, bool $notNeeded = false): Requirement
     {
         if ($ok) {
             return new Requirement($id, $label, true);
+        }
+
+        if ($notNeeded) {
+            return new Requirement($id, $label, true, __('Not needed: every setting is provided by the environment.'));
         }
 
         return new Requirement($id, $label, false, __('The web server user cannot write to :path. Change its permissions or ownership.', ['path' => AtomicFile::display($path)]));

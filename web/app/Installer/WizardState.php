@@ -113,7 +113,8 @@ final class WizardState
 
         foreach ($step->fields() as $field) {
             $locked = $this->settings->isLocked($field);
-            $value = $field->secret ? '' : $values[$field->name];
+            $byUrl = $this->settings->isProvidedByUrl($field);
+            $value = $field->secret || $byUrl ? '' : $values[$field->name];
 
             // The example's address is a development one; the address the administrator is using right now is a better suggestion.
             if ($step === InstallStep::Application && $field->name === 'url' && ! $locked && $this->state->status($step) === InstallationState::STATUS_PENDING) {
@@ -129,6 +130,7 @@ final class WizardState
                 'secret' => $field->secret,
                 'secretSet' => $field->secret && $this->settings->hasValue($field),
                 'locked' => $locked,
+                'masked' => $byUrl,
                 'help' => $field->help,
                 'placeholder' => $field->placeholder,
                 'options' => $field->options,
@@ -143,6 +145,7 @@ final class WizardState
             'intro' => $step->intro(),
             'status' => $this->state->status($step),
             'optional' => $step->isOptional(),
+            'notice' => $this->settings->providedUrl($step) === null ? '' : __('The connection is provided by the :variable setting: the fields below are read-only and the checks use it as is.', ['variable' => $step->urlKey()]),
             'submit' => match ($step) {
                 InstallStep::Database => __('Test the connection and continue'),
                 InstallStep::Application => __('Continue'),

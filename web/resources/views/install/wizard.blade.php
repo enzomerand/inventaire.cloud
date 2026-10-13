@@ -23,6 +23,7 @@
                 <h2 class="card-title" x-text="step.title"></h2>
                 <p class="text-secondary" x-text="step.intro"></p>
 
+                <div class="alert alert-info" role="status" x-show="step.notice" x-text="step.notice"></div>
                 <div class="alert alert-danger" role="alert" x-show="step.error" x-text="step.error"></div>
 
                 {{-- Requirements --}}

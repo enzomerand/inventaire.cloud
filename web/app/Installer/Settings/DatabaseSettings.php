@@ -19,14 +19,16 @@ final readonly class DatabaseSettings
         public string $database,
         public string $username,
         public string $password,
+        public ?string $url = null,
     ) {}
 
     /**
      * Builds the settings from the values of the database step.
      *
      * @param  array<string, mixed>  $values
+     * @param  string|null  $url  The connection URL (DB_URL) when one is provided; it then replaces the other values.
      */
-    public static function fromArray(array $values): self
+    public static function fromArray(array $values, ?string $url = null): self
     {
         return new self(
             driver: self::text($values, 'driver'),
@@ -35,6 +37,7 @@ final readonly class DatabaseSettings
             database: self::text($values, 'database'),
             username: self::text($values, 'username'),
             password: self::text($values, 'password'),
+            url: $url,
         );
     }
 
@@ -42,14 +45,19 @@ final readonly class DatabaseSettings
      * A Laravel connection configuration targeting these settings.
      *
      * The engine's own entry in config/database.php is the base, so charset,
-     * collation, schema and SSL options stay what the application uses; a
-     * connection URL is dropped because it would override the fields.
+     * collation, schema and SSL options stay what the application uses. With
+     * a connection URL the fields are ignored, exactly as Laravel does: the URL
+     * is handed over as is and parsed when the connection is opened.
      *
      * @param  array<string, mixed>  $base
      * @return array<string, mixed>
      */
     public function connectionConfig(array $base): array
     {
+        if ($this->url !== null) {
+            return array_replace($base, ['url' => $this->url]);
+        }
+
         return array_replace($base, [
             'url' => null,
             'host' => $this->host,

@@ -21,7 +21,7 @@ function settingsFor(object $test, string $contents = '', array $process = []): 
         file_put_contents($test->sandbox->envPath(), $contents);
     }
 
-    return new InstallerSettings($file, new EnvironmentLocks($file, fn (): array => $process));
+    return new InstallerSettings($file, new EnvironmentLocks(fn (): array => $process));
 }
 
 /**
@@ -125,19 +125,39 @@ describe('storing the values of a step', function (): void {
     });
 
     it('writes "null" for an optional value left empty and keeps a secret empty', function (): void {
-        $settings = settingsFor($this);
+        file_put_contents($this->sandbox->envPath(), "MAIL_SCHEME=smtps\nMAIL_USERNAME=someone\nMAIL_PASSWORD=old-secret\n");
 
-        $settings->persist(InstallStep::Mail, ['host' => 'h', 'port' => '25', 'scheme' => '', 'username' => '', 'password' => '', 'from_address' => 'a@b.c', 'from_name' => 'n']);
+        settingsFor($this)->persist(InstallStep::Mail, ['host' => 'h', 'port' => '25', 'scheme' => '', 'username' => '', 'password' => '', 'from_address' => 'a@b.c', 'from_name' => 'n']);
 
         $contents = file_get_contents($this->sandbox->envPath());
 
         expect($contents)->toContain("MAIL_SCHEME=null\n")->toContain("MAIL_USERNAME=null\n")->toContain("MAIL_PASSWORD=\n");
     });
 
+    it('writes only what changes, so an unchanged configuration needs no .env at all', function (): void {
+        file_put_contents($this->sandbox->envPath(), "APP_URL=https://a.test\nAPP_LOCALE=fr\nAPP_TIMEZONE=UTC\n");
+        $before = file_get_contents($this->sandbox->envPath());
+        chmod($this->sandbox->envPath(), 0444);
+
+        // Read-only file, nothing to change: no error, no write.
+        settingsFor($this)->persist(InstallStep::Application, ['url' => 'https://a.test', 'locale' => 'fr', 'timezone' => 'UTC']);
+
+        expect(file_get_contents($this->sandbox->envPath()))->toBe($before);
+    });
+
+    it('does not even create .env when nothing has to be stored', function (): void {
+        $settings = settingsFor($this, '', ['APP_URL' => 'https://a.test', 'APP_LOCALE' => 'fr', 'APP_TIMEZONE' => 'UTC']);
+
+        $settings->persist(InstallStep::Application, ['url' => 'tampered', 'locale' => 'en', 'timezone' => 'Asia/Tokyo']);
+
+        expect(is_file($this->sandbox->envPath()))->toBeFalse();
+    });
+
     it('writes checkboxes as true or false', function (): void {
         settingsFor($this)->persist(InstallStep::Storage, ['disk' => 's3', 'key' => 'k', 'secret' => 's', 'region' => 'r', 'bucket' => 'b', 'endpoint' => '', 'path_style' => true]);
 
-        expect(file_get_contents($this->sandbox->envPath()))->toContain("AWS_USE_PATH_STYLE_ENDPOINT=true\n")->toContain("AWS_ENDPOINT=null\n");
+        expect(file_get_contents($this->sandbox->envPath()))->toContain("AWS_USE_PATH_STYLE_ENDPOINT=true\n")
+            ->and(consoleEnvFile($this)['AWS_ENDPOINT'])->toBe('');
     });
 
     it('never writes what the environment imposes', function (): void {
@@ -187,5 +207,31 @@ describe('storing the values of a step', function (): void {
         }
 
         $this->fail('Expected an InstallationException.');
+    });
+});
+
+describe('a configuration that lives entirely in the environment', function (): void {
+    it('is recognised, so that nothing has to be written', function (): void {
+        expect(settingsFor($this)->isEnvironmentOnly())->toBeFalse()
+            ->and(settingsFor($this, '', containerEnvironment())->isEnvironmentOnly())->toBeTrue();
+    });
+
+    it('is not recognised as soon as one required setting is missing', function (string $missing): void {
+        $environment = containerEnvironment();
+        unset($environment[$missing]);
+
+        expect(settingsFor($this, '', $environment)->isEnvironmentOnly())->toBeFalse();
+    })->with(['DB_HOST', 'APP_URL', 'MAIL_HOST', 'MAIL_FROM_ADDRESS', 'FILESYSTEM_DISK', 'MAIL_MAILER']);
+
+    it('does not need the S3 settings for local storage but needs them for S3', function (): void {
+        expect(settingsFor($this, '', containerEnvironment())->isEnvironmentOnly())->toBeTrue()
+            ->and(settingsFor($this, '', ['FILESYSTEM_DISK' => 's3'] + containerEnvironment())->isEnvironmentOnly())->toBeFalse();
+    });
+
+    it('counts a connection URL as providing the database', function (): void {
+        $environment = array_diff_key(containerEnvironment(), array_flip(['DB_CONNECTION', 'DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD']));
+
+        expect(settingsFor($this, '', $environment)->isEnvironmentOnly())->toBeFalse()
+            ->and(settingsFor($this, '', $environment + ['DB_URL' => 'postgres://u:p@h/d'])->isEnvironmentOnly())->toBeTrue();
     });
 });

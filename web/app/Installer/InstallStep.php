@@ -45,6 +45,23 @@ enum InstallStep: string
     }
 
     /**
+     * The variable that can hold the whole connection as a URL (Laravel's
+     * `DB_URL` and `MAIL_URL`), or null for steps that have none.
+     *
+     * When it is set, the URL replaces the host, port, credentials... of the
+     * step: they are shown read-only (masked, a URL often carries a password)
+     * and the checks run on the URL itself.
+     */
+    public function urlKey(): ?string
+    {
+        return match ($this) {
+            self::Database => 'DB_URL',
+            self::Mail => 'MAIL_URL',
+            default => null,
+        };
+    }
+
+    /**
      * Translated name of the step.
      */
     public function title(): string
@@ -85,12 +102,12 @@ enum InstallStep: string
                     ['value' => 'pgsql', 'label' => 'PostgreSQL'],
                     ['value' => 'mysql', 'label' => 'MySQL'],
                     ['value' => 'mariadb', 'label' => 'MariaDB'],
-                ]),
-                new Field('host', 'DB_HOST', __('Host'), default: '127.0.0.1'),
-                new Field('port', 'DB_PORT', __('Port'), 'number', default: '5432', help: __('Usually 5432 for PostgreSQL, 3306 for MySQL and MariaDB.')),
-                new Field('database', 'DB_DATABASE', __('Database name'), default: 'inventaire'),
-                new Field('username', 'DB_USERNAME', __('Username'), default: 'inventaire'),
-                new Field('password', 'DB_PASSWORD', __('Password'), 'password', secret: true, required: false),
+                ], urlKey: 'DB_URL'),
+                new Field('host', 'DB_HOST', __('Host'), default: '127.0.0.1', urlKey: 'DB_URL'),
+                new Field('port', 'DB_PORT', __('Port'), 'number', default: '5432', help: __('Usually 5432 for PostgreSQL, 3306 for MySQL and MariaDB.'), urlKey: 'DB_URL'),
+                new Field('database', 'DB_DATABASE', __('Database name'), default: 'inventaire', urlKey: 'DB_URL'),
+                new Field('username', 'DB_USERNAME', __('Username'), default: 'inventaire', urlKey: 'DB_URL'),
+                new Field('password', 'DB_PASSWORD', __('Password'), 'password', secret: true, required: false, urlKey: 'DB_URL'),
             ],
             self::Application => [
                 new Field('url', 'APP_URL', __('Public URL'), 'url', default: 'http://localhost', help: __('The address people use to reach this instance, without a trailing slash.')),
@@ -98,15 +115,15 @@ enum InstallStep: string
                 new Field('timezone', 'APP_TIMEZONE', __('Timezone'), 'select', default: 'UTC', options: $this->timezoneOptions()),
             ],
             self::Mail => [
-                new Field('host', 'MAIL_HOST', __('SMTP host')),
-                new Field('port', 'MAIL_PORT', __('SMTP port'), 'number', default: '587'),
+                new Field('host', 'MAIL_HOST', __('SMTP host'), urlKey: 'MAIL_URL'),
+                new Field('port', 'MAIL_PORT', __('SMTP port'), 'number', default: '587', urlKey: 'MAIL_URL'),
                 new Field('scheme', 'MAIL_SCHEME', __('Connection security'), 'select', required: false, default: '', options: [
                     ['value' => '', 'label' => __('Automatic (implicit TLS on port 465, STARTTLS otherwise)')],
                     ['value' => 'smtp', 'label' => __('STARTTLS when the server offers it')],
                     ['value' => 'smtps', 'label' => __('Implicit TLS (SMTPS)')],
-                ]),
-                new Field('username', 'MAIL_USERNAME', __('SMTP username'), required: false),
-                new Field('password', 'MAIL_PASSWORD', __('SMTP password'), 'password', secret: true, required: false),
+                ], urlKey: 'MAIL_URL'),
+                new Field('username', 'MAIL_USERNAME', __('SMTP username'), required: false, urlKey: 'MAIL_URL'),
+                new Field('password', 'MAIL_PASSWORD', __('SMTP password'), 'password', secret: true, required: false, urlKey: 'MAIL_URL'),
                 new Field('from_address', 'MAIL_FROM_ADDRESS', __('Sender address'), 'email'),
                 new Field('from_name', 'MAIL_FROM_NAME', __('Sender name'), default: (string) config('app.name')),
                 new Field('test_recipient', null, __('Test address'), 'email', help: __('A 6-digit code is sent to this address. Enter it in the next screen.')),

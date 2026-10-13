@@ -31,6 +31,7 @@ const DEAD_CODES = ['mail_code_missing', 'mail_code_expired', 'mail_code_exhaust
  * @property {boolean} secret
  * @property {boolean} secretSet
  * @property {boolean} locked
+ * @property {boolean} masked Its value comes from a connection URL and is never shown.
  * @property {string | null} placeholder
  * @property {{ field: string, value: string } | null} showWhen
  * @property {string} error
@@ -225,7 +226,7 @@ export default function installer() {
          * @returns {string}
          */
         placeholder(field) {
-            return field.secretSet ? '••••••••' : (field.placeholder ?? '');
+            return field.secretSet || field.masked ? '••••••••' : (field.placeholder ?? '');
         },
 
         /**

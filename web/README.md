@@ -97,7 +97,11 @@ Creating the first administrator account is not part of the installer yet (it co
 
 ### Values provided by the environment
 
-With Docker, configuration usually arrives as real environment variables, which Laravel prefers over `.env`. A value that is set in the process environment and is absent from, or different in, `.env` is **imposed**: the wizard shows it read-only with a "set by the environment" badge, probes it as is, and never writes it. Secrets are never sent back to the browser (an empty box means "unchanged"), and a `.env` that cannot be written is reported with a clear message instead of being silently ignored.
+With Docker, configuration usually arrives as real environment variables, which Laravel prefers over `.env`. The installer records the environment the process started with, at the very top of `bootstrap/app.php` (before `.env` is read): every variable in it is **imposed**, even when `.env` holds the same value. The wizard shows imposed values read-only with a "set by the environment" badge, probes them as is, and never writes them. Secrets are never sent back to the browser (an empty box means "unchanged"), and a `.env` that cannot be written is reported with a clear message instead of being silently ignored.
+
+`DB_URL` and `MAIL_URL` are honoured: when one is set (environment or `.env`), the corresponding step treats the connection as provided. Its fields are read-only and masked (a URL usually contains a password), and the checks and the migrations use exactly the configuration the application will use, URL included.
+
+When every setting the installation needs is provided by the environment, nothing has to be written: the wizard does not require `.env` or `bootstrap/cache/` to be writable, which suits read-only containers.
 
 When `.env` does not exist, the installer creates it from `.env.example`. A file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production` and `APP_DEBUG=false` instead of the example's development values; if you copy `.env.example` yourself on a server, set these two values yourself, because the installation only leaves `local` untouched. For development, run `composer setup`, which copies the example first.
 

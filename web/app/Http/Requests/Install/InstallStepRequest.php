@@ -19,6 +19,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 final class InstallStepRequest extends FormRequest
 {
+    /** @var array<string, mixed> The form completed with what is already configured. */
+    private array $resolved = [];
+
     /**
      * The route is already protected by the setup token middleware.
      */
@@ -42,7 +45,7 @@ final class InstallStepRequest extends FormRequest
      */
     public function rules(): array
     {
-        return $this->step()->rules();
+        return app(InstallerSettings::class)->rules($this->step());
     }
 
     /**
@@ -54,13 +57,14 @@ final class InstallStepRequest extends FormRequest
     }
 
     /**
-     * The validated values, one entry per field of the step.
+     * The values of the step, one entry per field: the validated ones, plus
+     * those no rule applies to (the fields a connection URL replaces).
      *
      * @return array<string, mixed>
      */
     public function values(): array
     {
-        return $this->validated();
+        return array_replace($this->resolved, $this->validated());
     }
 
     /**
@@ -68,6 +72,8 @@ final class InstallStepRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        $this->merge(app(InstallerSettings::class)->resolve($this->step(), $this->all()));
+        $this->resolved = app(InstallerSettings::class)->resolve($this->step(), $this->all());
+
+        $this->merge($this->resolved);
     }
 }

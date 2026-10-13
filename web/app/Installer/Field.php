@@ -22,6 +22,7 @@ final readonly class Field
      * @param  string|null  $placeholder  Translated placeholder.
      * @param  list<array{value: string, label: string}>  $options  Choices of a select.
      * @param  array{field: string, value: string}|null  $showWhen  Display condition: another field must hold this value.
+     * @param  string|null  $urlKey  Variable holding a connection URL (DB_URL, MAIL_URL) that replaces this field when set.
      */
     public function __construct(
         public string $name,
@@ -35,5 +36,6 @@ final readonly class Field
         public ?string $placeholder = null,
         public array $options = [],
         public ?array $showWhen = null,
+        public ?string $urlKey = null,
     ) {}
 }

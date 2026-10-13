@@ -64,7 +64,7 @@ final class InstallerSteps
      */
     public function saveDatabase(array $values): ProbeResult
     {
-        return $this->saveIfWorking(InstallStep::Database, $values, $this->database->check(DatabaseSettings::fromArray($values)));
+        return $this->saveIfWorking(InstallStep::Database, $values, $this->database->check(DatabaseSettings::fromArray($values, $this->settings->providedUrl(InstallStep::Database))));
     }
 
     /**
@@ -92,7 +92,7 @@ final class InstallerSteps
         $recipient = is_scalar($values['test_recipient'] ?? null) ? (string) $values['test_recipient'] : '';
         unset($values['test_recipient']);
 
-        return $this->mailVerification->begin(MailSettings::fromArray($values), $recipient, $values);
+        return $this->mailVerification->begin(MailSettings::fromArray($values, $this->settings->providedUrl(InstallStep::Mail)), $recipient, $values);
     }
 
     /**
@@ -115,7 +115,7 @@ final class InstallerSteps
      */
     public function saveMailAfterConnection(array $values): ProbeResult
     {
-        return $this->saveIfWorking(InstallStep::Mail, $values, $this->mail->checkConnection(MailSettings::fromArray($values)));
+        return $this->saveIfWorking(InstallStep::Mail, $values, $this->mail->checkConnection(MailSettings::fromArray($values, $this->settings->providedUrl(InstallStep::Mail))));
     }
 
     /**

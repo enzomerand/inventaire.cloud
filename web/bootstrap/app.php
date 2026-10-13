@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 use App\Http\Middleware\RedirectIfNotInstalled;
 use App\Http\Middleware\SetLocale;
+use App\Installer\ProcessEnvironment;
 use App\Services\LocaleResolver;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+
+// Before anything reads .env: the installer must know which variables the process really started with.
+ProcessEnvironment::capture();
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(

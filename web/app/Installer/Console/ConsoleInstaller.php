@@ -363,7 +363,7 @@ final class ConsoleInstaller
      */
     private function validates(InstallStep $step, array $values): bool
     {
-        $rules = $step->rules();
+        $rules = $this->settings->rules($step);
 
         // The test address only exists to receive a code, which non-interactive runs cannot read.
         if ($step === InstallStep::Mail && ! $this->interactive) {
@@ -419,7 +419,7 @@ final class ConsoleInstaller
             }
 
             if ($this->settings->isLocked($field)) {
-                $this->components->twoColumnDetail($field->label, $field->secret ? '••••••••' : (string) $defaults[$field->name]);
+                $this->components->twoColumnDetail($field->label, $field->secret || $this->settings->isProvidedByUrl($field) ? '••••••••' : (string) $defaults[$field->name]);
                 $this->command->line('    <fg=gray>'.__('Set by the environment.').'</>');
 
                 continue;

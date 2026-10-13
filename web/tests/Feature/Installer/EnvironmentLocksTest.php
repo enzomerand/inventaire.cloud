@@ -2,62 +2,58 @@
 
 declare(strict_types=1);
 
-use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
+use App\Installer\ProcessEnvironment;
 
-/**
- * Builds locks over a .env file with the given contents and a fake process environment.
- *
- * @param  array<string, string>  $process
- */
-function environmentLocks(object $test, string $contents, array $process): EnvironmentLocks
-{
-    $path = $test->sandbox->root.'/lock-env';
-    file_put_contents($path, $contents);
-
-    return new EnvironmentLocks(new EnvironmentFile($path, $path), fn (): array => $process);
-}
-
-it('locks variables set in the environment but absent from .env', function (): void {
-    $locks = environmentLocks($this, "APP_NAME=x\n", ['DB_HOST' => 'db']);
+it('locks every variable the process started with', function (): void {
+    $locks = new EnvironmentLocks(fn (): array => ['DB_HOST' => 'db']);
 
     expect($locks->isLocked('DB_HOST'))->toBeTrue()->and($locks->value('DB_HOST'))->toBe('db');
-});
-
-it('locks variables whose environment value differs from .env', function (): void {
-    $locks = environmentLocks($this, "DB_HOST=127.0.0.1\n", ['DB_HOST' => 'db']);
-
-    expect($locks->isLocked('DB_HOST'))->toBeTrue()->and($locks->value('DB_HOST'))->toBe('db');
-});
-
-it('does not lock values Laravel merely copied from .env', function (): void {
-    $locks = environmentLocks($this, "DB_HOST=db\nMAIL_FROM_NAME=\"\${DB_HOST} mail\"\n", ['DB_HOST' => 'db', 'MAIL_FROM_NAME' => 'db mail']);
-
-    expect($locks->isLocked('DB_HOST'))->toBeFalse()
-        ->and($locks->isLocked('MAIL_FROM_NAME'))->toBeFalse()
-        ->and($locks->value('DB_HOST'))->toBeNull();
 });
 
 it('does not lock variables the environment does not define', function (): void {
-    $locks = environmentLocks($this, "DB_HOST=db\n", []);
+    $locks = new EnvironmentLocks(fn (): array => ['DB_HOST' => 'db']);
 
-    expect($locks->isLocked('DB_HOST'))->toBeFalse()->and($locks->isLocked('NOPE'))->toBeFalse();
+    expect($locks->isLocked('DB_PORT'))->toBeFalse()->and($locks->value('DB_PORT'))->toBeNull();
 });
 
-it('keeps the verdict taken at creation even after .env is rewritten', function (): void {
-    $path = $this->sandbox->root.'/lock-env';
-    file_put_contents($path, "DB_HOST=old\n");
-    $file = new EnvironmentFile($path, $path);
+it('locks a variable even when .env holds the very same value', function (): void {
+    // The snapshot is taken before .env is loaded: an equal value in .env is still the environment's.
+    file_put_contents($this->sandbox->envPath(), "DB_HOST=db\n");
 
-    // The process still holds the value it loaded at startup, as in a real request.
-    $locks = new EnvironmentLocks($file, fn (): array => ['DB_HOST' => 'old']);
-    $file->set(['DB_HOST' => 'new']);
+    $locks = new EnvironmentLocks(fn (): array => ['DB_HOST' => 'db']);
 
-    expect($locks->isLocked('DB_HOST'))->toBeFalse();
+    expect($locks->isLocked('DB_HOST'))->toBeTrue();
 });
 
-it('ignores non-scalar and numerically indexed environment entries', function (): void {
-    $locks = environmentLocks($this, '', [0 => 'x', 'ARR' => ['a'], 'PORT' => 5432]);
+it('ignores non-scalar and numerically indexed entries', function (): void {
+    $locks = new EnvironmentLocks(fn (): array => [0 => 'x', 'ARR' => ['a'], 'PORT' => 5432]);
 
-    expect($locks->isLocked('ARR'))->toBeFalse()->and($locks->value('PORT'))->toBe('5432');
+    expect($locks->isLocked('ARR'))->toBeFalse()->and($locks->value('PORT'))->toBe('5432')->and($locks->isLocked('0'))->toBeFalse();
+});
+
+describe('the process environment snapshot', function (): void {
+    it('contains the variables of the process, not the headers a visitor sends', function (): void {
+        $variables = ProcessEnvironment::variables();
+
+        expect($variables)->not->toBeEmpty()->and(array_filter(array_keys($variables), fn (string $name): bool => str_starts_with($name, 'HTTP_')))->toBe([]);
+    });
+
+    it('is taken once, before .env is loaded, and survives later changes', function (): void {
+        $before = ProcessEnvironment::variables();
+
+        putenv('INSTALLER_SNAPSHOT_PROBE=late');
+
+        try {
+            expect(ProcessEnvironment::variables())->toBe($before)->and(array_key_exists('INSTALLER_SNAPSHOT_PROBE', ProcessEnvironment::variables()))->toBeFalse();
+        } finally {
+            putenv('INSTALLER_SNAPSHOT_PROBE');
+        }
+    });
+
+    it('is captured at the very top of bootstrap/app.php', function (): void {
+        $bootstrap = (string) file_get_contents(base_path('bootstrap/app.php'));
+
+        expect(strpos($bootstrap, 'ProcessEnvironment::capture()'))->toBeLessThan(strpos($bootstrap, 'Application::configure'));
+    });
 });

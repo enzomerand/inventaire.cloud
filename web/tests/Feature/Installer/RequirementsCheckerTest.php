@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Installer\EnvironmentFile;
+use App\Installer\EnvironmentLocks;
+use App\Installer\InstallerSettings;
 use App\Installer\Requirement;
 use App\Installer\RequirementsChecker;
 use Illuminate\Foundation\Application;
@@ -17,6 +19,7 @@ function checker(object $test, array $missingExtensions = [], ?string $phpVersio
     return new RequirementsChecker(
         app(Application::class),
         $environment ?? new EnvironmentFile($test->sandbox->root.'/.env', base_path('.env.example')),
+        app(InstallerSettings::class),
         fn (string $name): bool => ! in_array($name, $missingExtensions, true) && extension_loaded($name),
         $phpVersion,
     );
@@ -95,4 +98,28 @@ it('reports an .env file that cannot be written', function (): void {
 
 it('serializes for the browser', function (): void {
     expect(requirement(checker($this)->check(), 'php')->toArray())->toHaveKeys(['id', 'label', 'ok', 'detail']);
+});
+
+it('does not require a writable .env or bootstrap/cache when every setting comes from the environment', function (): void {
+    if (posix_geteuid() === 0) {
+        $this->markTestSkipped('Directory permissions do not restrict root.');
+    }
+
+    mkdir($this->sandbox->root.'/readonly', 0555);
+    $environment = new EnvironmentFile($this->sandbox->root.'/readonly/.env', base_path('.env.example'));
+
+    // Without the environment providing everything, a read-only .env is a blocker...
+    $blocked = requirement(checker($this, environment: $environment)->check(), 'env');
+    expect($blocked->ok)->toBeFalse();
+
+    // ...with it, nothing needs to be written and the requirement is lifted.
+    $this->processEnvironment = containerEnvironment();
+    $this->app->forgetInstance(EnvironmentLocks::class);
+    $this->app->forgetInstance(InstallerSettings::class);
+    $requirements = checker($this, environment: $environment)->check();
+
+    expect(requirement($requirements, 'env')->ok)->toBeTrue()
+        ->and(requirement($requirements, 'env')->detail)->toContain('Not needed')
+        ->and(requirement($requirements, 'bootstrap-cache')->ok)->toBeTrue()
+        ->and(RequirementsChecker::passed($requirements))->toBeTrue();
 });

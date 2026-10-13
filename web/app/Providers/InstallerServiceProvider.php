@@ -13,6 +13,7 @@ use App\Installer\InstallerSettings;
 use App\Installer\PreInstallRuntime;
 use App\Installer\Probes\FilesystemStorageProbe;
 use App\Installer\Probes\StorageProbe;
+use App\Installer\ProcessEnvironment;
 use App\Installer\SetupToken;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Application;
@@ -52,9 +53,8 @@ final class InstallerServiceProvider extends ServiceProvider
             $app->make(InstallationState::class)->path('env.backup'),
         ));
 
-        $this->app->singleton(EnvironmentLocks::class, fn (Application $app): EnvironmentLocks => new EnvironmentLocks(
-            $app->make(EnvironmentFile::class),
-            static fn (): array => getenv(),
+        $this->app->singleton(EnvironmentLocks::class, fn (): EnvironmentLocks => new EnvironmentLocks(
+            ProcessEnvironment::variables(...),
         ));
 
         $this->app->singleton(InstallerSettings::class);
@@ -67,8 +67,6 @@ final class InstallerServiceProvider extends ServiceProvider
             return;
         }
 
-        // Captured now, before any request code can rewrite .env (see EnvironmentLocks).
-        $this->app->make(EnvironmentLocks::class);
         $this->app->make(PreInstallRuntime::class)->apply();
 
         $this->ensureApplicationKey();

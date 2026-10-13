@@ -200,14 +200,8 @@ describe('--from-env', function (): void {
             $this->markTestSkipped('Directory permissions do not restrict root.');
         }
 
-        $db = testDatabaseSettings();
         // What a Docker container looks like: everything imposed, no .env at all, nothing writable.
-        $this->processEnvironment = [
-            'DB_CONNECTION' => $db->driver, 'DB_HOST' => $db->host, 'DB_PORT' => (string) $db->port, 'DB_DATABASE' => $db->database,
-            'DB_USERNAME' => $db->username, 'DB_PASSWORD' => $db->password, 'APP_URL' => 'https://inventory.example.test',
-            'APP_LOCALE' => 'fr', 'APP_TIMEZONE' => 'UTC', 'MAIL_HOST' => 'smtp.example.test', 'MAIL_PORT' => '587',
-            'MAIL_FROM_ADDRESS' => 'hello@example.test', 'MAIL_FROM_NAME' => 'My Shop', 'FILESYSTEM_DISK' => 'local',
-        ];
+        $this->processEnvironment = containerEnvironment();
         $this->app->forgetInstance(EnvironmentLocks::class);
         Mail::fake();
         Artisan::call('db:wipe', ['--force' => true]);

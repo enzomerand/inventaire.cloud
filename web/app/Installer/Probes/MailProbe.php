@@ -69,7 +69,7 @@ final class MailProbe
      */
     private function withMailer(MailSettings $settings, Closure $check): ProbeResult
     {
-        $this->config->set('mail.mailers.'.self::MAILER, $settings->mailerConfig());
+        $this->config->set('mail.mailers.'.self::MAILER, $settings->mailerConfig((array) $this->config->get('mail.mailers.smtp', [])));
         Mail::purge(self::MAILER);
 
         try {
@@ -89,8 +89,10 @@ final class MailProbe
     {
         $message = (string) preg_replace('/\s+/', ' ', $exception->getMessage());
 
-        if ($settings->password !== null && $settings->password !== '') {
-            $message = str_replace($settings->password, '***', $message);
+        foreach ([$settings->password, $settings->url, parse_url((string) $settings->url, PHP_URL_PASS) ?: null] as $secret) {
+            if (is_string($secret) && $secret !== '') {
+                $message = str_replace($secret, '***', $message);
+            }
         }
 
         return Str::limit(trim($message), 240);

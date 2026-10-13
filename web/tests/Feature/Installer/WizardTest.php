@@ -466,6 +466,34 @@ function completeRequiredSteps(object $test): void
     $test->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
 }
 
+describe('a container configured only through variables', function (): void {
+    it('goes through every step and installs without writing .env', function (): void {
+        if (posix_geteuid() === 0) {
+            $this->markTestSkipped('Directory permissions do not restrict root.');
+        }
+
+        $this->processEnvironment = containerEnvironment();
+        authorizedWizard($this);
+        Mail::fake();
+        Artisan::call('db:wipe', ['--force' => true]);
+        @mkdir(config('installer.state_path'), 0750, true);
+        // Nothing but the installer's own state folder is writable: no .env, nothing next to it.
+        chmod($this->sandbox->root, 0555);
+
+        $requirements = $this->getJson('/install/requirements')->assertOk()->json('requirements');
+        expect($requirements['passed'])->toBeTrue();
+
+        $this->postJson('/install/database', [])->assertOk()->assertJsonPath('statuses.database', 'done');
+        $this->postJson('/install/application', [])->assertOk();
+        $this->postJson('/install/storage', [])->assertOk();
+        $this->postJson('/install/mail', ['test_recipient' => 'admin@example.test'])->assertOk();
+        $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+        $this->postJson('/install/finalize')->assertOk();
+
+        expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
+    });
+});
+
 describe('finishing', function (): void {
     it('refuses while a required step is missing', function (): void {
         authorizedWizard($this);
