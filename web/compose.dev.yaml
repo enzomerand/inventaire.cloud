@@ -1,0 +1,77 @@
+# Local development services. Not a production setup: credentials are public.
+#
+#   docker compose -f compose.dev.yaml up -d --wait
+#
+# Each database exposes two schemas: `inventaire` for day-to-day development and
+# `inventaire_test` for the test suite, so RefreshDatabase never wipes dev data.
+# The init scripts below only run when a data volume is first created; run
+# `docker compose -f compose.dev.yaml down -v` to start over.
+
+name: inventaire-dev
+
+services:
+    pgsql:
+        image: postgres:18-alpine
+        ports:
+            - '54329:5432'
+        environment:
+            POSTGRES_DB: inventaire
+            POSTGRES_USER: inventaire
+            POSTGRES_PASSWORD: secret
+        volumes:
+            # PostgreSQL 18 images keep versioned data directories below this path.
+            - pgsql-data:/var/lib/postgresql
+        configs:
+            - source: pgsql-test-database
+              target: /docker-entrypoint-initdb.d/10-test-database.sql
+        healthcheck:
+            # TCP (-h) so the check only passes once the final server is up, not the
+            # socket-only one the entrypoint runs while initialising.
+            test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U inventaire -d inventaire']
+            interval: 5s
+            timeout: 5s
+            retries: 12
+
+    mysql:
+        image: mysql:9.7
+        ports:
+            - '33069:3306'
+        environment:
+            MYSQL_DATABASE: inventaire
+            MYSQL_USER: inventaire
+            MYSQL_PASSWORD: secret
+            MYSQL_ROOT_PASSWORD: secret
+        volumes:
+            - mysql-data:/var/lib/mysql
+        configs:
+            - source: mysql-test-database
+              target: /docker-entrypoint-initdb.d/10-test-database.sql
+        healthcheck:
+            test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -u inventaire -psecret --silent']
+            interval: 5s
+            timeout: 5s
+            retries: 20
+
+    mailpit:
+        image: axllent/mailpit:v1.31
+        ports:
+            - '1025:1025' # SMTP
+            - '8025:8025' # web UI
+        healthcheck:
+            test: ['CMD', '/mailpit', 'readyz']
+            interval: 5s
+            timeout: 5s
+            retries: 12
+
+configs:
+    pgsql-test-database:
+        content: |
+            CREATE DATABASE inventaire_test OWNER inventaire;
+    mysql-test-database:
+        content: |
+            CREATE DATABASE IF NOT EXISTS inventaire_test;
+            GRANT ALL PRIVILEGES ON inventaire_test.* TO 'inventaire'@'%';
+
+volumes:
+    pgsql-data:
+    mysql-data:

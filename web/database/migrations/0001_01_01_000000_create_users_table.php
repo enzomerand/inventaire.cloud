@@ -1,9 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
+/**
+ * Creates the account tables: users, password reset tokens and database-backed sessions.
+ */
 return new class extends Migration
 {
     /**

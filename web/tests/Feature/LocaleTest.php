@@ -3,11 +3,12 @@
 declare(strict_types=1);
 
 use App\View\Components\ClientMessages;
+use Illuminate\Testing\TestResponse;
 
 /**
  * Asserts the rendered page declares the given language on <html>.
  */
-function assertHtmlLang(Illuminate\Testing\TestResponse $response, string $locale): void
+function assertHtmlLang(TestResponse $response, string $locale): void
 {
     $response->assertSee('<html lang="'.$locale.'"', false);
 }
