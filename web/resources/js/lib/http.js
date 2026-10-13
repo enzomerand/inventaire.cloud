@@ -25,9 +25,6 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 /** Time a feedback toast stays readable before the page reloads or redirects. */
 const NAVIGATION_DELAY_MS = 1500;
 
-/** Statuses reported as a (less severe) warning rather than an error. */
-const WARNING_STATUSES = [401, 403, 404, 419, 429];
-
 /** Translation keys of the statuses that have a dedicated message. */
 const STATUS_MESSAGE_KEYS = {
     401: 'error.unauthenticated',
@@ -487,7 +484,8 @@ function report(error, silent) {
         return error;
     }
 
-    notify(WARNING_STATUSES.includes(error.status) ? 'warning' : 'danger', error.message);
+    // Statuses with a dedicated message are expected conditions (warning); the rest are errors.
+    notify(error.status in STATUS_MESSAGE_KEYS ? 'warning' : 'danger', error.message);
     error.reported = true;
 
     if (error.status === 419) {

@@ -6,7 +6,6 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateLocaleRequest;
 use App\Services\LocaleResolver;
-use Illuminate\Contracts\Cookie\QueueingFactory;
 use Illuminate\Http\Response;
 
 /**
@@ -15,13 +14,11 @@ use Illuminate\Http\Response;
 class UpdateLocaleController extends Controller
 {
     /**
-     * Queues the long-lived locale cookie that {@see LocaleResolver} reads on the
-     * following requests. Nothing to return, so the front end simply reloads.
+     * Attaches the long-lived locale cookie that {@see LocaleResolver} reads on
+     * the following requests. Nothing to return, so the front end simply reloads.
      */
-    public function __invoke(UpdateLocaleRequest $request, LocaleResolver $resolver, QueueingFactory $cookies): Response
+    public function __invoke(UpdateLocaleRequest $request, LocaleResolver $resolver): Response
     {
-        $cookies->queue($resolver->cookie($request->string('locale')->toString()));
-
-        return response()->noContent();
+        return response()->noContent()->withCookie($resolver->cookie($request->string('locale')->toString()));
     }
 }

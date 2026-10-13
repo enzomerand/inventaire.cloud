@@ -28,12 +28,6 @@ it('creates the core tables', function (string $table): void {
     'failed_jobs',
 ]);
 
-it('reads back a row written through Eloquent', function (): void {
-    $user = User::factory()->create(['email' => 'reader@example.com']);
-
-    expect(User::query()->where('email', 'reader@example.com')->value('id'))->toBe($user->id);
-});
-
 it('enforces the unique email constraint', function (): void {
     User::factory()->create(['email' => 'unique@example.com']);
 

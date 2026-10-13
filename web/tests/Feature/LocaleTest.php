@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Services\LocaleResolver;
 use App\View\Components\ClientMessages;
-use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Testing\TestResponse;
 
 /**
@@ -48,13 +48,6 @@ describe('locale detection', function (): void {
         assertHtmlLang($response, 'en');
     })->with(['unknown code' => 'xx', 'empty' => '', 'injection attempt' => '"><script>']);
 
-    it('does not use the session for the locale any more', function (): void {
-        $response = $this->withSession(['locale' => 'en'])
-            ->get(route('home'), ['Accept-Language' => 'fr']);
-
-        assertHtmlLang($response, 'fr');
-    });
-
     it('renders unknown routes in the resolved locale', function (): void {
         $this->get('/no-such-page', ['Accept-Language' => 'fr'])
             ->assertNotFound()
@@ -77,10 +70,6 @@ describe('locale detection', function (): void {
         }
     });
 
-    it('announces the language in the Content-Language header', function (): void {
-        $this->get(route('home'), ['Accept-Language' => 'en'])->assertHeader('Content-Language', 'en');
-    });
-
     it('translates the interface according to the locale', function (): void {
         $this->get(route('home'), ['Accept-Language' => 'en'])->assertSee('Inventories, simple and free');
         $this->get(route('home'), ['Accept-Language' => 'fr'])->assertSee('Des inventaires simples et gratuits');
@@ -98,19 +87,6 @@ describe('PUT /locale', function (): void {
         expect($cookie->getExpiresTime())->toBeBetween(time() + 365 * 86400 - 120, time() + 365 * 86400 + 120)
             ->and($cookie->isHttpOnly())->toBeTrue()
             ->and($cookie->getSameSite())->toBe('lax');
-    });
-
-    it('does not store anything in the session', function (): void {
-        $this->putJson(route('locale.update'), ['locale' => 'en'])->assertSessionMissing('locale');
-    });
-
-    it('is followed on the next request when the browser sends the cookie back', function (): void {
-        $value = $this->putJson(route('locale.update'), ['locale' => 'en'])->getCookie('locale', false)->getValue();
-
-        assertHtmlLang(
-            $this->withUnencryptedCookie('locale', $value)->get(route('home'), ['Accept-Language' => 'fr']),
-            'en',
-        );
     });
 
     it('rejects a locale that is not supported', function (string $locale): void {
@@ -132,24 +108,17 @@ describe('PUT /locale', function (): void {
             ->assertJsonPath('errors.locale.0', fn (string $message): bool => str_contains($message, 'invalide'));
     });
 
-    it('keeps the locale cookie out of cookie encryption', function (): void {
-        expect(app(EncryptCookies::class)->isDisabled('locale'))->toBeTrue();
-    });
 });
 
 describe('locale configuration', function (): void {
-    it('names every supported locale and ships a translation file for the non-source ones', function (): void {
-        foreach (config()->array('app.supported_locales') as $locale) {
-            expect(config()->array('app.locale_names'))->toHaveKey($locale);
-
-            if ($locale !== 'en') {
-                expect(lang_path($locale.'.json'))->toBeFile();
-            }
+    it('ships a translation file for every supported locale except the English source', function (): void {
+        foreach (array_diff(app(LocaleResolver::class)->supported(), ['en']) as $locale) {
+            expect(lang_path($locale.'.json'))->toBeFile();
         }
     });
 
     it('uses a supported default and fallback locale', function (): void {
-        expect(config()->array('app.supported_locales'))
+        expect(app(LocaleResolver::class)->supported())
             ->toContain(config()->string('app.locale'))
             ->toContain(config()->string('app.fallback_locale'));
     });

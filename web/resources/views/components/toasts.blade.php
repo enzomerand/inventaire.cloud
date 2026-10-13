@@ -7,13 +7,13 @@
 --}}
 <div class="app-toasts" x-data="toasts">
     <div class="d-flex flex-column gap-2" role="status" aria-live="polite" aria-atomic="false">
-        <template x-for="toast in polite" :key="toast.id">
+        <template x-for="toast in $store.toasts.polite" :key="toast.id">
             @include('partials.toast')
         </template>
     </div>
 
     <div class="d-flex flex-column gap-2 mt-2" role="alert" aria-live="assertive" aria-atomic="false">
-        <template x-for="toast in assertive" :key="toast.id">
+        <template x-for="toast in $store.toasts.assertive" :key="toast.id">
             @include('partials.toast')
         </template>
     </div>

@@ -85,7 +85,7 @@ composer test:pgsql   # PostgreSQL only
 composer test:mysql   # MySQL only
 ```
 
-These scripts point `DB_*` at the compose services and use the dedicated `inventaire_test` schema. `phpunit.xml` targets the PostgreSQL test schema too, so a plain `php artisan test` is safe as well.
+`phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` overrides `DB_*` to use the MySQL service and its own `inventaire_test` schema.
 
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
@@ -155,11 +155,11 @@ A request cancelled through the caller's `signal` rejects with the raw `AbortErr
 
 French is the default language and English the fallback. Interface strings are written in English in the code with `__()` and translated in `lang/fr.json`; framework messages (validation, authentication, pagination, passwords) come from [laravel-lang](https://laravel-lang.com).
 
-The language of a request is chosen by `App\Services\LocaleResolver`, trying in order: the signed-in user's saved preference (a documented hook, filled in with the accounts lot), the one-year `locale` cookie written by `PUT /locale`, the best `Accept-Language` match, then the default. The `SetLocale` middleware is global and runs first, so 404 pages, expired-session errors and the future API are localized too, and responses carry `Content-Language` and `Vary: Accept-Language`. The `locale` cookie is excluded from encryption because its value is validated against the supported list on every read.
+The language of a request is chosen by `App\Services\LocaleResolver`, trying in order: the signed-in user's saved preference (a documented hook, filled in with the accounts lot), the one-year `locale` cookie written by `PUT /locale`, the best `Accept-Language` match, then the default. The `SetLocale` middleware is global and runs first, so 404 pages, expired-session errors and the future API are localized too, and responses carry `Content-Language` and `Vary: Accept-Language, Cookie`. The `locale` cookie is excluded from encryption because its value is validated against the supported list on every read.
 
 To add a language, for example Spanish:
 
-1. Add `es` to `supported_locales` and `locale_names` in `config/app.php`.
+1. Add `es` to `locale_names` in `config/app.php` (its keys are the supported locales).
 2. Run `php artisan lang:add es` for the framework messages and `lang/es.json`, then translate the project strings in it.
 
 The language switcher and the `PUT /locale` endpoint pick the new locale up from the configuration.

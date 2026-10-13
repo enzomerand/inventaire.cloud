@@ -57,12 +57,6 @@
             "@test:mysql"
         ],
         "test:pgsql": [
-            "@putenv DB_CONNECTION=pgsql",
-            "@putenv DB_HOST=127.0.0.1",
-            "@putenv DB_PORT=54329",
-            "@putenv DB_DATABASE=inventaire_test",
-            "@putenv DB_USERNAME=inventaire",
-            "@putenv DB_PASSWORD=secret",
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],

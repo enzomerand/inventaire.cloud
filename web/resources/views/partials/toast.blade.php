@@ -6,7 +6,7 @@
             type="button"
             class="btn-close m-2"
             aria-label="{{ __('Close') }}"
-            @click="dismiss(toast.id)"
+            @click="$store.toasts.dismiss(toast.id)"
         ></button>
     </div>
 </div>

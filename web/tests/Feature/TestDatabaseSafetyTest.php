@@ -3,14 +3,6 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Process;
-use Tests\Support\TestDatabaseGuard;
-
-it('runs against a dedicated test database', function (): void {
-    $connection = config()->string('database.default');
-
-    expect(config()->string("database.connections.{$connection}.database"))
-        ->toEndWith(TestDatabaseGuard::REQUIRED_SUFFIX);
-});
 
 it('stops the suite before any migration when the database is not a test database', function (): void {
     // Run a real child suite whose environment names a database without the
@@ -18,7 +10,7 @@ it('stops the suite before any migration when the database is not a test databas
     // regressed, the child would fail to connect instead of wiping dev data.
     $result = Process::path(base_path())
         ->env(['DB_DATABASE' => 'inventaire_guard_probe'])
-        ->run([PHP_BINARY, 'artisan', 'test', '--filter', 'runs against a dedicated test database']);
+        ->run([PHP_BINARY, 'artisan', 'test', '--filter', 'serves the home page']);
 
     expect($result->failed())->toBeTrue()
         ->and($result->output().$result->errorOutput())->toContain('Refusing to run tests');

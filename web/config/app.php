@@ -91,16 +91,15 @@ return [
     | Supported Locales
     |--------------------------------------------------------------------------
     |
-    | Locales the interface is translated into, and the name each one is
+    | The locales the interface is translated into, each with the name it is
     | displayed with in the language switcher. A language is always written in
     | itself (never translated) so that people can find theirs whatever the
-    | current interface language is. Adding a language means adding it to both
-    | lists and providing its lang/<locale>.json file. The first list also
-    | validates the locale a visitor asks for.
+    | current interface language is. The keys are the single source of truth for
+    | which locales are supported (see App\Services\LocaleResolver::supported()),
+    | so adding a language means adding it here and providing its
+    | lang/<locale>.json file.
     |
     */
-
-    'supported_locales' => ['fr', 'en'],
 
     'locale_names' => [
         'fr' => 'Français',

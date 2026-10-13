@@ -47,7 +47,14 @@ final class LocaleResolver
      */
     public function resolve(Request $request): string
     {
-        foreach ($this->sources() as $source) {
+        // Priority order; each source is only consulted if the previous ones found nothing usable.
+        $sources = [
+            $this->fromUserPreference(...),
+            $this->fromCookie(...),
+            $this->fromAcceptLanguage(...),
+        ];
+
+        foreach ($sources as $source) {
             $locale = $source($request);
 
             if ($locale !== null && $this->isSupported($locale)) {
@@ -78,28 +85,14 @@ final class LocaleResolver
     }
 
     /**
-     * Locales the application is translated into.
+     * Locales the application is translated into: the keys of
+     * `app.locale_names`, the one place where they are declared.
      *
      * @return list<string>
      */
     public function supported(): array
     {
-        return array_values(array_map(strval(...), config()->array('app.supported_locales')));
-    }
-
-    /**
-     * The sources in priority order. Each returns a locale code or null; the
-     * result is validated by the caller, so sources can stay naive.
-     *
-     * @return list<callable(Request): ?string>
-     */
-    private function sources(): array
-    {
-        return [
-            $this->fromUserPreference(...),
-            $this->fromCookie(...),
-            $this->fromAcceptLanguage(...),
-        ];
+        return array_map(strval(...), array_keys(config()->array('app.locale_names')));
     }
 
     /**

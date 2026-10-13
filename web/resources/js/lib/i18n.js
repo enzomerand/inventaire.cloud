@@ -46,13 +46,3 @@ function loadMessages() {
 export function t(key) {
     return loadMessages()[key] ?? key;
 }
-
-/**
- * Forgets the cached messages so the next lookup re-reads the document.
- * Only meant for tests, which swap the DOM between cases.
- *
- * @returns {void}
- */
-export function resetMessages() {
-    messages = null;
-}
