@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\View\Components\ClientMessages;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Testing\TestResponse;
 
 /**
@@ -33,18 +34,44 @@ describe('locale detection', function (): void {
         assertHtmlLang($this->get(route('home'), ['Accept-Language' => 'de-DE,ja;q=0.8,*;q=0.1']), 'fr');
     });
 
-    it('lets an explicit session choice win over the browser', function (): void {
-        $response = $this->withSession(['locale' => 'en'])
+    it('lets the locale cookie win over the browser', function (): void {
+        $response = $this->withUnencryptedCookie('locale', 'en')
             ->get(route('home'), ['Accept-Language' => 'fr-FR,fr;q=0.9']);
 
         assertHtmlLang($response, 'en');
     });
 
-    it('ignores a session value that is no longer supported', function (): void {
-        $response = $this->withSession(['locale' => 'xx'])
+    it('ignores a cookie holding an unsupported value', function (string $value): void {
+        $response = $this->withUnencryptedCookie('locale', $value)
             ->get(route('home'), ['Accept-Language' => 'en']);
 
         assertHtmlLang($response, 'en');
+    })->with(['unknown code' => 'xx', 'empty' => '', 'injection attempt' => '"><script>']);
+
+    it('does not use the session for the locale any more', function (): void {
+        $response = $this->withSession(['locale' => 'en'])
+            ->get(route('home'), ['Accept-Language' => 'fr']);
+
+        assertHtmlLang($response, 'fr');
+    });
+
+    it('renders unknown routes in the resolved locale', function (): void {
+        $this->get('/no-such-page', ['Accept-Language' => 'fr'])
+            ->assertNotFound()
+            ->assertSee('Non trouvé')
+            ->assertHeader('Content-Language', 'fr');
+
+        $this->withUnencryptedCookie('locale', 'en')
+            ->get('/no-such-page', ['Accept-Language' => 'fr'])
+            ->assertNotFound()
+            ->assertSee('Not Found')
+            ->assertHeader('Content-Language', 'en');
+    });
+
+    it('tells shared caches the response depends on Accept-Language', function (): void {
+        expect($this->get(route('home'))->headers->get('Vary'))->toContain('Accept-Language')
+            ->and($this->get('/no-such-page')->headers->get('Vary'))->toContain('Accept-Language')
+            ->and($this->putJson(route('locale.update'), ['locale' => 'en'])->headers->get('Vary'))->toContain('Accept-Language');
     });
 
     it('announces the language in the Content-Language header', function (): void {
@@ -58,18 +85,36 @@ describe('locale detection', function (): void {
 });
 
 describe('PUT /locale', function (): void {
-    it('stores the chosen locale in the session', function (): void {
-        $this->putJson(route('locale.update'), ['locale' => 'en'])
+    it('queues a long-lived locale cookie', function (): void {
+        $response = $this->putJson(route('locale.update'), ['locale' => 'en'])
             ->assertNoContent()
-            ->assertSessionHas('locale', 'en');
+            ->assertCookie('locale', 'en', false);
+
+        $cookie = $response->getCookie('locale', false);
+
+        expect($cookie->getExpiresTime())->toBeBetween(time() + 365 * 86400 - 120, time() + 365 * 86400 + 120)
+            ->and($cookie->isHttpOnly())->toBeTrue()
+            ->and($cookie->getSameSite())->toBe('lax');
+    });
+
+    it('does not store anything in the session', function (): void {
+        $this->putJson(route('locale.update'), ['locale' => 'en'])->assertSessionMissing('locale');
+    });
+
+    it('is followed on the next request when the browser sends the cookie back', function (): void {
+        $value = $this->putJson(route('locale.update'), ['locale' => 'en'])->getCookie('locale', false)->getValue();
+
+        assertHtmlLang(
+            $this->withUnencryptedCookie('locale', $value)->get(route('home'), ['Accept-Language' => 'fr']),
+            'en',
+        );
     });
 
     it('rejects a locale that is not supported', function (string $locale): void {
         $this->putJson(route('locale.update'), ['locale' => $locale])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('locale');
-
-        $this->assertNull(session('locale'));
+            ->assertJsonValidationErrors('locale')
+            ->assertCookieMissing('locale');
     })->with(['unknown code' => 'xx', 'region not listed' => 'en_GB', 'injection attempt' => '../fr']);
 
     it('rejects a missing locale', function (): void {
@@ -82,6 +127,10 @@ describe('PUT /locale', function (): void {
         $this->putJson(route('locale.update'), ['locale' => 'xx'], ['Accept-Language' => 'fr'])
             ->assertUnprocessable()
             ->assertJsonPath('errors.locale.0', fn (string $message): bool => str_contains($message, 'invalide'));
+    });
+
+    it('keeps the locale cookie out of cookie encryption', function (): void {
+        expect(app(EncryptCookies::class)->isDisabled('locale'))->toBeTrue();
     });
 });
 

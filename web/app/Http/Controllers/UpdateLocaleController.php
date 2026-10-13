@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Http\Middleware\SetLocale;
 use App\Http\Requests\UpdateLocaleRequest;
+use App\Services\LocaleResolver;
+use Illuminate\Contracts\Cookie\QueueingFactory;
 use Illuminate\Http\Response;
 
 /**
@@ -14,12 +15,12 @@ use Illuminate\Http\Response;
 class UpdateLocaleController extends Controller
 {
     /**
-     * Stores the locale in the session; the next request is rendered with it by
-     * {@see SetLocale}. Nothing to return, so the front end simply reloads.
+     * Queues the long-lived locale cookie that {@see LocaleResolver} reads on the
+     * following requests. Nothing to return, so the front end simply reloads.
      */
-    public function __invoke(UpdateLocaleRequest $request): Response
+    public function __invoke(UpdateLocaleRequest $request, LocaleResolver $resolver, QueueingFactory $cookies): Response
     {
-        $request->session()->put(SetLocale::SESSION_KEY, $request->validated('locale'));
+        $cookies->queue($resolver->cookie($request->string('locale')->toString()));
 
         return response()->noContent();
     }

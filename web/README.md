@@ -95,8 +95,9 @@ Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless t
 app/
   Http/
     Controllers/    Invokable or resourceful controllers
-    Middleware/     SetLocale resolves the request language
+    Middleware/     SetLocale (global): applies the language chosen by LocaleResolver
     Requests/       Form requests (validation)
+  Services/         LocaleResolver: which language a request is answered in
   View/Components/  Blade component classes (ClientMessages)
 config/             Laravel configuration (app.php lists the supported locales)
 lang/               fr.json (UI strings) and fr/ (framework messages)
@@ -148,6 +149,8 @@ A request cancelled through the caller's `signal` rejects with the raw `AbortErr
 ## Translations
 
 French is the default language and English the fallback. Interface strings are written in English in the code with `__()` and translated in `lang/fr.json`; framework messages (validation, authentication, pagination, passwords) come from [laravel-lang](https://laravel-lang.com).
+
+The language of a request is chosen by `App\Services\LocaleResolver`, trying in order: the signed-in user's saved preference (a documented hook, filled in with the accounts lot), the one-year `locale` cookie written by `PUT /locale`, the best `Accept-Language` match, then the default. The `SetLocale` middleware is global and runs first, so 404 pages, expired-session errors and the future API are localized too, and responses carry `Content-Language` and `Vary: Accept-Language`. The `locale` cookie is excluded from encryption because its value is validated against the supported list on every read.
 
 To add a language, for example Spanish:
 

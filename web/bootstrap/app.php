@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Middleware\SetLocale;
+use App\Services\LocaleResolver;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,8 +16,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Appended so it runs after StartSession and can read the stored choice.
-        $middleware->web(append: [SetLocale::class]);
+        // Global and first, so that 404s, 419s and the future API are localized too.
+        $middleware->prepend(SetLocale::class);
+
+        // The value is checked against the supported list on every read, and the
+        // global SetLocale middleware needs to read it before cookies are decrypted.
+        $middleware->encryptCookies(except: [LocaleResolver::COOKIE_NAME]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
