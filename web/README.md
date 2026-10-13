@@ -9,7 +9,7 @@ It is built **API-first**: the pages are classic server-rendered navigation, but
 | Layer      | Choice                                                                                  |
 |------------|-----------------------------------------------------------------------------------------|
 | Backend    | Laravel 13, PHP 8.3+                                                                    |
-| Database   | PostgreSQL or MySQL, never engine-specific SQL (SQLite is not supported)                |
+| Database   | PostgreSQL, MySQL or MariaDB, never engine-specific SQL (SQLite is not supported)       |
 | Front end  | Blade + [Tabler](https://tabler.io) (Bootstrap 5) + Alpine.js (CSP build), bundled by Vite |
 | Icons      | [`secondnetwork/blade-tabler-icons`](https://github.com/secondnetwork/blade-tabler-icons) |
 | Tests      | Pest (PHP), Vitest + jsdom (JS)                                                         |
@@ -19,7 +19,7 @@ Privacy by design: no CDN, no Google Fonts, no external request from the browser
 
 ## Requirements
 
-- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions
+- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB)
 - [Composer](https://getcomposer.org) 2
 - Node.js 20.19+ / 22.12+ and npm
 - [Docker](https://www.docker.com) with Compose, for the development database and mail services
@@ -28,7 +28,7 @@ Privacy by design: no CDN, no Google Fonts, no external request from the browser
 
 Run every command from this `web/` directory.
 
-1. **Start the services** (PostgreSQL, MySQL, Mailpit) and wait until they are healthy:
+1. **Start the services** (PostgreSQL, MySQL, MariaDB, Mailpit) and wait until they are healthy:
 
    ```bash
    docker compose -f compose.dev.yaml up -d --wait
@@ -38,6 +38,7 @@ Run every command from this `web/` directory.
    |------------|------------------------------------|----------------------------------------------|
    | PostgreSQL | `54329`                            | database `inventaire`, user `inventaire`, password `secret` |
    | MySQL      | `33069`                            | same as above                                |
+   | MariaDB    | `33070`                            | same as above                                |
    | Mailpit    | `1025` (SMTP), `8025` (web UI)     | none                                         |
 
    Each database also has an `inventaire_test` schema reserved for the test suite. These scripts only run when a volume is first created; use `docker compose -f compose.dev.yaml down -v` to start from scratch.
@@ -48,7 +49,7 @@ Run every command from this `web/` directory.
    composer setup
    ```
 
-   `.env.example` points at the PostgreSQL service. To develop on MySQL instead, uncomment the MySQL block in `.env` (and comment the PostgreSQL one), then run `php artisan migrate:fresh`.
+   `.env.example` points at the PostgreSQL service. To develop on MySQL or MariaDB instead, uncomment the matching block in `.env` (and comment the PostgreSQL one), then run `php artisan migrate:fresh`.
 
 3. **Run the application.** `composer dev` starts the PHP server, the queue worker, the log tail and the Vite dev server together:
 
@@ -65,9 +66,10 @@ Run every command from this `web/` directory.
 | `composer lint`        | Checks PHP code style with Pint (`pint --test`)                      |
 | `composer format`      | Fixes PHP code style with Pint                                       |
 | `composer analyse`     | Runs Larastan at level 8 on `app`, `config`, `routes`, `database`    |
-| `composer test`        | Runs the Pest suite on PostgreSQL, then on MySQL (stops at the first failure) |
+| `composer test`        | Runs the Pest suite on PostgreSQL, MySQL, then MariaDB (stops at the first failure) |
 | `composer test:pgsql`  | Runs the suite on the PostgreSQL service only                        |
 | `composer test:mysql`  | Runs the suite on the MySQL service only                             |
+| `composer test:mariadb` | Runs the suite on the MariaDB service only                          |
 | `npm run lint`         | ESLint, then Prettier in check mode (JS, CSS, JSON)                  |
 | `npm run format`       | Fixes JS, CSS and JSON files                                         |
 | `npm test`             | Runs the Vitest suite                                                |
@@ -75,17 +77,18 @@ Run every command from this `web/` directory.
 
 All PHP files under `app`, `config`, `routes`, `database` and `tests` declare `strict_types`, and Larastan runs without a baseline: fix new findings instead of silencing them.
 
-## Testing on PostgreSQL and MySQL
+## Testing on PostgreSQL, MySQL and MariaDB
 
-The application has to behave the same on both engines, and SQLite is deliberately not supported. The database tests (`RefreshDatabase`) run the real migrations, so running the suite on each engine catches engine-specific SQL early. The services must be running (`docker compose -f compose.dev.yaml up -d --wait`):
+The application has to behave the same on all three engines, and SQLite is deliberately not supported. The database tests (`RefreshDatabase`) run the real migrations, so running the suite on each engine catches engine-specific SQL early. The services must be running (`docker compose -f compose.dev.yaml up -d --wait`):
 
 ```bash
-composer test         # PostgreSQL, then MySQL; stops at the first failure
+composer test         # PostgreSQL, MySQL, then MariaDB; stops at the first failure
 composer test:pgsql   # PostgreSQL only
 composer test:mysql   # MySQL only
+composer test:mariadb # MariaDB only
 ```
 
-`phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` overrides `DB_*` to use the MySQL service and its own `inventaire_test` schema.
+`phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` and `composer test:mariadb` override `DB_*` to use their own service and its `inventaire_test` schema.
 
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
