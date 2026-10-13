@@ -1,0 +1,107 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "inventaire-cloud/web",
+    "type": "project",
+    "description": "inventaire.cloud: a free inventory tool for professionals and individuals.",
+    "keywords": ["laravel", "inventory"],
+    "license": "AGPL-3.0-only",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^13.17",
+        "laravel/tinker": "^3.0",
+        "secondnetwork/blade-tabler-icons": "^3.49"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.13",
+        "laravel-lang/common": "^6.8",
+        "laravel/pail": "^1.2.5",
+        "laravel/pao": "^1.0.6",
+        "laravel/pint": "^1.27",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.6",
+        "pestphp/pest": "^4.7",
+        "pestphp/pest-plugin-laravel": "^4.1",
+        "phpunit/phpunit": "^12.5.12"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "setup": [
+            "composer install",
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
+            "@php artisan key:generate",
+            "@php artisan migrate --force",
+            "npm install --ignore-scripts",
+            "npm run build"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan dev"
+        ],
+        "lint": "pint --test",
+        "format": "pint",
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "test": [
+            "@test:pgsql",
+            "@test:mysql"
+        ],
+        "test:pgsql": [
+            "@php artisan config:clear --ansi",
+            "@php artisan test"
+        ],
+        "test:mysql": [
+            "@putenv DB_CONNECTION=mysql",
+            "@putenv DB_HOST=127.0.0.1",
+            "@putenv DB_PORT=33069",
+            "@putenv DB_DATABASE=inventaire_test",
+            "@putenv DB_USERNAME=inventaire",
+            "@putenv DB_PASSWORD=secret",
+            "@php artisan config:clear --ansi",
+            "@php artisan test"
+        ],
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi",
+            "@php artisan migrate --graceful --ansi"
+        ],
+        "pre-package-uninstall": [
+            "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
