@@ -6,6 +6,7 @@ namespace App\Installer;
 
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\Support\AtomicFile;
+use App\Installer\Support\FileLock;
 use Dotenv\Dotenv;
 use Dotenv\Exception\InvalidFileException;
 
@@ -32,11 +33,13 @@ final class EnvironmentFile
      * @param  string  $path  The file to maintain (usually base_path('.env')).
      * @param  string  $examplePath  Template copied when the file does not exist yet.
      * @param  string|null  $backupPath  Where the previous contents are kept while the file is rewritten in place (see {@see self::write()}).
+     * @param  string|null  $lockPath  File locked during a read-modify-write; defaults to a lock file derived from the path.
      */
     public function __construct(
         private readonly string $path,
         private readonly string $examplePath,
         private readonly ?string $backupPath = null,
+        private readonly ?string $lockPath = null,
     ) {}
 
     /**
@@ -116,16 +119,20 @@ final class EnvironmentFile
      */
     public function set(array $values, array $whenCreated = []): bool
     {
-        $created = ! is_file($this->path);
+        // The file is read, changed and written back: two requests doing it together would lose one change.
+        return FileLock::exclusively($this->lockPath ?? sys_get_temp_dir().'/inventaire-env-'.md5($this->path).'.lock', function () use ($values, $whenCreated): bool {
+            $created = ! is_file($this->path);
 
-        if ($created) {
-            $values += $whenCreated;
-        }
-        $contents = $created ? (string) @file_get_contents($this->examplePath) : (string) @file_get_contents($this->path);
+            if ($created) {
+                $values += $whenCreated;
+            }
 
-        $this->write($this->render($contents, $values));
+            $contents = $created ? (string) @file_get_contents($this->examplePath) : (string) @file_get_contents($this->path);
 
-        return $created;
+            $this->write($this->render($contents, $values));
+
+            return $created;
+        });
     }
 
     /**

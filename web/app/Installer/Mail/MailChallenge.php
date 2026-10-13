@@ -21,6 +21,7 @@ final readonly class MailChallenge
      * @param  string  $codeHash  Keyed hash of the code.
      * @param  int  $expiresAt  Unix time after which the code is no longer accepted.
      * @param  int  $attempts  Wrong codes entered so far.
+     * @param  string  $id  Identifies the challenge, to count its attempts outside the session (see {@see MailAttemptStore}).
      */
     public function __construct(
         public array $values,
@@ -28,6 +29,7 @@ final readonly class MailChallenge
         public string $codeHash,
         public int $expiresAt,
         public int $attempts = 0,
+        public string $id = '',
     ) {}
 
     /**
@@ -38,7 +40,7 @@ final readonly class MailChallenge
      */
     public static function issue(array $values, string $recipient, string $code, string $key, int $lifetimeMinutes, ?int $now = null): self
     {
-        return new self($values, $recipient, self::hash($code, $key), ($now ?? time()) + $lifetimeMinutes * 60);
+        return new self($values, $recipient, self::hash($code, $key), ($now ?? time()) + $lifetimeMinutes * 60, 0, bin2hex(random_bytes(8)));
     }
 
     /**
@@ -61,9 +63,17 @@ final readonly class MailChallenge
             return [MailCodeOutcome::Accepted, $this];
         }
 
-        $next = new self($this->values, $this->recipient, $this->codeHash, $this->expiresAt, $this->attempts + 1);
+        $next = $this->withAttempts($this->attempts + 1);
 
         return [$next->attempts >= $maxAttempts ? MailCodeOutcome::TooManyAttempts : MailCodeOutcome::Wrong, $next];
+    }
+
+    /**
+     * The same challenge with another count of wrong codes.
+     */
+    public function withAttempts(int $attempts): self
+    {
+        return new self($this->values, $this->recipient, $this->codeHash, $this->expiresAt, $attempts, $this->id);
     }
 
     /**
@@ -85,6 +95,7 @@ final readonly class MailChallenge
             'code_hash' => $this->codeHash,
             'expires_at' => $this->expiresAt,
             'attempts' => $this->attempts,
+            'id' => $this->id,
         ], JSON_THROW_ON_ERROR);
     }
 
@@ -96,11 +107,12 @@ final readonly class MailChallenge
         $data = json_decode($payload, true);
 
         if (! is_array($data) || ! is_array($data['values'] ?? null) || ! is_string($data['recipient'] ?? null)
-            || ! is_string($data['code_hash'] ?? null) || ! is_int($data['expires_at'] ?? null) || ! is_int($data['attempts'] ?? null)) {
+            || ! is_string($data['code_hash'] ?? null) || ! is_int($data['expires_at'] ?? null) || ! is_int($data['attempts'] ?? null)
+            || ! is_string($data['id'] ?? null)) {
             return null;
         }
 
-        return new self($data['values'], $data['recipient'], $data['code_hash'], $data['expires_at'], $data['attempts']);
+        return new self($data['values'], $data['recipient'], $data['code_hash'], $data['expires_at'], $data['attempts'], $data['id']);
     }
 
     private static function hash(string $code, string $key): string

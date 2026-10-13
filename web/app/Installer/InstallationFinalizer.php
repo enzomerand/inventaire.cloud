@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Installer;
 
 use App\Installer\Exceptions\InstallationException;
+use App\Installer\Exceptions\LockBusyException;
 use App\Installer\Settings\DatabaseSettings;
+use App\Installer\Support\FileLock;
 use Illuminate\Config\Repository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\DatabaseManager;
@@ -25,6 +27,9 @@ final class InstallationFinalizer
 {
     /** Name of the connection the migrations run on. */
     private const CONNECTION = 'installer_migrate';
+
+    /** Lock held while finalizing, so that two requests cannot do it together. */
+    private const LOCK = 'finalize.lock';
 
     public function __construct(
         private readonly Application $app,
@@ -50,6 +55,24 @@ final class InstallationFinalizer
      * @throws InstallationException When a step is missing or something fails; the instance stays uninstalled.
      */
     public function finalize(): string
+    {
+        // One finalization at a time: a second request (a double click, a script) must not migrate in parallel.
+        try {
+            return FileLock::exclusively($this->state->path(self::LOCK), fn (): string => $this->run(), 0);
+        } catch (LockBusyException) {
+            throw new InstallationException('The installation is already running.');
+        }
+    }
+
+    /**
+     * The finalization itself, under the lock.
+     *
+     * Safe to run again after a failure at any point: the migrations only apply
+     * what is missing, and the marker that ends the installation comes last.
+     *
+     * @throws InstallationException
+     */
+    private function run(): string
     {
         if ($this->state->isInstalled()) {
             throw new InstallationException('The instance is already installed.');
@@ -99,6 +122,8 @@ final class InstallationFinalizer
                 '--database' => self::CONNECTION,
                 '--force' => true,
                 '--no-interaction' => true,
+                // Refuses (exit 1) when another migration is already running instead of silently doing nothing.
+                '--isolated' => 1,
             ], $output);
         } catch (Throwable $exception) {
             throw new InstallationException('The database migration failed: :reason', ['reason' => $this->lastLine($exception->getMessage())]);

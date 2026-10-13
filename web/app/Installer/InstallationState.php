@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use App\Installer\Exceptions\InstallationException;
 use App\Installer\Support\AtomicFile;
+use App\Installer\Support\FileLock;
 use Closure;
 
 /**
@@ -71,10 +73,12 @@ final class InstallationState
      */
     public function markInstalled(): void
     {
-        AtomicFile::write(
-            $this->path(self::MARKER),
-            json_encode(['installed_at' => gmdate('c')], JSON_THROW_ON_ERROR)."\n",
-        );
+        $this->exclusively(function (): void {
+            AtomicFile::write(
+                $this->path(self::MARKER),
+                json_encode(['installed_at' => gmdate('c')], JSON_THROW_ON_ERROR)."\n",
+            );
+        });
 
         $this->installed = true;
     }
@@ -123,10 +127,13 @@ final class InstallationState
      */
     public function record(InstallStep $step, string $status = self::STATUS_DONE): void
     {
-        $progress = array_filter($this->progress(), static fn (string $value): bool => $value !== self::STATUS_PENDING);
-        $progress[$step->value] = $status;
+        // Read, change, write: under the lock, or a concurrent request's step would be lost.
+        $this->exclusively(function () use ($step, $status): void {
+            $progress = array_filter($this->progress(), static fn (string $value): bool => $value !== self::STATUS_PENDING);
+            $progress[$step->value] = $status;
 
-        AtomicFile::write($this->path(self::PROGRESS), json_encode(['steps' => $progress], JSON_THROW_ON_ERROR)."\n");
+            AtomicFile::write($this->path(self::PROGRESS), json_encode(['steps' => $progress], JSON_THROW_ON_ERROR)."\n");
+        });
     }
 
     /**
@@ -147,34 +154,24 @@ final class InstallationState
      */
     public function forgetProgress(): void
     {
-        @unlink($this->path(self::PROGRESS));
+        $this->exclusively(fn (): bool => @unlink($this->path(self::PROGRESS)));
     }
 
     /**
-     * Runs a callback while holding an exclusive lock, so two requests racing
-     * on the first visit cannot both generate a key or a token.
+     * Runs a callback while holding the installer's exclusive lock, so two
+     * requests racing on the first visit cannot both generate a key or a
+     * token, nor overwrite each other's progress.
      *
      * @template T
      *
      * @param  Closure(): T  $callback
      * @return T
+     *
+     * @throws InstallationException When the lock cannot be taken: the sequence never runs unlocked.
      */
     public function exclusively(Closure $callback): mixed
     {
-        AtomicFile::touch($this->path(self::LOCK));
-
-        $handle = fopen($this->path(self::LOCK), 'c');
-
-        if ($handle === false || ! flock($handle, LOCK_EX)) {
-            return $callback();
-        }
-
-        try {
-            return $callback();
-        } finally {
-            flock($handle, LOCK_UN);
-            fclose($handle);
-        }
+        return FileLock::exclusively($this->path(self::LOCK), $callback);
     }
 
     /**

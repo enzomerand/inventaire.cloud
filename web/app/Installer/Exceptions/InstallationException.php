@@ -15,7 +15,7 @@ use RuntimeException;
  * is still registering its providers, before the translator exists. The
  * English source text is what `getMessage()` returns, which suits logs.
  */
-final class InstallationException extends RuntimeException
+class InstallationException extends RuntimeException
 {
     /**
      * @param  string  $source  English message, also the key of its translation in lang/*.json.
