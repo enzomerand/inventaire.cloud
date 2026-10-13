@@ -1,58 +1,140 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# inventaire.cloud — web application
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+The web application behind [inventaire.cloud](https://inventaire.cloud), a free and simple inventory tool for professionals and individuals.
 
-## About Laravel
+It is built **API-first**: the pages are classic server-rendered navigation, but every action goes through one HTTP helper so the same JSON API (`/api/v1`, coming in a later lot) can serve the web front, the native apps and third-party tools.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Stack
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+| Layer      | Choice                                                                                  |
+|------------|-----------------------------------------------------------------------------------------|
+| Backend    | Laravel 13, PHP 8.3+                                                                    |
+| Database   | PostgreSQL or MySQL (never engine-specific SQL), SQLite for the default test run        |
+| Front end  | Blade + [Tabler](https://tabler.io) (Bootstrap 5) + Alpine.js, bundled by Vite          |
+| Icons      | [`secondnetwork/blade-tabler-icons`](https://github.com/secondnetwork/blade-tabler-icons) |
+| Tests      | Pest (PHP), Vitest + jsdom (JS)                                                         |
+| Quality    | Pint, Larastan (level 8), ESLint, Prettier                                              |
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Privacy by design: no CDN, no Google Fonts, no external request from the browser. The Inter font and every asset are served by the application itself.
 
-## Learning Laravel
+## Requirements
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions
+- [Composer](https://getcomposer.org) 2
+- Node.js 20.19+ / 22.12+ and npm
+- [Docker](https://www.docker.com) with Compose, for the development database and mail services
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Development setup
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+Run every command from this `web/` directory.
 
-## Agentic Development
+1. **Start the services** (PostgreSQL, MySQL, Mailpit) and wait until they are healthy:
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+   ```bash
+   docker compose -f compose.dev.yaml up -d --wait
+   ```
+
+   | Service    | Host port                          | Credentials                                  |
+   |------------|------------------------------------|----------------------------------------------|
+   | PostgreSQL | `54329`                            | database `inventaire`, user `inventaire`, password `secret` |
+   | MySQL      | `33069`                            | same as above                                |
+   | Mailpit    | `1025` (SMTP), `8025` (web UI)     | none                                         |
+
+   Each database also has an `inventaire_test` schema reserved for the test suite. These scripts only run when a volume is first created; use `docker compose -f compose.dev.yaml down -v` to start from scratch.
+
+2. **Install and configure** the application. `composer setup` installs the dependencies, creates `.env` from `.env.example`, generates the application key, runs the migrations and builds the assets:
+
+   ```bash
+   composer setup
+   ```
+
+   `.env.example` points at the PostgreSQL service. To develop on MySQL instead, uncomment the MySQL block in `.env` (and comment the PostgreSQL one), then run `php artisan migrate:fresh`.
+
+3. **Run the application.** `composer dev` starts the PHP server, the queue worker, the log tail and the Vite dev server together:
+
+   ```bash
+   composer dev
+   ```
+
+   The app is then available on <http://localhost:8000> and the mail inbox on <http://localhost:8025>.
+
+## Quality commands
+
+| Command                | What it does                                                         |
+|------------------------|----------------------------------------------------------------------|
+| `composer lint`        | Checks PHP code style with Pint (`pint --test`)                      |
+| `composer format`      | Fixes PHP code style with Pint                                       |
+| `composer analyse`     | Runs Larastan at level 8 on `app`, `config`, `routes`, `database`    |
+| `composer test`        | Runs the Pest suite on in-memory SQLite                              |
+| `composer test:pgsql`  | Runs the same suite on the PostgreSQL service                        |
+| `composer test:mysql`  | Runs the same suite on the MySQL service                             |
+| `npm run lint`         | ESLint, then Prettier in check mode (JS, CSS, JSON)                  |
+| `npm run format`       | Fixes JS, CSS and JSON files                                         |
+| `npm test`             | Runs the Vitest suite                                                |
+| `npm run build`        | Builds the production assets into `public/build`                     |
+
+All PHP files under `app`, `config`, `routes`, `database` and `tests` declare `strict_types`, and Larastan runs without a baseline: fix new findings instead of silencing them.
+
+## Testing on PostgreSQL and MySQL
+
+The application has to behave the same on both engines. The database tests (`RefreshDatabase`) run the real migrations, so running the suite on each engine catches engine-specific SQL early:
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+docker compose -f compose.dev.yaml up -d --wait
+composer test:pgsql
+composer test:mysql
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+These scripts point `DB_*` at the compose services and use the dedicated `inventaire_test` schema, so your development data in `inventaire` is never touched. Run `composer test` for the quick SQLite loop while developing.
 
-## Contributing
+## Project structure
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```text
+app/
+  Http/
+    Controllers/    Invokable or resourceful controllers
+    Middleware/     SetLocale resolves the request language
+    Requests/       Form requests (validation)
+  View/Components/  Blade component classes (ClientMessages)
+config/             Laravel configuration (app.php lists the supported locales)
+lang/               fr.json (UI strings) and fr/ (framework messages)
+resources/
+  css/app.css       Tabler, the self-hosted Inter font and project tokens
+  js/
+    app.js          Entry point: Tabler, Alpine, stores, components
+    lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js
+    stores/         Alpine stores (toasts)
+    components/     Alpine components (locale switcher)
+  views/
+    layouts/        app.blade.php, the Tabler page layout
+    components/     Anonymous Blade components (<x-toasts />, <x-locale-switcher />)
+routes/web.php      Web routes
+tests/
+  Feature/          Pest feature tests (HTTP, database)
+  Unit/             Pest unit tests
+  js/               Vitest tests
+compose.dev.yaml    Development services
+```
 
-## Code of Conduct
+## Conventions
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- **One HTTP helper.** Scripts never call `fetch` directly: they use `http` from `resources/js/lib/http.js`, which adds the CSRF token, locale and JSON headers and reports expired sessions and server errors with a toast.
+- **No display text in JavaScript.** Strings that scripts need are translated on the server and embedded by `<x-client-messages />`; scripts read them with `t('key')`.
+- **Icons.** Use `<x-tabler-*>` components and do not pass a `class` attribute: the SVG files already have one, which would render the attribute twice. Size and space icons from a parent element.
+- **Documentation.** Every class and public method carries a PHPDoc/JSDoc block that explains the why, not only the what.
+- **Language.** Code, identifiers, comments and commit messages are in English.
 
-## Security Vulnerabilities
+## Translations
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+French is the default language and English the fallback. Interface strings are written in English in the code with `__()` and translated in `lang/fr.json`; framework messages (validation, authentication, pagination, passwords) come from [laravel-lang](https://laravel-lang.com).
+
+To add a language, for example Spanish:
+
+1. Add `es` to `supported_locales` and `locale_names` in `config/app.php`.
+2. Run `php artisan lang:add es` for the framework messages and `lang/es.json`, then translate the project strings in it.
+
+The language switcher and the `PUT /locale` endpoint pick the new locale up from the configuration.
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Released under the [GNU Affero General Public License v3.0](../LICENSE) (AGPL-3.0). If you run a modified version as a network service, you must offer its source code to your users.
