@@ -40,8 +40,8 @@ class SetLocale
         // Tells clients which language the body is in...
         $response->headers->set('Content-Language', $locale);
 
-        // ...and tells shared caches that it depends on the Accept-Language request header.
-        $response->setVary('Accept-Language', false);
+        // ...and tells shared caches that it depends on the request headers the locale is resolved from.
+        $response->setVary('Accept-Language, Cookie', false);
 
         return $response;
     }

@@ -270,38 +270,49 @@ function failureFrom(response, body) {
 }
 
 /**
- * Reads the body of a response, throwing HttpError for failed statuses and for
- * successful ones whose payload is not what the caller asked for.
+ * Reads the raw body of a response from the network: text for JSON, text and
+ * error bodies, a Blob for downloads. This is the only part that can fail
+ * because the connection dropped, so it is the only part that runs inside the
+ * network error handling of `attempt()`.
  *
  * @param {Response} response
  * @param {'json' | 'blob' | 'text'} responseType
- * @returns {Promise<any>}
+ * @returns {Promise<string | Blob | null>}
  */
-async function readResponse(response, responseType) {
-    if (!response.ok) {
-        throw failureFrom(response, tryParseJson(await response.text()));
-    }
-
+async function readBody(response, responseType) {
     if (response.status === 204 || response.status === 205) {
         return null;
     }
 
-    if (responseType === 'blob') {
-        return response.blob();
+    return response.ok && responseType === 'blob' ? response.blob() : response.text();
+}
+
+/**
+ * Turns a fully read response into the value the caller asked for, or throws
+ * HttpError for failed statuses and for successful ones whose payload is not
+ * what was asked for.
+ *
+ * @param {Response} response
+ * @param {string | Blob | null} body What `readBody()` returned.
+ * @param {'json' | 'blob' | 'text'} responseType
+ * @returns {any}
+ */
+function interpretResponse(response, body, responseType) {
+    if (!response.ok) {
+        throw failureFrom(response, tryParseJson(body));
     }
 
-    const text = await response.text();
-
-    if (responseType === 'text') {
-        return text;
+    // No content, a download or plain text: nothing to parse.
+    if (body === null || responseType !== 'json') {
+        return body;
     }
 
-    if (text === '') {
+    if (body === '') {
         return null;
     }
 
     try {
-        return JSON.parse(text);
+        return JSON.parse(body);
     } catch {
         // Typically an HTML page from a proxy, a captive portal or a misrouted URL.
         throw new HttpError(response.status, t('error.unexpected_response'), { kind: 'unexpected_response' });
@@ -335,8 +346,10 @@ function forwardAbort(signal, controller) {
 /**
  * Performs one HTTP exchange, without any user feedback.
  *
- * Everything that can fail, including reading the body, happens inside the try
- * block so a connection dropped mid-body is a network failure like any other.
+ * Only the fetch call and the reading of the body run inside the try block, so
+ * a dropped connection becomes a network failure. The URL, headers and body are
+ * built beforehand, and the response is interpreted afterwards: a bug in that
+ * code surfaces as itself instead of masquerading as a network error.
  *
  * @param {string} method
  * @param {string} url
@@ -346,6 +359,14 @@ function forwardAbort(signal, controller) {
  */
 async function attempt(method, url, options) {
     const { data, params, headers, signal, timeout = DEFAULT_TIMEOUT_MS, responseType = 'json' } = options;
+
+    const target = withQuery(url, params);
+    const init = {
+        method,
+        headers: buildHeaders(data, headers),
+        body: serializeBody(data),
+        credentials: 'same-origin',
+    };
 
     const controller = new AbortController();
     const stopForwarding = forwardAbort(signal, controller);
@@ -358,21 +379,13 @@ async function attempt(method, url, options) {
               }, timeout)
             : null;
 
+    let response;
+    let body;
+
     try {
-        const response = await fetch(withQuery(url, params), {
-            method,
-            headers: buildHeaders(data, headers),
-            body: serializeBody(data),
-            credentials: 'same-origin',
-            signal: controller.signal,
-        });
-
-        return await readResponse(response, responseType);
+        response = await fetch(target, { ...init, signal: controller.signal });
+        body = await readBody(response, responseType);
     } catch (error) {
-        if (error instanceof HttpError) {
-            throw error;
-        }
-
         if (timedOut) {
             throw new HttpError(0, t('error.timeout'), { kind: 'timeout' });
         }
@@ -387,6 +400,8 @@ async function attempt(method, url, options) {
         clearTimeout(timer);
         stopForwarding();
     }
+
+    return interpretResponse(response, body, responseType);
 }
 
 /**

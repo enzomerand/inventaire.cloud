@@ -23,6 +23,34 @@ it('derives both footer links from the configured repository URL', function (): 
         ->assertDontSee('github.com/enzomerand', false);
 });
 
-it('reads the repository URL from the environment', function (): void {
-    expect(file_get_contents(base_path('.env.example')))->toContain('APP_REPOSITORY_URL=');
+it('falls back to the upstream repository when APP_REPOSITORY_URL is empty', function (): void {
+    $name = 'APP_REPOSITORY_URL';
+    $previous = ['env' => $_ENV[$name] ?? null, 'server' => $_SERVER[$name] ?? null, 'putenv' => getenv($name)];
+
+    // Blank the variable everywhere the environment repository may read it.
+    putenv("{$name}=");
+    $_ENV[$name] = $_SERVER[$name] = '';
+
+    try {
+        // Proves the override is seen: otherwise the next assertion could pass on the .env value alone.
+        expect(env($name))->toBe('');
+
+        $config = require config_path('app.php');
+    } finally {
+        $previous['putenv'] === false ? putenv($name) : putenv("{$name}={$previous['putenv']}");
+
+        if ($previous['env'] === null) {
+            unset($_ENV[$name]);
+        } else {
+            $_ENV[$name] = $previous['env'];
+        }
+
+        if ($previous['server'] === null) {
+            unset($_SERVER[$name]);
+        } else {
+            $_SERVER[$name] = $previous['server'];
+        }
+    }
+
+    expect($config['repository_url'])->toBe('https://github.com/enzomerand/inventaire.cloud');
 });

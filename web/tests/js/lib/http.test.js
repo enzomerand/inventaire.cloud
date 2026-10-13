@@ -161,6 +161,18 @@ describe('http helper', () => {
             expect(fetchMock.mock.calls[0][1].headers.Accept).toBe('text/csv');
         });
 
+        it('lets a programming error surface as itself instead of a network failure', async () => {
+            const circular = {};
+            circular.self = circular;
+
+            const error = await http.post('/items', circular).catch((e) => e);
+
+            expect(error).toBeInstanceOf(TypeError);
+            expect(error).not.toBeInstanceOf(HttpError);
+            expect(fetchMock).not.toHaveBeenCalled();
+            expect(notify).not.toHaveBeenCalled();
+        });
+
         it('does not send a body on delete', async () => {
             answerWith(() => new Response(null, { status: 204 }));
 

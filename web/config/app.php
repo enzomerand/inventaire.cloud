@@ -120,7 +120,8 @@ return [
     |
     */
 
-    'repository_url' => env('APP_REPOSITORY_URL', 'https://github.com/enzomerand/inventaire.cloud'),
+    // "?:" rather than env()'s default: an empty APP_REPOSITORY_URL must fall back too.
+    'repository_url' => env('APP_REPOSITORY_URL') ?: 'https://github.com/enzomerand/inventaire.cloud',
 
     /*
     |--------------------------------------------------------------------------

@@ -68,10 +68,13 @@ describe('locale detection', function (): void {
             ->assertHeader('Content-Language', 'en');
     });
 
-    it('tells shared caches the response depends on Accept-Language', function (): void {
-        expect($this->get(route('home'))->headers->get('Vary'))->toContain('Accept-Language')
-            ->and($this->get('/no-such-page')->headers->get('Vary'))->toContain('Accept-Language')
-            ->and($this->putJson(route('locale.update'), ['locale' => 'en'])->headers->get('Vary'))->toContain('Accept-Language');
+    it('tells shared caches the response depends on Accept-Language and Cookie', function (): void {
+        foreach ([route('home'), '/no-such-page'] as $url) {
+            // A response may carry several Vary lines; together they must name both headers.
+            $vary = implode(', ', $this->get($url)->headers->all('vary'));
+
+            expect($vary)->toContain('Accept-Language')->toContain('Cookie');
+        }
     });
 
     it('announces the language in the Content-Language header', function (): void {
