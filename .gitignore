@@ -1,0 +1,11 @@
+# Native apps are developed in their own private repositories.
+/mac/
+/ios/
+/android/
+
+# Local AI assistant files, never published.
+/CLAUDE.md
+/.claude/
+
+# OS files
+.DS_Store
