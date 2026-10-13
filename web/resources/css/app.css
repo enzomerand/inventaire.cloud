@@ -17,7 +17,7 @@
     --tblr-font-sans-serif:
         'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
 
-    /* Width reserved for toasts so long messages wrap instead of stretching. */
+    /* Toasts: width before long messages wrap, and distance from the viewport corner. */
     --app-toast-width: 22rem;
     --app-toast-offset: 1rem;
     --app-skip-link-offset: 0.75rem;
@@ -51,4 +51,21 @@
 .hero-icon svg {
     width: 3rem;
     height: 3rem;
+}
+
+/*
+ * Toast stack, pinned to the top end corner. The wrapper ignores pointer events
+ * so it never blocks the page; Tabler re-enables them on each toast.
+ */
+.app-toasts {
+    position: fixed;
+    top: var(--app-toast-offset);
+    inset-inline-end: var(--app-toast-offset);
+    z-index: 1090;
+    max-width: calc(100vw - 2 * var(--app-toast-offset));
+    pointer-events: none;
+}
+
+.app-toasts .toast {
+    --tblr-toast-max-width: var(--app-toast-width);
 }

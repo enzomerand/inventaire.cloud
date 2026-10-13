@@ -65,5 +65,8 @@
             </footer>
         </div>
     </div>
+
+    <x-toasts />
+    <x-client-messages />
 </body>
 </html>

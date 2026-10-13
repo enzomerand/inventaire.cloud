@@ -9,6 +9,17 @@
 import '@tabler/core';
 import Alpine from 'alpinejs';
 
+import { http } from './lib/http.js';
+import { t } from './lib/i18n.js';
+import { createToastsStore } from './stores/toasts.js';
+
 window.Alpine = Alpine;
+
+Alpine.store('toasts', createToastsStore());
+
+// $http and $t give templates access to the shared helper and the server
+// translations without any global variable.
+Alpine.magic('http', () => http);
+Alpine.magic('t', () => t);
 
 Alpine.start();
