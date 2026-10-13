@@ -28,7 +28,6 @@ class ClientMessages extends Component
     public function messages(): array
     {
         return [
-            'close' => __('Close'),
             'error.generic' => __('Something went wrong. Please try again.'),
             'error.network' => __('Network error. Check your connection and try again.'),
             'error.timeout' => __('The server took too long to answer. Please try again.'),

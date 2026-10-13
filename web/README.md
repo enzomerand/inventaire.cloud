@@ -10,7 +10,7 @@ It is built **API-first**: the pages are classic server-rendered navigation, but
 |------------|-----------------------------------------------------------------------------------------|
 | Backend    | Laravel 13, PHP 8.3+                                                                    |
 | Database   | PostgreSQL or MySQL, never engine-specific SQL (SQLite is not supported)                |
-| Front end  | Blade + [Tabler](https://tabler.io) (Bootstrap 5) + Alpine.js, bundled by Vite          |
+| Front end  | Blade + [Tabler](https://tabler.io) (Bootstrap 5) + Alpine.js (CSP build), bundled by Vite |
 | Icons      | [`secondnetwork/blade-tabler-icons`](https://github.com/secondnetwork/blade-tabler-icons) |
 | Tests      | Pest (PHP), Vitest + jsdom (JS)                                                         |
 | Quality    | Pint, Larastan (level 8), ESLint, Prettier                                              |
@@ -107,7 +107,7 @@ resources/
     app.js          Entry point: Tabler, Alpine, stores, components
     lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js
     stores/         Alpine stores (toasts)
-    components/     Alpine components (locale switcher)
+    components/     Alpine components (toasts, locale switcher)
   views/
     layouts/        app.blade.php, the Tabler page layout
     components/     Anonymous Blade components (<x-toasts />, <x-locale-switcher />)
@@ -123,6 +123,11 @@ compose.dev.yaml    Development services
 
 - **One HTTP helper.** Scripts never call `fetch` directly: they use `http` from `resources/js/lib/http.js` (see below).
 - **No display text in JavaScript.** Strings that scripts need are translated on the server and embedded by `<x-client-messages />`; scripts read them with `t('key')`.
+- **Alpine, CSP build.** The app uses `@alpinejs/csp`, so a strict Content-Security-Policy without `'unsafe-eval'` can be enforced (the header itself arrives in a later lot). In practice:
+  - every component is registered in `resources/js/app.js` with `Alpine.data('name', factory)` and referenced by name in the markup (`x-data="toasts"`), never with an inline object;
+  - expressions in templates stay simple: property access, method calls with arguments, comparisons, `!`, `&&`/`||`, ternaries and string `+`. Arrow functions, template literals, `;` statements and Blade values interpolated inside an expression are not allowed: put that logic in a component method;
+  - a component gets its values from `data-*` attributes (`data-url` on the root, `data-locale` on an item), read through `$root` or `event.currentTarget`, and translated texts are rendered by Blade as plain attributes;
+  - `tests/js/templates/alpine-csp.test.js` scans every Blade template for forbidden syntax and mounts the toast markup with the real CSP build.
 - **Icons.** Use `<x-tabler-*>` components and do not pass a `class` attribute: the SVG files already have one, which would render the attribute twice. Size and space icons from a parent element.
 - **Documentation.** Every class and public method carries a PHPDoc/JSDoc block that explains the why, not only the what.
 - **Language.** Code, identifiers, comments and commit messages are in English.

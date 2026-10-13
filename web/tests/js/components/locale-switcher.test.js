@@ -13,17 +13,24 @@ vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
 vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
 vi.mock('../../../resources/js/lib/page.js', () => ({ reloadPage: vi.fn() }));
 
+/** Builds the click event of a dropdown item carrying `data-locale`. */
+function click(locale) {
+    return { currentTarget: { dataset: { locale } } };
+}
+
 describe('locale switcher', () => {
     let component;
 
     beforeEach(() => {
-        component = localeSwitcher('/locale');
+        component = localeSwitcher();
+        // Alpine injects $root (the element carrying x-data and data-url).
+        component.$root = { dataset: { url: '/locale' } };
     });
 
     it('stores the locale then reloads the page', async () => {
         http.put.mockResolvedValue(null);
 
-        await component.select('en');
+        await component.select(click('en'));
 
         expect(http.put).toHaveBeenCalledWith('/locale', { locale: 'en' });
         expect(reloadPage).toHaveBeenCalledTimes(1);
@@ -32,7 +39,7 @@ describe('locale switcher', () => {
     it('ignores clicks while a change is in flight', async () => {
         http.put.mockResolvedValue(null);
 
-        await Promise.all([component.select('en'), component.select('fr')]);
+        await Promise.all([component.select(click('en')), component.select(click('fr'))]);
 
         expect(http.put).toHaveBeenCalledTimes(1);
     });
@@ -42,7 +49,7 @@ describe('locale switcher', () => {
             new HttpError(422, 'The given data was invalid.', { errors: { locale: ['Langue invalide.'] } }),
         );
 
-        await component.select('xx');
+        await component.select(click('xx'));
 
         expect(notify).toHaveBeenCalledWith('danger', 'Langue invalide.');
         expect(reloadPage).not.toHaveBeenCalled();
@@ -52,7 +59,7 @@ describe('locale switcher', () => {
     it('falls back to the helper message for other unreported client errors', async () => {
         http.put.mockRejectedValue(new HttpError(409, 'Une erreur est survenue.'));
 
-        await component.select('en');
+        await component.select(click('en'));
 
         expect(notify).toHaveBeenCalledWith('danger', 'Une erreur est survenue.');
     });
@@ -62,7 +69,7 @@ describe('locale switcher', () => {
         error.reported = true;
         http.put.mockRejectedValue(error);
 
-        await component.select('en');
+        await component.select(click('en'));
 
         expect(notify).not.toHaveBeenCalled();
         expect(reloadPage).not.toHaveBeenCalled();
@@ -72,7 +79,7 @@ describe('locale switcher', () => {
     it('stays silent when the request was cancelled', async () => {
         http.put.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
 
-        await component.select('en');
+        await component.select(click('en'));
 
         expect(notify).not.toHaveBeenCalled();
         expect(component.busy).toBe(false);
