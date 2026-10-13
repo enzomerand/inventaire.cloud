@@ -86,6 +86,39 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Supported Locales
+    |--------------------------------------------------------------------------
+    |
+    | Locales the interface is translated into, mapped to the name each one is
+    | displayed with in the language switcher. A language is always written in
+    | itself (never translated) so that people can find theirs whatever the
+    | current interface language is. Adding a language means adding it here and
+    | providing its lang/<locale>.json file.
+    |
+    */
+
+    'supported_locales' => ['fr', 'en'],
+
+    'locale_names' => [
+        'fr' => 'Français',
+        'en' => 'English',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Source Repository
+    |--------------------------------------------------------------------------
+    |
+    | Public location of the project's source code. The AGPL-3.0 requires that
+    | users interacting with the application over a network can obtain its
+    | source, so the page footer links here.
+    |
+    */
+
+    'repository_url' => 'https://github.com/enzomerand/inventaire.cloud',
+
+    /*
+    |--------------------------------------------------------------------------
     | Encryption Key
     |--------------------------------------------------------------------------
     |
