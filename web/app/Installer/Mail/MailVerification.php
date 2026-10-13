@@ -7,6 +7,7 @@ namespace App\Installer\Mail;
 use App\Installer\Probes\MailProbe;
 use App\Installer\Probes\ProbeResult;
 use App\Installer\Settings\MailSettings;
+use Closure;
 use Illuminate\Config\Repository;
 
 /**
@@ -18,9 +19,13 @@ use Illuminate\Config\Repository;
  */
 final class MailVerification
 {
+    /**
+     * @param  Closure(): string|null  $codeGenerator  Produces the code; defaults to a random 6-digit one. Tests inject a fixed one.
+     */
     public function __construct(
         private readonly MailProbe $probe,
         private readonly Repository $config,
+        private readonly ?Closure $codeGenerator = null,
     ) {}
 
     /**
@@ -31,7 +36,9 @@ final class MailVerification
      */
     public function begin(MailSettings $settings, string $recipient, array $values): array
     {
-        $code = str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
+        $code = $this->codeGenerator !== null
+            ? ($this->codeGenerator)()
+            : str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
         $lifetime = $this->config->integer('installer.mail_code.lifetime_minutes');
 
         $result = $this->probe->sendCode($settings, $recipient, $code, $lifetime);

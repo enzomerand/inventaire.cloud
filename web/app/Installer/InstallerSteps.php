@@ -27,6 +27,9 @@ use App\Installer\Settings\StorageSettings;
  */
 final class InstallerSteps
 {
+    /** Whether a validated step is written to .env (false when the values already live in the environment). */
+    private bool $persist = true;
+
     public function __construct(
         private readonly InstallationState $state,
         private readonly InstallerSettings $settings,
@@ -36,6 +39,21 @@ final class InstallerSteps
         private readonly StorageProbe $storage,
         private readonly DocumensoProbe $documenso,
     ) {}
+
+    /**
+     * A copy that checks the steps but writes nothing to .env.
+     *
+     * For `inventaire:install --from-env`, where the configuration already
+     * exists (often as Docker variables, possibly with no writable .env) and
+     * the installer only has to verify it and record the steps as done.
+     */
+    public function validatingOnly(): self
+    {
+        $copy = clone $this;
+        $copy->persist = false;
+
+        return $copy;
+    }
 
     /**
      * Tests the database connection and, if it works, saves it.
@@ -165,7 +183,10 @@ final class InstallerSteps
      */
     private function complete(InstallStep $step, array $values): void
     {
-        $this->settings->persist($step, $values);
+        if ($this->persist) {
+            $this->settings->persist($step, $values);
+        }
+
         $this->state->record($step);
     }
 }
