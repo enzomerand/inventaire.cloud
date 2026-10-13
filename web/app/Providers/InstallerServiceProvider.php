@@ -49,6 +49,7 @@ final class InstallerServiceProvider extends ServiceProvider
         $this->app->singleton(EnvironmentFile::class, fn (Application $app): EnvironmentFile => new EnvironmentFile(
             $app->environmentFilePath(),
             $app->basePath('.env.example'),
+            $app->make(InstallationState::class)->path('env.backup'),
         ));
 
         $this->app->singleton(EnvironmentLocks::class, fn (Application $app): EnvironmentLocks => new EnvironmentLocks(

@@ -67,6 +67,15 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // The installer's own log: the setup token and installation failures. Fixed file and level, so the
+        // token reaches the administrator whatever LOG_CHANNEL, LOG_STACK or LOG_LEVEL say.
+        'installer' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/installer.log'),
+            'level' => 'debug',
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),

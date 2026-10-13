@@ -47,7 +47,7 @@ final class SetupToken
                 return false;
             }
 
-            AtomicFile::write($this->path(), bin2hex(random_bytes(16))."\n", 0600);
+            AtomicFile::write($this->path(), bin2hex(random_bytes(16))."\n");
 
             return true;
         });

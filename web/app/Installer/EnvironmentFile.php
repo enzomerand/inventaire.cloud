@@ -31,10 +31,12 @@ final class EnvironmentFile
     /**
      * @param  string  $path  The file to maintain (usually base_path('.env')).
      * @param  string  $examplePath  Template copied when the file does not exist yet.
+     * @param  string|null  $backupPath  Where the previous contents are kept while the file is rewritten in place (see {@see self::write()}).
      */
     public function __construct(
         private readonly string $path,
         private readonly string $examplePath,
+        private readonly ?string $backupPath = null,
     ) {}
 
     /**
@@ -134,7 +136,8 @@ final class EnvironmentFile
     {
         $value = str_replace("\0", '', $value);
 
-        if ($value === '' || preg_match('/^[A-Za-z0-9_.\/:@+,=-]+$/', $value) === 1) {
+        // \z, not $: a trailing newline would match $ and be lost when the value is read back.
+        if ($value === '' || preg_match('/^[A-Za-z0-9_.\/:@+,=-]+\z/', $value) === 1) {
             return $value;
         }
 
@@ -257,12 +260,18 @@ final class EnvironmentFile
     }
 
     /**
-     * Stores the new contents, atomically when the directory allows it.
+     * Stores the new contents.
      *
-     * The rename-based write cannot work when .env is a file mounted into a
-     * container (rename over a mount point fails) or when only the file, not
-     * its directory, is writable: in those cases the file is rewritten in
-     * place under an exclusive lock.
+     * The preferred way is the atomic one: a temporary sibling renamed over the
+     * file, which also keeps the file's mode, owner and group. It cannot be
+     * used when .env is a file mounted into a container (rename over a mount
+     * point fails), when only the file, not its directory, is writable, or when
+     * replacing it would hand a file owned by somebody else to the current
+     * user. In those cases the file is rewritten in place under an exclusive
+     * lock, which keeps its inode and owner, but is not atomic: the previous
+     * contents are kept in memory (and in a backup file when one is configured)
+     * so that a write that fails halfway restores them instead of leaving an
+     * empty or truncated .env.
      *
      * @throws InstallationException
      */
@@ -271,7 +280,7 @@ final class EnvironmentFile
         $target = is_link($this->path) ? (realpath($this->path) ?: $this->path) : $this->path;
         $mode = is_file($target) ? (fileperms($target) & 0777) : (0666 & ~umask());
 
-        if (is_writable(dirname($target))) {
+        if (is_writable(dirname($target)) && AtomicFile::canPreserveOwnership($target)) {
             try {
                 AtomicFile::write($target, $contents, $mode);
 
@@ -281,10 +290,97 @@ final class EnvironmentFile
             }
         }
 
-        if (@file_put_contents($target, $contents, LOCK_EX) === false) {
+        $this->writeInPlace($target, $contents);
+    }
+
+    /**
+     * Rewrites the file where it stands, restoring its previous contents if the
+     * write fails.
+     *
+     * @throws InstallationException
+     */
+    private function writeInPlace(string $target, string $contents): void
+    {
+        $handle = @fopen($target, 'c+b');
+
+        if ($handle === false) {
             throw new InstallationException('The .env file is not writable.');
         }
 
-        clearstatcache(true, $target);
+        try {
+            if (! flock($handle, LOCK_EX)) {
+                throw new InstallationException('The .env file is not writable.');
+            }
+
+            $previous = (string) stream_get_contents($handle);
+
+            $this->keepBackup($previous);
+
+            if (! $this->overwrite($handle, $contents)) {
+                // Put back what was there; if even that fails the backup file is the last resort.
+                $this->overwrite($handle, $previous);
+
+                throw new InstallationException('The .env file could not be written; its previous contents were restored.');
+            }
+
+            $this->discardBackup();
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+            clearstatcache(true, $target);
+        }
+    }
+
+    /**
+     * Replaces everything in an open file; false if any step fails.
+     *
+     * @param  resource  $handle
+     */
+    private function overwrite($handle, string $contents): bool
+    {
+        if (! rewind($handle) || ! ftruncate($handle, 0)) {
+            return false;
+        }
+
+        $length = strlen($contents);
+        $written = 0;
+
+        while ($written < $length) {
+            $chunk = fwrite($handle, substr($contents, $written));
+
+            if ($chunk === false || $chunk === 0) {
+                return false;
+            }
+
+            $written += $chunk;
+        }
+
+        return fflush($handle);
+    }
+
+    /**
+     * Saves the previous contents before an in-place rewrite.
+     */
+    private function keepBackup(string $previous): void
+    {
+        if ($this->backupPath === null || $previous === '') {
+            return;
+        }
+
+        try {
+            AtomicFile::write($this->backupPath, $previous);
+        } catch (InstallationException) {
+            // The in-memory copy still protects against a failed write.
+        }
+    }
+
+    /**
+     * Removes the backup once the new contents are safely written (it holds secrets).
+     */
+    private function discardBackup(): void
+    {
+        if ($this->backupPath !== null) {
+            @unlink($this->backupPath);
+        }
     }
 }

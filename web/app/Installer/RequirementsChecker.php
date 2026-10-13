@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use App\Installer\Support\AtomicFile;
 use Closure;
 use Illuminate\Foundation\Application;
 
@@ -147,6 +148,6 @@ final class RequirementsChecker
             return new Requirement($id, $label, true);
         }
 
-        return new Requirement($id, $label, false, __('The web server user cannot write to :path. Change its permissions or ownership.', ['path' => $path]));
+        return new Requirement($id, $label, false, __('The web server user cannot write to :path. Change its permissions or ownership.', ['path' => AtomicFile::display($path)]));
     }
 }

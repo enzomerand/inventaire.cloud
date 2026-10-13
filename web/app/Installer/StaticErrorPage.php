@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * A self-contained error page for failures that happen before the application
@@ -19,12 +21,14 @@ final class StaticErrorPage
     /**
      * Builds the HTML response.
      *
-     * @param  string  $message  Already translated, plain text.
+     * The text is deliberately generic: this page is shown to anybody who
+     * reaches the site, so it never carries a path or an exception message.
+     * Those go to the log ({@see self::report()}).
      */
-    public static function response(string $message): Response
+    public static function response(): Response
     {
         $title = e(__('The installer cannot start'));
-        $body = e($message);
+        $body = e(__('A file or folder the installer needs is not writable. Check the permissions of storage/ and of the .env file, then reload this page. The details are in storage/logs/installer.log.'));
         $lang = e(app()->getLocale());
 
         $html = <<<HTML
@@ -52,5 +56,20 @@ p{margin:0}
 HTML;
 
         return new Response($html, 500, ['Content-Type' => 'text/html; charset=UTF-8']);
+    }
+
+    /**
+     * Records why the installer cannot start, in the installer log or, when
+     * even that is not writable, in the server's error log.
+     */
+    public static function report(Throwable $exception): void
+    {
+        $line = 'inventaire.cloud installer cannot start: '.$exception->getMessage();
+
+        try {
+            Log::channel('installer')->error($line);
+        } catch (Throwable) {
+            error_log($line);
+        }
     }
 }

@@ -73,7 +73,7 @@ There are three ways to install, and they share the same checks:
 
 ### The setup token (web wizard)
 
-Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/app/private/installation/setup-token` (owner-only permissions), written to the application log (`storage/logs/laravel.log`, or the container logs) and printed by:
+Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to the application log (`storage/logs/laravel.log`, or the container logs) and printed by:
 
 ```bash
 php artisan inventaire:install-token
@@ -83,7 +83,7 @@ The token is compared in constant time, the form accepts 5 attempts per minute a
 
 ### The steps
 
-The wizard is one page with a progress bar and one AJAX endpoint per step. Each step **tests the real service before saving**, writes its values to `.env` immediately and is recorded in `storage/app/private/installation/progress.json`, so an interrupted installation resumes where it stopped (the token is asked again in a new browser session).
+The wizard is one page with a progress bar and one AJAX endpoint per step. Each step **tests the real service before saving**, writes its values to `.env` immediately and is recorded in `storage/installer/progress.json`, so an interrupted installation resumes where it stopped (the token is asked again in a new browser session).
 
 1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` or `imagick`, `zip`, `curl`) and write access to `storage/`, `bootstrap/cache/` and `.env`.
 2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that already holds tables of another application, and the user must be able to create tables. An interrupted installation can be resumed on the same database.
@@ -120,8 +120,8 @@ php artisan inventaire:install --from-env      # validate the current configurat
 ### Troubleshooting
 
 - *I lost the setup token*: `php artisan inventaire:install-token`.
-- *The wizard keeps showing finished steps*: the progress lives in `storage/app/private/installation/progress.json`; delete that file to start over (the configuration stays in `.env`).
-- *I want to run the wizard again on an installed instance*: delete `storage/app/private/installation/installed.json`. This only re-enables the installer; it does not touch the database.
+- *The wizard keeps showing finished steps*: the progress lives in `storage/installer/progress.json`; delete that file to start over (the configuration stays in `.env`).
+- *I want to run the wizard again on an installed instance*: delete `storage/installer/installed.json`. This only re-enables the installer; it does not touch the database.
 
 ## Quality commands
 

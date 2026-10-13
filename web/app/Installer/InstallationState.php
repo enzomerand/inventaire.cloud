@@ -161,7 +161,7 @@ final class InstallationState
      */
     public function exclusively(Closure $callback): mixed
     {
-        AtomicFile::ensureDirectory($this->directory);
+        AtomicFile::touch($this->path(self::LOCK));
 
         $handle = fopen($this->path(self::LOCK), 'c');
 

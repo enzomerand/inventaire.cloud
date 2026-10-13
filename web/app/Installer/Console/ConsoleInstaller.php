@@ -17,6 +17,7 @@ use App\Installer\Mail\MailCodeOutcome;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\ProbeResult;
 use App\Installer\RequirementsChecker;
+use App\Installer\Support\AtomicFile;
 use Illuminate\Console\Command;
 use Illuminate\Console\View\Components\Factory;
 use Illuminate\Support\Facades\Validator;
@@ -106,6 +107,8 @@ final class ConsoleInstaller
             return Command::INVALID;
         }
 
+        $this->warnAboutUser();
+
         try {
             $this->key->ensure();
 
@@ -129,6 +132,30 @@ final class ConsoleInstaller
 
             return Command::FAILURE;
         }
+    }
+
+    /**
+     * Warns when the command runs as another user than the one that owns storage/.
+     *
+     * The web server normally owns storage/. Files this command creates as
+     * somebody else would be unreadable for it and the site would loop on the
+     * wizard; as root, files are handed over to the owner of their folder.
+     */
+    private function warnAboutUser(): void
+    {
+        $owner = @fileowner(storage_path());
+        $current = AtomicFile::effectiveUser();
+
+        if ($owner === false || $owner === $current) {
+            return;
+        }
+
+        $name = static fn (int $uid): string => function_exists('posix_getpwuid') ? (string) (posix_getpwuid($uid)['name'] ?? $uid) : (string) $uid;
+
+        $this->components->warn(__('This command runs as :user but storage/ belongs to :owner. If the web server runs as :owner, run this command as :owner (for example with sudo -u :owner), or as root so that the files it creates are handed over to the owner of their folder.', [
+            'user' => $name($current),
+            'owner' => $name($owner),
+        ]));
     }
 
     /**

@@ -20,7 +20,7 @@ it('creates a random token readable by its owner only', function (): void {
 
     expect($token->ensure())->toBeTrue()
         ->and($token->ensure())->toBeFalse()
-        ->and(fileperms($token->path()) & 0777)->toBe(0600)
+        ->and(fileperms($token->path()) & 0777)->toBe(0640)
         ->and($token->current())->toMatch('/^[0-9a-f]{32}$/')
         ->and(freshToken($this)->current())->toBe($token->current());
 });

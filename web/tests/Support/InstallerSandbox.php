@@ -51,6 +51,7 @@ final class InstallerSandbox
         $config->set('filesystems.disks.local.root', $this->root.'/storage');
         // The setup token is logged on the first web access: keep test tokens out of the real log file.
         $config->set('logging.default', 'null');
+        $config->set('logging.channels.installer.path', $this->root.'/installer.log');
 
         if (! $appKey) {
             $config->set('app.key', '');

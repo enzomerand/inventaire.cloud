@@ -55,7 +55,9 @@ final class RedirectIfNotInstalled
         $failure = $this->startupFailure();
 
         if ($failure !== null) {
-            return StaticErrorPage::response($failure);
+            StaticErrorPage::report($failure);
+
+            return StaticErrorPage::response();
         }
 
         if ($request->is(self::EXEMPT)) {
@@ -76,13 +78,15 @@ final class RedirectIfNotInstalled
     /**
      * Why the installer cannot run at all, or null when it can.
      *
+     * The visitor only gets a generic page; the exception goes to the log.
+     *
      * Also creates the setup token on the very first web access and writes it
      * to the log, which is where an administrator with server access finds it.
      */
-    private function startupFailure(): ?string
+    private function startupFailure(): ?InstallationException
     {
         if ($this->app->bound(InstallerServiceProvider::STARTUP_FAILURE)) {
-            return $this->app->make(InstallerServiceProvider::STARTUP_FAILURE)->userMessage();
+            return $this->app->make(InstallerServiceProvider::STARTUP_FAILURE);
         }
 
         try {
@@ -93,7 +97,7 @@ final class RedirectIfNotInstalled
                 );
             }
         } catch (InstallationException $exception) {
-            return $exception->userMessage();
+            return $exception;
         }
 
         return null;

@@ -77,7 +77,7 @@ describe('on a fresh instance', function (): void {
         $this->get('/');
 
         Log::shouldHaveReceived('warning')->once();
-        expect(fileperms(app(SetupToken::class)->path()) & 0777)->toBe(0600);
+        expect(fileperms(app(SetupToken::class)->path()) & 0777)->toBe(0640);
     });
 
     it('does not create the token for the health check', function (): void {
@@ -190,17 +190,30 @@ describe('the application key', function (): void {
         expect(config('app.key'))->toBe('')->and(is_file($this->sandbox->envPath()))->toBeFalse();
     });
 
-    it('shows a static error page when it cannot be stored', function (): void {
+    it('shows a generic static page when the key cannot be stored, and logs the details', function (): void {
         if (posix_geteuid() === 0) {
             $this->markTestSkipped('Directory permissions do not restrict root.');
         }
 
         chmod($this->sandbox->root, 0555);
         $this->bootInstaller(installed: false, appKey: false);
+
+        // The sandbox log lives in the directory made read-only: use a writable one for this test.
+        $log = sys_get_temp_dir().'/inventaire-installer-log-'.bin2hex(random_bytes(4));
+        config(['logging.channels.installer.path' => $log]);
+
         $page = $this->get('/anything');
 
-        $page->assertStatus(500)->assertSee('.env', false)->assertSee('<!doctype html>', false)->assertDontSee('<script', false);
+        $page->assertStatus(500)->assertSee('<!doctype html>', false)->assertDontSee('<script', false)
+            ->assertSee('storage/', false)
+            // Visitors learn nothing about the server: no path, no exception message.
+            ->assertDontSee($this->sandbox->root, false)
+            ->assertDontSee('Cannot create', false)
+            ->assertDontSee('Cannot write', false);
         $this->getJson('/')->assertStatus(500);
+
+        expect(file_get_contents($log))->toContain('installer cannot start')->toContain('application key is missing');
+        @unlink($log);
     });
 });
 

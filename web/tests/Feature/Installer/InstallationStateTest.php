@@ -22,8 +22,8 @@ it('is not installed until the marker is written, then stays installed', functio
 
     expect($state->isInstalled())->toBeTrue()
         ->and(new InstallationState($state->directory()))->isInstalled()->toBeTrue()
-        ->and(fileperms($state->path('installed.json')) & 0777)->toBe(0600)
-        ->and(fileperms($state->directory()) & 0777)->toBe(0700);
+        ->and(fileperms($state->path('installed.json')) & 0777)->toBe(0640)
+        ->and(fileperms($state->directory()) & 0777)->toBe(0750);
 });
 
 it('notices a marker created by another process', function (): void {

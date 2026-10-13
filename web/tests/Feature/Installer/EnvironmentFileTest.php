@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Installer\EnvironmentFile;
 use App\Installer\Exceptions\InstallationException;
 use Dotenv\Dotenv;
+use Tests\Support\FailingWriteStream;
 
 /**
  * Builds an EnvironmentFile on a sandbox file holding the given contents.
@@ -113,6 +114,9 @@ it('reads values back exactly as the dotenv parser Laravel uses', function (stri
     'only spaces' => '   ',
     'mail from' => 'inventaire.cloud <hello@example.com>',
     'null word' => 'null',
+    'trailing newline' => "abc\n",
+    'only a newline' => "\n",
+    'trailing CRLF' => "abc\r\n",
 ]);
 
 it('writes an empty value as an empty assignment', function (): void {
@@ -236,4 +240,50 @@ it('treats an unreadable or invalid file as empty', function (): void {
     $invalid = environmentFile($this, "BROKEN=\"never closed\n");
 
     expect($missing->all())->toBe([])->and($invalid->all())->toBe([]);
+});
+
+describe('when the file has to be rewritten in place', function (): void {
+    beforeEach(function (): void {
+        stream_wrapper_register('failing', FailingWriteStream::class);
+        FailingWriteStream::$files = ['failing://env' => "A=1\nSECRET=keep-me\n"];
+    });
+
+    afterEach(function (): void {
+        stream_wrapper_unregister('failing');
+        FailingWriteStream::$failNextWrite = false;
+    });
+
+    it('rewrites the file under a lock', function (): void {
+        $file = new EnvironmentFile('failing://env', base_path('.env.example'));
+
+        $file->set(['A' => '2']);
+
+        expect(FailingWriteStream::$files['failing://env'])->toBe("A=2\nSECRET=keep-me\n");
+    });
+
+    it('restores the previous contents instead of leaving an empty file when the write fails', function (): void {
+        $file = new EnvironmentFile('failing://env', base_path('.env.example'), $this->sandbox->root.'/env.backup');
+        FailingWriteStream::$failNextWrite = true;
+
+        try {
+            $file->set(['A' => '2']);
+        } catch (InstallationException $exception) {
+            expect($exception->userMessage())->toContain('previous contents were restored');
+            expect(FailingWriteStream::$files['failing://env'])->toBe("A=1\nSECRET=keep-me\n")
+                // The backup file stays as a last resort after a failure...
+                ->and(file_get_contents($this->sandbox->root.'/env.backup'))->toBe("A=1\nSECRET=keep-me\n");
+
+            return;
+        }
+
+        $this->fail('Expected an InstallationException.');
+    });
+
+    it('does not keep the backup, which holds secrets, after a successful write', function (): void {
+        $file = new EnvironmentFile('failing://env', base_path('.env.example'), $this->sandbox->root.'/env.backup');
+
+        $file->set(['A' => '2']);
+
+        expect(is_file($this->sandbox->root.'/env.backup'))->toBeFalse();
+    });
 });

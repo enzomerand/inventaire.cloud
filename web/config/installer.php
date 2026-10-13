@@ -15,11 +15,12 @@ return [
 
     /*
     | Directory holding the installer's own files: the "installed" marker, the
-    | wizard progress and the one-time setup token. It lives under the private
-    | disk root so the web server never serves it, and it is created with
-    | owner-only permissions.
+    | wizard progress, the one-time setup token and the locks. It is outside the
+    | public and local disks (which hold user files), outside the web root, and
+    | readable by the group so the web server and the person running the console
+    | installer can both use it.
     */
-    'state_path' => storage_path('app/private/installation'),
+    'state_path' => storage_path('installer'),
 
     /*
     | Oldest server version accepted for each database engine. Lower versions
