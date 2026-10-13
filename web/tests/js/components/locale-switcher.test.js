@@ -37,22 +37,44 @@ describe('locale switcher', () => {
         expect(http.put).toHaveBeenCalledTimes(1);
     });
 
-    it('reports a rejected locale and stays on the page', async () => {
-        http.put.mockRejectedValue(new HttpError(422, 'Invalid locale.'));
+    it('shows the translated validation message of a rejected locale and stays on the page', async () => {
+        http.put.mockRejectedValue(
+            new HttpError(422, 'The given data was invalid.', { errors: { locale: ['Langue invalide.'] } }),
+        );
 
         await component.select('xx');
 
-        expect(notify).toHaveBeenCalledWith('danger', 'Invalid locale.');
+        expect(notify).toHaveBeenCalledWith('danger', 'Langue invalide.');
         expect(reloadPage).not.toHaveBeenCalled();
         expect(component.busy).toBe(false);
     });
 
+    it('falls back to the helper message for other unreported client errors', async () => {
+        http.put.mockRejectedValue(new HttpError(409, 'Une erreur est survenue.'));
+
+        await component.select('en');
+
+        expect(notify).toHaveBeenCalledWith('danger', 'Une erreur est survenue.');
+    });
+
     it('does not repeat a failure the HTTP helper already reported', async () => {
-        http.put.mockRejectedValue(new HttpError(500, 'Boom'));
+        const error = new HttpError(500, 'Boom');
+        error.reported = true;
+        http.put.mockRejectedValue(error);
 
         await component.select('en');
 
         expect(notify).not.toHaveBeenCalled();
         expect(reloadPage).not.toHaveBeenCalled();
+        expect(component.busy).toBe(false);
+    });
+
+    it('stays silent when the request was cancelled', async () => {
+        http.put.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+
+        await component.select('en');
+
+        expect(notify).not.toHaveBeenCalled();
+        expect(component.busy).toBe(false);
     });
 });

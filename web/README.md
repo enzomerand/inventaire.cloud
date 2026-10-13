@@ -120,11 +120,30 @@ compose.dev.yaml    Development services
 
 ## Conventions
 
-- **One HTTP helper.** Scripts never call `fetch` directly: they use `http` from `resources/js/lib/http.js`, which adds the CSRF token, locale and JSON headers and reports expired sessions and server errors with a toast.
+- **One HTTP helper.** Scripts never call `fetch` directly: they use `http` from `resources/js/lib/http.js` (see below).
 - **No display text in JavaScript.** Strings that scripts need are translated on the server and embedded by `<x-client-messages />`; scripts read them with `t('key')`.
 - **Icons.** Use `<x-tabler-*>` components and do not pass a `class` attribute: the SVG files already have one, which would render the attribute twice. Size and space icons from a parent element.
 - **Documentation.** Every class and public method carries a PHPDoc/JSDoc block that explains the why, not only the what.
 - **Language.** Code, identifiers, comments and commit messages are in English.
+
+## HTTP helper
+
+`http.get/post/put/patch/delete` is the contract every action relies on. It sends JSON with `Accept`, `Accept-Language`, `X-Requested-With` and the CSRF token (`X-XSRF-TOKEN` from the `XSRF-TOKEN` cookie, falling back to the `csrf-token` meta tag, so rotation after login or logout is followed). It resolves the parsed JSON, `null` for `204`, or a `Blob`/text with `{ responseType: 'blob' | 'text' }`; a `FormData` body is sent as is. `{ timeout }` (default 30 s, covering the body too) and `{ signal }` can be combined.
+
+Failures throw an `HttpError` (`status`, `message`, `errors`, `code` from `body.code`, `retryAfter`, `kind`, `reported`). Raw response messages are never shown, except the server-translated validation messages of a `422`; everything else is looked up by key in the strings embedded by `<x-client-messages />`.
+
+| Situation              | Central handling (skip all with `{ silent: true }`)                                              |
+|------------------------|--------------------------------------------------------------------------------------------------|
+| `401`                  | Toast, then redirect to the `login-url` meta tag if the page has one, else reload                |
+| `403`, `404`           | Toast                                                                                            |
+| `419`                  | Refresh the token (`csrf-refresh-url` meta tag) and replay once; only a second failure toasts and reloads |
+| `422`, other `4xx`     | Nothing: the caller handles it (`errors`, `code`)                                                |
+| `429`                  | Toast; `retryAfter` holds the `Retry-After` delay in seconds                                     |
+| `5xx`                  | Toast                                                                                            |
+| Network, timeout       | Toast (`HttpError.status === 0`, `kind` is `network` or `timeout`)                               |
+| `2xx` that is not JSON | Toast and `HttpError` with `kind === 'unexpected_response'`                                      |
+
+A request cancelled through the caller's `signal` rejects with the raw `AbortError` and no toast.
 
 ## Translations
 

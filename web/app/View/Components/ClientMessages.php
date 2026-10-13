@@ -31,6 +31,13 @@ class ClientMessages extends Component
             'close' => __('Close'),
             'error.generic' => __('Something went wrong. Please try again.'),
             'error.network' => __('Network error. Check your connection and try again.'),
+            'error.timeout' => __('The server took too long to answer. Please try again.'),
+            'error.server' => __('The server hit an error. Please try again in a moment.'),
+            'error.unexpected_response' => __('The server sent an unexpected answer. Please try again.'),
+            'error.unauthenticated' => __('You are signed out. Please sign in again.'),
+            'error.forbidden' => __('You are not allowed to do this.'),
+            'error.not_found' => __('This item no longer exists.'),
+            'error.too_many_requests' => __('Too many attempts. Please wait a moment before trying again.'),
             'error.session_expired' => __('Your session has expired. The page is about to reload.'),
         ];
     }

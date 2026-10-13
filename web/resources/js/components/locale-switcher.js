@@ -5,7 +5,7 @@
  * parameter) lets the same preference apply to every later page and to API
  * clients that share the session.
  */
-import { http } from '../lib/http.js';
+import { HttpError, http } from '../lib/http.js';
 import { notify } from '../lib/notify.js';
 import { reloadPage } from '../lib/page.js';
 
@@ -21,9 +21,10 @@ export default function localeSwitcher(url) {
         /**
          * Saves the locale then reloads so the whole page is rendered in it.
          *
-         * Failures that the HTTP helper already reports (network, 5xx, expired
-         * session) are not repeated here; only the remaining client errors
-         * (e.g. a rejected locale) get a toast.
+         * Failures the HTTP helper already reported (network, 5xx, expired
+         * session...) are not repeated. For the others the message shown is
+         * either the server's translated validation message for the locale
+         * field or the helper's own translated message, never raw response text.
          *
          * @param {string} locale
          * @returns {Promise<void>}
@@ -40,9 +41,9 @@ export default function localeSwitcher(url) {
             } catch (error) {
                 this.busy = false;
 
-                const alreadyReported = error.status === 0 || error.status >= 500 || error.status === 419;
-                if (!alreadyReported) {
-                    notify('danger', error.message);
+                // Anything else than an HttpError is a cancelled request: nothing to tell.
+                if (error instanceof HttpError && !error.reported) {
+                    notify('danger', error.errors.locale?.[0] ?? error.message);
                 }
 
                 return;
