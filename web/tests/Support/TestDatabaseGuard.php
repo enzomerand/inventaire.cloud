@@ -53,7 +53,7 @@ final class TestDatabaseGuard
 
             throw new RuntimeException(
                 "Refusing to run tests: database \"{$shown}\" on connection \"{$connection}\" does not end with \""
-                .self::REQUIRED_SUFFIX.'". Use composer test (or test:pgsql / test:mysql) and clear any cached config.'
+                .self::REQUIRED_SUFFIX.'". Use composer test (or test:pgsql / test:mysql / test:mariadb) and clear any cached config.'
             );
         }
     }

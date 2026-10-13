@@ -42,3 +42,12 @@ it('refuses a missing database name', function (): void {
 it('refuses an unknown default connection', function (): void {
     TestDatabaseGuard::assertSafe(new Repository(['database' => ['default' => 'nope', 'connections' => []]]));
 })->throws(RuntimeException::class, 'not configured');
+
+it('accepts a test database on every supported engine', function (string $driver): void {
+    TestDatabaseGuard::assertSafe(new Repository([
+        'database' => [
+            'default' => $driver,
+            'connections' => [$driver => ['driver' => $driver, 'database' => 'inventaire_test', 'url' => null]],
+        ],
+    ]));
+})->with(['pgsql', 'mysql', 'mariadb'])->throwsNoExceptions();
