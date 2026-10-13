@@ -9,7 +9,7 @@ It is built **API-first**: the pages are classic server-rendered navigation, but
 | Layer      | Choice                                                                                  |
 |------------|-----------------------------------------------------------------------------------------|
 | Backend    | Laravel 13, PHP 8.3+                                                                    |
-| Database   | PostgreSQL or MySQL (never engine-specific SQL), SQLite for the default test run        |
+| Database   | PostgreSQL or MySQL, never engine-specific SQL (SQLite is not supported)                |
 | Front end  | Blade + [Tabler](https://tabler.io) (Bootstrap 5) + Alpine.js, bundled by Vite          |
 | Icons      | [`secondnetwork/blade-tabler-icons`](https://github.com/secondnetwork/blade-tabler-icons) |
 | Tests      | Pest (PHP), Vitest + jsdom (JS)                                                         |
@@ -65,9 +65,9 @@ Run every command from this `web/` directory.
 | `composer lint`        | Checks PHP code style with Pint (`pint --test`)                      |
 | `composer format`      | Fixes PHP code style with Pint                                       |
 | `composer analyse`     | Runs Larastan at level 8 on `app`, `config`, `routes`, `database`    |
-| `composer test`        | Runs the Pest suite on in-memory SQLite                              |
-| `composer test:pgsql`  | Runs the same suite on the PostgreSQL service                        |
-| `composer test:mysql`  | Runs the same suite on the MySQL service                             |
+| `composer test`        | Runs the Pest suite on PostgreSQL, then on MySQL (stops at the first failure) |
+| `composer test:pgsql`  | Runs the suite on the PostgreSQL service only                        |
+| `composer test:mysql`  | Runs the suite on the MySQL service only                             |
 | `npm run lint`         | ESLint, then Prettier in check mode (JS, CSS, JSON)                  |
 | `npm run format`       | Fixes JS, CSS and JSON files                                         |
 | `npm test`             | Runs the Vitest suite                                                |
@@ -77,15 +77,17 @@ All PHP files under `app`, `config`, `routes`, `database` and `tests` declare `s
 
 ## Testing on PostgreSQL and MySQL
 
-The application has to behave the same on both engines. The database tests (`RefreshDatabase`) run the real migrations, so running the suite on each engine catches engine-specific SQL early:
+The application has to behave the same on both engines, and SQLite is deliberately not supported. The database tests (`RefreshDatabase`) run the real migrations, so running the suite on each engine catches engine-specific SQL early. The services must be running (`docker compose -f compose.dev.yaml up -d --wait`):
 
 ```bash
-docker compose -f compose.dev.yaml up -d --wait
-composer test:pgsql
-composer test:mysql
+composer test         # PostgreSQL, then MySQL; stops at the first failure
+composer test:pgsql   # PostgreSQL only
+composer test:mysql   # MySQL only
 ```
 
-These scripts point `DB_*` at the compose services and use the dedicated `inventaire_test` schema, so your development data in `inventaire` is never touched. Run `composer test` for the quick SQLite loop while developing.
+These scripts point `DB_*` at the compose services and use the dedicated `inventaire_test` schema. `phpunit.xml` targets the PostgreSQL test schema too, so a plain `php artisan test` is safe as well.
+
+Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
 ## Project structure
 

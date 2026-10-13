@@ -53,8 +53,8 @@
         "format": "pint",
         "analyse": "phpstan analyse --memory-limit=1G",
         "test": [
-            "@php artisan config:clear --ansi @no_additional_args",
-            "@php artisan test"
+            "@test:pgsql",
+            "@test:mysql"
         ],
         "test:pgsql": [
             "@putenv DB_CONNECTION=pgsql",
@@ -88,7 +88,6 @@
         ],
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi",
-            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
             "@php artisan migrate --graceful --ansi"
         ],
         "pre-package-uninstall": [
