@@ -54,7 +54,7 @@ services:
             retries: 20
 
     mariadb:
-        # 12.3 is the current LTS (what the `lts` tag points to); pinned like the others.
+        # 12.3 is the current LTS (what the `lts` tag points to).
         image: mariadb:12.3
         ports:
             - '127.0.0.1:33070:3306'
@@ -66,7 +66,7 @@ services:
         volumes:
             - mariadb-data:/var/lib/mysql
         configs:
-            - source: mariadb-test-database
+            - source: mysql-test-database
               target: /docker-entrypoint-initdb.d/10-test-database.sql
         healthcheck:
             # Image-provided script: passes once the server accepts connections and
@@ -92,10 +92,6 @@ configs:
         content: |
             CREATE DATABASE inventaire_test OWNER inventaire;
     mysql-test-database:
-        content: |
-            CREATE DATABASE IF NOT EXISTS inventaire_test;
-            GRANT ALL PRIVILEGES ON inventaire_test.* TO 'inventaire'@'%';
-    mariadb-test-database:
         content: |
             CREATE DATABASE IF NOT EXISTS inventaire_test;
             GRANT ALL PRIVILEGES ON inventaire_test.* TO 'inventaire'@'%';

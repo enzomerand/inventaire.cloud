@@ -8,10 +8,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 
 /*
- * Runs the real migrations on whichever engine DB_CONNECTION points to
- * (PostgreSQL by default, MySQL through `composer test:mysql`, MariaDB through
- * `composer test:mariadb`). It is the canary proving the schema stays
- * engine-agnostic.
+ * Runs the real migrations on whichever engine DB_CONNECTION points to.
+ * It is the canary proving the schema stays engine-agnostic.
  */
 uses(RefreshDatabase::class);
 

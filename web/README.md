@@ -38,7 +38,7 @@ Run every command from this `web/` directory.
    |------------|------------------------------------|----------------------------------------------|
    | PostgreSQL | `54329`                            | database `inventaire`, user `inventaire`, password `secret` |
    | MySQL      | `33069`                            | same as above                                |
-   | MariaDB    | `33070`                            | same as above (LTS 12.3)                     |
+   | MariaDB    | `33070`                            | same as above                                |
    | Mailpit    | `1025` (SMTP), `8025` (web UI)     | none                                         |
 
    Each database also has an `inventaire_test` schema reserved for the test suite. These scripts only run when a volume is first created; use `docker compose -f compose.dev.yaml down -v` to start from scratch.
