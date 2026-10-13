@@ -103,7 +103,7 @@ final class InstallerServiceProvider extends ServiceProvider
         }
 
         try {
-            $key->ensure(production: true);
+            $key->ensure();
         } catch (InstallationException $exception) {
             $this->app->instance(self::STARTUP_FAILURE, $exception);
         }

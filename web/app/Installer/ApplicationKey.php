@@ -41,13 +41,13 @@ final class ApplicationKey
      * same key, so the check and the write happen under a lock and the file is
      * consulted again once it is held.
      *
-     * @param  bool  $production  Whether a .env created here belongs to a server: it then starts in production mode instead
-     *                            of copying the example's local, debug-enabled development defaults.
+     * A .env created here starts in production mode (see {@see EnvironmentFile::NEW_FILE_DEFAULTS}).
+     *
      * @return string The key now in use.
      *
      * @throws InstallationException When .env is not writable.
      */
-    public function ensure(bool $production = false): string
+    public function ensure(): string
     {
         if (! $this->isMissing()) {
             return $this->config->string('app.key');
@@ -57,7 +57,7 @@ final class ApplicationKey
             throw new InstallationException('The application key is missing and the .env file is not writable. Set APP_KEY in the environment, or make the .env file writable.');
         }
 
-        $key = $this->state->exclusively(function () use ($production): string {
+        $key = $this->state->exclusively(function (): string {
             $stored = $this->environment->get('APP_KEY');
 
             if ($stored !== null && $stored !== '') {
@@ -65,13 +65,7 @@ final class ApplicationKey
             }
 
             $key = 'base64:'.base64_encode(Encrypter::generateKey($this->config->string('app.cipher')));
-            $values = ['APP_KEY' => $key];
-
-            if (! $this->environment->exists() && $production) {
-                $values += ['APP_ENV' => 'production', 'APP_DEBUG' => 'false'];
-            }
-
-            $this->environment->set($values);
+            $this->environment->set(['APP_KEY' => $key], EnvironmentFile::NEW_FILE_DEFAULTS);
 
             return $key;
         });

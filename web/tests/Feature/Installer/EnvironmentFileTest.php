@@ -141,6 +141,22 @@ it('creates the file from the example when it does not exist', function (): void
         ->and($file->set(['APP_NAME' => 'x']))->toBeFalse();
 });
 
+it('applies the creation defaults only when it creates the file', function (): void {
+    $file = environmentFile($this, null, "APP_ENV=local\nAPP_DEBUG=true\n");
+
+    $file->set(['APP_KEY' => 'k'], EnvironmentFile::NEW_FILE_DEFAULTS);
+    expect(file_get_contents($file->path()))->toBe("APP_ENV=production\nAPP_DEBUG=false\n\nAPP_KEY=k\n");
+
+    file_put_contents($file->path(), "APP_ENV=local\n");
+    $file->set(['APP_KEY' => 'k'], EnvironmentFile::NEW_FILE_DEFAULTS);
+    expect(file_get_contents($file->path()))->toBe("APP_ENV=local\n\nAPP_KEY=k\n");
+
+    // An explicit value wins over a creation default.
+    unlink($file->path());
+    $file->set(['APP_ENV' => 'staging'], EnvironmentFile::NEW_FILE_DEFAULTS);
+    expect($file->get('APP_ENV'))->toBe('staging');
+});
+
 it('creates a file even when there is no example', function (): void {
     $file = new EnvironmentFile($this->sandbox->root.'/fresh', $this->sandbox->root.'/missing-example');
 

@@ -22,6 +22,13 @@ use Dotenv\Exception\InvalidFileException;
 final class EnvironmentFile
 {
     /**
+     * Settings given to a .env that the installer creates: .env.example holds
+     * development defaults (local environment, debug on), which must not
+     * leak into a server. An existing file is never touched this way.
+     */
+    public const NEW_FILE_DEFAULTS = ['APP_ENV' => 'production', 'APP_DEBUG' => 'false'];
+
+    /**
      * @param  string  $path  The file to maintain (usually base_path('.env')).
      * @param  string  $examplePath  Template copied when the file does not exist yet.
      */
@@ -100,13 +107,18 @@ final class EnvironmentFile
      * end. When the file does not exist it starts as a copy of .env.example.
      *
      * @param  array<string, string>  $values  Key => raw value; quoting is handled here.
+     * @param  array<string, string>  $whenCreated  Further values applied only when the file is created by this call, below $values.
      * @return bool True when the file did not exist and was created.
      *
      * @throws InstallationException When the file cannot be written.
      */
-    public function set(array $values): bool
+    public function set(array $values, array $whenCreated = []): bool
     {
         $created = ! is_file($this->path);
+
+        if ($created) {
+            $values += $whenCreated;
+        }
         $contents = $created ? (string) @file_get_contents($this->examplePath) : (string) @file_get_contents($this->path);
 
         $this->write($this->render($contents, $values));

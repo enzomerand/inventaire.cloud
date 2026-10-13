@@ -136,7 +136,7 @@ final class InstallerSettings
             throw new InstallationException('The .env file is not writable. Make it writable by the web server user, or provide the settings as environment variables and run "php artisan inventaire:install --from-env".');
         }
 
-        $this->file->set($updates);
+        $this->file->set($updates, EnvironmentFile::NEW_FILE_DEFAULTS);
     }
 
     /**

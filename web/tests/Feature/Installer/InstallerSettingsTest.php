@@ -24,6 +24,16 @@ function settingsFor(object $test, string $contents = '', array $process = []): 
     return new InstallerSettings($file, new EnvironmentLocks($file, fn (): array => $process));
 }
 
+/**
+ * The sandbox .env, parsed.
+ *
+ * @return array<string, string>
+ */
+function consoleEnvFile(object $test): array
+{
+    return (new EnvironmentFile($test->sandbox->envPath(), $test->sandbox->envPath()))->all();
+}
+
 it('falls back to the defaults of the fields', function (): void {
     $values = settingsFor($this)->current(InstallStep::Database);
 
@@ -147,7 +157,17 @@ describe('storing the values of a step', function (): void {
         $contents = file_get_contents($this->sandbox->envPath());
 
         expect($contents)->toContain('APP_NAME="inventaire.cloud"')->toContain('APP_URL=https://inventory.example.com')
-            ->toContain('APP_LOCALE=en')->toContain('APP_TIMEZONE=Europe/Paris');
+            ->toContain('APP_LOCALE=en')->toContain('APP_TIMEZONE=Europe/Paris')
+            // The example's development defaults must not leak into a file the installer creates.
+            ->toContain('APP_ENV=production')->toContain('APP_DEBUG=false');
+    });
+
+    it('leaves the environment of an existing .env alone', function (): void {
+        file_put_contents($this->sandbox->envPath(), "APP_ENV=local\nAPP_DEBUG=true\n");
+
+        settingsFor($this)->persist(InstallStep::Application, ['url' => 'https://inventory.example.com', 'locale' => 'en', 'timezone' => 'UTC']);
+
+        expect(consoleEnvFile($this))->toMatchArray(['APP_ENV' => 'local', 'APP_DEBUG' => 'true']);
     });
 
     it('refuses with a clear message when .env cannot be written', function (): void {
