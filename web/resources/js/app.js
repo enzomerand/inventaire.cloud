@@ -11,6 +11,7 @@ import Alpine from 'alpinejs';
 
 import { http } from './lib/http.js';
 import { t } from './lib/i18n.js';
+import localeSwitcher from './components/locale-switcher.js';
 import { createToastsStore } from './stores/toasts.js';
 
 window.Alpine = Alpine;
@@ -21,5 +22,7 @@ Alpine.store('toasts', createToastsStore());
 // translations without any global variable.
 Alpine.magic('http', () => http);
 Alpine.magic('t', () => t);
+
+Alpine.data('localeSwitcher', localeSwitcher);
 
 Alpine.start();

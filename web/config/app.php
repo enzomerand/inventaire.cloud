@@ -78,22 +78,23 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    'locale' => env('APP_LOCALE', 'fr'),
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 
-    'faker_locale' => env('APP_FAKER_LOCALE', 'en_US'),
+    'faker_locale' => env('APP_FAKER_LOCALE', 'fr_FR'),
 
     /*
     |--------------------------------------------------------------------------
     | Supported Locales
     |--------------------------------------------------------------------------
     |
-    | Locales the interface is translated into, mapped to the name each one is
+    | Locales the interface is translated into, and the name each one is
     | displayed with in the language switcher. A language is always written in
     | itself (never translated) so that people can find theirs whatever the
-    | current interface language is. Adding a language means adding it here and
-    | providing its lang/<locale>.json file.
+    | current interface language is. Adding a language means adding it to both
+    | lists and providing its lang/<locale>.json file. The first list also
+    | validates the locale a visitor asks for.
     |
     */
 

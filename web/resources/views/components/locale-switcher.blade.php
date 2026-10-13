@@ -13,7 +13,7 @@
     $names = config('app.locale_names');
 @endphp
 
-<div class="nav-item dropdown">
+<div class="nav-item dropdown" x-data="localeSwitcher(@js(route('locale.update', absolute: false)))">
     <button
         type="button"
         class="nav-link dropdown-toggle d-flex align-items-center gap-1 bg-transparent border-0"
@@ -31,7 +31,8 @@
                 type="button"
                 class="dropdown-item @if ($locale === $current) active @endif"
                 lang="{{ $locale }}"
-                data-locale="{{ $locale }}"
+                @click="select(@js($locale))"
+                :disabled="busy"
                 @if ($locale === $current) aria-current="true" @endif
             >
                 {{ $names[$locale] ?? $locale }}
