@@ -23,6 +23,12 @@ use Dotenv\Exception\InvalidFileException;
 final class EnvironmentFile
 {
     /**
+     * Permissions of the backup kept during an in-place rewrite: it holds every
+     * secret of the .env file, so it is private to the user who writes it.
+     */
+    private const BACKUP_MODE = 0600;
+
+    /**
      * Settings given to a .env that the installer creates: .env.example holds
      * development defaults (local environment, debug on, the credentials and
      * ports of the docker services of compose.dev.yaml, the product's own
@@ -293,16 +299,22 @@ final class EnvironmentFile
      * so that a write that fails halfway restores them instead of leaving an
      * empty or truncated .env.
      *
+     * The file holds secrets (application key, database, SMTP and S3
+     * passwords): an existing one keeps the mode it has and is never made more
+     * accessible, a new one is private to its owner and group
+     * ({@see AtomicFile::FILE_MODE}), whatever the umask says.
+     *
      * @throws InstallationException
      */
     private function write(string $contents): void
     {
         $target = is_link($this->path) ? (realpath($this->path) ?: $this->path) : $this->path;
-        $mode = is_file($target) ? (fileperms($target) & 0777) : (0666 & ~umask());
+        $mode = is_file($target) ? (fileperms($target) & 0777) : AtomicFile::FILE_MODE;
 
         if (is_writable(dirname($target)) && AtomicFile::canPreserveOwnership($target)) {
             try {
                 AtomicFile::write($target, $contents, $mode);
+                $this->discardBackup();
 
                 return;
             } catch (InstallationException) {
@@ -321,6 +333,8 @@ final class EnvironmentFile
      */
     private function writeInPlace(string $target, string $contents): void
     {
+        $this->createPrivately($target);
+
         $handle = @fopen($target, 'c+b');
 
         if ($handle === false) {
@@ -337,8 +351,10 @@ final class EnvironmentFile
             $this->keepBackup($previous);
 
             if (! $this->overwrite($handle, $contents)) {
-                // Put back what was there; if even that fails the backup file is the last resort.
-                $this->overwrite($handle, $previous);
+                // Put back what was there; if even that fails the backup file is the last resort and stays.
+                if ($this->overwrite($handle, $previous)) {
+                    $this->discardBackup();
+                }
 
                 throw new InstallationException('The .env file could not be written; its previous contents were restored.');
             }
@@ -348,6 +364,26 @@ final class EnvironmentFile
             flock($handle, LOCK_UN);
             fclose($handle);
             clearstatcache(true, $target);
+        }
+    }
+
+    /**
+     * Creates the file empty, with its final permissions, when it does not
+     * exist yet: opening it for writing would create it with the umask's
+     * permissions (usually world-readable) before the secrets are written to it.
+     *
+     * @throws InstallationException
+     */
+    private function createPrivately(string $target): void
+    {
+        if (file_exists($target)) {
+            return;
+        }
+
+        try {
+            AtomicFile::touch($target);
+        } catch (InstallationException) {
+            throw new InstallationException('The .env file is not writable.');
         }
     }
 
@@ -388,14 +424,16 @@ final class EnvironmentFile
         }
 
         try {
-            AtomicFile::write($this->backupPath, $previous);
+            AtomicFile::write($this->backupPath, $previous, self::BACKUP_MODE);
         } catch (InstallationException) {
             // The in-memory copy still protects against a failed write.
         }
     }
 
     /**
-     * Removes the backup once the new contents are safely written (it holds secrets).
+     * Removes the backup once it is no longer needed: the new contents are
+     * safely written, or the previous ones are back in place (it holds secrets).
+     * Also clears a stale one left by an earlier run that crashed.
      */
     private function discardBackup(): void
     {

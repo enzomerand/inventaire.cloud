@@ -19,6 +19,9 @@ final class FailingWriteStream
     /** When true, the next write fails (once). */
     public static bool $failNextWrite = false;
 
+    /** When true, every write fails: not even the previous contents can be put back. */
+    public static bool $failAllWrites = false;
+
     /** @var resource|null */
     public $context;
 
@@ -44,6 +47,10 @@ final class FailingWriteStream
 
     public function stream_write(string $data): int
     {
+        if (self::$failAllWrites) {
+            return 0;
+        }
+
         if (self::$failNextWrite) {
             self::$failNextWrite = false;
 

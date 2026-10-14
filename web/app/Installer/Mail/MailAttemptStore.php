@@ -24,6 +24,12 @@ final class MailAttemptStore
     /** Challenges remembered; older ones are long expired. */
     private const KEEP = 20;
 
+    /**
+     * Prefix of every key. PHP turns an all-digit array key into an integer, which JSON then
+     * reads back as such: without a prefix a challenge id made only of digits would never be found again.
+     */
+    private const KEY_PREFIX = 'challenge-';
+
     public function __construct(private readonly InstallationState $state) {}
 
     /**
@@ -31,7 +37,7 @@ final class MailAttemptStore
      */
     public function count(string $id): int
     {
-        return $this->load()[$id] ?? 0;
+        return $this->load()[self::key($id)] ?? 0;
     }
 
     /**
@@ -40,8 +46,10 @@ final class MailAttemptStore
     public function record(string $id, int $attempts): void
     {
         $counts = $this->load();
-        unset($counts[$id]);
-        $counts[$id] = $attempts;
+        $key = self::key($id);
+
+        unset($counts[$key]);
+        $counts[$key] = $attempts;
 
         AtomicFile::write($this->state->path(self::FILE), json_encode(array_slice($counts, -self::KEEP), JSON_THROW_ON_ERROR)."\n");
     }
@@ -57,6 +65,14 @@ final class MailAttemptStore
     public function exclusively(Closure $callback): mixed
     {
         return $this->state->exclusively($callback);
+    }
+
+    /**
+     * The array key of a challenge: always a string, whatever the id looks like.
+     */
+    private static function key(string $id): string
+    {
+        return self::KEY_PREFIX.$id;
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
+use App\Installer\InstallationFinalizer;
 use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
 use App\Installer\InstallStep;
@@ -245,6 +246,50 @@ describe('--from-env', function (): void {
 
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
     });
+
+    it('leaves a read-only .env holding development defaults alone', function (): void {
+        if (posix_geteuid() === 0) {
+            $this->markTestSkipped('File permissions do not restrict root.');
+        }
+
+        configuredEnvironment($this);
+        app(EnvironmentFile::class)->set(['APP_ENV' => 'local', 'APP_DEBUG' => 'true']);
+        Mail::fake();
+        Artisan::call('db:wipe', ['--force' => true]);
+        app()['env'] = 'local';
+        config(['app.debug' => true]);
+        $before = file_get_contents($this->sandbox->envPath());
+        chmod($this->sandbox->envPath(), 0444);
+
+        try {
+            $this->artisan('inventaire:install', ['--from-env' => true])->assertSuccessful();
+
+            expect(app(InstallationState::class)->isInstalled())->toBeTrue()
+                ->and(file_get_contents($this->sandbox->envPath()))->toBe($before);
+        } finally {
+            chmod($this->sandbox->envPath(), 0644);
+        }
+    });
+});
+
+it('does not try to write the production defaults of a container configured only through the environment', function (): void {
+    if (posix_geteuid() === 0) {
+        $this->markTestSkipped('Directory permissions do not restrict root.');
+    }
+
+    // The container imposes everything but APP_ENV / APP_DEBUG, and nothing is writable: without .env there is nothing to switch.
+    $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
+    $this->app->forgetInstance(EnvironmentLocks::class);
+    $this->app->forgetInstance(InstallerSettings::class);
+    $this->app->forgetInstance(InstallationFinalizer::class);
+    Artisan::call('db:wipe', ['--force' => true]);
+    app()['env'] = 'local';
+    config(['app.debug' => true]);
+    chmod($this->sandbox->root, 0555);
+
+    $this->artisan('inventaire:install', ['--no-interaction' => true, '--skip-mail-test' => true])->assertSuccessful();
+
+    expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
 });
 
 it('does nothing on an installed instance', function (): void {

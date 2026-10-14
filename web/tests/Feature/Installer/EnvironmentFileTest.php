@@ -8,6 +8,25 @@ use Dotenv\Dotenv;
 use Tests\Support\FailingWriteStream;
 
 /**
+ * Runs a callback under the given umask (restored afterwards), so that a file the code forgot to chmod shows up.
+ *
+ * @template T
+ *
+ * @param  callable(): T  $callback
+ * @return T
+ */
+function withUmask(int $umask, callable $callback): mixed
+{
+    $previous = umask($umask);
+
+    try {
+        return $callback();
+    } finally {
+        umask($previous);
+    }
+}
+
+/**
  * Builds an EnvironmentFile on a sandbox file holding the given contents.
  */
 function environmentFile(object $test, ?string $contents = null, ?string $example = null): EnvironmentFile
@@ -253,6 +272,7 @@ describe('when the file has to be rewritten in place', function (): void {
     afterEach(function (): void {
         stream_wrapper_unregister('failing');
         FailingWriteStream::$failNextWrite = false;
+        FailingWriteStream::$failAllWrites = false;
     });
 
     it('rewrites the file under a lock', function (): void {
@@ -272,13 +292,31 @@ describe('when the file has to be rewritten in place', function (): void {
         } catch (InstallationException $exception) {
             expect($exception->userMessage())->toContain('previous contents were restored');
             expect(FailingWriteStream::$files['failing://env'])->toBe("A=1\nSECRET=keep-me\n")
-                // The backup file stays as a last resort after a failure...
-                ->and(file_get_contents($this->sandbox->root.'/env.backup'))->toBe("A=1\nSECRET=keep-me\n");
+                // The secrets are back where they were: the backup file has nothing left to protect, and must not linger.
+                ->and(is_file($this->sandbox->root.'/env.backup'))->toBeFalse();
 
             return;
         }
 
         $this->fail('Expected an InstallationException.');
+    });
+
+    it('keeps a private backup as the last resort when even the restore fails', function (): void {
+        $file = new EnvironmentFile('failing://env', base_path('.env.example'), $this->sandbox->root.'/env.backup');
+        FailingWriteStream::$failAllWrites = true;
+
+        withUmask(0000, function () use ($file): void {
+            try {
+                $file->set(['A' => '2']);
+            } catch (InstallationException) {
+                return;
+            }
+
+            $this->fail('Expected an InstallationException.');
+        });
+
+        expect(file_get_contents($this->sandbox->root.'/env.backup'))->toBe("A=1\nSECRET=keep-me\n")
+            ->and(fileperms($this->sandbox->root.'/env.backup') & 0777)->toBe(0600);
     });
 
     it('does not keep the backup, which holds secrets, after a successful write', function (): void {
@@ -287,5 +325,66 @@ describe('when the file has to be rewritten in place', function (): void {
         $file->set(['A' => '2']);
 
         expect(is_file($this->sandbox->root.'/env.backup'))->toBeFalse();
+    });
+});
+
+describe('the permissions of a file that holds secrets', function (): void {
+    it('creates a new file private to its owner and group whatever the umask is', function (int $umask): void {
+        $file = environmentFile($this, null, "APP_KEY=\n");
+
+        withUmask($umask, fn () => $file->set(['APP_KEY' => 'base64:secret']));
+
+        expect(fileperms($file->path()) & 0777)->toBe(0640);
+    })->with([
+        'a permissive umask' => 0000,
+        'the usual umask' => 0022,
+    ]);
+
+    it('creates a missing file privately when it has to be written in place too', function (): void {
+        $path = $this->sandbox->root.'/created-in-place';
+        $file = new EnvironmentFile($path, $this->sandbox->root.'/none');
+
+        withUmask(0022, fn () => (new ReflectionMethod($file, 'writeInPlace'))->invoke($file, $path, "DB_PASSWORD=secret\n"));
+
+        expect(file_get_contents($path))->toBe("DB_PASSWORD=secret\n")->and(fileperms($path) & 0777)->toBe(0640);
+    });
+
+    it('keeps the mode of an existing file and never makes it more accessible', function (int $mode): void {
+        $file = environmentFile($this, "A=1\n");
+        chmod($file->path(), $mode);
+
+        withUmask(0000, fn () => $file->set(['A' => '2', 'B' => '3']));
+
+        expect(file_get_contents($file->path()))->toBe("A=2\n\nB=3\n")->and(fileperms($file->path()) & 0777)->toBe($mode);
+    })->with([
+        'owner only' => 0600,
+        'group readable' => 0640,
+        'group writable' => 0660,
+    ]);
+
+    it('keeps the mode of an existing file rewritten in place', function (): void {
+        if (posix_geteuid() === 0) {
+            $this->markTestSkipped('Directory permissions do not restrict root.');
+        }
+
+        $directory = $this->sandbox->root.'/mounted';
+        mkdir($directory);
+        file_put_contents($directory.'/.env', "A=1\n");
+        chmod($directory.'/.env', 0600);
+        chmod($directory, 0555);
+
+        withUmask(0000, fn () => (new EnvironmentFile($directory.'/.env', $this->sandbox->root.'/none'))->set(['A' => '2']));
+
+        expect(file_get_contents($directory.'/.env'))->toBe("A=2\n")->and(fileperms($directory.'/.env') & 0777)->toBe(0600);
+    });
+
+    it('does not let a stale backup of an earlier crash survive a successful write', function (): void {
+        $file = new EnvironmentFile($this->sandbox->root.'/live-env', $this->sandbox->root.'/none', $this->sandbox->root.'/env.backup');
+        file_put_contents($this->sandbox->root.'/live-env', "A=1\n");
+        file_put_contents($this->sandbox->root.'/env.backup', "A=0\nSECRET=stale\n");
+
+        $file->set(['A' => '2']);
+
+        expect(file_get_contents($file->path()))->toBe("A=2\n")->and(is_file($this->sandbox->root.'/env.backup'))->toBeFalse();
     });
 });

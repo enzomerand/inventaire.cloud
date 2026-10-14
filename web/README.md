@@ -75,7 +75,7 @@ The installer keeps its own files (installed marker, progress, setup token, lock
 
 ### The setup token (web wizard)
 
-Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to its own log file, `storage/logs/installer.log` (a dedicated channel, so it does not depend on `LOG_CHANNEL`, `LOG_STACK` or `LOG_LEVEL`) and printed by:
+Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to its own log file, `storage/logs/installer.log` (a dedicated channel, so it does not depend on `LOG_CHANNEL`, `LOG_STACK` or `LOG_LEVEL`; readable by the owner and the group only) and printed by:
 
 ```bash
 php artisan inventaire:install-token
@@ -96,7 +96,7 @@ Everything the wizard does is behind the setup token: whoever holds it is truste
 The wizard is one page with a progress bar and one AJAX endpoint per step. Each step **tests the real service before saving**, writes its values to `.env` immediately and is recorded in `storage/installer/progress.json`, so an interrupted installation resumes where it stopped (the token is asked again in a new browser session).
 
 1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` or `imagick`, `zip`, `curl`) and write access to `storage/`, `bootstrap/cache/` and `.env`.
-2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables. An interrupted installation can be resumed on the same database.
+2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables (the check creates, then drops, a table named `installer_probe_check`: it is refused if one already exists, and never touches it). An interrupted installation can be resumed on the same database.
 3. **Application**: public URL, default language and timezone.
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
@@ -111,7 +111,7 @@ With Docker, configuration usually arrives as real environment variables, which 
 
 `DB_URL` and `MAIL_URL` are honoured: when one is set (environment or `.env`), the corresponding step treats the connection as provided. Its fields are read-only and masked (a URL usually contains a password), and the checks and the migrations use exactly the configuration the application will use, URL included.
 
-When every setting the installation needs is provided by the environment, nothing has to be written: the wizard does not require `.env` or `bootstrap/cache/` to be writable, which suits read-only containers.
+When every setting the installation needs is provided by the environment, nothing has to be written: the wizard does not require `.env` or `bootstrap/cache/` to be writable, which suits read-only containers; finalizing such an instance writes nothing but the "installed" marker (set `APP_ENV` and `APP_DEBUG` in the environment too). A `.env` the installer creates is readable by the owner and the group only (`0640`); an existing one keeps its permissions, which the installer never widens.
 
 When `.env` does not exist, the installer creates it from `.env.example`, minus the development defaults: a file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production`, `APP_DEBUG=false`, no database or SMTP credentials, no SMTP host and no sender address, instead of the example's local services. If you copy `.env.example` yourself on a server, set these values yourself. For development, run `composer setup`, which copies the example first and leaves the environment alone.
 

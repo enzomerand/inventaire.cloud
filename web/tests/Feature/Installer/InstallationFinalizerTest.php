@@ -185,6 +185,33 @@ describe('leaving development defaults', function (): void {
         expect(file_get_contents($this->sandbox->envPath()))->toBe($before);
     });
 
+    it('writes nothing but the marker when the whole configuration comes from the environment', function (): void {
+        if (posix_geteuid() === 0) {
+            $this->markTestSkipped('File permissions do not restrict root.');
+        }
+
+        // A container: every setting imposed except APP_ENV / APP_DEBUG, and a .env it cannot write.
+        $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
+        $this->app->forgetInstance(EnvironmentLocks::class);
+        $this->app->forgetInstance(InstallerSettings::class);
+        $this->app->forgetInstance(InstallationFinalizer::class);
+        $before = file_get_contents($this->sandbox->envPath());
+        chmod($this->sandbox->envPath(), 0444);
+        app()['env'] = 'local';
+        config(['app.debug' => true]);
+
+        try {
+            expect(app(InstallationFinalizer::class)->needsProductionDefaults())->toBeFalse();
+
+            app(InstallationFinalizer::class)->finalize();
+
+            expect(app(InstallationState::class)->isInstalled())->toBeTrue()
+                ->and(file_get_contents($this->sandbox->envPath()))->toBe($before);
+        } finally {
+            chmod($this->sandbox->envPath(), 0644);
+        }
+    });
+
     it('never writes what the environment imposes', function (): void {
         // Docker imposes values that differ from the stale ones in .env.
         $this->processEnvironment = ['APP_ENV' => 'staging-docker', 'APP_DEBUG' => '1'];

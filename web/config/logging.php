@@ -68,11 +68,13 @@ return [
         ],
 
         // The installer's own log: the setup token and installation failures. Fixed file and level, so the
-        // token reaches the administrator whatever LOG_CHANNEL, LOG_STACK or LOG_LEVEL say.
+        // token reaches the administrator whatever LOG_CHANNEL, LOG_STACK or LOG_LEVEL say. The token is a
+        // credential: the file is readable by the owner and the group only, not by everybody (umask).
         'installer' => [
             'driver' => 'single',
             'path' => storage_path('logs/installer.log'),
             'level' => 'debug',
+            'permission' => 0640,
             'replace_placeholders' => true,
         ],
 

@@ -180,6 +180,10 @@ final class InstallationFinalizer
      * installer cannot change them), and nothing is written when the instance
      * already runs in production without debug.
      *
+     * An instance configured only through the environment (typically a
+     * container whose .env is read-only or absent) is not touched either:
+     * finalizing it writes nothing but the "installed" marker.
+     *
      * @throws InstallationException When .env cannot be written.
      */
     private function applyProductionDefaults(): void
@@ -198,12 +202,18 @@ final class InstallationFinalizer
     }
 
     /**
-     * The .env assignments needed to reach production defaults.
+     * The .env assignments needed to reach production defaults; none for an
+     * instance configured only through the environment, which has no .env to
+     * write (see {@see InstallerSettings::isEnvironmentOnly()}).
      *
      * @return array<string, string>
      */
     private function productionUpdates(): array
     {
+        if ($this->settings->isEnvironmentOnly()) {
+            return [];
+        }
+
         $updates = [];
 
         if (! $this->app->environment('production') && ! $this->locks->isLocked('APP_ENV')) {

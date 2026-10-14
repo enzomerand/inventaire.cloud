@@ -8,6 +8,7 @@ use App\Installer\EnvironmentLocks;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Env;
+use RuntimeException;
 use Tests\Support\InstallerSandbox;
 use Tests\Support\TestDatabaseGuard;
 
@@ -65,6 +66,12 @@ abstract class TestCase extends BaseTestCase
         $app = $this->withAppKey ? parent::createApplication() : $this->withoutAppKey(fn () => parent::createApplication());
 
         $this->sandbox->configure($app);
+
+        // The real .env holds credentials and local settings: if it were read, a test would depend on
+        // (and could expose) whatever is configured on this machine.
+        if ($app->environmentFile() !== '.env.testing') {
+            throw new RuntimeException('The test suite must load .env.testing, not the real .env: restore web/.env.testing and keep APP_ENV=testing in phpunit.xml.');
+        }
 
         if ($this->language !== null) {
             $app->make('config')->set('app.locale', $this->language);

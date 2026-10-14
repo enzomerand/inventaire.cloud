@@ -233,8 +233,9 @@ describe('the application key', function (): void {
         $page = $this->get('/anything');
 
         $page->assertStatus(500)->assertSee('<!doctype html>', false)->assertDontSee('<script', false)
-            ->assertSee('storage/', false)
-            // Visitors learn nothing about the server: no path, no exception message.
+            // Visitors learn nothing about the server: no path (not even a relative one), no exception message.
+            ->assertDontSee('storage/', false)
+            ->assertDontSee('installer.log', false)
             ->assertDontSee($this->sandbox->root, false)
             ->assertDontSee('Cannot create', false)
             ->assertDontSee('Cannot write', false);

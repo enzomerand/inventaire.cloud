@@ -129,15 +129,38 @@ describe('what the database already holds', function (): void {
         expect($result->ok)->toBeFalse()->and($result->field)->toBe('database')->and($result->message)->toContain('migrations of another application');
     });
 
-    it('removes a probe table left behind by an earlier crash and does not count it as foreign', function (): void {
+    it('never touches a table that already has the name of its own probe table', function (): void {
+        Artisan::call('migrate:fresh', ['--force' => true]);
+        Schema::create('installer_probe_check', static function ($table): void {
+            $table->id();
+            $table->string('note');
+        });
+        DB::table('installer_probe_check')->insert(['note' => 'a user table that must survive']);
+
+        $result = app(DatabaseProbe::class)->check(testDatabaseSettings());
+
+        expect($result->ok)->toBeFalse()->and($result->field)->toBe('database')
+            ->and($result->message)->toContain('installer_probe_check')->toContain('Rename or remove it')
+            ->and(DB::table('installer_probe_check')->pluck('note')->all())->toBe(['a user table that must survive']);
+    });
+
+    it('explains the probe table conflict in French', function (): void {
         Artisan::call('migrate:fresh', ['--force' => true]);
         Schema::create('installer_probe_check', static function ($table): void {
             $table->id();
         });
+        $this->useLanguage('fr');
 
         $result = app(DatabaseProbe::class)->check(testDatabaseSettings());
 
-        expect($result->ok)->toBeTrue()->and(Schema::hasTable('installer_probe_check'))->toBeFalse();
+        expect($result->message)->toContain('contient déjà une table nommée installer_probe_check');
+    });
+
+    it('drops the probe table it created itself', function (): void {
+        Artisan::call('migrate:fresh', ['--force' => true]);
+
+        expect(app(DatabaseProbe::class)->check(testDatabaseSettings())->ok)->toBeTrue()
+            ->and(Schema::hasTable('installer_probe_check'))->toBeFalse();
     });
 
     it('opens its connection with a timeout so that an unreachable host answers within seconds', function (): void {

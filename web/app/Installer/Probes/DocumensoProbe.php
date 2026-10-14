@@ -6,7 +6,6 @@ namespace App\Installer\Probes;
 
 use App\Installer\Settings\DocumensoSettings;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -46,8 +45,6 @@ final class DocumensoProbe
                 ->get($settings->apiBaseUrl().'/envelope', ['page' => 1, 'perPage' => 1]);
         } catch (ConnectionException) {
             return ProbeResult::failure(__('Cannot reach Documenso at this address.'), 'url');
-        } catch (RequestException $exception) {
-            return ProbeResult::failure(__('Documenso answered with an error (HTTP :status).', ['status' => $exception->response->status()]), 'url');
         } catch (Throwable $exception) {
             $this->report($exception, $settings);
 

@@ -28,7 +28,7 @@ final class DatabaseProbe
     /** Name of the throw-away connection. */
     private const CONNECTION = 'installer_probe';
 
-    /** Table created, then dropped, to prove the user may do so. A fixed name, so a leftover is recognised and removed. */
+    /** Table created, then dropped, to prove the user may do so. It must not exist beforehand: the probe only ever drops the table it created. */
     private const PROBE_TABLE = 'installer_probe_check';
 
     /** Seconds to establish the connection. */
@@ -46,7 +46,8 @@ final class DatabaseProbe
      * Checks, in order: the connection, that the engine is the one chosen (a
      * MariaDB server answers to a "mysql" connection and the other way round),
      * the minimum version, that the database holds nothing but this
-     * application's tables, and that the user may create tables.
+     * application's tables (and no table named like the probe's own), and that
+     * the user may create tables.
      */
     public function check(DatabaseSettings $settings): ProbeResult
     {
@@ -135,11 +136,12 @@ final class DatabaseProbe
             ]), 'host');
         }
 
-        // A leftover of an earlier probe is ours and is about to be dropped: it does not count.
-        $tables = array_values(array_filter(
-            $this->tableNames($connection, $driver, $config),
-            static fn (string $table): bool => $table !== self::PROBE_TABLE,
-        ));
+        $tables = $this->tableNames($connection, $driver, $config);
+
+        // Whoever owns this table (a user, an earlier crashed probe), it is not ours to drop: the probe stays out of it.
+        if (in_array(self::PROBE_TABLE, $tables, true)) {
+            return ProbeResult::failure(__('The database already contains a table named :table, which this check needs to create and drop. Rename or remove it, then try again.', ['table' => self::PROBE_TABLE]), 'database');
+        }
 
         if (($failure = $this->checkExistingTables($connection, $tables)) !== null) {
             return $failure;
@@ -213,14 +215,16 @@ final class DatabaseProbe
      * Creates and drops a table to prove the user may do so; a read-only user
      * (or PostgreSQL 15+, which no longer lets every user create in "public")
      * would otherwise only fail at the very end, in the migrations.
+     *
+     * The caller has checked that the table does not exist yet. Nothing is
+     * dropped unless the creation succeeded, so a table that appeared in the
+     * meantime (the creation then fails) is never touched.
      */
     private function checkPrivileges(Connection $connection): ?ProbeResult
     {
         $schema = $connection->getSchemaBuilder();
 
         try {
-            $schema->dropIfExists(self::PROBE_TABLE);
-
             $schema->create(self::PROBE_TABLE, static function (Blueprint $blueprint): void {
                 $blueprint->id();
             });

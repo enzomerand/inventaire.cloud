@@ -492,6 +492,37 @@ describe('a container configured only through variables', function (): void {
 
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
     });
+
+    it('finalizes without writing a read-only .env that still holds development defaults', function (): void {
+        if (posix_geteuid() === 0) {
+            $this->markTestSkipped('File permissions do not restrict root.');
+        }
+
+        // An image built from .env.example (APP_ENV=local, debug on) whose .env is mounted read-only, with the
+        // settings that matter imposed by the container: the production defaults cannot, and need not, be written.
+        $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
+        authorizedWizard($this);
+        Mail::fake();
+        Artisan::call('db:wipe', ['--force' => true]);
+        file_put_contents($this->sandbox->envPath(), "APP_ENV=local\nAPP_DEBUG=true\n");
+        chmod($this->sandbox->envPath(), 0444);
+
+        try {
+            expect($this->getJson('/install/requirements')->assertOk()->json('requirements.passed'))->toBeTrue();
+
+            $this->postJson('/install/database', [])->assertOk();
+            $this->postJson('/install/application', [])->assertOk();
+            $this->postJson('/install/storage', [])->assertOk();
+            $this->postJson('/install/mail', ['test_recipient' => 'admin@example.test'])->assertOk();
+            $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+            $this->postJson('/install/finalize')->assertOk();
+
+            expect(app(InstallationState::class)->isInstalled())->toBeTrue()
+                ->and(file_get_contents($this->sandbox->envPath()))->toBe("APP_ENV=local\nAPP_DEBUG=true\n");
+        } finally {
+            chmod($this->sandbox->envPath(), 0644);
+        }
+    });
 });
 
 describe('finishing', function (): void {

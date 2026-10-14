@@ -18,7 +18,10 @@
         </include>
     </source>
     <php>
+        <!-- APP_ENV=testing makes Laravel load .env.testing (empty) instead of the real .env: see that file. -->
         <env name="APP_ENV" value="testing"/>
+        <!-- A throw-away key that protects nothing: the real one lives in the developer's .env, which tests never read. -->
+        <env name="APP_KEY" value="base64:vYU7ee1XHOuhWH078v6IvJEB9zvu7Qj9bc6kCUVXhKs="/>
         <env name="APP_LOCALE" value="fr"/>
         <env name="APP_FALLBACK_LOCALE" value="en"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>

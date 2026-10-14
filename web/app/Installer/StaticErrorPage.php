@@ -22,13 +22,13 @@ final class StaticErrorPage
      * Builds the HTML response.
      *
      * The text is deliberately generic: this page is shown to anybody who
-     * reaches the site, so it never carries a path or an exception message.
-     * Those go to the log ({@see self::report()}).
+     * reaches the site, so it never carries a file path or an exception
+     * message. Those go to the log ({@see self::report()}).
      */
     public static function response(): Response
     {
         $title = e(__('The installer cannot start'));
-        $body = e(__('A file or folder the installer needs is not writable. Check the permissions of storage/ and of the .env file, then reload this page. The details are in storage/logs/installer.log.'));
+        $body = e(__('A file or folder the installer needs is not writable. Check the permissions of the application folders and of its configuration file, then reload this page. The details are in the installer log.'));
         $lang = e(app()->getLocale());
 
         $html = <<<HTML
