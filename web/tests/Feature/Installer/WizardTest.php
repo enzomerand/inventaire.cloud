@@ -541,7 +541,7 @@ describe('finishing', function (): void {
         completeRequiredSteps($this);
         Artisan::call('db:wipe', ['--force' => true]);
 
-        $this->postJson('/install/finalize')->assertOk()->assertJson(['redirect' => '/'])->assertJsonPath('redirect', '/');
+        $this->postJson('/install/finalize')->assertOk()->assertJson(['redirect' => '/login'])->assertJsonPath('redirect', '/login');
 
         expect(Schema::hasTable('users'))->toBeTrue()
             ->and(app(InstallationState::class)->isInstalled())->toBeTrue()

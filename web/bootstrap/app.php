@@ -35,6 +35,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // A signed-out visitor of a page goes to the login page; an API client has nowhere to be redirected to
         // and gets a 401 in JSON (the default would also fail while no "login" route exists).
         $middleware->redirectGuestsTo(fn (Request $request): ?string => $request->is('api/*') ? null : route('login'));
+
+        // Someone already signed in who opens the login page goes to their space.
+        $middleware->redirectUsersTo(fn (Request $request): string => route('app'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // The API always answers JSON, whatever the client asked for: a script that forgets the Accept header must

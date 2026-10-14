@@ -475,7 +475,7 @@ export default function installer() {
         },
 
         /**
-         * Runs the installation, then leaves the wizard for the home page.
+         * Runs the installation, then leaves the wizard for the sign-in page.
          *
          * @param {WizardStep} step The last screen.
          * @returns {Promise<void>}

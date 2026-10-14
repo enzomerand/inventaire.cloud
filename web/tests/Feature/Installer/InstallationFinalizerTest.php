@@ -88,7 +88,7 @@ it('creates the tables, marks the instance installed and removes the token and p
 
     $state = new InstallationState(config('installer.state_path'));
 
-    expect($redirect)->toBe('/')
+    expect($redirect)->toBe('/login')
         ->and(Schema::hasTable('users'))->toBeTrue()
         ->and(Schema::hasTable('migrations'))->toBeTrue()
         ->and(Schema::hasTable('sessions'))->toBeTrue()

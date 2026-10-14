@@ -424,13 +424,13 @@ describe('installer wizard', () => {
 
     describe('finishing', () => {
         it('runs the installation without a timeout and goes to the home page', async () => {
-            http.post.mockResolvedValue({ redirect: '/' });
+            http.post.mockResolvedValue({ redirect: '/login' });
 
             await wizard.finalize(wizard.steps[4]);
 
             expect(http.post).toHaveBeenCalledWith('/install/finalize', undefined, { timeout: 0 });
             expect(notify).toHaveBeenCalledWith('success', 'install.finished');
-            expect(redirectTo).toHaveBeenCalledWith('/');
+            expect(redirectTo).toHaveBeenCalledWith('/login');
         });
 
         it('shows why the installation failed and lets the person retry', async () => {

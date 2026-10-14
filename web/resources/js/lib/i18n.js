@@ -40,9 +40,19 @@ function loadMessages() {
  * Returns the translated message for a key, or the key itself when the server
  * did not provide it (makes a missing translation visible instead of blank).
  *
+ * A message may hold placeholders written `:name`, like the server's own
+ * translations; they are replaced by the matching entry of `replacements`.
+ *
  * @param {string} key Message identifier, e.g. "error.generic".
+ * @param {Record<string, string | number>} [replacements] Values for the placeholders of the message.
  * @returns {string}
  */
-export function t(key) {
-    return loadMessages()[key] ?? key;
+export function t(key, replacements = {}) {
+    let message = loadMessages()[key] ?? key;
+
+    for (const [name, value] of Object.entries(replacements)) {
+        message = message.replaceAll(':' + name, String(value));
+    }
+
+    return message;
 }

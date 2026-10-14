@@ -16,9 +16,11 @@
 import '@tabler/core';
 import Alpine from '@alpinejs/csp';
 
+import accountMenu from './components/account-menu.js';
 import installer from './components/installer.js';
 import installerToken from './components/installer-token.js';
 import localeSwitcher from './components/locale-switcher.js';
+import login from './components/login.js';
 import toasts from './components/toasts.js';
 import { createToastsStore } from './stores/toasts.js';
 
@@ -26,9 +28,11 @@ window.Alpine = Alpine;
 
 Alpine.store('toasts', createToastsStore());
 
+Alpine.data('accountMenu', accountMenu);
 Alpine.data('installer', installer);
 Alpine.data('installerToken', installerToken);
 Alpine.data('localeSwitcher', localeSwitcher);
+Alpine.data('login', login);
 Alpine.data('toasts', toasts);
 
 Alpine.start();

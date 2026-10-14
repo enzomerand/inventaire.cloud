@@ -50,7 +50,7 @@ final class InstallationFinalizer
      * duration, a hook just uses `DB` or its models.
      *
      * @param  bool  $productionDefaults  Whether to set APP_ENV=production and APP_DEBUG=false. The web wizard always does; the console installer asks, and `--from-env` (the developer path) does not.
-     * @return string Where to send the administrator next (the home page).
+     * @return string Where to send the administrator next (the sign-in page, where the administrator signs in with a code sent to the address given during the installation).
      *
      * @throws InstallationException When a step is missing or something fails; the instance stays uninstalled.
      */
@@ -106,7 +106,7 @@ final class InstallationFinalizer
         $this->token->forget();
         $this->state->forgetProgress();
 
-        return route('home', absolute: false);
+        return route('login', absolute: false);
     }
 
     /**
