@@ -143,7 +143,7 @@ describe('finalizing twice at once', function (): void {
     });
 
     it('runs the migrations in isolated mode', function (): void {
-        expect(file_get_contents(base_path('app/Installer/InstallationFinalizer.php')))->toContain("'--isolated' => 1");
+        expect(file_get_contents(base_path('app/Installer/DatabaseMigrator.php')))->toContain("'--isolated' => 1");
     });
 });
 
