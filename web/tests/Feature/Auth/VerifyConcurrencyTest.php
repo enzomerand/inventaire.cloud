@@ -78,8 +78,9 @@ function typeCodeInParallel(string $directory, string $email, string $code, int 
             throw new RuntimeException('A child process failed: '.$child->getOutput().$child->getErrorOutput());
         }
 
-        $lines = array_values(array_filter(explode("\n", trim($child->getOutput())), fn (string $line): bool => $line !== 'ready'));
-        $answers[] = json_decode($lines[0] ?? '', true, flags: JSON_THROW_ON_ERROR);
+        // The answer is the last JSON line: whatever else the process printed ("ready", a warning...) is not it.
+        $results = array_values(array_filter(explode("\n", $child->getOutput()), fn (string $line): bool => str_starts_with($line, '{')));
+        $answers[] = json_decode($results === [] ? '' : $results[array_key_last($results)], true, flags: JSON_THROW_ON_ERROR);
     }
 
     return $answers;

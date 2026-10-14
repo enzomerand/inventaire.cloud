@@ -32,15 +32,15 @@ final class EmailAddress
      * It never fails: what cannot be converted comes back as typed (in
      * lowercase), and {@see self::rules()} refuses it. Normalizing a
      * normalized address changes nothing. An address longer than
-     * {@see self::MAX_LENGTH} bytes is not worth converting, since it is refused
-     * whatever its form: it only comes back trimmed, so that a request carrying
-     * megabytes in place of an address costs next to nothing.
+     * {@see self::MAX_LENGTH} characters is not worth converting, since it is
+     * refused whatever its form: it only comes back trimmed, so that a request
+     * carrying megabytes in place of an address costs next to nothing.
      */
     public static function normalize(string $email): string
     {
         $email = trim($email);
 
-        if (strlen($email) > self::MAX_LENGTH) {
+        if (self::isTooLong($email)) {
             return $email;
         }
 
@@ -65,10 +65,15 @@ final class EmailAddress
     /**
      * Whether the text is too long to be an address, which {@see self::rules()} refuses
      * and nothing has to be computed for (hash, conversion...).
+     *
+     * The length is counted in characters, like the `max` rule does: an address
+     * with an internationalized domain is longer in bytes than in characters,
+     * and must still be converted. A character takes at most four bytes, so
+     * what is longer than four times the limit in bytes is not even counted.
      */
     public static function isTooLong(string $email): bool
     {
-        return strlen($email) > self::MAX_LENGTH;
+        return strlen($email) > self::MAX_LENGTH * 4 || mb_strlen($email) > self::MAX_LENGTH;
     }
 
     /**

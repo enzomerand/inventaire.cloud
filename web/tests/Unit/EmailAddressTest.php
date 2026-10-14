@@ -50,6 +50,20 @@ describe('the canonical form of an address', function (): void {
             ->and(EmailAddress::isTooLong($address.'x'))->toBeTrue();
     });
 
+    it('counts the length in characters: an internationalized domain long in bytes is still converted', function (): void {
+        $label = str_repeat('ä', 45);
+        $punycode = 'xn--4caaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        $address = str_repeat('a', 64).'@'.$label.'.'.$label.'.'.$label.'.com';
+
+        // 341 bytes but 206 characters: the `max:254` rule accepts it once converted, so it must be converted.
+        expect(strlen($address))->toBeGreaterThan(EmailAddress::MAX_LENGTH)
+            ->and(mb_strlen($address))->toBeLessThan(EmailAddress::MAX_LENGTH)
+            ->and(EmailAddress::isTooLong($address))->toBeFalse()
+            ->and(EmailAddress::normalize($address))->toBe(str_repeat('a', 64).'@'.$punycode.'.'.$punycode.'.'.$punycode.'.com')
+            ->and(EmailAddress::isTooLong(str_repeat('ä', EmailAddress::MAX_LENGTH).'a'))->toBeTrue()
+            ->and(EmailAddress::isTooLong(str_repeat('ä', 5_000_000)))->toBeTrue();
+    });
+
     it('judges the part after the last @', function (): void {
         expect(EmailAddress::normalize('"a@b"@gmäil.com'))->toBe('"a@b"@xn--gmil-moa.com');
     });

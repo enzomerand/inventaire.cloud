@@ -18,7 +18,13 @@ function addressErrors(string $address): array
 describe('the rules of an address', function (): void {
     it('accept an ordinary address and one whose domain was converted', function (string $address): void {
         expect(addressErrors($address))->toBe([]);
-    })->with(['ada@example.com', ' Ada.Lovelace+tag@Example.COM ', 'john.doe@gmäil.com', 'ada@пример.рф']);
+    })->with([
+        'ada@example.com',
+        ' Ada.Lovelace+tag@Example.COM ',
+        'john.doe@gmäil.com',
+        'ada@пример.рф',
+        'an internationalized domain that is longer in bytes than the limit' => str_repeat('a', 64).'@'.str_repeat('ä', 45).'.'.str_repeat('ä', 45).'.'.str_repeat('ä', 45).'.com',
+    ]);
 
     it('refuse an accent or a non-Latin letter before the @, in the language of the request', function (string $language, string $message): void {
         $this->useLanguage($language);
