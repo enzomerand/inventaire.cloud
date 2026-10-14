@@ -10,7 +10,8 @@ use Illuminate\Database\Seeder;
 
 /**
  * Entry point of `php artisan db:seed`; only meant to give a local environment
- * something to log in with, never to run in production.
+ * something to log in with (the code is sent to the mail catcher), never to
+ * run in production.
  */
 class DatabaseSeeder extends Seeder
 {
@@ -23,7 +24,7 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::factory()->create([
+        User::factory()->admin()->create([
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);

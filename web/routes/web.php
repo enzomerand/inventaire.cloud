@@ -15,6 +15,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home')->name('home');
 
+// Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space.
+Route::view('/login', 'auth.login')->middleware('guest')->name('login');
+Route::view('/app', 'app.dashboard')->middleware('auth')->name('app');
+
 Route::get('/csrf-token', RefreshCsrfTokenController::class)->name('csrf.refresh');
 
 Route::put('/locale', UpdateLocaleController::class)->name('locale.update');

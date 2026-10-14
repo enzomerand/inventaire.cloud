@@ -19,6 +19,8 @@ final class MailChallengeStore
 {
     private const KEY = 'installer.mail';
 
+    private const VERIFIED_KEY = 'installer.mail_verified';
+
     public function __construct(private readonly Encrypter $encrypter) {}
 
     /**
@@ -45,6 +47,24 @@ final class MailChallengeStore
         } catch (DecryptException) {
             return null;
         }
+    }
+
+    /**
+     * Remembers the address whose owner just read a code back, so that a later step can suggest it.
+     */
+    public function rememberVerified(Session $session, string $address): void
+    {
+        $session->put(self::VERIFIED_KEY, $address);
+    }
+
+    /**
+     * The address that was proven to receive email in this session, or null.
+     */
+    public function verifiedAddress(Session $session): ?string
+    {
+        $address = $session->get(self::VERIFIED_KEY);
+
+        return is_string($address) && $address !== '' ? $address : null;
     }
 
     /**

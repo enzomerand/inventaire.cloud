@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="csrf-refresh-url" content="{{ route('csrf.refresh', absolute: false) }}">
-    {{-- Once a "login" route exists, the HTTP helper sends signed-out users there instead of reloading. --}}
-    @if (Route::has('login'))
-        <meta name="login-url" content="{{ route('login', absolute: false) }}">
-    @endif
+    {{-- The HTTP helper sends signed-out users here on a 401 instead of reloading: a page that calls the API as a
+         visitor must pass `silent: true` and handle the error itself. --}}
+    <meta name="login-url" content="{{ route('login', absolute: false) }}">
 
     <title>@hasSection('title')@yield('title') · @endif{{ config('app.name') }}</title>
 
@@ -24,8 +23,22 @@
                     {{ config('app.name') }}
                 </a>
 
-                <div class="navbar-nav flex-row order-md-last">
+                <div class="navbar-nav flex-row order-md-last align-items-center gap-2">
                     <x-locale-switcher />
+
+                    {{-- The install wizard runs before there are any accounts, or even a database to look them up in. --}}
+                    @unless (request()->routeIs('install.*'))
+                        @auth
+                            <x-account-menu />
+                        @else
+                            @unless (request()->routeIs('login'))
+                                <a class="btn btn-primary btn-sm d-inline-flex align-items-center gap-1" href="{{ route('login') }}">
+                                    <x-tabler-login aria-hidden="true" />
+                                    {{ __('Sign in') }}
+                                </a>
+                            @endunless
+                        @endauth
+                    @endunless
                 </div>
             </div>
         </header>

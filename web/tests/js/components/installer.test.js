@@ -369,6 +369,91 @@ describe('installer wizard', () => {
             expect(wizard.current).toBe('documenso');
         });
 
+        describe('suggestions', () => {
+            const administrator = () => wizard.steps.find((step) => step.id === 'administrator');
+            const email = () => administrator().fields.find((candidate) => candidate.name === 'email');
+            const verified = (suggestions) => ({ ...progress({ mail: 'done' }), mailPending: false, suggestions });
+
+            beforeEach(() => {
+                // The Administrator step follows the mail step: add it to the default state.
+                const state = wizardState();
+                state.steps.splice(-1, 0, {
+                    id: 'administrator',
+                    title: 'Administrator',
+                    status: 'pending',
+                    optional: false,
+                    fields: [field('name'), field('email', { type: 'email' })],
+                });
+                wizard = mount(state);
+                wizard.current = 'mail';
+                wizard.mailPhase = 'code';
+                wizard.code = '123456';
+            });
+
+            it('fills the administrator address from the answer to the code, without a reload', async () => {
+                http.post.mockResolvedValue(verified({ administrator: { email: 'admin@example.test' } }));
+
+                await wizard.verifyCode();
+
+                expect(email().value).toBe('admin@example.test');
+                expect(email().locked).toBe(false);
+                expect(reloadPage).not.toHaveBeenCalled();
+            });
+
+            it('keeps the suggested address editable', async () => {
+                http.post.mockResolvedValueOnce(verified({ administrator: { email: 'admin@example.test' } }));
+                await wizard.verifyCode();
+
+                expect(email().value).toBe('admin@example.test');
+                email().value = 'jane@example.test';
+                http.post.mockResolvedValueOnce(progress({ administrator: 'done' }));
+                await wizard.submit(administrator());
+
+                expect(http.post).toHaveBeenLastCalledWith('/install/administrator', {
+                    name: '',
+                    email: 'jane@example.test',
+                });
+            });
+
+            it('never overwrites what was already typed', async () => {
+                email().value = 'jane@example.test';
+                http.post.mockResolvedValue(verified({ administrator: { email: 'admin@example.test' } }));
+
+                await wizard.verifyCode();
+
+                expect(email().value).toBe('jane@example.test');
+            });
+
+            it('never overwrites a value the environment imposes', async () => {
+                email().locked = true;
+                http.post.mockResolvedValue(verified({ administrator: { email: 'admin@example.test' } }));
+
+                await wizard.verifyCode();
+
+                expect(email().value).toBe('');
+            });
+
+            it('ignores suggestions for steps or fields it does not have', async () => {
+                http.post.mockResolvedValue(
+                    verified({ nowhere: { email: 'a@example.test' }, administrator: { missing: 'x' } }),
+                );
+
+                await wizard.verifyCode();
+
+                expect(email().value).toBe('');
+                expect(wizard.current).toBe('documenso');
+            });
+
+            it.each([undefined, [], {}])('copes with an answer carrying no suggestion (%j)', async (suggestions) => {
+                http.post.mockResolvedValue(verified(suggestions));
+
+                await wizard.verifyCode();
+
+                expect(email().value).toBe('');
+                expect(wizard.current).toBe('documenso');
+            });
+        });
+
         it('keeps the code box open on a wrong code', async () => {
             wizard.mailPhase = 'code';
             http.post.mockRejectedValue(
@@ -424,13 +509,13 @@ describe('installer wizard', () => {
 
     describe('finishing', () => {
         it('runs the installation without a timeout and goes to the home page', async () => {
-            http.post.mockResolvedValue({ redirect: '/' });
+            http.post.mockResolvedValue({ redirect: '/login' });
 
             await wizard.finalize(wizard.steps[4]);
 
             expect(http.post).toHaveBeenCalledWith('/install/finalize', undefined, { timeout: 0 });
             expect(notify).toHaveBeenCalledWith('success', 'install.finished');
-            expect(redirectTo).toHaveBeenCalledWith('/');
+            expect(redirectTo).toHaveBeenCalledWith('/login');
         });
 
         it('shows why the installation failed and lets the person retry', async () => {

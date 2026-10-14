@@ -17,8 +17,8 @@ it('hands out the token in the readable XSRF-TOKEN cookie', function (): void {
         ->and($cookie->isHttpOnly())->toBeFalse();
 });
 
-it('advertises the refresh endpoint to the scripts and no login URL yet', function (): void {
+it('advertises the refresh endpoint and the login page to the scripts', function (): void {
     $this->get(route('home'))
         ->assertSee('<meta name="csrf-refresh-url" content="/csrf-token">', false)
-        ->assertDontSee('name="login-url"', false);
+        ->assertSee('<meta name="login-url" content="/login">', false);
 });

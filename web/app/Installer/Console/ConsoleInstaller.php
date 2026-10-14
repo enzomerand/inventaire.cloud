@@ -60,6 +60,7 @@ final class ConsoleInstaller
         'mail' => ['host' => 'mail-host', 'port' => 'mail-port', 'scheme' => 'mail-scheme', 'username' => 'mail-user', 'password' => 'mail-password', 'password_clear' => 'mail-no-password', 'from_address' => 'mail-from-address', 'from_name' => 'mail-from-name', 'test_recipient' => 'mail-test-recipient'],
         'storage' => ['disk' => 'storage', 'key' => 's3-key', 'secret' => 's3-secret', 'region' => 's3-region', 'bucket' => 's3-bucket', 'endpoint' => 's3-endpoint', 'path_style' => 's3-path-style'],
         'documenso' => ['url' => 'documenso-url', 'api_key' => 'documenso-api-key'],
+        'administrator' => ['name' => 'admin-name', 'email' => 'admin-email'],
     ];
 
     private readonly bool $fromEnv;
@@ -67,6 +68,9 @@ final class ConsoleInstaller
     private readonly Factory $components;
 
     private InstallerSteps $steps;
+
+    /** The address that read a verification code back at the mail step, suggested for the administrator. */
+    private ?string $verifiedAddress = null;
 
     /**
      * @param  Command  $command  The running command, for its options, output and plain lines.
@@ -323,6 +327,7 @@ final class ConsoleInstaller
             switch ($outcome) {
                 case MailCodeOutcome::Accepted:
                     $this->steps->completeMail($challenge);
+                    $this->verifiedAddress = $challenge->recipient;
 
                     return true;
 
@@ -401,7 +406,7 @@ final class ConsoleInstaller
             return $provided;
         }
 
-        $defaults = $provided + $previous + $this->settings->current($step);
+        $defaults = $provided + $previous + $this->settings->withSuggestions($step, $this->settings->current($step), $this->verifiedAddress);
         $values = [];
 
         foreach ($step->fields() as $field) {

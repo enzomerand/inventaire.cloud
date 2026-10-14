@@ -18,14 +18,19 @@ it('creates the core tables', function (string $table): void {
 })->with([
     'migrations',
     'users',
-    'password_reset_tokens',
     'sessions',
     'cache',
     'cache_locks',
     'jobs',
     'job_batches',
     'failed_jobs',
+    'personal_access_tokens',
+    'login_codes',
 ]);
+
+it('no longer has the password reset tokens table', function (): void {
+    expect(Schema::hasTable('password_reset_tokens'))->toBeFalse();
+});
 
 it('enforces the unique email constraint', function (): void {
     User::factory()->create(['email' => 'unique@example.com']);

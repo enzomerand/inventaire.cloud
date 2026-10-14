@@ -76,6 +76,7 @@ final class InstallerSteps
             InstallStep::Mail => $this->mail->checkConnection(MailSettings::fromArray($values, $this->settings->providedUrl($step))),
             InstallStep::Storage => $this->storage->check(StorageSettings::fromArray($values)),
             InstallStep::Documenso => $this->documenso->check(DocumensoSettings::fromArray($values)),
+            InstallStep::Administrator => ProbeResult::success(), // Nothing to test either: the account is created once the tables exist.
         };
 
         if ($result->ok) {

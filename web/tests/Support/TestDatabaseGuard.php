@@ -23,17 +23,19 @@ final class TestDatabaseGuard
     public const REQUIRED_SUFFIX = '_test';
 
     /**
-     * Throws unless the default connection targets a database whose name ends
-     * with {@see self::REQUIRED_SUFFIX}.
+     * Throws unless the connection (the default one unless another is named)
+     * targets a database whose name ends with {@see self::REQUIRED_SUFFIX}.
      *
      * A connection URL is rejected as well: it overrides the database name at
      * connection time, so the configured name could no longer be trusted.
      *
+     * @param  string|null  $name  Connection to check; null for the default one.
+     *
      * @throws RuntimeException When the database is not clearly a test database.
      */
-    public static function assertSafe(Repository $config): void
+    public static function assertSafe(Repository $config, ?string $name = null): void
     {
-        $connection = $config->get('database.default');
+        $connection = $name ?? $config->get('database.default');
         $settings = $config->get("database.connections.{$connection}");
 
         if (! is_string($connection) || ! is_array($settings)) {

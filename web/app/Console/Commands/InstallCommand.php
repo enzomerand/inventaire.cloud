@@ -46,7 +46,9 @@ final class InstallCommand extends Command
         {--s3-endpoint= : S3 endpoint URL for non-AWS providers}
         {--s3-path-style : Use path-style S3 URLs}
         {--documenso-url= : Documenso instance URL}
-        {--documenso-api-key= : Documenso API token (visible in the process list: prefer .env or the environment)}';
+        {--documenso-api-key= : Documenso API token (visible in the process list: prefer .env or the environment)}
+        {--admin-name= : Name of the first administrator}
+        {--admin-email= : Email address of the first administrator, who signs in with a code sent to it}';
 
     protected $description = 'Install the instance from the terminal (interactive, non-interactive with options, or --from-env)';
 

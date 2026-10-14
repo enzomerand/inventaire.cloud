@@ -11,9 +11,9 @@ namespace App\Installer;
  * This is the extension point of the installation. The finalizer runs, in
  * order: the migrations, every registered hook, the production defaults, and
  * only then writes the "installed" marker. A feature that needs the database
- * during the installation plugs in here: the accounts lot will create the first
- * administrator from the values collected by its wizard step, which need the
- * `users` table and are stored in the database rather than in `.env`.
+ * during the installation plugs in here: {@see CreateAdministrator} creates the
+ * first administrator from the values collected by the "administrator" step,
+ * which need the `users` table.
  *
  * Register a hook from a service provider by tagging it:
  *
@@ -35,8 +35,11 @@ interface PostMigrationHook
     public const TAG = 'installer.post-migration';
 
     /**
-     * Does the work. Runs after the migrations, with the database configured
-     * as the application will use it.
+     * Does the work. Runs after the migrations, with the database being
+     * installed as the default connection: the application's own default
+     * connection may have been configured before the wizard wrote the database
+     * settings, so a hook must use the default connection (`DB`, models) and
+     * never one by name.
      *
      * @throws Exceptions\InstallationException To abort the installation with a message people can act on.
      */

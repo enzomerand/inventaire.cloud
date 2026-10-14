@@ -122,6 +122,7 @@ describe('DB_URL', function (): void {
         // Valid fields in .env, wrong password in the URL: the migrations must use the URL and fail.
         $db = testDatabaseSettings();
         app(InstallerSettings::class)->persist(InstallStep::Database, ['driver' => $db->driver, 'host' => $db->host, 'port' => $db->port, 'database' => $db->database, 'username' => $db->username, 'password' => $db->password]);
+        app(InstallerSettings::class)->persist(InstallStep::Administrator, ['name' => 'Jane Doe', 'email' => 'jane@example.test']);
         $this->processEnvironment = ['DB_URL' => databaseUrl(['password' => 'Wrong-Passw0rd'])];
         $this->app->forgetInstance(EnvironmentLocks::class);
         $this->app->forgetInstance(InstallerSettings::class);

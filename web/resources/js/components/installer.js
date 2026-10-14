@@ -135,6 +135,27 @@ export default function installer() {
         },
 
         /**
+         * Pre-fills fields with values the server suggests after a step (the
+         * administrator's address once the mail step proved one), since the
+         * page is not reloaded. Whatever is already in a field was typed or
+         * configured: it is kept, and so is any field the environment imposes.
+         *
+         * @param {Record<string, Record<string, string>> | undefined} suggestions Step id => field name => value.
+         * @returns {void}
+         */
+        applySuggestions(suggestions) {
+            for (const [stepId, values] of Object.entries(suggestions ?? {})) {
+                const step = this.steps.find((candidate) => candidate.id === stepId);
+
+                for (const field of step?.fields ?? []) {
+                    if (!field.locked && field.value === '' && typeof values[field.name] === 'string') {
+                        field.value = values[field.name];
+                    }
+                }
+            }
+        },
+
+        /**
          * @param {WizardStep} step
          * @returns {boolean}
          */
@@ -421,6 +442,7 @@ export default function installer() {
                 const response = await http.post(this.base + '/mail/verify', { code: this.code });
 
                 this.applyProgress(response);
+                this.applySuggestions(response.suggestions);
                 this.mailPhase = 'form';
                 this.code = '';
                 this.markSecretsSet(step);
@@ -475,7 +497,7 @@ export default function installer() {
         },
 
         /**
-         * Runs the installation, then leaves the wizard for the home page.
+         * Runs the installation, then leaves the wizard for the sign-in page.
          *
          * @param {WizardStep} step The last screen.
          * @returns {Promise<void>}

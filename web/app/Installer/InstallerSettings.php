@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use App\Auth\EmailAddress;
 use App\Installer\Exceptions\InstallationException;
 
 /**
@@ -144,7 +145,36 @@ final class InstallerSettings
     }
 
     /**
+     * Fills in what the installers can suggest where nothing is configured yet.
+     *
+     * The administrator is most likely the person who just proved their
+     * address at the mail step: that address is suggested for the
+     * administrator's (it stays editable, and a configured or imposed address
+     * wins, an imposed empty one included).
+     *
+     * @param  array<string, mixed>  $values  Field name => value, as returned by {@see self::current()}.
+     * @param  string|null  $verifiedAddress  The address that read a verification code back at the mail step, if any.
+     * @return array<string, mixed>
+     */
+    public function withSuggestions(InstallStep $step, array $values, ?string $verifiedAddress): array
+    {
+        if ($step !== InstallStep::Administrator || ($values['email'] ?? '') !== '' || $verifiedAddress === null || $verifiedAddress === '') {
+            return $values;
+        }
+
+        $email = array_find($step->fields(), static fn (Field $field): bool => $field->name === 'email');
+
+        if ($email !== null && ! $this->isLocked($email)) {
+            $values['email'] = EmailAddress::normalize($verifiedAddress);
+        }
+
+        return $values;
+    }
+
+    /**
      * Completes a submitted form with what is already configured.
+     *
+     * The administrator's address comes out in canonical form ({@see EmailAddress::normalize()}).
      *
      * Imposed values replace whatever was submitted, a missing field keeps its
      * configured value, and an empty secret keeps the stored secret (secrets
@@ -181,6 +211,11 @@ final class InstallerSettings
                 || ($field->secret && ($input[$name] === null || $input[$name] === ''));
 
             $resolved[$name] = $keep ? $current[$name] : $input[$name];
+        }
+
+        // The address of the administrator is stored, validated and compared in its canonical form, in both installers.
+        if ($step === InstallStep::Administrator && is_string($resolved['email'] ?? null)) {
+            $resolved['email'] = EmailAddress::normalize($resolved['email']);
         }
 
         return $resolved;

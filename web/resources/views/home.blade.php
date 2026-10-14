@@ -10,6 +10,9 @@
             <p class="lead text-secondary mb-0">
                 {{ __('A free inventory tool for professionals and individuals.') }}
             </p>
+            @auth
+                <a class="btn btn-primary mt-4" href="{{ route('app') }}">{{ __('Open my space') }}</a>
+            @endauth
         </div>
     </div>
 @endsection

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use App\Auth\EmailAddress;
 use App\Installer\Settings\DatabaseSettings;
 use App\Services\LocaleResolver;
 use DateTimeZone;
@@ -21,7 +22,9 @@ use Illuminate\Validation\Rule;
  *
  * The requirements check and the final "install" action are not steps: they
  * store nothing, so they are not tracked in the progress file. Work that needs
- * the database belongs to a {@see PostMigrationHook}.
+ * the database belongs to a {@see PostMigrationHook}: the administrator step
+ * only collects the name and address, {@see CreateAdministrator} creates the
+ * account once the tables exist.
  */
 enum InstallStep: string
 {
@@ -30,6 +33,7 @@ enum InstallStep: string
     case Mail = 'mail';
     case Storage = 'storage';
     case Documenso = 'documenso';
+    case Administrator = 'administrator';
 
     /**
      * Whether the instance can be installed without this step (it may be
@@ -97,6 +101,7 @@ enum InstallStep: string
             self::Mail => __('Email'),
             self::Storage => __('File storage'),
             self::Documenso => __('Electronic signature'),
+            self::Administrator => __('Administrator'),
         };
     }
 
@@ -111,6 +116,7 @@ enum InstallStep: string
             self::Mail => __('Sign-in codes and notifications are sent by email through an SMTP server. A 6-digit code is sent to the test address to prove that sending works.'),
             self::Storage => __('Where uploaded files (photos, attachments, exports) are kept.'),
             self::Documenso => __('Optional. Official exports can be signed electronically through Documenso. You can skip this step and configure it later.'),
+            self::Administrator => __('The person who administers this instance. There are no passwords: they sign in with a code sent to this address, so it must be one they can read.'),
         };
     }
 
@@ -190,6 +196,10 @@ enum InstallStep: string
                 new Field('url', 'DOCUMENSO_URL', __('Documenso URL'), 'url', placeholder: 'https://app.documenso.com', help: __('The address of your Documenso instance, or https://app.documenso.com.')),
                 new Field('api_key', 'DOCUMENSO_API_KEY', __('API token'), 'password', secret: true, help: __('Created in Documenso, under the team settings, "API tokens".')),
             ],
+            self::Administrator => [
+                new Field('name', 'ADMIN_NAME', __('Name')),
+                new Field('email', 'ADMIN_EMAIL', __('Email address'), 'email', help: __('The administrator account is created when the installation finishes.')),
+            ],
         };
     }
 
@@ -252,6 +262,10 @@ enum InstallStep: string
             self::Documenso => [
                 'url' => ['required', 'url:http,https', 'max:255'],
                 'api_key' => ['required', 'string', 'max:255'],
+            ],
+            self::Administrator => [
+                'name' => ['required', 'string', 'max:255'],
+                'email' => EmailAddress::rules(),
             ],
         };
     }

@@ -11,15 +11,14 @@ return [
     | Authentication Defaults
     |--------------------------------------------------------------------------
     |
-    | This option defines the default authentication "guard" and password
-    | reset "broker" for your application. You may change these values
-    | as required, but they're a perfect start for most applications.
+    | This option defines the default authentication "guard" for your
+    | application. Accounts have no password: people sign in with a code sent
+    | by email, so there is no password reset "broker" either.
     |
     */
 
     'defaults' => [
         'guard' => env('AUTH_GUARD', 'web'),
-        'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
     ],
 
     /*
@@ -43,6 +42,9 @@ return [
         'web' => [
             'driver' => 'session',
             'provider' => 'users',
+            // Minutes the "remember me" cookie lasts: people stay signed in for 30 days. It is the cookie that
+            // lives that long, not the session (anonymous visitors have sessions too, see SESSION_LIFETIME).
+            'remember' => 60 * 24 * 30,
         ],
     ],
 
@@ -77,43 +79,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Resetting Passwords
+    | Sign-in codes
     |--------------------------------------------------------------------------
     |
-    | These configuration options specify the behavior of Laravel's password
-    | reset functionality, including the table utilized for token storage
-    | and the user provider that is invoked to actually retrieve users.
-    |
-    | The expiry time is the number of minutes that each reset token will be
-    | considered valid. This security feature keeps tokens short-lived so
-    | they have less time to be guessed. You may change this as needed.
-    |
-    | The throttle setting is the number of seconds a user must wait before
-    | generating more password reset tokens. This prevents the user from
-    | quickly generating a very large amount of password reset tokens.
+    | People sign in with a 6-digit code sent to their email address. A code is
+    | valid for a few minutes and for a few wrong guesses; asking for a new one
+    | replaces the previous one. Sending is limited per address and network
+    | together (somebody asking again and again), per address alone (so nobody's
+    | inbox can be flooded from many networks) and per network alone (so the
+    | instance cannot be used to mail arbitrary people); an IPv6 client counts
+    | as its whole /64. Typing codes back is limited per network and address, on
+    | top of the attempts allowed for each code, and wrong codes are also
+    | counted per address over a longer, fixed period that opens with the first
+    | of them, whatever the codes they were typed against: asking for a new
+    | code does not give guesses back.
     |
     */
 
-    'passwords' => [
-        'users' => [
-            'provider' => 'users',
-            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
-            'expire' => 60,
-            'throttle' => 60,
-        ],
+    'login_codes' => [
+        'lifetime_minutes' => 10,
+        'max_attempts' => 5,
+        'send_per_email_and_ip' => ['attempts' => 3, 'minutes' => 10],
+        'send_per_email' => ['attempts' => 10, 'minutes' => 60],
+        'send_per_ip' => ['attempts' => 20, 'minutes' => 10],
+        'verify_per_minute' => 10,
+        'failures_per_email' => ['attempts' => 10, 'minutes' => 60],
     ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Password Confirmation Timeout
-    |--------------------------------------------------------------------------
-    |
-    | Here you may define the number of seconds before a password confirmation
-    | window expires and users are asked to re-enter their password via the
-    | confirmation screen. By default, the timeout lasts for three hours.
-    |
-    */
-
-    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
 ];

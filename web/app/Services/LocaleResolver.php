@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Http\Controllers\UpdateLocaleController;
 use Illuminate\Contracts\Cookie\Factory as CookieFactory;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Cookie;
@@ -14,14 +15,24 @@ use Symfony\Component\HttpFoundation\Cookie;
  * Sources are tried in a fixed order and the first one that yields a supported
  * locale wins:
  *
- *  1. the signed-in user's saved preference (see {@see self::fromUserPreference()}),
- *  2. the long-lived `locale` cookie written by the language switcher,
- *  3. the best match in the browser's Accept-Language header,
- *  4. the application default.
+ *  1. the long-lived `locale` cookie written by the language switcher,
+ *  2. the best match in the browser's Accept-Language header,
+ *  3. the application default.
  *
- * An explicit choice (user preference, cookie) must beat the browser's header,
- * otherwise the switcher would seem to do nothing for people whose browser
- * speaks another language than the one they want here.
+ * An explicit choice (the cookie) must beat the browser's header, otherwise the
+ * switcher would seem to do nothing for people whose browser speaks another
+ * language than the one they want here.
+ *
+ * The language of an account (`users.locale`) is not a source of its own. This
+ * resolver runs in a global middleware, before the session and authentication
+ * middleware, so the signed-in user is not known yet, and starting the session
+ * earlier just to read it would cost every request (404s, errors, the install
+ * wizard) a session and a database query. The cookie carries the account's
+ * language instead: signing in sets the cookie from `users.locale`, and the
+ * language switcher updates the cookie and `users.locale` together (see
+ * {@see UpdateLocaleController}). The account therefore
+ * follows its owner from one device to the next at sign-in, while each device
+ * keeps its cookie in between.
  */
 final class LocaleResolver
 {
@@ -49,7 +60,6 @@ final class LocaleResolver
     {
         // Priority order; each source is only consulted if the previous ones found nothing usable.
         $sources = [
-            $this->fromUserPreference(...),
             $this->fromCookie(...),
             $this->fromAcceptLanguage(...),
         ];
@@ -63,6 +73,17 @@ final class LocaleResolver
         }
 
         return config()->string('app.locale');
+    }
+
+    /**
+     * The locale the current request is answered in (set by the SetLocale
+     * middleware). Always a supported locale.
+     */
+    public function resolved(): string
+    {
+        $locale = app()->getLocale();
+
+        return $this->isSupported($locale) ? $locale : config()->string('app.locale');
     }
 
     /**
@@ -93,21 +114,6 @@ final class LocaleResolver
     public function supported(): array
     {
         return array_map(strval(...), array_keys(config()->array('app.locale_names')));
-    }
-
-    /**
-     * Hook for the authenticated user's saved language. Always null until
-     * accounts exist (lot 3), which widens the return type to ?string and reads
-     * the preference from the user.
-     *
-     * Note for that lot: this resolver runs in a global middleware, before the
-     * session and authentication middleware of the web group. Resolve the user
-     * from the guard directly (token or session), or apply the preference again
-     * once the user is known, instead of relying on `$request->user()` here.
-     */
-    private function fromUserPreference(Request $request): null
-    {
-        return null;
     }
 
     /**

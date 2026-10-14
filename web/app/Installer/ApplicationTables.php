@@ -21,13 +21,14 @@ final class ApplicationTables
     public const NAMES = [
         'migrations',
         'users',
-        'password_reset_tokens',
         'sessions',
         'cache',
         'cache_locks',
         'jobs',
         'job_batches',
         'failed_jobs',
+        'personal_access_tokens',
+        'login_codes',
     ];
 
     /**

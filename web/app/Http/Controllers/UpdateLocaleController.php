@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateLocaleRequest;
+use App\Models\User;
 use App\Services\LocaleResolver;
 use Illuminate\Http\Response;
 
@@ -15,10 +16,19 @@ class UpdateLocaleController extends Controller
 {
     /**
      * Attaches the long-lived locale cookie that {@see LocaleResolver} reads on
-     * the following requests. Nothing to return, so the front end simply reloads.
+     * the following requests and, for a signed-in user, saves the choice on the
+     * account so that it follows them to their next device. Nothing to return,
+     * so the front end simply reloads.
      */
     public function __invoke(UpdateLocaleRequest $request, LocaleResolver $resolver): Response
     {
-        return response()->noContent()->withCookie($resolver->cookie($request->string('locale')->toString()));
+        $locale = $request->string('locale')->toString();
+        $user = $request->user();
+
+        if ($user instanceof User) {
+            $user->update(['locale' => $locale]);
+        }
+
+        return response()->noContent()->withCookie($resolver->cookie($locale));
     }
 }
