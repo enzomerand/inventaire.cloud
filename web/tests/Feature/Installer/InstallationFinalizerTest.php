@@ -185,7 +185,7 @@ describe('leaving development defaults', function (): void {
         expect(file_get_contents($this->sandbox->envPath()))->toBe($before);
     });
 
-    it('writes nothing but the marker when the whole configuration comes from the environment', function (): void {
+    it('writes nothing but the marker when the whole configuration comes from the environment and .env cannot be written', function (): void {
         if (posix_geteuid() === 0) {
             $this->markTestSkipped('File permissions do not restrict root.');
         }
@@ -210,6 +210,23 @@ describe('leaving development defaults', function (): void {
         } finally {
             chmod($this->sandbox->envPath(), 0644);
         }
+    });
+
+    it('still applies the production defaults when the configuration comes from the environment but .env is writable', function (): void {
+        // The environment imposes every setting except APP_ENV / APP_DEBUG, which live in a .env that can be written.
+        $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
+        $this->app->forgetInstance(EnvironmentLocks::class);
+        $this->app->forgetInstance(InstallerSettings::class);
+        $this->app->forgetInstance(InstallationFinalizer::class);
+        app()['env'] = 'local';
+        config(['app.debug' => true]);
+
+        expect(app(InstallationFinalizer::class)->needsProductionDefaults())->toBeTrue();
+
+        app(InstallationFinalizer::class)->finalize();
+
+        expect(app(InstallationState::class)->isInstalled())->toBeTrue()
+            ->and((new EnvironmentFile($this->sandbox->envPath(), $this->sandbox->envPath()))->all())->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
     });
 
     it('never writes what the environment imposes', function (): void {

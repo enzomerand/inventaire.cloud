@@ -306,6 +306,8 @@
     "Test and continue": "Tester et continuer",
     "Test the connection and continue": "Tester la connexion et continuer",
     "Test the storage and continue": "Tester le stockage et continuer",
+    "The .env file could not be written and its previous contents could not be restored: check that it is intact.": "Le fichier .env n'a pas pu être écrit et son contenu précédent n'a pas pu être restauré : vérifiez qu'il est intact.",
+    "The .env file could not be written and its previous contents could not be restored; they were kept in :path.": "Le fichier .env n'a pas pu être écrit et son contenu précédent n'a pas pu être restauré ; il a été conservé dans :path.",
     "The .env file could not be written; its previous contents were restored.": "Le fichier .env n'a pas pu être écrit ; son contenu précédent a été restauré.",
     "The .env file is not writable.": "Le fichier .env n'est pas accessible en écriture.",
     "The .env file is not writable. Make it writable by the web server user, or provide the settings as environment variables and run \"php artisan inventaire:install --from-env\".": "Le fichier .env n'est pas accessible en écriture. Rendez-le modifiable par l'utilisateur du serveur web, ou fournissez les réglages en variables d'environnement et lancez « php artisan inventaire:install --from-env ».",

@@ -272,7 +272,7 @@ describe('--from-env', function (): void {
     });
 });
 
-it('does not try to write the production defaults of a container configured only through the environment', function (): void {
+it('does not try to write the production defaults of a container whose .env cannot be written', function (): void {
     if (posix_geteuid() === 0) {
         $this->markTestSkipped('Directory permissions do not restrict root.');
     }
@@ -290,6 +290,22 @@ it('does not try to write the production defaults of a container configured only
     $this->artisan('inventaire:install', ['--no-interaction' => true, '--skip-mail-test' => true])->assertSuccessful();
 
     expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
+});
+
+it('writes the production defaults when the settings come from the environment but .env is writable', function (): void {
+    $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
+    $this->app->forgetInstance(EnvironmentLocks::class);
+    $this->app->forgetInstance(InstallerSettings::class);
+    $this->app->forgetInstance(InstallationFinalizer::class);
+    Artisan::call('db:wipe', ['--force' => true]);
+    file_put_contents($this->sandbox->envPath(), "APP_ENV=local\nAPP_DEBUG=true\n");
+    app()['env'] = 'local';
+    config(['app.debug' => true]);
+
+    $this->artisan('inventaire:install', ['--no-interaction' => true, '--skip-mail-test' => true])->assertSuccessful();
+
+    expect(app(InstallationState::class)->isInstalled())->toBeTrue()
+        ->and(consoleEnv($this))->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
 });
 
 it('does nothing on an installed instance', function (): void {

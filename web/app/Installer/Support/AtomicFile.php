@@ -124,7 +124,13 @@ final class AtomicFile
             throw new InstallationException('Cannot write :path.', ['path' => self::display($path)]);
         }
 
-        @chmod($path, self::FILE_MODE);
+        // Callers put secrets in the file once it exists: if it cannot be made private, remove it and fail now.
+        if (! @chmod($path, self::FILE_MODE)) {
+            @unlink($path);
+
+            throw new InstallationException('Cannot write :path.', ['path' => self::display($path)]);
+        }
+
         self::giveTo($path, $owner);
     }
 

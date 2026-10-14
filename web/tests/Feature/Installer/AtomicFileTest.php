@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Installer\EnvironmentFile;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\Support\AtomicFile;
+use Tests\Support\ChmodRefusingStream;
 
 it('creates files readable by the group and directories traversable by it', function (): void {
     $path = $this->sandbox->root.'/a/b/file.json';
@@ -74,4 +76,32 @@ it('fails with a message that does not reveal where the application lives', func
     }
 
     $this->fail('Expected an InstallationException.');
+});
+
+describe('when a new file cannot be made private', function (): void {
+    beforeEach(function (): void {
+        stream_wrapper_register('chmodrefuse', ChmodRefusingStream::class);
+        ChmodRefusingStream::$files = [];
+        ChmodRefusingStream::$directories = ['chmodrefuse://folder'];
+    });
+
+    afterEach(function (): void {
+        stream_wrapper_unregister('chmodrefuse');
+        ChmodRefusingStream::$files = [];
+        ChmodRefusingStream::$directories = [];
+    });
+
+    it('fails and removes the empty file instead of leaving it with the permissions of the umask', function (): void {
+        expect(fn () => AtomicFile::touch('chmodrefuse://folder/secret'))->toThrow(InstallationException::class, 'Cannot write');
+
+        expect(ChmodRefusingStream::$files)->toBe([]);
+    });
+
+    it('stops the .env writer before any secret is written', function (): void {
+        $file = new EnvironmentFile('chmodrefuse://folder/.env', base_path('.env.example'));
+
+        expect(fn () => $file->set(['DB_PASSWORD' => 'secret']))->toThrow(InstallationException::class);
+
+        expect(ChmodRefusingStream::$files)->toBe([]);
+    });
 });

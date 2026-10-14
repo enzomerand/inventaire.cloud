@@ -301,22 +301,55 @@ describe('when the file has to be rewritten in place', function (): void {
         $this->fail('Expected an InstallationException.');
     });
 
-    it('keeps a private backup as the last resort when even the restore fails', function (): void {
+    it('keeps a private backup as the last resort when even the restore fails, and says so without lying', function (): void {
         $file = new EnvironmentFile('failing://env', base_path('.env.example'), $this->sandbox->root.'/env.backup');
         FailingWriteStream::$failAllWrites = true;
+        $message = null;
 
-        withUmask(0000, function () use ($file): void {
+        withUmask(0000, function () use ($file, &$message): void {
             try {
                 $file->set(['A' => '2']);
-            } catch (InstallationException) {
-                return;
+            } catch (InstallationException $exception) {
+                $message = $exception->userMessage();
             }
-
-            $this->fail('Expected an InstallationException.');
         });
 
         expect(file_get_contents($this->sandbox->root.'/env.backup'))->toBe("A=1\nSECRET=keep-me\n")
-            ->and(fileperms($this->sandbox->root.'/env.backup') & 0777)->toBe(0600);
+            ->and(fileperms($this->sandbox->root.'/env.backup') & 0777)->toBe(0600)
+            // It does not claim the contents were restored, points at the backup, and shows no absolute path.
+            ->and($message)->toContain('could not be restored')->toContain('storage/framework/testing/installer/env.backup')
+            ->not->toContain('were restored')->not->toContain($this->sandbox->root);
+    });
+
+    it('says the file may be damaged when it could not be restored and there is no backup either', function (): void {
+        $file = new EnvironmentFile('failing://env', base_path('.env.example'));
+        FailingWriteStream::$failAllWrites = true;
+
+        try {
+            $file->set(['A' => '2']);
+        } catch (InstallationException $exception) {
+            expect($exception->userMessage())->toContain('could not be restored')->toContain('check that it is intact')->not->toContain('were restored');
+
+            return;
+        }
+
+        $this->fail('Expected an InstallationException.');
+    });
+
+    it('explains in French that the previous contents could not be restored', function (): void {
+        $this->useLanguage('fr');
+        $file = new EnvironmentFile('failing://env', base_path('.env.example'), $this->sandbox->root.'/env.backup');
+        FailingWriteStream::$failAllWrites = true;
+
+        try {
+            $file->set(['A' => '2']);
+        } catch (InstallationException $exception) {
+            expect($exception->userMessage())->toContain('pas pu être restauré')->toContain('env.backup');
+
+            return;
+        }
+
+        $this->fail('Expected an InstallationException.');
     });
 
     it('does not keep the backup, which holds secrets, after a successful write', function (): void {

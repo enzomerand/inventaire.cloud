@@ -352,9 +352,11 @@ final class EnvironmentFile
 
             if (! $this->overwrite($handle, $contents)) {
                 // Put back what was there; if even that fails the backup file is the last resort and stays.
-                if ($this->overwrite($handle, $previous)) {
-                    $this->discardBackup();
+                if (! $this->overwrite($handle, $previous)) {
+                    throw $this->notRestored();
                 }
+
+                $this->discardBackup();
 
                 throw new InstallationException('The .env file could not be written; its previous contents were restored.');
             }
@@ -365,6 +367,20 @@ final class EnvironmentFile
             fclose($handle);
             clearstatcache(true, $target);
         }
+    }
+
+    /**
+     * The failure to report when the file could neither be rewritten nor put
+     * back as it was: it says where the last copy is, if there is one, with a
+     * path relative to the application (never an absolute one).
+     */
+    private function notRestored(): InstallationException
+    {
+        if ($this->backupPath !== null && is_file($this->backupPath)) {
+            return new InstallationException('The .env file could not be written and its previous contents could not be restored; they were kept in :path.', ['path' => AtomicFile::display($this->backupPath)]);
+        }
+
+        return new InstallationException('The .env file could not be written and its previous contents could not be restored: check that it is intact.');
     }
 
     /**
