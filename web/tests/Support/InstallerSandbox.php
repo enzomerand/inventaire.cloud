@@ -42,7 +42,7 @@ final class InstallerSandbox
             throw new RuntimeException("Cannot create the test sandbox {$sandbox->root}.");
         }
 
-        foreach (['sessions', 'cache', 'storage'] as $directory) {
+        foreach (['sessions', 'cache', 'storage', 'views'] as $directory) {
             mkdir($sandbox->root.'/'.$directory, 0700);
         }
 

@@ -30,6 +30,15 @@ $app = Application::configure(basePath: dirname(__DIR__))
         //
     })->create();
 
+// APP_ENVIRONMENT_FILE moves the configuration file out of the application folder (a Docker volume): Laravel and the
+// installer, which falls back to the file Laravel loads, then use the same one. Unset, nothing changes.
+$environmentFile = ProcessEnvironment::environmentFile();
+
+if ($environmentFile !== null) {
+    $app->useEnvironmentPath(dirname($environmentFile));
+    $app->loadEnvironmentFrom(basename($environmentFile));
+}
+
 // Read once the configuration (and so .env) is loaded: the middleware callback above runs earlier.
 $app->booted(fn () => TrustedProxies::apply($app->make('config')->get('app.trusted_proxies')));
 

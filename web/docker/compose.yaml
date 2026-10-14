@@ -1,0 +1,121 @@
+# Self-hosting example: inventaire.cloud with PostgreSQL. Run it from this folder.
+#
+#   cp .env.example .env     # then set DB_PASSWORD (see the file for the two ways to configure)
+#   docker compose up -d --build
+#
+# The application listens on http://localhost:8080 (APP_PORT changes the port). Put a
+# reverse proxy in front of it for HTTPS and set TRUSTED_PROXIES (see the README).
+#
+# - app        the web server; it also updates or installs the instance when it starts
+# - worker     the queue worker (waits until the instance is installed)
+# - scheduler  the task scheduler (waits until the instance is installed)
+# - db         PostgreSQL
+#
+# The `storage` volume holds the generated configuration (APP_KEY, secrets), the
+# uploaded files and the installed marker: back it up, keep it private, and never
+# delete it unless you mean to erase the instance.
+
+name: inventaire
+
+x-app: &app
+    # worker and scheduler share the image of the app service: the build is cached after the first.
+    build:
+        context: ..
+        dockerfile: Dockerfile
+    image: inventaire-cloud:latest
+    restart: unless-stopped
+    # A tiny init process as PID 1, so that docker stop reaches the queue worker and the scheduler.
+    init: true
+    environment:
+        # The database service below. Set the same names in .env to use another server.
+        DB_CONNECTION: ${DB_CONNECTION:-pgsql}
+        DB_HOST: ${DB_HOST:-db}
+        DB_PORT: ${DB_PORT:-5432}
+        DB_DATABASE: ${DB_DATABASE:-inventaire}
+        DB_USERNAME: ${DB_USERNAME:-inventaire}
+        DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in docker/.env (copy .env.example)}
+    # Everything else you put in .env reaches the container as a real environment variable,
+    # and the install wizard then shows it read-only ("set by the environment"). With the
+    # whole configuration there, the instance installs itself on the first start.
+    env_file:
+        - path: .env
+          required: false
+    volumes:
+        - storage:/app/storage
+
+services:
+    app:
+        <<: *app
+        ports:
+            - '${APP_PORT:-8080}:8080'
+        depends_on:
+            db:
+                condition: service_healthy
+
+    worker:
+        <<: *app
+        command: worker
+        # The image's health check queries the web server, which this container does not run.
+        healthcheck:
+            disable: true
+        # restart: Compose restarts this container whenever it recreates or restarts app, so that
+        # an update reaches the worker too, once the new app container is healthy.
+        depends_on:
+            app:
+                condition: service_healthy
+                restart: true
+
+    scheduler:
+        <<: *app
+        command: scheduler
+        healthcheck:
+            disable: true
+        depends_on:
+            app:
+                condition: service_healthy
+                restart: true
+
+    db:
+        image: postgres:18-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: ${DB_DATABASE:-inventaire}
+            POSTGRES_USER: ${DB_USERNAME:-inventaire}
+            POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in docker/.env (copy .env.example)}
+        volumes:
+            # PostgreSQL 18 images keep versioned data directories below this path.
+            - db-data:/var/lib/postgresql
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+            interval: 5s
+            timeout: 5s
+            retries: 12
+
+    # To run MySQL or MariaDB here instead of PostgreSQL, replace the `db` service with one of
+    # these, and set DB_CONNECTION (mysql or mariadb) and DB_PORT=3306 in .env. Volume and
+    # healthcheck as in compose.dev.yaml of the repository.
+    #
+    # db:
+    #     image: mysql:9.7
+    #     restart: unless-stopped
+    #     environment:
+    #         MYSQL_DATABASE: ${DB_DATABASE:-inventaire}
+    #         MYSQL_USER: ${DB_USERNAME:-inventaire}
+    #         MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in docker/.env}
+    #         MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+    #     volumes:
+    #         - db-data:/var/lib/mysql
+    #     healthcheck:
+    #         test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -u "$${MYSQL_USER}" -p"$${MYSQL_PASSWORD}" --silent']
+    #         interval: 5s
+    #         timeout: 5s
+    #         retries: 20
+    #
+    # MariaDB: the same with `image: mariadb:12.3`, the MARIADB_* variable names
+    # (MARIADB_DATABASE, MARIADB_USER, MARIADB_PASSWORD, MARIADB_RANDOM_ROOT_PASSWORD),
+    # DB_CONNECTION=mariadb, DB_PORT=3306 and this healthcheck:
+    #     test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+
+volumes:
+    storage:
+    db-data:

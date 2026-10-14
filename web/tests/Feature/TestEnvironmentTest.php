@@ -42,3 +42,18 @@ it('does not see anything only the developer\'s real .env defines', function ():
 
     expect(array_values($leaked))->toBe([]);
 });
+
+it('resolves the relative compiled views path from the base path, whatever the working directory', function (): void {
+    $expected = base_path('storage/framework/testing/installer/views');
+    $workingDirectory = (string) getcwd();
+
+    chdir(sys_get_temp_dir());
+
+    try {
+        $compiled = (require config_path('view.php'))['compiled'];
+    } finally {
+        chdir($workingDirectory);
+    }
+
+    expect($compiled)->toBe($expected)->and(config('view.compiled'))->toBe($expected);
+});

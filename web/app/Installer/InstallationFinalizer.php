@@ -9,11 +9,7 @@ use App\Installer\Exceptions\LockBusyException;
 use App\Installer\Settings\DatabaseSettings;
 use App\Installer\Support\FileLock;
 use Illuminate\Config\Repository;
-use Illuminate\Contracts\Console\Kernel;
-use Illuminate\Database\DatabaseManager;
 use Illuminate\Foundation\Application;
-use Symfony\Component\Console\Output\BufferedOutput;
-use Throwable;
 
 /**
  * Completes the installation once every required step is validated.
@@ -25,9 +21,6 @@ use Throwable;
  */
 final class InstallationFinalizer
 {
-    /** Name of the connection the migrations run on. */
-    private const CONNECTION = 'installer_migrate';
-
     /** Lock held while finalizing, so that two requests cannot do it together. */
     private const LOCK = 'finalize.lock';
 
@@ -39,8 +32,7 @@ final class InstallationFinalizer
         private readonly EnvironmentFile $environment,
         private readonly EnvironmentLocks $locks,
         private readonly SetupToken $token,
-        private readonly DatabaseManager $db,
-        private readonly Kernel $artisan,
+        private readonly DatabaseMigrator $migrator,
         /** @var iterable<PostMigrationHook> */
         private readonly iterable $hooks = [],
     ) {}
@@ -138,27 +130,7 @@ final class InstallationFinalizer
             throw new InstallationException('The database engine is not supported.');
         }
 
-        $this->config->set('database.connections.'.self::CONNECTION, $settings->connectionConfig($base));
-        $output = new BufferedOutput;
-
-        try {
-            $status = $this->artisan->call('migrate', [
-                '--database' => self::CONNECTION,
-                '--force' => true,
-                '--no-interaction' => true,
-                // Refuses (exit 1) when another migration is already running instead of silently doing nothing.
-                '--isolated' => 1,
-            ], $output);
-        } catch (Throwable $exception) {
-            throw new InstallationException('The database migration failed: :reason', ['reason' => $this->lastLine($exception->getMessage())]);
-        } finally {
-            $this->db->purge(self::CONNECTION);
-            $this->config->offsetUnset('database.connections.'.self::CONNECTION);
-        }
-
-        if ($status !== 0) {
-            throw new InstallationException('The database migration failed: :reason', ['reason' => $this->lastLine($output->fetch())]);
-        }
+        $this->migrator->migrateOn($settings->connectionConfig($base));
     }
 
     /**
@@ -228,15 +200,5 @@ final class InstallationFinalizer
         }
 
         return $updates;
-    }
-
-    /**
-     * The last meaningful line of an error or of command output.
-     */
-    private function lastLine(string $text): string
-    {
-        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', $text) ?: [])));
-
-        return mb_substr($lines === [] ? '' : $lines[array_key_last($lines)], 0, 240);
     }
 }
