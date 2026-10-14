@@ -40,7 +40,7 @@ it('records the progress of each step so the wizard can resume', function (): vo
     $state = freshState($this);
 
     expect($state->progress())->toBe([
-        'database' => 'pending', 'application' => 'pending', 'mail' => 'pending', 'storage' => 'pending', 'documenso' => 'pending',
+        'database' => 'pending', 'application' => 'pending', 'mail' => 'pending', 'storage' => 'pending', 'documenso' => 'pending', 'administrator' => 'pending',
     ]);
 
     $state->record(InstallStep::Database);
@@ -52,7 +52,7 @@ it('records the progress of each step so the wizard can resume', function (): vo
         ->and($resumed->status(InstallStep::Documenso))->toBe('skipped')
         ->and($resumed->isSettled(InstallStep::Documenso))->toBeTrue()
         ->and($resumed->isSettled(InstallStep::Mail))->toBeFalse()
-        ->and($resumed->missingRequiredSteps())->toBe([InstallStep::Application, InstallStep::Mail, InstallStep::Storage]);
+        ->and($resumed->missingRequiredSteps())->toBe([InstallStep::Application, InstallStep::Mail, InstallStep::Storage, InstallStep::Administrator]);
 });
 
 it('ignores a corrupted or tampered progress file', function (): void {

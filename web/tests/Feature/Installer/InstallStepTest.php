@@ -25,7 +25,7 @@ it('describes every field once, with a label and a rule', function (InstallStep 
 })->with(InstallStep::cases());
 
 it('keeps required steps apart from the optional one', function (): void {
-    expect(InstallStep::required())->toBe([InstallStep::Database, InstallStep::Application, InstallStep::Mail, InstallStep::Storage])
+    expect(InstallStep::required())->toBe([InstallStep::Database, InstallStep::Application, InstallStep::Mail, InstallStep::Storage, InstallStep::Administrator])
         ->and(InstallStep::Documenso->isOptional())->toBeTrue();
 });
 
@@ -63,6 +63,14 @@ it('requires the S3 details only for S3 storage', function (): void {
         ->and(validateStep(InstallStep::Storage, $s3)->errors()->keys())->toEqualCanonicalizing(['key', 'secret', 'region', 'bucket'])
         ->and(validateStep(InstallStep::Storage, ['key' => 'k', 'secret' => 's', 'region' => 'r', 'bucket' => 'b', 'endpoint' => 'https://s3.example.com'] + $s3)->passes())->toBeTrue()
         ->and(validateStep(InstallStep::Storage, ['key' => 'k', 'secret' => 's', 'region' => 'r', 'bucket' => 'b', 'endpoint' => 'minio'] + $s3)->errors()->keys())->toBe(['endpoint']);
+});
+
+it('validates the administrator step', function (): void {
+    expect(validateStep(InstallStep::Administrator, ['name' => 'Jane Doe', 'email' => 'jane@example.com'])->passes())->toBeTrue()
+        ->and(validateStep(InstallStep::Administrator, ['name' => '', 'email' => ''])->errors()->keys())->toEqualCanonicalizing(['name', 'email'])
+        ->and(validateStep(InstallStep::Administrator, ['name' => 'Jane', 'email' => 'not-an-address'])->errors()->keys())->toBe(['email'])
+        ->and(InstallStep::Administrator->isOptional())->toBeFalse()
+        ->and(collect(InstallStep::Administrator->fields())->pluck('envKey')->all())->toBe(['ADMIN_NAME', 'ADMIN_EMAIL']);
 });
 
 it('validates the Documenso step', function (): void {

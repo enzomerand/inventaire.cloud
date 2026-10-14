@@ -151,6 +151,7 @@ final class WizardState
                 InstallStep::Mail => __('Send the code'),
                 InstallStep::Storage => __('Test the storage and continue'),
                 InstallStep::Documenso => __('Test and continue'),
+                InstallStep::Administrator => __('Continue'),
             },
             'fields' => $fields,
         ];

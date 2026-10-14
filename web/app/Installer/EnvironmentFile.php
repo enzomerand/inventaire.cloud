@@ -32,7 +32,7 @@ final class EnvironmentFile
      * Settings given to a .env that the installer creates: .env.example holds
      * development defaults (local environment, debug on, the credentials and
      * ports of the docker services of compose.dev.yaml, the product's own
-     * sender address), which must not leak into a server or be pre-filled in
+     * sender address, a placeholder administrator), which must not leak into a server or be pre-filled in
      * the wizard. An existing file is never touched this way.
      */
     public const NEW_FILE_DEFAULTS = [
@@ -46,6 +46,8 @@ final class EnvironmentFile
         'MAIL_USERNAME' => 'null',
         'MAIL_PASSWORD' => 'null',
         'MAIL_FROM_ADDRESS' => '',
+        'ADMIN_NAME' => '',
+        'ADMIN_EMAIL' => '',
     ];
 
     /**

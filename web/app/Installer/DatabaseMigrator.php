@@ -18,7 +18,8 @@ use Throwable;
  *
  * It is the one place that knows how, shared by the installation
  * ({@see InstallationFinalizer}, on a connection built from the wizard's
- * settings) and by `inventaire:upgrade` (on the application's own connection).
+ * settings, see {@see self::onConnection()}) and by `inventaire:upgrade` (on the
+ * application's own connection).
  *
  * Concurrency is handled by an exclusive file lock (`migrate.lock` in the
  * installer's state folder), held for the whole migration. A second caller
@@ -32,7 +33,7 @@ final class DatabaseMigrator
     /** How long a caller waits for another migration to finish, in seconds. The Docker image's HEALTHCHECK start period (Dockerfile) is sized from it: keep it above twice this. */
     public const LOCK_WAIT = 600.0;
 
-    /** Name of the temporary connection {@see self::migrateOn()} registers. */
+    /** Name of the temporary connection {@see self::onConnection()} registers. */
     private const CONNECTION = 'installer_migrate';
 
     /** Lock file, in the installer's state folder. */
@@ -50,7 +51,8 @@ final class DatabaseMigrator
     ) {}
 
     /**
-     * Applies the pending migrations on the application's default connection.
+     * Applies the pending migrations on the application's default connection
+     * (inside {@see self::onConnection()}, the temporary one).
      *
      * @return string What the migrator printed, for the caller to show.
      *
@@ -58,29 +60,41 @@ final class DatabaseMigrator
      */
     public function migrate(): string
     {
-        return $this->call([]);
+        // Named explicitly: the migrator remembers the connection it was last told about, and must follow the default one.
+        return $this->call(['--database' => $this->db->getDefaultConnection()]);
     }
 
     /**
-     * Applies the pending migrations on a connection that exists only for this
-     * call, built from the given configuration.
+     * Runs a callback with a database connection that exists only for this
+     * call, built from the given configuration and made the default one.
      *
-     * The installer needs it because in a web request the default connection
-     * was configured before the wizard wrote the database settings. The
-     * connection is removed afterwards, whatever the outcome.
+     * The installer needs it because in a web request (and in the interactive
+     * console installer) the application's connections were configured before
+     * the wizard wrote the database settings: the default connection may point
+     * somewhere else, or nowhere. Everything that must happen on the database
+     * being installed (the migrations, the post-migration hooks) runs inside
+     * such a callback, where `DB`, Eloquent models and `migrate` all use the
+     * right database without being told which. The previous default connection
+     * is put back and the temporary one removed afterwards, whatever the
+     * outcome.
+     *
+     * @template T
      *
      * @param  array<string, mixed>  $connection  A Laravel connection configuration.
-     * @return string What the migrator printed.
-     *
-     * @throws InstallationException When the migrations fail, or another migration is still running after the wait.
+     * @param  callable(): T  $callback
+     * @return T
      */
-    public function migrateOn(array $connection): string
+    public function onConnection(array $connection, callable $callback): mixed
     {
+        $previous = $this->db->getDefaultConnection();
+
         $this->config->set('database.connections.'.self::CONNECTION, $connection);
+        $this->db->setDefaultConnection(self::CONNECTION);
 
         try {
-            return $this->call(['--database' => self::CONNECTION]);
+            return $callback();
         } finally {
+            $this->db->setDefaultConnection($previous);
             $this->db->purge(self::CONNECTION);
             $this->config->offsetUnset('database.connections.'.self::CONNECTION);
         }

@@ -33,6 +33,7 @@ function installOptions(array $override = []): array
         '--mail-host' => 'smtp.example.test', '--mail-port' => '587',
         '--mail-from-address' => 'hello@example.test', '--mail-from-name' => 'My Shop',
         '--storage' => 'local',
+        '--admin-name' => 'Jane Doe', '--admin-email' => 'jane@example.test',
     ];
 }
 
@@ -48,6 +49,7 @@ function configuredEnvironment(object $test): void
     $settings->persist(InstallStep::Application, ['url' => 'https://inventory.example.test', 'locale' => 'fr', 'timezone' => 'Europe/Paris']);
     $settings->persist(InstallStep::Mail, ['host' => 'smtp.example.test', 'port' => '587', 'scheme' => '', 'username' => '', 'password' => '', 'from_address' => 'hello@example.test', 'from_name' => 'My Shop']);
     $settings->persist(InstallStep::Storage, ['disk' => 'local']);
+    $settings->persist(InstallStep::Administrator, ['name' => 'Jane Doe', 'email' => 'jane@example.test']);
 }
 
 /**
@@ -312,6 +314,8 @@ describe('interactive installation', function (): void {
             ->expectsQuestion('Verification code', '246810')
             ->expectsChoice('Storage', 'local', ['local' => 'This server (local disk)', 's3' => 'S3-compatible storage'])
             ->expectsConfirmation('Configure the electronic signature (Documenso) now?', 'no')
+            ->expectsQuestion('Name', 'Jane Doe')
+            ->expectsQuestion('Email address', 'Jane@Example.test')
             ->expectsConfirmation('Switch this instance to production mode (APP_ENV=production, APP_DEBUG=false)?', 'yes')
             ->expectsOutputToContain('Installation complete')
             ->assertSuccessful();

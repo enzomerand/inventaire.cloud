@@ -95,7 +95,7 @@ describe('the wizard page', function (): void {
         preg_match('#<script type="application/json" id="installer-state">(.*?)</script>#s', $page->getContent(), $match);
         $state = json_decode($match[1], true);
 
-        expect(array_column($state['steps'], 'id'))->toBe(['requirements', 'database', 'application', 'mail', 'storage', 'documenso', 'finalize'])
+        expect(array_column($state['steps'], 'id'))->toBe(['requirements', 'database', 'application', 'mail', 'storage', 'documenso', 'administrator', 'finalize'])
             ->and($state['current'])->toBe('database')
             ->and($state['requirements']['passed'])->toBeTrue()
             ->and($state['canFinalize'])->toBeFalse()
@@ -464,6 +464,7 @@ function completeRequiredSteps(object $test): void
     Mail::fake();
     $test->postJson('/install/mail', mailForm())->assertOk();
     $test->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+    $test->postJson('/install/administrator', ['name' => 'Jane Doe', 'email' => 'Jane@Example.test'])->assertOk();
 }
 
 describe('a container configured only through variables', function (): void {
@@ -488,6 +489,7 @@ describe('a container configured only through variables', function (): void {
         $this->postJson('/install/storage', [])->assertOk();
         $this->postJson('/install/mail', ['test_recipient' => 'admin@example.test'])->assertOk();
         $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+        $this->postJson('/install/administrator', [])->assertOk();
         $this->postJson('/install/finalize')->assertOk();
 
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
@@ -515,6 +517,7 @@ describe('a container configured only through variables', function (): void {
             $this->postJson('/install/storage', [])->assertOk();
             $this->postJson('/install/mail', ['test_recipient' => 'admin@example.test'])->assertOk();
             $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+            $this->postJson('/install/administrator', [])->assertOk();
             $this->postJson('/install/finalize')->assertOk();
 
             expect(app(InstallationState::class)->isInstalled())->toBeTrue()

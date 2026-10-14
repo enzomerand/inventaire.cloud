@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Installer\Settings\DatabaseSettings;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Mime\Email;
 use Tests\TestCase;
 
@@ -18,10 +19,25 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)->in('Feature');
 
-// The installer's messages are asserted on their English source text.
-pest()->in('Feature/Installer')->beforeEach(function (): void {
-    $this->useLanguage('en');
-});
+// The installer's messages are asserted on their English source text. These tests install for real into the test
+// database, which creates the administrator account there for good (no test transaction wraps them): remove it, or
+// the tests that expect an empty users table would depend on the order in which the files run.
+pest()->in('Feature/Installer')
+    ->beforeEach(function (): void {
+        $this->useLanguage('en');
+    })
+    ->afterEach(function (): void {
+        try {
+            // By name: a test may have left the default connection pointing elsewhere, on purpose.
+            $connection = DB::connection(getenv('DB_CONNECTION') ?: 'pgsql');
+
+            if ($connection->getSchemaBuilder()->hasTable('users')) {
+                $connection->table('users')->delete();
+            }
+        } catch (Throwable) {
+            // The database may be unreachable on purpose (a wrong password under test): nothing was created then.
+        }
+    });
 
 /**
  * Database settings pointing at the engine the suite currently runs on (the
@@ -77,6 +93,7 @@ function containerEnvironment(): array
         'APP_URL' => 'https://inventory.example.test', 'APP_LOCALE' => 'fr', 'APP_TIMEZONE' => 'UTC',
         'MAIL_MAILER' => 'smtp', 'MAIL_HOST' => 'smtp.example.test', 'MAIL_PORT' => '587',
         'MAIL_FROM_ADDRESS' => 'hello@example.test', 'MAIL_FROM_NAME' => 'My Shop', 'FILESYSTEM_DISK' => 'local',
+        'ADMIN_NAME' => 'Jane Doe', 'ADMIN_EMAIL' => 'jane@example.test',
     ];
 }
 

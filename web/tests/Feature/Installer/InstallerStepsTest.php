@@ -28,6 +28,6 @@ it('has an endpoint for every step of the registry and no other', function (): v
 
     expect($routes->values()->all())->toEqualCanonicalizing([
         'install.show', 'install.token', 'install.requirements', 'install.finalize',
-        'install.database', 'install.application', 'install.mail', 'install.mail.verify', 'install.storage', 'install.documenso', 'install.documenso.skip',
+        'install.database', 'install.application', 'install.mail', 'install.mail.verify', 'install.storage', 'install.documenso', 'install.documenso.skip', 'install.administrator',
     ]);
 });

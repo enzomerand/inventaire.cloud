@@ -60,6 +60,7 @@ final class ConsoleInstaller
         'mail' => ['host' => 'mail-host', 'port' => 'mail-port', 'scheme' => 'mail-scheme', 'username' => 'mail-user', 'password' => 'mail-password', 'password_clear' => 'mail-no-password', 'from_address' => 'mail-from-address', 'from_name' => 'mail-from-name', 'test_recipient' => 'mail-test-recipient'],
         'storage' => ['disk' => 'storage', 'key' => 's3-key', 'secret' => 's3-secret', 'region' => 's3-region', 'bucket' => 's3-bucket', 'endpoint' => 's3-endpoint', 'path_style' => 's3-path-style'],
         'documenso' => ['url' => 'documenso-url', 'api_key' => 'documenso-api-key'],
+        'administrator' => ['name' => 'admin-name', 'email' => 'admin-email'],
     ];
 
     private readonly bool $fromEnv;

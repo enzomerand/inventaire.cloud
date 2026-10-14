@@ -37,6 +37,8 @@ it('says wizard when the environment provides nothing, or only part of the confi
     'nothing' => [[]],
     'only the database' => [fn (): array => array_intersect_key(containerEnvironment(), array_flip(['DB_CONNECTION', 'DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD']))],
     'everything but the mail sender' => [fn (): array => array_diff_key(containerEnvironment(), ['MAIL_FROM_ADDRESS' => ''])],
+    'everything but the administrator' => [fn (): array => array_diff_key(containerEnvironment(), ['ADMIN_NAME' => '', 'ADMIN_EMAIL' => ''])],
+    'everything but the administrator address' => [fn (): array => array_diff_key(containerEnvironment(), ['ADMIN_EMAIL' => ''])],
 ]);
 
 it('runs none of the installer checks', function (): void {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Installer\ApplicationKey;
+use App\Installer\CreateAdministrator;
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use App\Installer\Exceptions\InstallationException;
@@ -61,6 +62,7 @@ final class InstallerServiceProvider extends ServiceProvider
 
         $this->app->singleton(InstallerSettings::class);
         $this->app->singleton(SetupToken::class);
+        $this->app->tag([CreateAdministrator::class], PostMigrationHook::TAG);
         $this->app->when(InstallationFinalizer::class)->needs('$hooks')->giveTagged(PostMigrationHook::TAG);
         $this->app->bind(StorageProbe::class, FilesystemStorageProbe::class);
         $this->app->singleton(ApplicationKey::class);

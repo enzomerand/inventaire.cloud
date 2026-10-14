@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Installer\CreateAdministrator;
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use App\Installer\Exceptions\InstallationException;
@@ -28,6 +29,7 @@ function readyInstance(object $test, array $database = []): void
     $db = testDatabaseSettings($database);
 
     $settings->persist(InstallStep::Database, ['driver' => $db->driver, 'host' => $db->host, 'port' => $db->port, 'database' => $db->database, 'username' => $db->username, 'password' => $db->password]);
+    $settings->persist(InstallStep::Administrator, ['name' => 'Jane Doe', 'email' => 'jane@example.test']);
 
     foreach (InstallStep::required() as $step) {
         $state->record($step);
@@ -298,7 +300,12 @@ describe('the order of the finalization', function (): void {
 
         $hooks = (new ReflectionProperty(InstallationFinalizer::class, 'hooks'))->getValue(app(InstallationFinalizer::class));
 
-        expect(iterator_to_array($hooks, false))->toBe([$hook]);
+        $registered = iterator_to_array($hooks, false);
+
+        // The installer's own hook comes first, the one registered by the test after it.
+        expect($registered)->toHaveCount(2)
+            ->and($registered[0])->toBeInstanceOf(CreateAdministrator::class)
+            ->and($registered[1])->toBe($hook);
     });
 
     it('stays uninstalled when a hook aborts, and can be run again', function (): void {

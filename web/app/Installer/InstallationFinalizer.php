@@ -14,9 +14,9 @@ use Illuminate\Foundation\Application;
 /**
  * Completes the installation once every required step is validated.
  *
- * It creates the tables, makes the instance leave development defaults when it
- * is not a development one, and only then writes the marker that turns the
- * installer off: a failure at any point leaves the instance not installed, so
+ * It creates the tables, runs what has to happen once they exist (the first
+ * administrator), makes the instance leave development defaults when it is not
+ * a development one, and only then writes the marker that turns the installer off: a failure at any point leaves the instance not installed, so
  * the wizard can simply be run again.
  */
 final class InstallationFinalizer
@@ -42,9 +42,12 @@ final class InstallationFinalizer
      * {@see PostMigrationHook}s, the production defaults, and finally the
      * "installed" marker.
      *
-     * The migrations run on a connection built from the stored settings rather
-     * than on the application's default one: in a web request the default
-     * connection was configured before the wizard wrote the database settings.
+     * The migrations and the hooks run on a connection built from the stored
+     * settings rather than on the application's default one: in a web request
+     * (and in the interactive console installer) the default connection was
+     * configured before the wizard wrote the database settings, so it may point
+     * at another database. On that connection, which is the default one for the
+     * duration, a hook just uses `DB` or its models.
      *
      * @param  bool  $productionDefaults  Whether to set APP_ENV=production and APP_DEBUG=false. The web wizard always does; the console installer asks, and `--from-env` (the developer path) does not.
      * @return string Where to send the administrator next (the home page).
@@ -87,8 +90,10 @@ final class InstallationFinalizer
         @set_time_limit(300);
 
         // 1. The tables. 2. Whatever else needs them. 3. Settings. 4. The marker, which ends the installation: last.
-        $this->migrate();
-        $this->runHooks();
+        $this->migrator->onConnection($this->connection(), function (): void {
+            $this->migrator->migrate();
+            $this->runHooks();
+        });
 
         if ($productionDefaults) {
             $this->applyProductionDefaults();
@@ -117,11 +122,13 @@ final class InstallationFinalizer
     }
 
     /**
-     * Creates the tables on the configured database.
+     * The configuration of the connection to the database being installed, built from the wizard's settings.
      *
-     * @throws InstallationException When the migrations fail.
+     * @return array<string, mixed>
+     *
+     * @throws InstallationException When the database engine is not supported.
      */
-    private function migrate(): void
+    private function connection(): array
     {
         $settings = DatabaseSettings::fromArray($this->settings->current(InstallStep::Database), $this->settings->providedUrl(InstallStep::Database));
         $base = $this->config->get('database.connections.'.$settings->driver);
@@ -130,7 +137,7 @@ final class InstallationFinalizer
             throw new InstallationException('The database engine is not supported.');
         }
 
-        $this->migrator->migrateOn($settings->connectionConfig($base));
+        return $settings->connectionConfig($base);
     }
 
     /**
