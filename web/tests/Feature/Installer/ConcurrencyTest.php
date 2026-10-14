@@ -18,6 +18,7 @@ use App\Installer\Support\FileLock;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+use Tests\Support\LockRefusingStream;
 
 /**
  * Runs several PHP processes at once, each hammering one change of a shared file, and waits for all of them.
@@ -80,6 +81,30 @@ describe('the file lock', function (): void {
         }
 
         $this->fail('Expected a LockBusyException.');
+    });
+
+    it('fails at once, without waiting, when the filesystem refuses the lock for another reason than a busy file', function (): void {
+        in_array('lockrefuse', stream_get_wrappers(), true) || stream_wrapper_register('lockrefuse', LockRefusingStream::class);
+        LockRefusingStream::$attempts = 0;
+        $ran = false;
+        $started = microtime(true);
+
+        try {
+            FileLock::exclusively('lockrefuse://folder/lock', function () use (&$ran): void {
+                $ran = true;
+            }, 30.0);
+        } catch (InstallationException $exception) {
+            // Not a "busy" failure: nobody holds the lock, so neither the retry loop nor the "another request" message applies.
+            expect($exception)->not->toBeInstanceOf(LockBusyException::class)
+                ->and($exception->getMessage())->toContain('the filesystem refused the lock')
+                ->and($ran)->toBeFalse()
+                ->and(LockRefusingStream::$attempts)->toBe(1)
+                ->and(microtime(true) - $started)->toBeLessThan(2.0);
+
+            return;
+        }
+
+        $this->fail('Expected an InstallationException.');
     });
 
     it('never runs the callback unlocked when the lock file cannot be opened', function (): void {

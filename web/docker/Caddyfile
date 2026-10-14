@@ -7,8 +7,12 @@
 # public/storage points to the storage volume, where uploads end up: a PHP file
 # uploaded there must never be executed. So the routing is spelled out:
 #
-#   1. a file that exists below public/ is served as it is, unless its name ends in .php
-#   2. everything else, including every .php URL, is handed to the front controller
+#   1. a file that exists below public/ is served as it is, unless its name ends in .php or
+#      any segment of its path starts with a dot (public/.htaccess and the like are not
+#      for visitors)
+#   2. everything else, including every .php URL and every hidden path, is handed to the front
+#      controller, which answers 404 when the application has no such route. A well-known URI
+#      (/.well-known/...) is therefore a Laravel route, not a file.
 {
 	skip_install_trust
 	admin off
@@ -25,6 +29,8 @@
 		@static {
 			file {path}
 			not path *.php
+			# A dot-segment anywhere: .htaccess, .git/..., .env, .well-known/...
+			not path */.*
 			# A URL ending in a slash is a page of the application, not a folder to list.
 			not path */
 		}

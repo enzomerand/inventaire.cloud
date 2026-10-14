@@ -111,10 +111,14 @@ EXPOSE 8080
 
 # /up answers 200 before and after the installation. Before the server starts the entrypoint
 # updates or installs the instance, and a migration can take minutes: failed probes do not
-# count during the start period (10 minutes, the longest a second upgrade waits for a running
-# migration), and start-interval probes every 5 seconds meanwhile so that the container turns
-# healthy as soon as it can.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10m --start-interval=5s --retries=3 \
+# count during the start period, and start-interval probes every 5 seconds meanwhile so that
+# the container turns healthy as soon as it can.
+# The start period is 20 minutes, which is the longest a starting container can legitimately
+# take: up to 10 minutes waiting for another upgrade's migration (DatabaseMigrator::LOCK_WAIT,
+# 600 seconds), then its own migration check and the cache rebuild, with as much time again
+# in reserve. The wait is kept as it is and this period sized from it: if LOCK_WAIT changes,
+# change this value with it, keeping it above twice the wait.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20m --start-interval=5s --retries=3 \
     CMD curl -fsS -o /dev/null http://127.0.0.1:8080/up || exit 1
 
 LABEL org.opencontainers.image.title="inventaire.cloud" \

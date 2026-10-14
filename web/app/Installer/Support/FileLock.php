@@ -39,7 +39,8 @@ final class FileLock
      * @return T
      *
      * @throws LockBusyException When somebody else holds the lock for longer than $wait.
-     * @throws InstallationException When the lock file cannot be opened.
+     * @throws InstallationException When the lock file cannot be opened, or the filesystem refuses the lock
+     *                               for a reason other than somebody else holding it (no lock support, no lock slot left).
      */
     public static function exclusively(string $path, Closure $callback, float $wait = self::DEFAULT_WAIT): mixed
     {
@@ -62,8 +63,17 @@ final class FileLock
         }
 
         $deadline = microtime(true) + $wait;
+        $wouldBlock = 0;
 
-        while (! flock($handle, LOCK_EX | LOCK_NB)) {
+        while (! flock($handle, LOCK_EX | LOCK_NB, $wouldBlock)) {
+            // Only "somebody else holds it" is worth waiting for. Any other refusal (a filesystem without
+            // locks, ENOLCK) would never go away: fail now instead of waiting and blaming a phantom holder.
+            if ($wouldBlock !== 1) {
+                fclose($handle);
+
+                throw new InstallationException('Cannot lock :path: the filesystem refused the lock.', ['path' => AtomicFile::display($path)]);
+            }
+
             if (microtime(true) >= $deadline) {
                 fclose($handle);
 

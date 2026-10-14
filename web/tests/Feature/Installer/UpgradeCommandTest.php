@@ -9,6 +9,8 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Symfony\Component\Process\Exception\ProcessStartFailedException;
+use Symfony\Component\Process\Process;
 
 /**
  * Replaces one of the framework's (or a package's) commands with a stand-in that
@@ -233,6 +235,69 @@ describe('the process runner', function (): void {
         [$status, $output] = (new ProcessArtisanRunner)->run('no:such-command');
 
         expect($status)->not->toBe(0)->and($output)->toContain('no:such-command');
+    });
+
+    /**
+     * A runner whose child is a shell script instead of artisan.
+     *
+     * @param  string  $script  The body of the script.
+     * @param  int  $timeout  Seconds the child may take.
+     */
+    function runnerOfScript(string $directory, string $script, int $timeout = 30): ProcessArtisanRunner
+    {
+        $path = $directory.'/child.sh';
+        file_put_contents($path, "#!/bin/sh\n".$script."\n");
+        chmod($path, 0700);
+
+        return new ProcessArtisanRunner(fn (string $command): Process => new Process([$path, $command], $directory, timeout: $timeout));
+    }
+
+    it('reports a child killed by the system as a failed run, with what it printed before', function (): void {
+        [$status, $output] = runnerOfScript($this->sandbox->root, 'echo "compiling..."; kill -9 $$')->run('view:cache');
+
+        expect($status)->toBe(1)
+            ->and($output)->toContain('Stopped by signal 9')
+            ->and($output)->toContain('ran out of memory')
+            ->and($output)->toContain('compiling...');
+    });
+
+    it('reports a child that takes too long as a failed run', function (): void {
+        [$status, $output] = runnerOfScript($this->sandbox->root, 'exec sleep 30', timeout: 1)->run('view:cache');
+
+        expect($status)->toBe(1)->and($output)->toBe('Timed out after 1 seconds.');
+    });
+
+    it('reports a child that cannot be started as a failed run', function (): void {
+        $factory = fn (): Process => new class(['php']) extends Process
+        {
+            public function run(?callable $callback = null, array $env = []): int
+            {
+                throw new ProcessStartFailedException($this, 'fork failed: resource temporarily unavailable');
+            }
+        };
+
+        [$status, $output] = (new ProcessArtisanRunner($factory))->run('view:cache');
+
+        expect($status)->toBe(1)->and($output)->toBe('Could not start PHP: Error: fork failed: resource temporarily unavailable');
+    });
+
+    it('reports a child that cannot be set up as a failed run', function (): void {
+        $factory = fn (string $command): Process => new Process([PHP_BINARY, '-v'], $this->sandbox->root.'/missing-directory');
+
+        [$status, $output] = (new ProcessArtisanRunner($factory))->run('view:cache');
+
+        expect($status)->toBe(1)->and($output)->toContain('Could not start PHP:')->and($output)->toContain('missing-directory');
+    });
+
+    it('lets inventaire:upgrade go on and succeed when the cache commands are killed', function (): void {
+        app()->instance(ArtisanRunner::class, runnerOfScript($this->sandbox->root, 'kill -9 $$'));
+
+        $this->artisan('inventaire:upgrade', ['--optimize' => true])
+            ->expectsOutputToContain('Stopped by signal 9')
+            ->expectsOutputToContain('The command config:cache failed')
+            ->expectsOutputToContain('The command view:cache failed')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
     });
 });
 

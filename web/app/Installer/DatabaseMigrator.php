@@ -35,7 +35,7 @@ use Throwable;
  */
 final class DatabaseMigrator
 {
-    /** How long a caller waits for another migration to finish, in seconds. */
+    /** How long a caller waits for another migration to finish, in seconds. The Docker image's HEALTHCHECK start period (Dockerfile) is sized from it: keep it above twice this. */
     public const LOCK_WAIT = 600.0;
 
     /** Name of the temporary connection {@see self::migrateOn()} registers. */

@@ -42,6 +42,7 @@
     "Cannot connect to the database: :reason": "Connexion à la base de données impossible : :reason",
     "Cannot create the directory :path.": "Impossible de créer le dossier :path.",
     "Cannot lock :path.": "Impossible de verrouiller :path.",
+    "Cannot lock :path: the filesystem refused the lock.": "Impossible de verrouiller :path : le système de fichiers a refusé le verrou.",
     "Cannot reach Documenso at this address.": "Impossible de joindre Documenso à cette adresse.",
     "Cannot reach the mail server: :reason": "Impossible de joindre le serveur de messagerie : :reason",
     "Cannot read the setup token.": "Impossible de lire le jeton d'installation.",

@@ -183,7 +183,7 @@ git pull
 docker compose up -d --build
 ```
 
-When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If a migration fails the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. Compose restarts the worker and the scheduler whenever it recreates or restarts `app` (`restart: true` in their `depends_on`), so they run the new code once the application is healthy. Back up before updating.
+When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If the update fails (a migration, for instance) the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. Compose restarts the worker and the scheduler whenever it recreates or restarts `app` (`restart: true` in their `depends_on`), so they run the new code once the application is healthy. Back up before updating.
 
 To run the update by hand, without recreating the containers:
 
@@ -195,15 +195,6 @@ docker compose restart worker scheduler
 ### Another database server
 
 `docker/compose.yaml` bundles PostgreSQL. To use a server you already have (PostgreSQL, MySQL or MariaDB), delete the `db` service, the `depends_on` entry of `app` that waits for it, and the `DB_*` lines of the shared environment. The wizard's database step is then editable; or put `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` in `docker/.env` to install without the wizard. Commented examples of bundled MySQL and MariaDB services are at the end of the file.
-
-### Updating
-
-```bash
-git pull
-docker compose up -d --build
-```
-
-When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If that fails the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. The worker and the scheduler restart on the new image once the application is healthy. Back up before updating.
 
 ### Reverse proxy and HTTPS
 
