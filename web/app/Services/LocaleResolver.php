@@ -76,6 +76,17 @@ final class LocaleResolver
     }
 
     /**
+     * The locale the current request is answered in (set by the SetLocale
+     * middleware). Always a supported locale.
+     */
+    public function resolved(): string
+    {
+        $locale = app()->getLocale();
+
+        return $this->isSupported($locale) ? $locale : config()->string('app.locale');
+    }
+
+    /**
      * Builds the cookie that remembers a locale for a year.
      *
      * Path, domain, Secure and SameSite follow the session cookie settings;

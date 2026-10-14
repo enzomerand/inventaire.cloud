@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Installer\Settings\DatabaseSettings;
+use Symfony\Component\Mime\Email;
 use Tests\TestCase;
 
 /*
@@ -77,4 +78,44 @@ function containerEnvironment(): array
         'MAIL_MAILER' => 'smtp', 'MAIL_HOST' => 'smtp.example.test', 'MAIL_PORT' => '587',
         'MAIL_FROM_ADDRESS' => 'hello@example.test', 'MAIL_FROM_NAME' => 'My Shop', 'FILESYSTEM_DISK' => 'local',
     ];
+}
+
+/**
+ * The headers of a call made by the web front: an API request from the application's own host, which Sanctum treats
+ * as stateful (session and CSRF protection). Without them an API call is stateless, as a script's would be.
+ *
+ * @param  array<string, string>  $extra
+ * @return array<string, string>
+ */
+function frontend(array $extra = []): array
+{
+    $origin = rtrim(config()->string('app.url'), '/');
+
+    return $extra + ['Origin' => $origin, 'Referer' => $origin.'/login'];
+}
+
+/**
+ * The emails the application sent so far in this test (the "array" mailer keeps them).
+ *
+ * @return list<Email>
+ */
+function sentMails(): array
+{
+    $transport = app('mailer')->getSymfonyTransport();
+
+    return $transport->messages()->map(fn ($message) => $message->getOriginalMessage())->values()->all();
+}
+
+/**
+ * The 6-digit code in the last email sent, as the person would read it.
+ */
+function lastSentCode(): string
+{
+    $mails = sentMails();
+
+    expect($mails)->not->toBe([], 'No email was sent.');
+
+    preg_match('/\b(\d{6})\b/', (string) end($mails)->getTextBody(), $matches);
+
+    return $matches[1] ?? '';
 }

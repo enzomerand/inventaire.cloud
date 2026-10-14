@@ -1,0 +1,268 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Models\LoginCode;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
+
+uses(RefreshDatabase::class);
+
+/**
+ * Asks for a code the way the web front does.
+ *
+ * @param  array<string, string>  $headers
+ */
+function askForCode(object $test, string $email, array $headers = []): TestResponse
+{
+    return $test->postJson('/api/v1/auth/code', ['email' => $email], frontend($headers));
+}
+
+describe('requesting a code', function (): void {
+    it('emails a six-digit code to the address', function (): void {
+        askForCode($this, 'ada@example.com')
+            ->assertOk()
+            ->assertExactJson(['data' => ['email' => 'ada@example.com', 'expires_in' => 600]]);
+
+        $mails = sentMails();
+
+        expect($mails)->toHaveCount(1)
+            ->and($mails[0]->getTo()[0]->getAddress())->toBe('ada@example.com')
+            ->and(lastSentCode())->toMatch('/^\d{6}$/')
+            ->and($mails[0]->getSubject())->toContain(lastSentCode());
+    });
+
+    it('sends a plain text body and a simple HTML one, with nothing fetched from outside', function (): void {
+        askForCode($this, 'ada@example.com')->assertOk();
+
+        $mail = sentMails()[0];
+        $code = lastSentCode();
+
+        expect($mail->getTextBody())->toContain($code)->toContain('10')
+            ->and($mail->getHtmlBody())->toContain($code)->toContain('<html')
+            ->and($mail->getHtmlBody())->not->toContain('http://')->not->toContain('https://')->not->toContain('<img')->not->toContain('<script')->not->toContain('<link');
+    });
+
+    it('stores only a hash of the code', function (): void {
+        askForCode($this, 'ada@example.com')->assertOk();
+
+        $row = LoginCode::query()->findOrFail('ada@example.com');
+
+        expect($row->code_hash)->toBe(hash_hmac('sha256', lastSentCode(), config()->string('app.key')))
+            ->and($row->code_hash)->not->toBe(lastSentCode())
+            ->and($row->attempts)->toBe(0);
+    });
+
+    it('is valid for ten minutes', function (): void {
+        $this->freezeSecond();
+
+        askForCode($this, 'ada@example.com')->assertOk();
+
+        expect(LoginCode::query()->findOrFail('ada@example.com')->expires_at->equalTo(now()->addMinutes(10)))->toBeTrue();
+    });
+
+    it('normalizes the address to lowercase before storing and mailing', function (): void {
+        askForCode($this, "  Ada.Lovelace@Example.COM \n")->assertOk()->assertJsonPath('data.email', 'ada.lovelace@example.com');
+
+        expect(LoginCode::query()->pluck('email')->all())->toBe(['ada.lovelace@example.com'])
+            ->and(sentMails()[0]->getTo()[0]->getAddress())->toBe('ada.lovelace@example.com');
+    });
+
+    it('replaces the previous code of the address', function (): void {
+        askForCode($this, 'ada@example.com')->assertOk();
+        $first = lastSentCode();
+        askForCode($this, 'ADA@example.com')->assertOk();
+        $second = lastSentCode();
+
+        expect(LoginCode::query()->count())->toBe(1)
+            ->and(LoginCode::query()->findOrFail('ada@example.com')->code_hash)->toBe(hash_hmac('sha256', $second, config()->string('app.key')))
+            ->and(sentMails())->toHaveCount(2);
+
+        if ($first !== $second) {
+            $this->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => $first, 'name' => 'Ada'], frontend())
+                ->assertUnprocessable()
+                ->assertJsonPath('code', 'login_code_wrong');
+        }
+    });
+
+    it('writes the mail in the language of the request', function (string $header, string $subject): void {
+        askForCode($this, 'ada@example.com', ['Accept-Language' => $header])->assertOk();
+
+        expect(sentMails()[0]->getSubject())->toStartWith($subject)
+            ->and(sentMails()[0]->getTextBody())->toContain($subject === 'Your' ? 'valid for 10 minutes' : 'valable 10 minutes');
+    })->with([
+        'english' => ['en', 'Your'],
+        'french' => ['fr', 'Votre'],
+    ]);
+
+    it('writes the mail in the language of the cookie when there is one', function (): void {
+        // JSON calls only carry cookies when asked to.
+        $this->withCredentials()->withUnencryptedCookie('locale', 'fr');
+
+        askForCode($this, 'ada@example.com', ['Accept-Language' => 'en'])->assertOk();
+
+        expect(sentMails()[0]->getSubject())->toStartWith('Votre code');
+    });
+
+    it('is sent at once, even when the queue is not a synchronous one', function (): void {
+        config(['queue.default' => 'database']);
+
+        askForCode($this, 'ada@example.com')->assertOk();
+
+        expect(sentMails())->toHaveCount(1);
+    });
+
+    it('drops the code when the mail cannot be sent', function (): void {
+        config([
+            'mail.default' => 'unreachable',
+            'mail.mailers.unreachable' => ['transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1],
+        ]);
+
+        askForCode($this, 'ada@example.com')->assertServerError();
+
+        expect(LoginCode::query()->count())->toBe(0);
+    });
+});
+
+describe('what the answer gives away', function (): void {
+    it('is the same whether the address has an account or not', function (): void {
+        User::factory()->create(['email' => 'known@example.com']);
+
+        $known = askForCode($this, 'known@example.com');
+        $unknown = askForCode($this, 'unknown@example.com');
+
+        expect($known->getStatusCode())->toBe($unknown->getStatusCode())
+            ->and(str_replace('known@', 'x@', (string) $known->getContent()))->toBe(str_replace('unknown@', 'x@', (string) $unknown->getContent()))
+            ->and($known->headers->get('Content-Type'))->toBe($unknown->headers->get('Content-Type'));
+    });
+
+    it('does the same work for both: a code stored and a mail sent, without ever reading the users', function (): void {
+        User::factory()->create(['email' => 'known@example.com']);
+        DB::enableQueryLog();
+
+        askForCode($this, 'known@example.com')->assertOk();
+        askForCode($this, 'unknown@example.com')->assertOk();
+
+        $queries = collect(DB::getQueryLog())->pluck('query')->implode("\n");
+
+        expect($queries)->not->toContain('"users"')->not->toContain('`users`')
+            ->and(LoginCode::query()->count())->toBe(2)
+            ->and(sentMails())->toHaveCount(2);
+    });
+
+    it('does not create an account', function (): void {
+        askForCode($this, 'new@example.com')->assertOk();
+
+        expect(User::query()->count())->toBe(0);
+    });
+});
+
+describe('validation', function (): void {
+    it('refuses a missing or malformed address in JSON', function (mixed $email): void {
+        $this->postJson('/api/v1/auth/code', ['email' => $email], frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email');
+
+        expect(sentMails())->toBe([])->and(LoginCode::query()->count())->toBe(0);
+    })->with([
+        'missing' => [null],
+        'not an address' => ['not-an-address'],
+        'no domain' => ['ada@'],
+        'too long' => [str_repeat('a', 250).'@example.com'],
+        'a list' => [['a@example.com']],
+    ]);
+
+    it('answers in JSON even without an Accept header', function (): void {
+        $response = $this->call('POST', '/api/v1/auth/code', server: ['HTTP_REFERER' => 'http://localhost/login', 'CONTENT_TYPE' => 'application/json'], content: '{"email":"nope"}');
+
+        $response->assertUnprocessable()->assertHeader('Content-Type', 'application/json');
+    });
+});
+
+describe('throttling', function (): void {
+    it('allows three codes per address in ten minutes, then answers 429 with Retry-After', function (): void {
+        foreach (range(1, 3) as $ignored) {
+            askForCode($this, 'ada@example.com')->assertOk();
+        }
+
+        $response = askForCode($this, 'ada@example.com')->assertStatus(429);
+
+        expect((int) $response->headers->get('Retry-After'))->toBeBetween(1, 600)
+            ->and($response->headers->get('Content-Type'))->toBe('application/json')
+            ->and(sentMails())->toHaveCount(3);
+    });
+
+    it('counts the address in canonical form: capitals do not buy more codes', function (): void {
+        foreach (['ada@example.com', 'ADA@example.com', ' Ada@Example.com'] as $email) {
+            askForCode($this, $email)->assertOk();
+        }
+
+        askForCode($this, 'aDa@EXAMPLE.com')->assertStatus(429);
+    });
+
+    it('does not let one address use up the codes of another', function (): void {
+        foreach (range(1, 3) as $ignored) {
+            askForCode($this, 'ada@example.com')->assertOk();
+        }
+
+        askForCode($this, 'grace@example.com')->assertOk();
+    });
+
+    it('limits the codes sent from one IP address, whatever the addresses', function (): void {
+        config(['auth.login_codes.send_per_ip' => ['attempts' => 4, 'minutes' => 10]]);
+
+        foreach (range(1, 4) as $number) {
+            askForCode($this, "person{$number}@example.com")->assertOk();
+        }
+
+        askForCode($this, 'person5@example.com')->assertStatus(429);
+    });
+
+    it('limits an unknown address exactly like a known one', function (): void {
+        User::factory()->create(['email' => 'known@example.com']);
+
+        foreach (['known@example.com', 'unknown@example.com'] as $email) {
+            foreach (range(1, 3) as $ignored) {
+                askForCode($this, $email)->assertOk();
+            }
+
+            askForCode($this, $email)->assertStatus(429);
+        }
+    });
+});
+
+describe('who may call it', function (): void {
+    it('is the web front only: a call from elsewhere is refused with a reason', function (): void {
+        $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'not_stateful');
+
+        $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'], ['Referer' => 'https://elsewhere.example.test/login'])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'not_stateful');
+
+        expect(sentMails())->toBe([])->and(LoginCode::query()->count())->toBe(0);
+    });
+
+    it('works from the host of APP_URL, whatever it is, with its port', function (): void {
+        // The list of stateful hosts is built from APP_URL when the configuration loads: build it as an instance would.
+        config(['app.url' => 'https://inventory.example.test:8443']);
+        config(['sanctum.stateful' => (require config_path('sanctum.php'))['stateful']]);
+
+        $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'], ['Origin' => 'https://inventory.example.test:8443', 'Referer' => 'https://inventory.example.test:8443/login'])
+            ->assertOk();
+
+        // The same host without its port is another origin.
+        $this->postJson('/api/v1/auth/code', ['email' => 'grace@example.com'], ['Referer' => 'https://inventory.example.test/login'])
+            ->assertForbidden();
+    });
+
+    it('works from any host listed in SANCTUM_STATEFUL_DOMAINS', function (): void {
+        config(['sanctum.stateful' => ['lan.example.test:9000']]);
+
+        $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'], ['Referer' => 'http://lan.example.test:9000/login'])->assertOk();
+        $this->postJson('/api/v1/auth/code', ['email' => 'grace@example.com'], frontend())->assertForbidden();
+    });
+});

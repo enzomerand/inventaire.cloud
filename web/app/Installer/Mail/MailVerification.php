@@ -7,6 +7,7 @@ namespace App\Installer\Mail;
 use App\Installer\Probes\MailProbe;
 use App\Installer\Probes\ProbeResult;
 use App\Installer\Settings\MailSettings;
+use App\Services\OneTimeCode;
 use Closure;
 use Illuminate\Config\Repository;
 
@@ -40,7 +41,7 @@ final class MailVerification
     {
         $code = $this->codeGenerator !== null
             ? ($this->codeGenerator)()
-            : str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
+            : OneTimeCode::generate();
         $lifetime = $this->config->integer('installer.mail_code.lifetime_minutes');
 
         $result = $this->probe->sendCode($settings, $recipient, $code, $lifetime);

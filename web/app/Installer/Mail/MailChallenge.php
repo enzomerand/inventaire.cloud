@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Installer\Mail;
 
+use App\Services\OneTimeCode;
+
 /**
  * A pending email verification: the values being tested and the code that was
  * sent for them.
@@ -40,7 +42,7 @@ final readonly class MailChallenge
      */
     public static function issue(array $values, string $recipient, string $code, string $key, int $lifetimeMinutes, ?int $now = null): self
     {
-        return new self($values, $recipient, self::hash($code, $key), ($now ?? time()) + $lifetimeMinutes * 60, 0, bin2hex(random_bytes(8)));
+        return new self($values, $recipient, OneTimeCode::hash($code, $key), ($now ?? time()) + $lifetimeMinutes * 60, 0, bin2hex(random_bytes(8)));
     }
 
     /**
@@ -59,7 +61,7 @@ final readonly class MailChallenge
             return [MailCodeOutcome::TooManyAttempts, $this];
         }
 
-        if (hash_equals($this->codeHash, self::hash(trim($submitted), $key))) {
+        if (OneTimeCode::matches($submitted, $this->codeHash, $key)) {
             return [MailCodeOutcome::Accepted, $this];
         }
 
@@ -113,10 +115,5 @@ final readonly class MailChallenge
         }
 
         return new self($data['values'], $data['recipient'], $data['code_hash'], $data['expires_at'], $data['attempts'], $data['id']);
-    }
-
-    private static function hash(string $code, string $key): string
-    {
-        return hash_hmac('sha256', $code, $key);
     }
 }
