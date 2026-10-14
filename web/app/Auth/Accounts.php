@@ -12,7 +12,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
  * Creating accounts.
  *
  * Every account is created through here, so that an address is always stored
- * in canonical form (see {@see User::normalizeEmail()}) and that two requests
+ * in canonical form (see {@see EmailAddress::normalize()}) and that two requests
  * racing for the same address end up with one account. An address is marked
  * verified when its owner first signs in, with a code sent to it.
  */
@@ -32,7 +32,7 @@ final class Accounts
      */
     public function register(string $email, string $name, ?string $locale, bool $administrator = false): array
     {
-        $email = User::normalizeEmail($email);
+        $email = EmailAddress::normalize($email);
 
         try {
             $user = new User(['name' => $name, 'email' => $email, 'locale' => $locale]);
@@ -43,7 +43,8 @@ final class Accounts
 
             return [$user, true];
         } catch (UniqueConstraintViolationException) {
-            return [User::query()->where('email', $email)->firstOrFail(), false];
+            // A locking read sees the winner's committed row even from inside a REPEATABLE READ transaction (MySQL, MariaDB).
+            return [User::query()->where('email', $email)->lockForUpdate()->firstOrFail(), false];
         }
     }
 
@@ -60,7 +61,7 @@ final class Accounts
      */
     public function administrator(string $email, string $name): array
     {
-        $email = User::normalizeEmail($email);
+        $email = EmailAddress::normalize($email);
         $user = User::query()->where('email', $email)->first();
 
         if ($user === null) {

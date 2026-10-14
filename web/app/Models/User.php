@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Auth\EmailAddress;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -63,32 +64,24 @@ class User extends Authenticatable implements HasLocalePreference
     }
 
     /**
-     * The canonical form of an email address: trimmed and in lowercase.
+     * Stores the address in its canonical form ({@see EmailAddress::normalize()}), whatever path creates the user.
      *
-     * Addresses are stored this way and looked up this way, because the unique
-     * index of PostgreSQL is case-sensitive while MySQL and MariaDB's is not:
-     * without it the same person could own two accounts on one engine and one
-     * on another.
-     */
-    public static function normalizeEmail(string $email): string
-    {
-        return mb_strtolower(trim($email));
-    }
-
-    /**
-     * Stores the address in its canonical form, whatever path creates the user.
+     * Addresses are stored this way and looked up this way: the database then compares them exactly (the email
+     * columns use a binary collation on MySQL and MariaDB, see the migration that sets it), so the same person
+     * cannot own two accounts, and a lookalike address cannot reach somebody else's.
      *
      * @return Attribute<string, string>
      */
     protected function email(): Attribute
     {
-        return Attribute::set(fn (string $value): string => self::normalizeEmail($value));
+        return Attribute::set(fn (string $value): string => EmailAddress::normalize($value));
     }
 
     /**
      * Accounts have no password, but the framework still asks for its hash: the "remember me" cookie is only
      * honoured when the user has one, as a string. A constant keeps it working; the cookie's real secret is the
-     * remember token, which is renewed whenever the person signs out.
+     * remember token, which every device of the account shares (signing out of one device keeps it, so the
+     * others stay signed in; "sign out everywhere" renews it).
      */
     public function getAuthPassword(): string
     {

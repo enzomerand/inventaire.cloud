@@ -69,6 +69,9 @@ final class ConsoleInstaller
 
     private InstallerSteps $steps;
 
+    /** The address that read a verification code back at the mail step, suggested for the administrator. */
+    private ?string $verifiedAddress = null;
+
     /**
      * @param  Command  $command  The running command, for its options, output and plain lines.
      * @param  bool  $interactive  Whether a person can answer prompts (false with --no-interaction and --from-env).
@@ -324,6 +327,7 @@ final class ConsoleInstaller
             switch ($outcome) {
                 case MailCodeOutcome::Accepted:
                     $this->steps->completeMail($challenge);
+                    $this->verifiedAddress = $challenge->recipient;
 
                     return true;
 
@@ -402,7 +406,7 @@ final class ConsoleInstaller
             return $provided;
         }
 
-        $defaults = $provided + $previous + $this->settings->current($step);
+        $defaults = $provided + $previous + $this->settings->withSuggestions($step, $this->settings->current($step), $this->verifiedAddress);
         $values = [];
 
         foreach ($step->fields() as $field) {

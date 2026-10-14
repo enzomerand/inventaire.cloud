@@ -84,19 +84,25 @@ return [
     |
     | People sign in with a 6-digit code sent to their email address. A code is
     | valid for a few minutes and for a few wrong guesses; asking for a new one
-    | replaces the previous one. Sending is limited per address (so nobody's
-    | inbox can be flooded) and per IP address (so the instance cannot be used
-    | to mail arbitrary people); typing codes back is limited per IP address and
-    | address, on top of the attempts allowed for each code.
+    | replaces the previous one. Sending is limited per address and network
+    | together (somebody asking again and again), per address alone (so nobody's
+    | inbox can be flooded from many networks) and per network alone (so the
+    | instance cannot be used to mail arbitrary people); an IPv6 client counts
+    | as its whole /64. Typing codes back is limited per network and address, on
+    | top of the attempts allowed for each code, and wrong codes are also
+    | counted per address over a longer period, whatever the codes they were
+    | typed against: asking for a new code does not give guesses back.
     |
     */
 
     'login_codes' => [
         'lifetime_minutes' => 10,
         'max_attempts' => 5,
-        'send_per_email' => ['attempts' => 3, 'minutes' => 10],
+        'send_per_email_and_ip' => ['attempts' => 3, 'minutes' => 10],
+        'send_per_email' => ['attempts' => 10, 'minutes' => 60],
         'send_per_ip' => ['attempts' => 20, 'minutes' => 10],
         'verify_per_minute' => 10,
+        'failures_per_email' => ['attempts' => 10, 'minutes' => 60],
     ],
 
 ];

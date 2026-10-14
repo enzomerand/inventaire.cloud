@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Auth;
 
-use App\Models\User;
+use App\Auth\EmailAddress;
 use App\Services\OneTimeCode;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -23,23 +23,23 @@ final class VerifyLoginCodeRequest extends FormRequest
     }
 
     /**
-     * @return array<string, list<string>>
+     * @return array<string, list<mixed>>
      */
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email', 'max:255'],
+            'email' => EmailAddress::rules(),
             'code' => ['required', 'string', 'digits:'.OneTimeCode::LENGTH],
             'name' => ['nullable', 'string', 'max:255'],
         ];
     }
 
     /**
-     * The address in its canonical form (lowercase, trimmed).
+     * The address in its canonical form ({@see EmailAddress::normalize()}).
      */
     public function email(): string
     {
-        return User::normalizeEmail($this->string('email')->toString());
+        return EmailAddress::normalize($this->string('email')->toString());
     }
 
     /**
@@ -68,7 +68,7 @@ final class VerifyLoginCodeRequest extends FormRequest
         $clean = [];
 
         if (is_string($this->input('email'))) {
-            $clean['email'] = User::normalizeEmail($this->input('email'));
+            $clean['email'] = EmailAddress::normalize($this->input('email'));
         }
 
         if (is_string($this->input('code'))) {

@@ -12,6 +12,7 @@ use App\Installer\InstallerSettings;
 use App\Installer\InstallStep;
 use App\Installer\Mail\MailAttemptStore;
 use App\Installer\Mail\MailVerification;
+use App\Installer\Mail\SetupCodeMail;
 use App\Installer\Probes\MailProbe;
 use App\Installer\SetupToken;
 use App\Models\User;
@@ -104,6 +105,46 @@ describe('the administrator step', function (): void {
             ->assertJsonValidationErrors(['name', 'email']);
 
         expect(app(InstallationState::class)->status(InstallStep::Administrator))->toBe('pending');
+    });
+
+    it('stores the address in canonical form: lowercase, its domain in ASCII', function (): void {
+        $this->postJson('/install/administrator', ['name' => 'Jane Doe', 'email' => ' Jane@Gmäil.COM '])
+            ->assertOk()
+            ->assertJsonPath('statuses.administrator', 'done');
+
+        expect((new EnvironmentFile($this->sandbox->envPath(), $this->sandbox->envPath()))->all())->toMatchArray(['ADMIN_EMAIL' => 'jane@xn--gmil-moa.com']);
+    });
+
+    it('refuses an accent in the local part of the address', function (): void {
+        $this->postJson('/install/administrator', ['name' => 'Jane Doe', 'email' => 'jöhn@example.test'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email');
+
+        expect(app(InstallationState::class)->status(InstallStep::Administrator))->toBe('pending');
+    });
+
+    it('suggests the address that read the verification code back at the mail step', function (): void {
+        Mail::fake();
+        $this->postJson('/install/mail', ['host' => 'smtp.example.test', 'port' => 587, 'scheme' => '', 'username' => '', 'password' => '', 'from_address' => 'hello@example.test', 'from_name' => 'My Shop', 'test_recipient' => 'Admin@Example.test'])->assertOk();
+
+        $administratorEmail = function (): string {
+            preg_match('#id="installer-state">(.*?)</script>#s', $this->get('/install')->getContent(), $match);
+            $step = collect(json_decode($match[1], true)['steps'])->firstWhere('id', 'administrator');
+
+            return collect($step['fields'])->firstWhere('name', 'email')['value'];
+        };
+
+        // Not before the code was typed back: sending a code proves nothing.
+        expect($administratorEmail())->toBe('');
+
+        $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+
+        expect($administratorEmail())->toBe('admin@example.test');
+
+        // It is only a suggestion: what the administrator saves wins.
+        $this->postJson('/install/administrator', ['name' => 'Jane Doe', 'email' => 'jane@example.test'])->assertOk();
+
+        expect($administratorEmail())->toBe('jane@example.test');
     });
 
     it('is described to the page like every step, and cannot be skipped', function (): void {
@@ -260,7 +301,7 @@ describe('the installation, on the database being installed', function (): void 
         expect($rows)->toHaveCount(1)
             ->and($rows[0]->email)->toBe('jane@example.test')
             ->and((bool) $rows[0]->is_admin)->toBeTrue()
-            ->and(consoleAdminEnv($this))->toMatchArray(['ADMIN_NAME' => 'Jane Doe', 'ADMIN_EMAIL' => 'JANE@example.test']);
+            ->and(consoleAdminEnv($this))->toMatchArray(['ADMIN_NAME' => 'Jane Doe', 'ADMIN_EMAIL' => 'jane@example.test']);
     });
 
     it('stops a non-interactive console installation that has no administrator', function (): void {

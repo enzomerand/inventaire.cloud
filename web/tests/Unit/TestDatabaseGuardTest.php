@@ -42,3 +42,31 @@ it('refuses a missing database name', function (): void {
 it('refuses an unknown default connection', function (): void {
     TestDatabaseGuard::assertSafe(new Repository(['database' => ['default' => 'nope', 'connections' => []]]));
 })->throws(RuntimeException::class, 'not configured');
+
+/**
+ * A repository whose default connection is the dev database and which also has a test one.
+ */
+function twoConnections(): Repository
+{
+    return new Repository([
+        'database' => [
+            'default' => 'dev',
+            'connections' => [
+                'dev' => ['driver' => 'pgsql', 'database' => 'inventaire', 'url' => null],
+                'testing' => ['driver' => 'pgsql', 'database' => 'inventaire_test', 'url' => null],
+            ],
+        ],
+    ]);
+}
+
+it('judges the connection it is asked about instead of the default one', function (): void {
+    TestDatabaseGuard::assertSafe(twoConnections(), 'testing');
+})->throwsNoExceptions();
+
+it('refuses a named connection that is not a test database, even when the default one is', function (): void {
+    TestDatabaseGuard::assertSafe(twoConnections(), 'dev');
+})->throws(RuntimeException::class, 'does not end with');
+
+it('refuses a named connection that is not configured', function (): void {
+    TestDatabaseGuard::assertSafe(twoConnections(), 'nope');
+})->throws(RuntimeException::class, 'not configured');

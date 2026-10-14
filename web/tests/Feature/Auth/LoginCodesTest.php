@@ -174,6 +174,117 @@ describe('verifying a code', function (): void {
     });
 });
 
+describe('wrong codes over an hour', function (): void {
+    /**
+     * Types five wrong codes against a freshly issued code for the address, and returns that code.
+     */
+    function fiveWrongCodes(string $email): string
+    {
+        $code = codes()->issue($email);
+
+        foreach (range(1, 5) as $ignored) {
+            codes()->verify($email, wrongCode($code));
+        }
+
+        return $code;
+    }
+
+    it('lock an address that collected ten of them, whichever codes they were typed against', function (): void {
+        $this->freezeSecond();
+
+        fiveWrongCodes('ada@example.com');
+        fiveWrongCodes('ada@example.com');
+
+        // A new code gives its five guesses back, but not the ten wrong codes already counted.
+        $fresh = codes()->issue('ada@example.com');
+        $verdict = codes()->verify('ada@example.com', $fresh);
+
+        expect($verdict->outcome)->toBe(LoginCodeOutcome::Locked)
+            ->and($verdict->accepted())->toBeFalse()
+            ->and($verdict->retryAfter)->toBe(3600)
+            // Nothing was spent: the code is still there, with all its attempts.
+            ->and(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(0);
+    });
+
+    it('lock the address for the right code as well as for a wrong one', function (): void {
+        fiveWrongCodes('ada@example.com');
+        fiveWrongCodes('ada@example.com');
+        $code = codes()->issue('ada@example.com');
+
+        expect(codes()->verify('ada@example.com', wrongCode($code))->outcome)->toBe(LoginCodeOutcome::Locked)
+            ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Locked);
+    });
+
+    it('slide: the address is released when the oldest of them is an hour old', function (): void {
+        $this->freezeSecond();
+
+        fiveWrongCodes('ada@example.com');
+        $this->travel(30)->minutes();
+        fiveWrongCodes('ada@example.com');
+
+        // Ten in the last hour: locked until the first five are an hour old, that is for 30 more minutes.
+        $code = codes()->issue('ada@example.com');
+        expect(codes()->verify('ada@example.com', $code, consume: false)->retryAfter)->toBe(1800);
+
+        // A second before the hour is up (the code asked for meanwhile is a new one: they only last ten minutes).
+        $this->travel(1799)->seconds();
+        $code = codes()->issue('ada@example.com');
+        expect(codes()->verify('ada@example.com', $code, consume: false))->outcome->toBe(LoginCodeOutcome::Locked)->retryAfter->toBe(1);
+
+        $this->travel(1)->seconds();
+        $code = codes()->issue('ada@example.com');
+        expect(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue();
+    });
+
+    it('count the guesses made at a code that is already burnt', function (): void {
+        $code = fiveWrongCodes('ada@example.com');
+
+        foreach (range(1, 4) as $ignored) {
+            expect(codes()->verify('ada@example.com', wrongCode($code))->outcome)->toBe(LoginCodeOutcome::TooManyAttempts);
+        }
+
+        // Five wrong codes and four more at the burnt code are nine: the tenth is still judged (and counted), the next one is locked.
+        expect(codes()->verify('ada@example.com', wrongCode($code))->outcome)->toBe(LoginCodeOutcome::TooManyAttempts)
+            ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Locked);
+    });
+
+    it('do not count a right code, nor codes typed for an address that has none', function (): void {
+        foreach (range(1, 12) as $ignored) {
+            expect(codes()->verify('nobody@example.com', '123456')->outcome)->toBe(LoginCodeOutcome::Expired);
+        }
+
+        foreach (range(1, 12) as $ignored) {
+            $code = codes()->issue('ada@example.com');
+            expect(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue();
+        }
+
+        $code = codes()->issue('nobody@example.com');
+        expect(codes()->verify('nobody@example.com', $code)->accepted())->toBeTrue();
+    });
+
+    it('are counted for each address on its own', function (): void {
+        fiveWrongCodes('ada@example.com');
+        fiveWrongCodes('ada@example.com');
+
+        $code = codes()->issue('grace@example.com');
+
+        expect(codes()->verify('grace@example.com', $code)->accepted())->toBeTrue();
+    });
+
+    it('follow the limit in the configuration', function (): void {
+        config(['auth.login_codes.failures_per_email' => ['attempts' => 3, 'minutes' => 5]]);
+        $this->freezeSecond();
+
+        $code = codes()->issue('ada@example.com');
+
+        foreach (range(1, 3) as $ignored) {
+            codes()->verify('ada@example.com', wrongCode($code));
+        }
+
+        expect(codes()->verify('ada@example.com', $code))->outcome->toBe(LoginCodeOutcome::Locked)->retryAfter->toBe(300);
+    });
+});
+
 describe('the table', function (): void {
     it('has the columns the service relies on', function (): void {
         expect(Schema::getColumnListing('login_codes'))->toEqualCanonicalizing(['email', 'code_hash', 'expires_at', 'attempts', 'created_at']);

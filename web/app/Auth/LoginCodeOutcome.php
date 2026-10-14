@@ -9,7 +9,8 @@ namespace App\Auth;
  *
  * A missing code (never requested, replaced, already used or burnt) is
  * reported as {@see self::Expired}: from the outside they all mean "ask for a
- * new one".
+ * new one". {@see self::Locked} is different: the address collected too many
+ * wrong codes over the last hour, and asking for a new code will not help.
  */
 enum LoginCodeOutcome: string
 {
@@ -17,4 +18,5 @@ enum LoginCodeOutcome: string
     case Wrong = 'wrong';
     case Expired = 'expired';
     case TooManyAttempts = 'too_many_attempts';
+    case Locked = 'locked';
 }

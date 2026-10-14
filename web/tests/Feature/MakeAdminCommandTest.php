@@ -88,6 +88,24 @@ describe('inventaire:make-admin', function (): void {
         expect(User::query()->count())->toBe(0);
     })->with(['no domain' => ['jane@'], 'not an address' => ['jane'], 'spaces' => ['jane doe@example.test']]);
 
+    it('stores the address of a lookalike domain in ASCII, so that it is not taken for the real one', function (): void {
+        User::factory()->create(['email' => 'jane@gmail.com']);
+
+        $this->artisan('inventaire:make-admin', ['email' => 'Jane@Gmäil.com', '--name' => 'Mallory', '--no-interaction' => true])
+            ->expectsOutputToContain('administrator account of jane@xn--gmil-moa.com was created')
+            ->assertSuccessful();
+
+        expect(User::query()->orderBy('id')->pluck('is_admin', 'email')->all())->toBe(['jane@gmail.com' => false, 'jane@xn--gmil-moa.com' => true]);
+    });
+
+    it('refuses an accent in the local part, with the reason', function (): void {
+        $this->artisan('inventaire:make-admin', ['email' => 'jöhn@example.test', '--name' => 'John', '--no-interaction' => true])
+            ->expectsOutputToContain('accents or other special letters')
+            ->assertExitCode(2);
+
+        expect(User::query()->count())->toBe(0);
+    });
+
     it('refuses to run on an instance that is not installed', function (): void {
         $this->bootInstaller(installed: false);
 

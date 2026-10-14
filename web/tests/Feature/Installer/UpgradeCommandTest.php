@@ -103,13 +103,20 @@ it('does not run the post-migration hooks: they belong to the installation', fun
 
 it('fails when the migrations fail, and leaves the caches alone', function (): void {
     $driver = config('database.default');
+    $password = config("database.connections.{$driver}.password");
     config(["database.connections.{$driver}.password" => 'wrong-password']);
     DB::purge();
     file_put_contents(app()->getCachedRoutesPath(), '<?php return [];');
 
-    $this->artisan('inventaire:upgrade')
-        ->expectsOutputToContain('The database migration failed')
-        ->assertExitCode(1);
+    try {
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain('The database migration failed')
+            ->assertExitCode(1);
+    } finally {
+        // The cleanup that follows every installer test connects to the database: give it its password back.
+        config(["database.connections.{$driver}.password" => $password]);
+        DB::purge();
+    }
 
     expect(is_file(app()->getCachedRoutesPath()))->toBeTrue();
 });

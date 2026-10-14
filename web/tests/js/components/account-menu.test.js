@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import accountMenu from '../../../resources/js/components/account-menu.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
-import { redirectTo } from '../../../resources/js/lib/page.js';
+import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -55,6 +55,40 @@ describe('account menu', () => {
         expect(notify).toHaveBeenCalledWith('danger', 'Network down');
         expect(redirectTo).not.toHaveBeenCalled();
         expect(component.busy).toBe(false);
+    });
+
+    describe('when the page is stale (419)', () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('says the page is about to reload, and reloads it', async () => {
+            http.post.mockRejectedValue(new HttpError(419, 'Your session has expired. The page is about to reload.'));
+
+            await component.signOut();
+
+            expect(notify).toHaveBeenCalledWith('warning', 'Your session has expired. The page is about to reload.');
+            expect(redirectTo).not.toHaveBeenCalled();
+            expect(component.busy).toBe(false);
+            expect(reloadPage).not.toHaveBeenCalled();
+
+            vi.advanceTimersByTime(1500);
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not reload for the other failures', async () => {
+            http.post.mockRejectedValue(new HttpError(0, 'Network down', { kind: 'network' }));
+
+            await component.signOut();
+            vi.advanceTimersByTime(5000);
+
+            expect(reloadPage).not.toHaveBeenCalled();
+        });
     });
 
     it('stays silent when the request was cancelled', async () => {

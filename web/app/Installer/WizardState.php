@@ -108,7 +108,7 @@ final class WizardState
      */
     private function configurationStep(InstallStep $step, Request $request): array
     {
-        $values = $this->settings->current($step);
+        $values = $this->settings->withSuggestions($step, $this->settings->current($step), $this->mailChallenges->verifiedAddress($request->session()));
         $fields = [];
 
         foreach ($step->fields() as $field) {

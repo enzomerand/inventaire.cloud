@@ -7,9 +7,9 @@
  * the root), because the CSP build of Alpine does not allow Blade to inject
  * values into expressions.
  */
-import { HttpError, http } from '../lib/http.js';
+import { HttpError, http, scheduleNavigation } from '../lib/http.js';
 import { notify } from '../lib/notify.js';
-import { redirectTo } from '../lib/page.js';
+import { redirectTo, reloadPage } from '../lib/page.js';
 
 /**
  * @returns {Record<string, any>}
@@ -33,8 +33,10 @@ export default function accountMenu() {
          * Ends the session, then leaves for the home page.
          *
          * A 401 means the session was already over (another tab signed out):
-         * the outcome is the one that was asked for. Any other failure is shown
-         * and the person stays signed in, so they are not misled.
+         * the outcome is the one that was asked for. A 419 (the page is stale and
+         * its CSRF token could not be renewed) is shown and the page reloads, as
+         * the message says. Any other failure is shown and the person stays
+         * signed in, so they are not misled.
          *
          * @returns {Promise<void>}
          */
@@ -52,7 +54,12 @@ export default function accountMenu() {
                     this.busy = false;
 
                     if (error instanceof HttpError) {
-                        notify('danger', error.message);
+                        notify(error.status === 419 ? 'warning' : 'danger', error.message);
+
+                        // Silent calls are not reloaded by the HTTP helper; the message says the page will be.
+                        if (error.status === 419) {
+                            scheduleNavigation(reloadPage);
+                        }
                     }
 
                     return;

@@ -11,35 +11,6 @@ use Symfony\Component\HttpFoundation\Cookie;
 
 uses(RefreshDatabase::class);
 
-/**
- * Asks for a code the way the web front does, and returns it as read from the email.
- */
-function receiveCode(object $test, string $email, string $language = 'en'): string
-{
-    $test->postJson('/api/v1/auth/code', ['email' => $email], frontend(['Accept-Language' => $language]))->assertOk();
-
-    return lastSentCode();
-}
-
-/**
- * Types a code back the way the web front does.
- *
- * @param  array<string, mixed>  $fields
- * @param  array<string, string>  $headers
- */
-function typeCode(object $test, string $email, string $code, array $fields = [], array $headers = []): TestResponse
-{
-    return $test->postJson('/api/v1/auth/verify', ['email' => $email, 'code' => $code] + $fields, frontend($headers));
-}
-
-/**
- * A code that is not the pending one.
- */
-function wrongCode(string $right): string
-{
-    return $right === '000000' ? '111111' : '000000';
-}
-
 describe('an existing account', function (): void {
     it('signs in with the right code', function (): void {
         $user = User::factory()->create(['name' => 'Ada Lovelace', 'email' => 'ada@example.com']);
@@ -346,7 +317,7 @@ describe('staying signed in', function (): void {
             ->assertJsonPath('data.id', $user->id);
     });
 
-    it('does not bring back a person who signed out', function (): void {
+    it('tells the browser to forget the cookie when the person signs out, and then brings nobody back', function (): void {
         User::factory()->create(['email' => 'ada@example.com']);
         $response = typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com'))->assertOk();
         $remember = rememberCookie($response);
@@ -358,12 +329,43 @@ describe('staying signed in', function (): void {
 
         expect($forgotten)->not->toBeNull()->and($forgotten->getExpiresTime())->toBeLessThan(time());
 
+        // The browser obeyed: the session is gone and there is no cookie left to bring the person back.
         $this->flushSession();
+        $this->flushHeaders();
+        $this->defaultCookies = [];
+        $this->unencryptedCookies = [];
         $this->app['auth']->forgetGuards();
 
-        $this->withCredentials()->withUnencryptedCookie($remember->getName(), $remember->getValue())
+        $this->getJson('/api/v1/me', frontend())->assertUnauthorized();
+    });
+
+    it('keeps the other devices of the account signed in when one signs out', function (): void {
+        $user = User::factory()->create(['email' => 'ada@example.com']);
+
+        $first = rememberCookie(typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com'))->assertOk());
+
+        // A second device signs in: its own session and cookie.
+        $this->flushSession();
+        $this->flushHeaders();
+        $this->app['auth']->forgetGuards();
+        $second = rememberCookie(typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com'))->assertOk());
+
+        // The first device signs out...
+        $this->flushSession();
+        $this->flushHeaders();
+        $this->app['auth']->forgetGuards();
+        $this->withCredentials()->withUnencryptedCookie($first->getName(), $first->getValue())
+            ->postJson('/api/v1/auth/logout', [], frontend())->assertNoContent();
+
+        // ...and the second one, whose session has expired since, is brought back by its cookie.
+        $this->flushSession();
+        $this->flushHeaders();
+        $this->app['auth']->forgetGuards();
+
+        $this->withCredentials()->withUnencryptedCookie($second->getName(), $second->getValue())
             ->getJson('/api/v1/me', frontend())
-            ->assertUnauthorized();
+            ->assertOk()
+            ->assertJsonPath('data.id', $user->id);
     });
 });
 
@@ -405,6 +407,154 @@ describe('the account language', function (): void {
     });
 });
 
+describe('too many wrong codes for an address', function (): void {
+    it('answers 429 with the time to wait, whichever codes were asked for in between', function (string $account): void {
+        if ($account === 'known') {
+            User::factory()->create(['email' => 'ada@example.com']);
+        }
+
+        $this->freezeSecond();
+
+        // Two codes, five wrong guesses at each (the per-minute throttle of the endpoint is left to cool down in between).
+        foreach ([1, 2] as $ignored) {
+            $code = receiveCode($this, 'ada@example.com');
+
+            foreach (range(1, 5) as $guess) {
+                typeCode($this, 'ada@example.com', wrongCode($code))->assertUnprocessable();
+            }
+
+            $this->travel(1)->minutes();
+        }
+
+        // A third code is a fresh set of five guesses, but the address already collected ten wrong codes.
+        $code = receiveCode($this, 'ada@example.com');
+
+        $response = typeCode($this, 'ada@example.com', $code)
+            ->assertStatus(429)
+            ->assertJsonPath('code', 'login_code_locked')
+            ->assertJsonPath('message', 'Too many incorrect codes for this address: try again later.');
+
+        expect((int) $response->headers->get('Retry-After'))->toBe(3480)
+            ->and($response->headers->get('Content-Type'))->toBe('application/json')
+            ->and(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(0);
+        $this->assertGuest('web');
+    })->with(['an account' => ['known'], 'an address without one' => ['unknown']]);
+
+    it('is answered the same for an account and for an address without one', function (): void {
+        User::factory()->create(['email' => 'known@example.com']);
+        $this->freezeSecond();
+
+        foreach ([1, 2] as $ignored) {
+            foreach (['known@example.com', 'unknown@example.com'] as $email) {
+                $code = receiveCode($this, $email);
+
+                foreach (range(1, 5) as $guess) {
+                    typeCode($this, $email, wrongCode($code));
+                }
+            }
+
+            $this->travel(1)->minutes();
+        }
+
+        $known = typeCode($this, 'known@example.com', receiveCode($this, 'known@example.com'));
+        $unknown = typeCode($this, 'unknown@example.com', receiveCode($this, 'unknown@example.com'));
+
+        expect($known->getStatusCode())->toBe(429)->and($unknown->getStatusCode())->toBe(429)
+            ->and($known->json())->toBe($unknown->json())
+            ->and($known->headers->get('Retry-After'))->toBe($unknown->headers->get('Retry-After'));
+    });
+
+    it('is answered in the language of the request', function (): void {
+        $this->freezeSecond();
+
+        foreach ([1, 2] as $ignored) {
+            $code = receiveCode($this, 'ada@example.com');
+
+            foreach (range(1, 5) as $guess) {
+                typeCode($this, 'ada@example.com', wrongCode($code));
+            }
+
+            $this->travel(1)->minutes();
+        }
+
+        typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com'), headers: ['Accept-Language' => 'fr'])
+            ->assertStatus(429)
+            ->assertJsonPath('message', 'Trop de codes incorrects pour cette adresse : réessayez plus tard.');
+    });
+
+    it('lets the other addresses sign in', function (): void {
+        $this->freezeSecond();
+
+        foreach ([1, 2] as $ignored) {
+            $code = receiveCode($this, 'ada@example.com');
+
+            foreach (range(1, 5) as $guess) {
+                typeCode($this, 'ada@example.com', wrongCode($code));
+            }
+
+            $this->travel(1)->minutes();
+        }
+
+        User::factory()->create(['email' => 'grace@example.com']);
+
+        typeCode($this, 'grace@example.com', receiveCode($this, 'grace@example.com'))->assertOk();
+    });
+});
+
+describe('a failure while signing in', function (): void {
+    it('does not burn the code when the account cannot be created', function (): void {
+        $code = receiveCode($this, 'new@example.com');
+        User::creating(fn () => throw new RuntimeException('Forced failure.'));
+
+        typeCode($this, 'new@example.com', $code, ['name' => 'Grace Hopper'])->assertServerError();
+
+        expect(LoginCode::query()->findOrFail('new@example.com')->attempts)->toBe(0)
+            ->and(User::query()->count())->toBe(0);
+        $this->assertGuest('web');
+
+        // The trouble is over: the same code, which was never spent, signs the person up.
+        User::flushEventListeners();
+
+        typeCode($this, 'new@example.com', $code, ['name' => 'Grace Hopper'])->assertCreated();
+        $this->assertAuthenticated('web');
+        expect(LoginCode::query()->count())->toBe(0);
+    });
+
+    it('does not burn the code when the account cannot be saved', function (): void {
+        User::factory()->unverified()->create(['email' => 'ada@example.com']);
+        $code = receiveCode($this, 'ada@example.com');
+        User::saving(fn () => throw new RuntimeException('Forced failure.'));
+
+        typeCode($this, 'ada@example.com', $code)->assertServerError();
+
+        expect(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(0)
+            ->and(User::query()->sole()->email_verified_at)->toBeNull();
+        $this->assertGuest('web');
+
+        User::flushEventListeners();
+
+        typeCode($this, 'ada@example.com', $code)->assertOk();
+        expect(User::query()->sole()->email_verified_at)->not->toBeNull();
+    });
+
+    it('still spends the code once the account is saved', function (): void {
+        $code = receiveCode($this, 'new@example.com');
+
+        typeCode($this, 'new@example.com', $code, ['name' => 'Grace Hopper'])->assertCreated();
+
+        expect(LoginCode::query()->count())->toBe(0);
+        typeCode($this, 'new@example.com', $code, ['name' => 'Grace Hopper'])->assertUnprocessable()->assertJsonPath('code', 'login_code_expired');
+    });
+
+    it('keeps the attempt that a wrong code cost, as before', function (): void {
+        $code = receiveCode($this, 'new@example.com');
+
+        typeCode($this, 'new@example.com', wrongCode($code), ['name' => 'Grace Hopper'])->assertUnprocessable();
+
+        expect(LoginCode::query()->findOrFail('new@example.com')->attempts)->toBe(1);
+    });
+});
+
 describe('throttling and access', function (): void {
     it('limits the codes typed from one address and IP, then answers 429', function (): void {
         $code = receiveCode($this, 'ada@example.com');
@@ -416,6 +566,27 @@ describe('throttling and access', function (): void {
         $response = typeCode($this, 'ada@example.com', wrongCode($code))->assertStatus(429);
 
         expect((int) $response->headers->get('Retry-After'))->toBeBetween(1, 60);
+    });
+
+    it('counts the codes typed from all the addresses of an IPv6 /64 together', function (): void {
+        // The cap on wrong codes per address would also answer 429 here: set it out of the way to see the throttle.
+        config(['auth.login_codes.failures_per_email' => ['attempts' => 1000, 'minutes' => 60]]);
+        $code = receiveCode($this, 'ada@example.com');
+
+        foreach (range(1, 10) as $number) {
+            $this->withServerVariables(['REMOTE_ADDR' => "2001:db8:aaaa:1::{$number}"])
+                ->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => wrongCode($code)], frontend())
+                ->assertUnprocessable();
+        }
+
+        $this->withServerVariables(['REMOTE_ADDR' => '2001:db8:aaaa:1:ffff::1'])
+            ->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => wrongCode($code)], frontend())
+            ->assertStatus(429)
+            ->assertJsonMissingPath('code');
+
+        $this->withServerVariables(['REMOTE_ADDR' => '2001:db8:aaaa:2::1'])
+            ->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => wrongCode($code)], frontend())
+            ->assertUnprocessable();
     });
 
     it('is the web front only', function (): void {

@@ -101,6 +101,7 @@ final class InstallStepController extends Controller
             case MailCodeOutcome::Accepted:
                 $this->saving(fn () => $this->steps->completeMail($kept));
                 $store->forget($session);
+                $store->rememberVerified($session, $kept->recipient);
 
                 return new JsonResponse($this->wizard->progress() + ['mailPending' => false]);
 

@@ -17,7 +17,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('login_codes', function (Blueprint $table) {
-            // Addresses are stored in lowercase (PostgreSQL compares case-sensitively, MySQL and MariaDB do not).
+            // Addresses are stored in canonical form (App\Auth\EmailAddress); the next migration makes MySQL and MariaDB compare them exactly.
             $table->string('email')->primary();
             $table->string('code_hash', 64);
             $table->timestamp('expires_at')->index();

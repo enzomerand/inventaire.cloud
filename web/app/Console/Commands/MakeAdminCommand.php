@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Auth\Accounts;
 use App\Auth\AdministratorChange;
+use App\Auth\EmailAddress;
 use App\Installer\InstallationState;
 use App\Models\User;
 use Illuminate\Console\Command;
@@ -40,8 +41,8 @@ final class MakeAdminCommand extends Command
         }
 
         $argument = $this->argument('email');
-        $email = User::normalizeEmail(is_string($argument) ? $argument : '');
-        $validator = Validator::make(['email' => $email], ['email' => ['required', 'email', 'max:255']], [], ['email' => __('Email address')]);
+        $email = EmailAddress::normalize(is_string($argument) ? $argument : '');
+        $validator = Validator::make(['email' => $email], ['email' => EmailAddress::rules()], [], ['email' => __('Email address')]);
 
         if ($validator->fails()) {
             $this->components->error($validator->errors()->first());

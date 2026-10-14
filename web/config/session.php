@@ -169,9 +169,14 @@ return [
     | to the server if the browser has a HTTPS connection. This will keep
     | the cookie from being sent to you when it can't be done securely.
     |
+    | When SESSION_SECURE_COOKIE is not set, cookies are HTTPS-only as soon as
+    | APP_URL is an https:// address (an instance behind a TLS-terminating
+    | reverse proxy is still reached over HTTPS by the browser). A value set
+    | explicitly always wins.
+    |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => env('SESSION_SECURE_COOKIE', str_starts_with(strtolower((string) env('APP_URL', '')), 'https://') ? true : null),
 
     /*
     |--------------------------------------------------------------------------

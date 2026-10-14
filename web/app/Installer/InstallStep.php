@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use App\Auth\EmailAddress;
 use App\Installer\Settings\DatabaseSettings;
 use App\Services\LocaleResolver;
 use DateTimeZone;
@@ -264,7 +265,7 @@ enum InstallStep: string
             ],
             self::Administrator => [
                 'name' => ['required', 'string', 'max:255'],
-                'email' => ['required', 'email', 'max:255'],
+                'email' => EmailAddress::rules(),
             ],
         };
     }

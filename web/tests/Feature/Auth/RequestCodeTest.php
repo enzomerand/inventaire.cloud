@@ -11,13 +11,11 @@ use Illuminate\Testing\TestResponse;
 uses(RefreshDatabase::class);
 
 /**
- * Asks for a code the way the web front does.
- *
- * @param  array<string, string>  $headers
+ * Asks for a code from a given IP address.
  */
-function askForCode(object $test, string $email, array $headers = []): TestResponse
+function askFrom(object $test, string $ip, string $email): TestResponse
 {
-    return $test->postJson('/api/v1/auth/code', ['email' => $email], frontend($headers));
+    return $test->withServerVariables(['REMOTE_ADDR' => $ip])->postJson('/api/v1/auth/code', ['email' => $email], frontend());
 }
 
 describe('requesting a code', function (): void {
@@ -218,6 +216,76 @@ describe('throttling', function (): void {
         }
 
         askForCode($this, 'person5@example.com')->assertStatus(429);
+    });
+
+    it('allows three codes per address and network together, and another network its own three', function (): void {
+        foreach (range(1, 3) as $ignored) {
+            askFrom($this, '203.0.113.1', 'ada@example.com')->assertOk();
+        }
+
+        askFrom($this, '203.0.113.1', 'ada@example.com')->assertStatus(429);
+        askFrom($this, '203.0.113.2', 'ada@example.com')->assertOk();
+    });
+
+    it('allows ten codes per address and hour, from however many networks, then answers 429 with Retry-After', function (): void {
+        foreach (range(1, 10) as $number) {
+            askFrom($this, "203.0.113.{$number}", 'ada@example.com')->assertOk();
+        }
+
+        $response = askFrom($this, '203.0.113.11', 'ada@example.com')->assertStatus(429);
+
+        expect((int) $response->headers->get('Retry-After'))->toBeBetween(1, 3600)
+            ->and($response->headers->get('Content-Type'))->toBe('application/json')
+            ->and(sentMails())->toHaveCount(10);
+
+        // Another address is not concerned, and the hour passes.
+        askFrom($this, '203.0.113.11', 'grace@example.com')->assertOk();
+
+        $this->travel(61)->minutes();
+
+        askFrom($this, '203.0.113.12', 'ada@example.com')->assertOk();
+    });
+
+    it('limits the address per hour exactly like a known one: the same answer for an account and for none', function (): void {
+        User::factory()->create(['email' => 'known@example.com']);
+
+        foreach (['known@example.com', 'unknown@example.com'] as $email) {
+            foreach (range(1, 10) as $number) {
+                askFrom($this, "203.0.113.{$number}", $email)->assertOk();
+            }
+        }
+
+        $known = askFrom($this, '203.0.113.11', 'known@example.com')->assertStatus(429);
+        $unknown = askFrom($this, '203.0.113.12', 'unknown@example.com')->assertStatus(429);
+
+        expect($known->headers->get('Content-Type'))->toBe($unknown->headers->get('Content-Type'))
+            ->and($known->getContent())->toBe($unknown->getContent());
+    });
+
+    it('counts an IPv4 address on its own', function (): void {
+        config(['auth.login_codes.send_per_ip' => ['attempts' => 2, 'minutes' => 10]]);
+
+        askFrom($this, '203.0.113.1', 'one@example.com')->assertOk();
+        askFrom($this, '203.0.113.1', 'two@example.com')->assertOk();
+        askFrom($this, '203.0.113.1', 'three@example.com')->assertStatus(429);
+
+        askFrom($this, '203.0.113.2', 'three@example.com')->assertOk();
+    });
+
+    it('counts all the addresses of an IPv6 /64 together: its owner picks as many as they like', function (): void {
+        config(['auth.login_codes.send_per_ip' => ['attempts' => 4, 'minutes' => 10]]);
+
+        $sameNetwork = ['2001:db8:aaaa:1::1', '2001:db8:aaaa:1:ffff:ffff:ffff:ffff', '2001:db8:aaaa:1:1234::5', '2001:DB8:AAAA:1:0:0:0:9'];
+
+        foreach ($sameNetwork as $number => $ip) {
+            askFrom($this, $ip, "person{$number}@example.com")->assertOk();
+        }
+
+        // A fifth address of the same /64, even a never-seen one, is refused...
+        askFrom($this, '2001:db8:aaaa:1:42::7', 'person9@example.com')->assertStatus(429);
+
+        // ...while the next /64 has its own allowance.
+        askFrom($this, '2001:db8:aaaa:2::1', 'person9@example.com')->assertOk();
     });
 
     it('limits an unknown address exactly like a known one', function (): void {

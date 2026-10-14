@@ -428,12 +428,14 @@ function refreshCsrfToken() {
 
 /**
  * Runs an action after the feedback toast had time to be read, at most once at
- * a time.
+ * a time. Exported for the components that make `silent` calls and handle the
+ * failures themselves: a definitive 419 (the page is stale) is answered with
+ * the same delayed reload as everywhere else.
  *
  * @param {() => void} action Reload or redirect.
  * @returns {void}
  */
-function scheduleNavigation(action) {
+export function scheduleNavigation(action) {
     if (navigationScheduled) {
         return;
     }

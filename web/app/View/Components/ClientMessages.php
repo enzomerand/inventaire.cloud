@@ -48,6 +48,7 @@ class ClientMessages extends Component
             'install.finished' => __('Installation complete. Redirecting...'),
             'login.error.not_stateful' => __('Signing in is not available from this address. Ask the administrator of this instance to check its SANCTUM_STATEFUL_DOMAINS setting.'),
             'login.error.throttled' => __('Too many attempts. Try again in :seconds seconds.'),
+            'login.error.throttled_minutes' => __('Too many attempts. Try again in :minutes minutes.'),
             'login.notice.code_resent' => __('A new code was sent.'),
         ];
     }

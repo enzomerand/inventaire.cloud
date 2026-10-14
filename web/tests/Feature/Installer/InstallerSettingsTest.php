@@ -262,3 +262,43 @@ describe('a configuration that lives entirely in the environment', function (): 
             ->and(settingsFor($this, '', $environment + ['DB_URL' => 'postgres://u:p@h/d'])->isEnvironmentOnly())->toBeTrue();
     });
 });
+
+describe('what the installers suggest', function (): void {
+    it('proposes the address verified at the mail step for the administrator', function (): void {
+        $settings = settingsFor($this);
+
+        $values = $settings->withSuggestions(InstallStep::Administrator, $settings->current(InstallStep::Administrator), ' Admin@Example.TEST ');
+
+        expect($values)->toBe(['name' => '', 'email' => 'admin@example.test']);
+    });
+
+    it('proposes nothing when no address was verified', function (): void {
+        $settings = settingsFor($this);
+
+        expect($settings->withSuggestions(InstallStep::Administrator, $settings->current(InstallStep::Administrator), null))->toBe(['name' => '', 'email' => '']);
+        expect($settings->withSuggestions(InstallStep::Administrator, $settings->current(InstallStep::Administrator), ''))->toBe(['name' => '', 'email' => '']);
+    });
+
+    it('keeps an address that is configured or imposed', function (): void {
+        $configured = settingsFor($this, "ADMIN_EMAIL=jane@example.test\n");
+
+        expect($configured->withSuggestions(InstallStep::Administrator, $configured->current(InstallStep::Administrator), 'admin@example.test')['email'])->toBe('jane@example.test');
+
+        $imposed = settingsFor($this, '', ['ADMIN_EMAIL' => 'imposed@example.test']);
+
+        expect($imposed->withSuggestions(InstallStep::Administrator, $imposed->current(InstallStep::Administrator), 'admin@example.test')['email'])->toBe('imposed@example.test');
+    });
+
+    it('suggests nothing for the other steps', function (): void {
+        $settings = settingsFor($this);
+        $values = $settings->current(InstallStep::Mail);
+
+        expect($settings->withSuggestions(InstallStep::Mail, $values, 'admin@example.test'))->toBe($values);
+    });
+
+    it('writes the address of the administrator in canonical form when a form is completed', function (): void {
+        $settings = settingsFor($this);
+
+        expect($settings->resolve(InstallStep::Administrator, ['name' => 'Jane', 'email' => ' Jane@Gmäil.COM '])['email'])->toBe('jane@xn--gmil-moa.com');
+    });
+});

@@ -16,12 +16,23 @@ describe('signing out', function (): void {
         $this->assertGuest('web');
     });
 
-    it('turns the remember token over, so that stolen cookies stop working', function (): void {
-        $user = User::factory()->create(['remember_token' => 'old-token']);
+    it('keeps the remember token, so that the other devices of the account stay signed in', function (): void {
+        $user = User::factory()->create(['remember_token' => 'shared-token']);
 
         $this->actingAs($user)->postJson('/api/v1/auth/logout', [], frontend())->assertNoContent();
 
-        expect($user->fresh()->remember_token)->not->toBe('old-token');
+        expect($user->fresh()->remember_token)->toBe('shared-token');
+    });
+
+    it('invalidates the session and issues a new CSRF token', function (): void {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->withSession(['_token' => 'old-csrf-token', 'kept' => 'nothing'])
+            ->postJson('/api/v1/auth/logout', [], frontend(['X-CSRF-TOKEN' => 'old-csrf-token']))
+            ->assertNoContent();
+
+        expect(session()->token())->not->toBe('old-csrf-token')
+            ->and(session()->has('kept'))->toBeFalse();
     });
 
     it('answers 401 in JSON to somebody who is not signed in', function (): void {

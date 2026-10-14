@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Middleware\RedirectIfNotInstalled;
 use App\Http\Middleware\SetLocale;
+use App\Http\Middleware\SetReferrerPolicy;
 use App\Installer\ProcessEnvironment;
 use App\Services\LocaleResolver;
 use App\Services\TrustedProxies;
@@ -23,9 +24,10 @@ $app = Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Language first (so every answer is localized), then the install gate: it must precede everything
-        // that could need a database, a session or an application key.
-        $middleware->prepend([SetLocale::class, RedirectIfNotInstalled::class]);
+        // The Referrer-Policy header goes out with every answer, so it comes first (outermost). Then the language
+        // (so every answer is localized), then the install gate: it must precede everything that could need a
+        // database, a session or an application key.
+        $middleware->prepend([SetReferrerPolicy::class, SetLocale::class, RedirectIfNotInstalled::class]);
         $middleware->encryptCookies(except: [LocaleResolver::COOKIE_NAME]);
 
         // The web front calls the API with its session cookie: Sanctum makes the requests that come from the

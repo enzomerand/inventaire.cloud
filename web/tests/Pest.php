@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use App\Installer\Settings\DatabaseSettings;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 use Symfony\Component\Mime\Email;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /*
@@ -27,15 +29,16 @@ pest()->in('Feature/Installer')
         $this->useLanguage('en');
     })
     ->afterEach(function (): void {
-        try {
-            // By name: a test may have left the default connection pointing elsewhere, on purpose.
-            $connection = DB::connection(getenv('DB_CONNECTION') ?: 'pgsql');
+        // By name: a test may have left the default connection pointing elsewhere, on purpose. Never delete from a
+        // database that is not clearly a test one, and let any failure surface rather than hide a leftover account.
+        $name = getenv('DB_CONNECTION') ?: 'pgsql';
 
-            if ($connection->getSchemaBuilder()->hasTable('users')) {
-                $connection->table('users')->delete();
-            }
-        } catch (Throwable) {
-            // The database may be unreachable on purpose (a wrong password under test): nothing was created then.
+        TestDatabaseGuard::assertSafe(app('config'), $name);
+
+        $connection = DB::connection($name);
+
+        if ($connection->getSchemaBuilder()->hasTable('users')) {
+            $connection->table('users')->delete();
         }
     });
 
@@ -109,6 +112,45 @@ function frontend(array $extra = []): array
     $origin = rtrim(config()->string('app.url'), '/');
 
     return $extra + ['Origin' => $origin, 'Referer' => $origin.'/login'];
+}
+
+/**
+ * Asks for a sign-in code the way the web front does.
+ *
+ * @param  array<string, string>  $headers
+ */
+function askForCode(object $test, string $email, array $headers = []): TestResponse
+{
+    return $test->postJson('/api/v1/auth/code', ['email' => $email], frontend($headers));
+}
+
+/**
+ * Asks for a code the way the web front does, and returns it as read from the email.
+ */
+function receiveCode(object $test, string $email, string $language = 'en'): string
+{
+    askForCode($test, $email, ['Accept-Language' => $language])->assertOk();
+
+    return lastSentCode();
+}
+
+/**
+ * Types a code back the way the web front does.
+ *
+ * @param  array<string, mixed>  $fields
+ * @param  array<string, string>  $headers
+ */
+function typeCode(object $test, string $email, string $code, array $fields = [], array $headers = []): TestResponse
+{
+    return $test->postJson('/api/v1/auth/verify', ['email' => $email, 'code' => $code] + $fields, frontend($headers));
+}
+
+/**
+ * A code that is not the pending one.
+ */
+function wrongCode(string $right): string
+{
+    return $right === '000000' ? '111111' : '000000';
 }
 
 /**

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Auth;
 
 use App\Models\LoginCode;
-use App\Models\User;
 use App\Services\OneTimeCode;
 use Illuminate\Config\Repository;
 use Illuminate\Database\DatabaseManager;
@@ -17,9 +16,12 @@ use Illuminate\Database\DatabaseManager;
  * handful of wrong guesses. The code itself is never stored: only its keyed
  * hash ({@see OneTimeCode}), so a leaked database cannot be replayed. Judging a
  * code happens in a transaction that holds a lock on the address's row, so that
- * parallel requests cannot make more guesses than the limit allows.
+ * parallel requests cannot make more guesses than the limit allows. Asking for
+ * a new code gives the guesses of that code back, but not the wrong codes the
+ * address already collected over the last hour ({@see LoginFailures}): past a
+ * limit, no code is judged any more, the right one included.
  *
- * Addresses are compared in lowercase (see {@see User::normalizeEmail()}).
+ * Addresses are compared in their canonical form (see {@see EmailAddress::normalize()}).
  * Nothing here looks at the users: a code is issued, and judged, in the same
  * way for an address that has an account and one that has not.
  */
@@ -28,6 +30,7 @@ final class LoginCodes
     public function __construct(
         private readonly Repository $config,
         private readonly DatabaseManager $db,
+        private readonly LoginFailures $failures,
     ) {}
 
     /**
@@ -60,7 +63,11 @@ final class LoginCodes
      *
      * A wrong code costs an attempt; the right one is spent (the code cannot
      * be used twice) unless $consume is false, for a caller that needs one
-     * more input before it can act on it.
+     * more input before it can act on it. An address that collected too many
+     * wrong codes lately is not judged at all ({@see LoginCodeOutcome::Locked}).
+     *
+     * Call it inside the transaction that acts on the answer: the code is only
+     * really spent if that transaction commits.
      *
      * @param  string  $email  Address, already normalized.
      * @param  bool  $consume  Whether an accepted code is used up.
@@ -80,9 +87,15 @@ final class LoginCodes
                 return new LoginCodeVerdict(LoginCodeOutcome::Expired);
             }
 
+            if ($this->failures->exhausted($email)) {
+                return new LoginCodeVerdict(LoginCodeOutcome::Locked, retryAfter: $this->failures->retryAfter($email));
+            }
+
             $max = $this->maxAttempts();
 
             if ($code->attempts >= $max) {
+                $this->failures->record($email);
+
                 return new LoginCodeVerdict(LoginCodeOutcome::TooManyAttempts);
             }
 
@@ -96,6 +109,7 @@ final class LoginCodes
 
             $code->attempts++;
             $code->save();
+            $this->failures->record($email);
 
             return $code->attempts >= $max
                 ? new LoginCodeVerdict(LoginCodeOutcome::TooManyAttempts)

@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import login from '../../../resources/js/components/login.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
-import { redirectTo } from '../../../resources/js/lib/page.js';
+import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -17,6 +17,7 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
         const messages = {
             'login.error.not_stateful': 'Not available from this address',
             'login.error.throttled': 'Wait :seconds seconds',
+            'login.error.throttled_minutes': 'Wait :minutes minutes',
             'login.notice.code_resent': 'A new code was sent',
             'error.too_many_requests': 'Slow down',
         };
@@ -112,6 +113,14 @@ describe('sign-in page', () => {
 
             expect(component.error).toBe('Wait 120 seconds');
             expect(component.phase).toBe('email');
+        });
+
+        it('tells a long wait in minutes, rounded up', async () => {
+            http.post.mockRejectedValue(new HttpError(429, 'Too many attempts.', { retryAfter: 3481 }));
+
+            await component.requestCode();
+
+            expect(component.error).toBe('Wait 59 minutes');
         });
 
         it('says so without a duration when the server gave none', async () => {
@@ -253,6 +262,71 @@ describe('sign-in page', () => {
 
             expect(component.error).toBe('Wait 30 seconds');
             expect(component.busy).toBe(false);
+        });
+    });
+
+    describe('a stale page', () => {
+        const EXPIRED = 'Your session has expired. The page is about to reload.';
+
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('says the page is about to reload, and reloads it, when a code cannot be asked for (419)', async () => {
+            http.post.mockRejectedValue(new HttpError(419, EXPIRED));
+            component.email = 'ada@example.com';
+
+            await component.requestCode();
+
+            expect(component.error).toBe(EXPIRED);
+            expect(component.phase).toBe('email');
+            expect(component.busy).toBe(false);
+            // The message gets the time to be read first, as everywhere else in the application.
+            expect(reloadPage).not.toHaveBeenCalled();
+
+            vi.advanceTimersByTime(1500);
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+        });
+
+        it('does the same when the code is typed back', async () => {
+            http.post.mockRejectedValue(new HttpError(419, EXPIRED));
+            component.phase = 'code';
+            component.code = '123456';
+
+            await component.verify();
+
+            expect(component.error).toBe(EXPIRED);
+            expect(redirectTo).not.toHaveBeenCalled();
+
+            vi.advanceTimersByTime(1500);
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+        });
+
+        it('reloads once, however many calls were refused', async () => {
+            http.post.mockRejectedValue(new HttpError(419, EXPIRED));
+            component.email = 'ada@example.com';
+
+            await component.requestCode();
+            await component.requestCode();
+            vi.advanceTimersByTime(5000);
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not reload for the other failures', async () => {
+            http.post.mockRejectedValue(new HttpError(429, 'Too many attempts.', { retryAfter: 30 }));
+            component.email = 'ada@example.com';
+
+            await component.requestCode();
+            vi.advanceTimersByTime(5000);
+
+            expect(reloadPage).not.toHaveBeenCalled();
         });
     });
 
