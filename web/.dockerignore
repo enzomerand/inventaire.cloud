@@ -1,0 +1,67 @@
+# What stays out of the Docker build context (and so out of the image): dependencies the
+# build installs itself, every environment file, runtime data and development tooling.
+
+# Version control and editors
+.git
+.gitattributes
+.gitignore
+.editorconfig
+.idea
+.vscode
+.DS_Store
+
+# Dependencies and build output (the image builds its own)
+vendor
+node_modules
+public/build
+public/hot
+public/storage
+
+# Environment files: secrets never enter the image. .env.example is the installer's template.
+**/.env
+**/.env.*
+!.env.example
+
+# Runtime data of this checkout: logs, caches, sessions, compiled views, installer state
+# (the installed marker, the setup token), uploads. The .gitignore files that keep the
+# folders in the image stay.
+storage/app/private/*
+!storage/app/private/.gitignore
+storage/app/public/*
+!storage/app/public/.gitignore
+storage/framework/cache/data/*
+!storage/framework/cache/data/.gitignore
+storage/framework/cache/locks/*
+!storage/framework/cache/locks/.gitignore
+storage/framework/sessions/*
+!storage/framework/sessions/.gitignore
+storage/framework/views/*
+!storage/framework/views/.gitignore
+storage/framework/testing
+storage/installer/*
+!storage/installer/.gitignore
+storage/logs/*
+!storage/logs/.gitignore
+storage/pail
+bootstrap/cache/*
+!bootstrap/cache/.gitignore
+database/*.sqlite*
+
+# Tests and development tooling
+tests
+phpunit.xml
+.phpunit.cache
+.phpunit.result.cache
+phpstan.neon.dist
+pint.json
+eslint.config.js
+vitest.config.js
+.prettierrc.json
+.prettierignore
+
+# Docker files themselves; docker/entrypoint.sh and docker/php.ini are the exceptions
+Dockerfile
+.dockerignore
+compose*.yaml
+docker/compose.yaml
+README.md
