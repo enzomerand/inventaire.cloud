@@ -35,6 +35,12 @@ it('sees the real client behind a proxy that is trusted', function (): void {
     expect(seenThroughProxy($this, '10.0.0.5', '203.0.113.7'))->toBe('203.0.113.7');
 });
 
+it('does not believe a proxy that is not on the list', function (): void {
+    TrustedProxies::apply(TrustedProxies::parse('10.0.0.0/8'));
+
+    expect(seenThroughProxy($this, '198.51.100.9', '203.0.113.7'))->toBe('198.51.100.9');
+});
+
 it('is configured from TRUSTED_PROXIES and wired when the application boots', function (): void {
     expect(config('app.trusted_proxies'))->toBe([])
         ->and(file_get_contents(base_path('bootstrap/app.php')))->toContain('TrustedProxies::apply')
