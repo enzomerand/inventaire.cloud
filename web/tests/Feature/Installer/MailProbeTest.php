@@ -114,3 +114,11 @@ describe('the verification code', function (): void {
             ->and($verification->confirm($challenge, $code)[0])->toBe(MailCodeOutcome::TooManyAttempts);
     });
 });
+
+it('writes the plain-text code email without HTML entities', function (): void {
+    app()->setLocale('fr');
+
+    $text = (new SetupCodeMail('123456', 15, 'noreply@example.test', 'Inventaire'))->render();
+
+    expect($text)->toContain("l'assistant")->not->toContain('&#039;');
+});

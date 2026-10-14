@@ -108,7 +108,7 @@
     "Environment file already exists.": "Le fichier d'environnement existe déjà.",
     "Environment file not found.": "Fichier d'environnement introuvable.",
     "errors": "les erreurs",
-    "Everything is ready. The tables are created and the instance is switched on.": "Tout est prêt. Les tables sont créées et l'instance est mise en service.",
+    "Everything is ready. Installing creates the tables and switches the instance on.": "Tout est prêt. L'installation crée les tables et met l'instance en service.",
     "Expand": "Développer",
     "Expand All": "Développer tout",
     "Expectation Failed": "Comportement attendu insatisfaisant",

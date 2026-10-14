@@ -42,7 +42,7 @@ final class WizardState
         $steps[] = [
             'id' => 'finalize',
             'title' => __('Installation'),
-            'intro' => __('Everything is ready. The tables are created and the instance is switched on.'),
+            'intro' => __('Everything is ready. Installing creates the tables and switches the instance on.'),
             'status' => InstallationState::STATUS_PENDING,
             'optional' => false,
             'submit' => __('Install'),
