@@ -25,6 +25,7 @@ it('creates the core tables', function (string $table): void {
     'jobs',
     'job_batches',
     'failed_jobs',
+    'personal_access_tokens',
 ]);
 
 it('enforces the unique email constraint', function (): void {

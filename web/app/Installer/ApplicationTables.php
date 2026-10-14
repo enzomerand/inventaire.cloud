@@ -28,6 +28,7 @@ final class ApplicationTables
         'jobs',
         'job_batches',
         'failed_jobs',
+        'personal_access_tokens',
     ];
 
     /**
