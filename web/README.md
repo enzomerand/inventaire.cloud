@@ -138,6 +138,66 @@ php artisan inventaire:install --from-env      # validate the current configurat
 - *The wizard keeps showing finished steps*: the progress lives in `storage/installer/progress.json`; delete that file to start over (the configuration stays in `.env`).
 - *I want to run the wizard again on an installed instance*: delete `storage/installer/installed.json`. This only re-enables the installer; it does not touch the database.
 
+## Upgrading an instance
+
+After every update of the code, bring the instance up to date:
+
+```bash
+git pull
+composer install --no-dev --optimize-autoloader
+npm ci && npm run build
+php artisan inventaire:upgrade --optimize
+```
+
+`inventaire:upgrade` applies the pending migrations (isolated: it stops with an error if another migration is already running), runs the post-migration hooks, then clears the configuration, route, view and event caches (never the application cache) and, with `--optimize`, rebuilds them. It refuses an instance that is not installed, exits non-zero as soon as a step fails, and can be run as often as you like: when everything is up to date it changes nothing. Run it as the user that owns `storage/`. With Docker the update is automatic (see below).
+
+## Self-hosting with Docker
+
+The image bundles PHP, the web server (FrankenPHP) and the built front end: you need Docker with Compose, not PHP or Node. `docker/compose.yaml` is a ready-to-use example with the application, a queue worker, a scheduler and PostgreSQL.
+
+```bash
+cd docker
+cp .env.example .env        # set DB_PASSWORD at least
+docker compose up -d --build
+```
+
+The application listens on <http://localhost:8080> (`APP_PORT` in `.env` changes the port). Everything below is run from the `docker/` folder.
+
+### Two ways to configure it
+
+- **Wizard.** Set `DB_PASSWORD` only. Open the application: it redirects to the install wizard, which asks for the rest. Its one-time setup token is printed by `docker compose exec app php artisan inventaire:install-token`. The database settings come from the compose file, so the wizard shows them read-only.
+- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, timezone, SMTP, file storage...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
+
+### What is kept where
+
+The `storage` volume is `/app/storage`: it holds the configuration the installer generates (`.env`, with `APP_KEY` and the secrets entered in the wizard), the uploaded files, the installer state (including the "installed" marker) and the logs. **Back it up together with the database, and keep it private**: whoever reads it can read your secrets, and an instance whose database survives but whose `APP_KEY` is lost cannot decrypt what it stored. Do not delete the volume unless you mean to erase the instance. If you replace it with a host folder, make it writable by user ID 1000, the unprivileged user every process of the container runs as.
+
+`APP_ENVIRONMENT_FILE` (default `/app/storage/.env`) tells Laravel and the installer which file holds that configuration. It must be an absolute path; Laravel prefers a file named like it followed by `.` and `APP_ENV` (`.env.production`) when one exists in the same folder, so keep none there.
+
+### Updating
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If that fails the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. The worker and the scheduler restart on the new image once the application is healthy. Back up before updating.
+
+### Reverse proxy and HTTPS
+
+The container speaks plain HTTP on port 8080. Terminate TLS in a reverse proxy in front of it, set `APP_URL` to the public `https://` address, and set `TRUSTED_PROXIES` in `.env` to the proxy's address or CIDR range (see "Behind a reverse proxy"): otherwise every visitor looks like the proxy and the setup token throttle counts them together.
+
+### Day-to-day commands
+
+```bash
+docker compose exec app php artisan inventaire:upgrade   # the update step, by hand
+docker compose exec app php artisan inventaire:install-token
+docker compose run --rm app php artisan tinker           # any other command, in a throw-away container
+docker compose logs -f app                               # application errors go to stderr
+```
+
+The image is built from `Dockerfile` (multi-stage; no `.env`, installer state or development dependency in it) and its `HEALTHCHECK` queries `/up`. `docker/entrypoint.sh` documents how each role (`app`, `worker`, `scheduler`) starts.
+
 ## Quality commands
 
 | Command                | What it does                                                         |
@@ -169,7 +229,7 @@ composer test:mariadb # MariaDB only
 
 `phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` and `composer test:mariadb` override `DB_*` to use their own service and its `inventaire_test` schema.
 
-The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
+The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE`, `APP_EVENTS_CACHE` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
 
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
@@ -177,13 +237,13 @@ Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless t
 
 ```text
 app/
-  Console/Commands/ inventaire:install (console wizard) and inventaire:install-token
+  Console/Commands/ inventaire:install (console wizard), inventaire:install-token, inventaire:install-status, inventaire:upgrade
   Http/
     Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints)
     Middleware/     SetLocale (global): applies the language chosen by LocaleResolver;
                     RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate
     Requests/       Form requests (validation)
-  Installer/        Installation state, .env writer, setup token, probes, finalizer (see "Installing an instance")
+  Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator (see "Installing an instance")
   Providers/        InstallerServiceProvider: pre-install runtime and application key
   Services/         LocaleResolver: which language a request is answered in
   View/Components/  Blade component classes (ClientMessages)
@@ -205,6 +265,8 @@ tests/
   Unit/             Pest unit tests
   js/               Vitest tests
 compose.dev.yaml    Development services
+Dockerfile          Self-hosting image (see "Self-hosting with Docker")
+docker/             Image entrypoint and php.ini, compose.yaml and .env.example for self-hosters
 ```
 
 ## Conventions
