@@ -21,7 +21,6 @@ final class ApplicationTables
     public const NAMES = [
         'migrations',
         'users',
-        'password_reset_tokens',
         'sessions',
         'cache',
         'cache_locks',

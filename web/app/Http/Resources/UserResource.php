@@ -24,6 +24,8 @@ final class UserResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
+            'locale' => $this->locale,
+            'is_admin' => $this->is_admin,
         ];
     }
 }

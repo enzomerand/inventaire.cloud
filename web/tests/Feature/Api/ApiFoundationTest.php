@@ -50,7 +50,7 @@ describe('the current user', function (): void {
 
         $this->actingAs($user)->getJson('/api/v1/me')
             ->assertOk()
-            ->assertExactJson(['data' => ['id' => $user->id, 'name' => 'Ada Lovelace', 'email' => 'ada@example.com']]);
+            ->assertExactJson(['data' => ['id' => $user->id, 'name' => 'Ada Lovelace', 'email' => 'ada@example.com', 'locale' => null, 'is_admin' => false]]);
     });
 });
 
