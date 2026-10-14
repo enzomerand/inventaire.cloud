@@ -43,7 +43,7 @@ Run every command from this `web/` directory.
 
    Each database also has an `inventaire_test` schema reserved for the test suite. These scripts only run when a volume is first created; use `docker compose -f compose.dev.yaml down -v` to start from scratch.
 
-2. **Install and configure** the application. `composer setup` installs the dependencies, creates `.env` from `.env.example`, generates the application key, runs the migrations and builds the assets:
+2. **Install and configure** the application. `composer setup` installs the dependencies, creates `.env` from `.env.example`, generates the application key, builds the assets, then runs `php artisan inventaire:install --from-env`: it checks the services configured in `.env` (database, mail, storage), runs the migrations and marks the instance as installed (see [Installing an instance](#installing-an-instance)):
 
    ```bash
    composer setup
@@ -58,6 +58,85 @@ Run every command from this `web/` directory.
    ```
 
    The app is then available on <http://localhost:8000> and the mail inbox on <http://localhost:8025>.
+
+## Installing an instance
+
+A new instance is not usable until it is installed. Until then **every web URL redirects to `/install`** (JSON requests get a `503` with `"code": "not_installed"`), and the application runs without a database or a complete `.env`: sessions and cache use files and jobs run inline. The `APP_KEY` is generated on the first web access and written to `.env` (or a static error page explains what to fix when `.env` is not writable). Once the installation is finished, every `/install` URL answers `404`.
+
+There are three ways to install, and they share the same checks:
+
+| Way                              | Use it for                                                              |
+|----------------------------------|-------------------------------------------------------------------------|
+| The **web wizard** at `/install` | A server you reach with a browser                                       |
+| `php artisan inventaire:install` | A terminal: interactive prompts, or options for scripts                 |
+| `inventaire:install --from-env`  | Configuration that already exists (Docker variables, `composer setup`)  |
+
+The installer keeps its own files (installed marker, progress, setup token, locks) in `storage/installer/`, readable by the owner and the group so that the web server and the person running the console installer can both use them; `INSTALLER_STATE_PATH` relocates the folder (for example onto a persistent volume). Steps are registered once, in the `App\Installer\InstallStep` enum: the web routes, the wizard and the console installer all iterate over it.
+
+### The setup token (web wizard)
+
+Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to its own log file, `storage/logs/installer.log` (a dedicated channel, so it does not depend on `LOG_CHANNEL`, `LOG_STACK` or `LOG_LEVEL`; readable by the owner and the group only) and printed by:
+
+```bash
+php artisan inventaire:install-token
+```
+
+The token is compared in constant time, the form accepts 5 attempts per minute and per IP address, the old session is destroyed and a new id issued once it is accepted, and the token is deleted when the installation completes. If the log cannot be written, the page still works and `inventaire:install-token` still prints the token. The console installer does not need it: running it already proves access to the server.
+
+### Behind a reverse proxy
+
+Behind a reverse proxy or a load balancer every request seems to come from the proxy, so the 5-attempts throttle would count all visitors together. Set `TRUSTED_PROXIES` in `.env` (or the environment) to a comma-separated list of the proxies' addresses or CIDR ranges, or `*` for any proxy; it is empty by default (no proxy is believed, so a forged `X-Forwarded-For` header is worthless). The application then reads the real client address from `X-Forwarded-For`.
+
+### Trust model
+
+Everything the wizard does is behind the setup token: whoever holds it is trusted like the server administrator. In particular the checks connect to the addresses typed in the forms (database, SMTP, S3 endpoint, Documenso), so they can reach hosts on the internal network, by design: do not hand the token to somebody who should not be able to probe your network. Checks use short timeouts (5 seconds to connect) and never show passwords or API tokens in their messages.
+
+### The steps
+
+The wizard is one page with a progress bar and one AJAX endpoint per step. Each step **tests the real service before saving**, writes its values to `.env` immediately and is recorded in `storage/installer/progress.json`, so an interrupted installation resumes where it stopped (the token is asked again in a new browser session).
+
+1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` or `imagick`, `zip`, `curl`) and write access to `storage/`, `bootstrap/cache/` and `.env`.
+2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables (the check creates, then drops, a table named `installer_probe_check`: it is refused if one already exists, and never touches it). An interrupted installation can be resumed on the same database.
+3. **Application**: public URL, default language and timezone.
+4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
+5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
+6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
+7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`.
+
+Creating the first administrator account is not part of the installer yet (it comes with the accounts lot).
+
+### Values provided by the environment
+
+With Docker, configuration usually arrives as real environment variables, which Laravel prefers over `.env`. The installer records the environment the process started with, at the very top of `bootstrap/app.php` (before `.env` is read): every variable in it is **imposed**, even when `.env` holds the same value. The wizard shows imposed values read-only with a "set by the environment" badge, probes them as is, and never writes them. Secrets are never sent back to the browser (an empty box means "unchanged"; to store an empty password on purpose, tick "No password" next to it), and a `.env` that cannot be written is reported with a clear message instead of being silently ignored.
+
+`DB_URL` and `MAIL_URL` are honoured: when one is set (environment or `.env`), the corresponding step treats the connection as provided. Its fields are read-only and masked (a URL usually contains a password), and the checks and the migrations use exactly the configuration the application will use, URL included.
+
+When every setting the installation needs is provided by the environment, nothing has to be written: the wizard does not require `.env` or `bootstrap/cache/` to be writable, which suits read-only containers: when `.env` cannot be written, finalizing such an instance writes nothing but the "installed" marker (set `APP_ENV` and `APP_DEBUG` in the environment too); when it can, the production defaults are written as usual. A `.env` the installer creates is readable by the owner and the group only (`0640`); an existing one keeps its permissions, which the installer never widens.
+
+When `.env` does not exist, the installer creates it from `.env.example`, minus the development defaults: a file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production`, `APP_DEBUG=false`, no database or SMTP credentials, no SMTP host and no sender address, instead of the example's local services. If you copy `.env.example` yourself on a server, set these values yourself. For development, run `composer setup`, which copies the example first and leaves the environment alone.
+
+### From the terminal
+
+```bash
+php artisan inventaire:install                 # interactive prompts, pre-filled from .env
+php artisan inventaire:install --no-interaction \
+    --db-driver=pgsql --db-host=127.0.0.1 --db-port=5432 --db-name=inventaire --db-user=inventaire \
+    --app-url=https://inventory.example.com --locale=fr --timezone=Europe/Paris \
+    --mail-host=smtp.example.com --mail-port=587 --mail-from-address=hello@example.com --mail-from-name="My Company" \
+    --storage=local
+php artisan inventaire:install --from-env      # validate the current configuration and finalize
+```
+
+- In interactive mode every value is prompted and the mail step is proven with a code, like in the web wizard.
+- In non-interactive mode (`--no-interaction`) the values come from the options (one per wizard field: `php artisan inventaire:install --help`), completed by what `.env` and the environment already provide; the first failing check stops the command with a non-zero exit code. The SMTP server is checked with an authenticated SMTP session, since nobody can read a code. `--skip-mail-test` skips that check (with a warning) and is refused when prompts are possible. Options end up in the shell history and the process list: for passwords, prefer `.env` or the environment.
+- Switching to production mode is asked interactively (default yes, except on a `local` instance) and done by default in non-interactive mode; `--keep-environment` leaves `APP_ENV` and `APP_DEBUG` alone. `--db-no-password` and `--mail-no-password` store an empty password on purpose.
+- `--from-env` asks nothing, never touches `APP_ENV` or `APP_DEBUG` (the developer path) and writes nothing to `.env` (it does not even need it to be writable): it validates the current configuration with the same live checks, then runs the migrations and finalizes. It is what `composer setup` runs, and what a container entrypoint can run.
+
+### Troubleshooting
+
+- *I lost the setup token*: `php artisan inventaire:install-token`.
+- *The wizard keeps showing finished steps*: the progress lives in `storage/installer/progress.json`; delete that file to start over (the configuration stays in `.env`).
+- *I want to run the wizard again on an installed instance*: delete `storage/installer/installed.json`. This only re-enables the installer; it does not touch the database.
 
 ## Quality commands
 
@@ -90,16 +169,22 @@ composer test:mariadb # MariaDB only
 
 `phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` and `composer test:mariadb` override `DB_*` to use their own service and its `inventaire_test` schema.
 
+The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
+
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
 ## Project structure
 
 ```text
 app/
+  Console/Commands/ inventaire:install (console wizard) and inventaire:install-token
   Http/
-    Controllers/    Invokable or resourceful controllers
-    Middleware/     SetLocale (global): applies the language chosen by LocaleResolver
+    Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints)
+    Middleware/     SetLocale (global): applies the language chosen by LocaleResolver;
+                    RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate
     Requests/       Form requests (validation)
+  Installer/        Installation state, .env writer, setup token, probes, finalizer (see "Installing an instance")
+  Providers/        InstallerServiceProvider: pre-install runtime and application key
   Services/         LocaleResolver: which language a request is answered in
   View/Components/  Blade component classes (ClientMessages)
 config/             Laravel configuration (app.php lists the supported locales)
@@ -110,7 +195,7 @@ resources/
     app.js          Entry point: Tabler, Alpine, stores, components
     lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js
     stores/         Alpine stores (toasts)
-    components/     Alpine components (toasts, locale switcher)
+    components/     Alpine components (toasts, locale switcher, install wizard)
   views/
     layouts/        app.blade.php, the Tabler page layout
     components/     Anonymous Blade components (<x-toasts />, <x-locale-switcher />)

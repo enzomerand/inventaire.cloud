@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use App\Services\TrustedProxies;
 
 return [
 
@@ -67,7 +68,21 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => env('APP_TIMEZONE', 'UTC'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Trusted Proxies
+    |--------------------------------------------------------------------------
+    |
+    | The reverse proxies whose X-Forwarded-* headers are believed, so that the
+    | client address (throttling, rate limits) is the real one. A comma-separated
+    | list of addresses or CIDR ranges, or "*" to trust every proxy. Empty by
+    | default: trusting everybody lets any visitor forge their address.
+    |
+    */
+
+    'trusted_proxies' => TrustedProxies::parse((string) env('TRUSTED_PROXIES', '')),
 
     /*
     |--------------------------------------------------------------------------

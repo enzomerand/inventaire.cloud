@@ -30,6 +30,16 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    | Documenso, the e-signature service used to sign official exports. The URL
+    | is the instance root (https://app.documenso.com or a self-hosted one); the
+    | API key is a team token created in Documenso. Both are optional.
+    */
+    'documenso' => [
+        'url' => env('DOCUMENSO_URL'),
+        'api_key' => env('DOCUMENSO_API_KEY'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

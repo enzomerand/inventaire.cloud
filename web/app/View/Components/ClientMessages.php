@@ -38,6 +38,14 @@ class ClientMessages extends Component
             'error.not_found' => __('This item no longer exists.'),
             'error.too_many_requests' => __('Too many attempts. Please wait a moment before trying again.'),
             'error.session_expired' => __('Your session has expired. The page is about to reload.'),
+            'install.status.done' => __('Done'),
+            'install.status.skipped' => __('Skipped'),
+            'install.status.pending' => __('To do'),
+            'install.requirement.ok' => __('Met'),
+            'install.requirement.missing' => __('Not met'),
+            'install.mail.code_sent' => __('A verification code was sent. Check the inbox of the test address.'),
+            'install.warning.documenso_insecure_url' => __('The Documenso address uses plain http: the API token travels unencrypted. Prefer https unless Documenso runs on this machine or a private network.'),
+            'install.finished' => __('Installation complete. Redirecting...'),
         ];
     }
 

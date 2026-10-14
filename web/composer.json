@@ -9,6 +9,7 @@
         "php": "^8.3",
         "laravel/framework": "^13.17",
         "laravel/tinker": "^3.0",
+        "league/flysystem-aws-s3-v3": "^3.0",
         "secondnetwork/blade-tabler-icons": "^3.49"
     },
     "require-dev": {
@@ -41,9 +42,9 @@
             "composer install",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
             "@php artisan key:generate",
-            "@php artisan migrate --force",
             "npm install --ignore-scripts",
-            "npm run build"
+            "npm run build",
+            "@php artisan inventaire:install --from-env --no-interaction"
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
