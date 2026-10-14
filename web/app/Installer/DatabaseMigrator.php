@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Installer;
 
 use App\Installer\Exceptions\InstallationException;
+use App\Installer\Exceptions\LockBusyException;
+use App\Installer\Support\FileLock;
 use Illuminate\Config\Repository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\DatabaseManager;
@@ -12,29 +14,45 @@ use Symfony\Component\Console\Output\BufferedOutput;
 use Throwable;
 
 /**
- * Brings the database up to date: the migrations, then the
- * {@see PostMigrationHook}s.
+ * Applies the pending database migrations, one process at a time.
  *
  * It is the one place that knows how, shared by the installation
  * ({@see InstallationFinalizer}, on a connection built from the wizard's
- * settings) and by `inventaire:upgrade` (on the application's own
- * connection). The migrations always run isolated: if another process is
- * already migrating, this one stops with an error instead of racing it, which
- * is what lets several containers start at once.
+ * settings) and by `inventaire:upgrade` (on the application's own connection).
+ *
+ * Concurrency is handled by an exclusive file lock (`migrate.lock` in the
+ * installer's state folder), held for the whole migration. A second caller
+ * WAITS for it, up to {@see self::LOCK_WAIT} seconds, and then finds nothing
+ * left to migrate: this is what lets several containers start together. The
+ * lock is a `flock`, which the system drops when the process ends, even when it
+ * is killed: no stale lock can block later upgrades. (Laravel's own
+ * `migrate --isolated` is not used: it keeps its lock in the cache store, which
+ * is the database once the instance is installed, and so fails when the
+ * database is empty and leaves an hour-long lock behind a killed process.)
+ *
+ * The {@see PostMigrationHook}s are not run here: they belong to the
+ * installation only, see {@see InstallationFinalizer}.
  */
 final class DatabaseMigrator
 {
+    /** How long a caller waits for another migration to finish, in seconds. */
+    public const LOCK_WAIT = 600.0;
+
     /** Name of the temporary connection {@see self::migrateOn()} registers. */
     private const CONNECTION = 'installer_migrate';
 
+    /** Lock file, in the installer's state folder. */
+    private const LOCK = 'migrate.lock';
+
     /**
-     * @param  iterable<PostMigrationHook>  $hooks  Registered through the container tag {@see PostMigrationHook::TAG}.
+     * @param  float  $lockWait  Seconds to wait for a running migration before giving up.
      */
     public function __construct(
         private readonly Kernel $artisan,
         private readonly Repository $config,
         private readonly DatabaseManager $db,
-        private readonly iterable $hooks = [],
+        private readonly InstallationState $state,
+        private readonly float $lockWait = self::LOCK_WAIT,
     ) {}
 
     /**
@@ -42,7 +60,7 @@ final class DatabaseMigrator
      *
      * @return string What the migrator printed, for the caller to show.
      *
-     * @throws InstallationException When the migrations fail or another migration is already running.
+     * @throws InstallationException When the migrations fail, or another migration is still running after the wait.
      */
     public function migrate(): string
     {
@@ -60,7 +78,7 @@ final class DatabaseMigrator
      * @param  array<string, mixed>  $connection  A Laravel connection configuration.
      * @return string What the migrator printed.
      *
-     * @throws InstallationException When the migrations fail or another migration is already running.
+     * @throws InstallationException When the migrations fail, or another migration is still running after the wait.
      */
     public function migrateOn(array $connection): string
     {
@@ -75,28 +93,7 @@ final class DatabaseMigrator
     }
 
     /**
-     * Runs the {@see PostMigrationHook}s, in registration order.
-     *
-     * Hooks must be idempotent: they run again on every upgrade.
-     *
-     * @return int How many hooks ran.
-     *
-     * @throws InstallationException When a hook aborts.
-     */
-    public function runHooks(): int
-    {
-        $count = 0;
-
-        foreach ($this->hooks as $hook) {
-            $hook->run();
-            $count++;
-        }
-
-        return $count;
-    }
-
-    /**
-     * Runs `migrate` with the given extra options.
+     * Runs `migrate` with the given extra options, under the lock.
      *
      * @param  array<string, mixed>  $options
      *
@@ -104,15 +101,26 @@ final class DatabaseMigrator
      */
     private function call(array $options): string
     {
+        try {
+            return FileLock::exclusively($this->state->path(self::LOCK), fn (): string => $this->migrateLocked($options), $this->lockWait);
+        } catch (LockBusyException) {
+            throw new InstallationException('Another migration is still running (waited :seconds seconds). Try again once it has finished.', ['seconds' => (int) round($this->lockWait)]);
+        }
+    }
+
+    /**
+     * The migration itself; the lock is held.
+     *
+     * @param  array<string, mixed>  $options
+     *
+     * @throws InstallationException
+     */
+    private function migrateLocked(array $options): string
+    {
         $output = new BufferedOutput;
 
         try {
-            $status = $this->artisan->call('migrate', $options + [
-                '--force' => true,
-                '--no-interaction' => true,
-                // Refuses (exit 1) when another migration is already running instead of silently doing nothing.
-                '--isolated' => 1,
-            ], $output);
+            $status = $this->artisan->call('migrate', $options + ['--force' => true, '--no-interaction' => true], $output);
         } catch (Throwable $exception) {
             throw new InstallationException('The database migration failed: :reason', ['reason' => $this->lastLine($exception->getMessage())]);
         }

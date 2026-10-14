@@ -4,24 +4,35 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Console\ArtisanRunner;
 use App\Installer\DatabaseMigrator;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\InstallationState;
 use Illuminate\Console\Command;
+use Illuminate\Foundation\Bootstrap\LoadConfiguration;
+use Illuminate\Foundation\Bootstrap\LoadEnvironmentVariables;
 use Illuminate\Support\ServiceProvider;
 
 /**
  * Brings an installed instance up to date after its code was updated.
  *
- * Run it after every update (`git pull`, a new Docker image): it applies the
- * pending migrations, runs the post-migration hooks, and clears the caches
- * that could keep serving the previous version. With `--optimize` it then
- * rebuilds them. It can be run as often as needed: when everything is up to
- * date the migrations have nothing to do and the hooks, which are idempotent,
- * change nothing.
+ * Run it after every update (`git pull`, a new Docker image). In this order it:
  *
- * The exit code is 0 only when every step succeeded, so a container entrypoint
- * or a deployment script can rely on it.
+ * 1. clears the cached configuration and reloads the configuration, so that
+ *    the migrations use the settings as they are now (an edited `.env`, a new
+ *    database password) and not the ones cached before;
+ * 2. applies the pending migrations, under a file lock: if another upgrade is
+ *    running, this one waits for it and then finds nothing to do;
+ * 3. clears the route, view, event and package caches, which could keep
+ *    serving the previous version;
+ * 4. with `--optimize`, rebuilds the caches.
+ *
+ * The post-migration hooks are not run: they belong to the installation.
+ *
+ * It can be run as often as needed. The exit code is 0 when the instance is up
+ * to date, so a container entrypoint or a deployment script can rely on it. A
+ * cache that cannot be rebuilt does not make the upgrade fail (the application
+ * simply runs without that cache): it is reported as a warning.
  */
 final class UpgradeCommand extends Command
 {
@@ -33,7 +44,7 @@ final class UpgradeCommand extends Command
     /**
      * Runs the upgrade.
      */
-    public function handle(InstallationState $state, DatabaseMigrator $migrator): int
+    public function handle(InstallationState $state): int
     {
         if (! $state->isInstalled()) {
             $this->components->error(__('The instance is not installed: nothing to upgrade. Install it first (php artisan inventaire:install, or open /install).'));
@@ -41,23 +52,25 @@ final class UpgradeCommand extends Command
             return self::FAILURE;
         }
 
+        if (! $this->refreshConfiguration()) {
+            return self::FAILURE;
+        }
+
         try {
-            $this->output->write($migrator->migrate());
-            $hooks = $migrator->runHooks();
+            // Resolved only now: the migrator must hold the freshly loaded configuration.
+            $this->output->write($this->laravel->make(DatabaseMigrator::class)->migrate());
         } catch (InstallationException $exception) {
             $this->components->error($exception->userMessage());
 
             return self::FAILURE;
         }
 
-        $this->components->info(__('Post-migration hooks run: :count.', ['count' => $hooks]));
-
         if (! $this->clearCaches()) {
             return self::FAILURE;
         }
 
-        if ($this->option('optimize') && ! $this->runSilently('optimize')) {
-            return self::FAILURE;
+        if ($this->option('optimize')) {
+            $this->optimize();
         }
 
         $this->components->info(__('The instance is up to date.'));
@@ -66,8 +79,37 @@ final class UpgradeCommand extends Command
     }
 
     /**
-     * Clears the caches that outlive an update: configuration, routes, views
-     * and events, plus those packages register as part of `optimize`.
+     * Makes the process use the configuration as it is now.
+     *
+     * Clearing the cached configuration is not enough on its own: when this very
+     * process booted from that cache, its settings are stale and the environment
+     * file was never read, so both are loaded again.
+     *
+     * @return bool Whether the cached configuration could be cleared.
+     */
+    private function refreshConfiguration(): bool
+    {
+        $wasCached = $this->laravel->configurationIsCached();
+
+        if (! $this->runSilently('config:clear')) {
+            return false;
+        }
+
+        if ($wasCached) {
+            // The framework remembers that this process booted from the cache, and then skips the environment file.
+            $this->laravel->instance('config_loaded_from_cache', false);
+
+            (new LoadEnvironmentVariables)->bootstrap($this->laravel);
+            (new LoadConfiguration)->bootstrap($this->laravel);
+        }
+
+        return true;
+    }
+
+    /**
+     * Clears the caches that outlive an update: routes, views and events, plus
+     * those packages register as part of `optimize` (the configuration was
+     * cleared before the migrations).
      *
      * The application cache (`cache:clear`) is left alone: it holds live data
      * such as rate limiters, not compiled code.
@@ -76,7 +118,7 @@ final class UpgradeCommand extends Command
      */
     private function clearCaches(): bool
     {
-        foreach (['config:clear', 'route:clear', 'view:clear', 'event:clear', ...array_values(ServiceProvider::$optimizeClearCommands)] as $command) {
+        foreach (['route:clear', 'view:clear', 'event:clear', ...array_values(ServiceProvider::$optimizeClearCommands)] as $command) {
             if (! $this->runSilently($command)) {
                 return false;
             }
@@ -88,8 +130,30 @@ final class UpgradeCommand extends Command
     }
 
     /**
-     * Runs one of the framework's own commands without its output, and
-     * reports a failure.
+     * Rebuilds the caches, one command at a time, each in a process of its own
+     * (see {@see ArtisanRunner}). They are the commands `optimize` runs, which
+     * hides their errors and always succeeds.
+     *
+     * A failure is reported with the command's own output and never stops the
+     * upgrade: the migrations are done, and the application works without a
+     * cache.
+     */
+    private function optimize(): void
+    {
+        $runner = $this->laravel->make(ArtisanRunner::class);
+
+        foreach (['config:cache', 'event:cache', 'route:cache', 'view:cache', ...array_values(ServiceProvider::$optimizeCommands)] as $command) {
+            [$status, $output] = $runner->run($command);
+
+            if ($status !== self::SUCCESS) {
+                $this->line($output);
+                $this->components->warn(__('The command :command failed, so that cache was not rebuilt: the instance works, only slower. Fix the cause above and run inventaire:upgrade --optimize again.', ['command' => $command]));
+            }
+        }
+    }
+
+    /**
+     * Runs a command without its output, and reports a failure.
      *
      * @return bool Whether the command succeeded.
      */

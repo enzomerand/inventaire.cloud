@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Installer\DatabaseMigrator;
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use App\Installer\Exceptions\InstallationException;
@@ -271,7 +270,7 @@ describe('the order of the finalization', function (): void {
     function finalizerWith(array $hooks): InstallationFinalizer
     {
         app()->forgetInstance(InstallationFinalizer::class);
-        app()->when(DatabaseMigrator::class)->needs('$hooks')->give(fn (): array => $hooks);
+        app()->when(InstallationFinalizer::class)->needs('$hooks')->give(fn (): array => $hooks);
 
         return app(InstallationFinalizer::class);
     }
@@ -295,8 +294,9 @@ describe('the order of the finalization', function (): void {
         };
         app()->instance('test.hook', $hook);
         app()->tag(['test.hook'], PostMigrationHook::TAG);
+        app()->forgetInstance(InstallationFinalizer::class);
 
-        $hooks = (new ReflectionProperty(DatabaseMigrator::class, 'hooks'))->getValue(app(DatabaseMigrator::class));
+        $hooks = (new ReflectionProperty(InstallationFinalizer::class, 'hooks'))->getValue(app(InstallationFinalizer::class));
 
         expect(iterator_to_array($hooks, false))->toBe([$hook]);
     });

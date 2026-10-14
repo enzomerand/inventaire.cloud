@@ -2,81 +2,61 @@
 
 declare(strict_types=1);
 
-use App\Installer\DatabaseMigrator;
-use App\Installer\Exceptions\InstallationException;
+use App\Console\ArtisanRunner;
+use App\Console\ProcessArtisanRunner;
 use App\Installer\PostMigrationHook;
-use Illuminate\Console\CacheCommandMutex;
 use Illuminate\Console\Command;
-use Illuminate\Database\Console\Migrations\MigrateCommand;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Makes the container hand these hooks to the migrator, as the tag does in production.
+ * Replaces one of the framework's (or a package's) commands with a stand-in that
+ * records its call: the real cache commands would write to, or wipe, the working
+ * copy's own bootstrap/cache.
  *
- * @param  list<PostMigrationHook>  $hooks
+ * @param  string  $name  The command to replace, e.g. `route:cache`.
+ * @param  int  $exitCode  What the stand-in returns.
+ * @param  string  $prints  What it prints.
  */
-function upgradeWithHooks(array $hooks): void
+function standIn(ArrayObject $calls, string $name, int $exitCode = 0, string $prints = '', ?Throwable $throws = null): void
 {
-    app()->when(DatabaseMigrator::class)->needs('$hooks')->give(fn (): array => $hooks);
-}
-
-/**
- * A hook that counts how many times it ran.
- */
-function countingHook(int &$runs): PostMigrationHook
-{
-    return new class($runs) implements PostMigrationHook
+    $standIn = new class($calls, $name, $exitCode, $prints, $throws) extends Command
     {
-        public function __construct(private int &$runs) {}
-
-        public function run(): void
+        public function __construct(private readonly ArrayObject $calls, string $name, private readonly int $exitCode, private readonly string $prints, private readonly ?Throwable $throws)
         {
-            $this->runs++;
-        }
-    };
-}
+            $this->signature = $name;
 
-/**
- * Replaces the framework's `optimize` command with one that only records the call:
- * the real one writes the route, event and view caches of this checkout.
- *
- * @param  array<int, string>  $calls
- */
-function recordOptimizeCalls(array &$calls, int $exitCode = 0): void
-{
-    $recorder = new class($calls, $exitCode) extends Command
-    {
-        protected $signature = 'optimize';
-
-        /** @param array<int, string> $calls */
-        public function __construct(private array &$calls, private readonly int $exitCode)
-        {
             parent::__construct();
         }
 
         public function handle(): int
         {
-            $this->calls[] = 'optimize';
+            $this->calls[] = $this->getName();
 
-            return $this->exitCode;
+            if ($this->prints !== '') {
+                $this->line($this->prints);
+            }
+
+            return $this->throws instanceof Throwable ? throw $this->throws : $this->exitCode;
         }
     };
 
-    Artisan::registerCommand($recorder);
+    Artisan::registerCommand($standIn);
 }
+
+beforeEach(function (): void {
+    // The package caches (Blade icons) live in bootstrap/cache: never let a test reach them.
+    $this->calls = new ArrayObject;
+    standIn($this->calls, 'icons:clear');
+});
 
 it('refuses to run on an instance that is not installed', function (): void {
     $this->bootInstaller(installed: false);
-    $runs = 0;
-    upgradeWithHooks([countingHook($runs)]);
 
     $this->artisan('inventaire:upgrade')
         ->expectsOutputToContain('The instance is not installed')
         ->assertExitCode(1);
-
-    expect($runs)->toBe(0);
 });
 
 it('applies the pending migrations', function (): void {
@@ -101,77 +81,56 @@ it('is a no-op the second time', function (): void {
     expect(DB::table('migrations')->pluck('migration')->all())->toBe($applied);
 });
 
-it('runs the post-migration hooks once per call, after the migrations', function (): void {
-    Artisan::call('db:wipe', ['--force' => true]);
+it('does not run the post-migration hooks: they belong to the installation', function (): void {
     $runs = 0;
-    $sawUsersTable = null;
-    upgradeWithHooks([countingHook($runs), new class($sawUsersTable) implements PostMigrationHook
+    $hook = new class($runs) implements PostMigrationHook
     {
-        public function __construct(private ?bool &$saw) {}
+        public function __construct(private int &$runs) {}
 
         public function run(): void
         {
-            $this->saw = Schema::hasTable('users');
+            $this->runs++;
         }
-    }]);
-
-    $this->artisan('inventaire:upgrade')->expectsOutputToContain('Post-migration hooks run: 2.')->assertExitCode(0);
-
-    expect($runs)->toBe(1)->and($sawUsersTable)->toBeTrue();
+    };
+    app()->instance('test.hook', $hook);
+    app()->tag(['test.hook'], PostMigrationHook::TAG);
 
     $this->artisan('inventaire:upgrade')->assertExitCode(0);
 
-    expect($runs)->toBe(2);
+    expect($runs)->toBe(0);
 });
 
-it('fails, without clearing anything, when a hook aborts', function (): void {
-    $hook = new class implements PostMigrationHook
-    {
-        public function run(): void
-        {
-            throw new InstallationException('The administrator account could not be created.');
-        }
-    };
-    upgradeWithHooks([$hook]);
-    file_put_contents(app()->getCachedConfigPath(), '<?php return [];');
-
-    $this->artisan('inventaire:upgrade')
-        ->expectsOutputToContain('The administrator account could not be created.')
-        ->assertExitCode(1);
-
-    expect(is_file(app()->getCachedConfigPath()))->toBeTrue();
-});
-
-it('fails when the migrations fail, and runs no hook', function (): void {
+it('fails when the migrations fail, and leaves the caches alone', function (): void {
     $driver = config('database.default');
     config(["database.connections.{$driver}.password" => 'wrong-password']);
     DB::purge();
-    $runs = 0;
-    upgradeWithHooks([countingHook($runs)]);
+    file_put_contents(app()->getCachedRoutesPath(), '<?php return [];');
 
     $this->artisan('inventaire:upgrade')
         ->expectsOutputToContain('The database migration failed')
         ->assertExitCode(1);
 
-    expect($runs)->toBe(0);
+    expect(is_file(app()->getCachedRoutesPath()))->toBeTrue();
 });
 
-it('refuses to migrate while another migration is running', function (): void {
-    $mutex = app(CacheCommandMutex::class);
-    $migrate = app(MigrateCommand::class);
+it('migrates with the configuration as it is now, not as it was cached', function (): void {
+    Artisan::call('db:wipe', ['--force' => true]);
 
-    expect($mutex->create($migrate))->toBeTrue();
+    // The process booted from a cached configuration that holds an outdated database password.
+    $driver = config('database.default');
+    config(["database.connections.{$driver}.password" => 'outdated-password']);
+    DB::purge();
+    file_put_contents(app()->getCachedConfigPath(), '<?php return [];');
+    app()->instance('config_loaded_from_cache', true);
 
-    try {
-        $this->artisan('inventaire:upgrade')->assertExitCode(1);
-    } finally {
-        $mutex->forget($migrate);
-    }
+    $this->artisan('inventaire:upgrade')->assertExitCode(0);
+
+    expect(is_file(app()->getCachedConfigPath()))->toBeFalse()
+        ->and(Schema::hasTable('users'))->toBeTrue();
 });
 
-it('clears the configuration, route, event and view caches, and only those', function (): void {
+it('clears the configuration, route, view and event caches and the packages\' ones, and only those', function (): void {
     $views = $this->sandbox->root.'/views';
-    mkdir($views);
     config(['view.compiled' => $views]);
     $caches = [app()->getCachedConfigPath(), app()->getCachedRoutesPath(), app()->getCachedEventsPath(), $views.'/compiled.php'];
     $kept = base_path('bootstrap/cache/services.php');
@@ -182,7 +141,10 @@ it('clears the configuration, route, event and view caches, and only those', fun
     }
 
     // phpunit.xml points the caches at the sandbox: otherwise this test would delete the real ones.
-    expect($caches[1])->toStartWith($this->sandbox->root)->and($caches[2])->toStartWith($this->sandbox->root);
+    foreach ($caches as $cache) {
+        expect($cache)->toStartWith($this->sandbox->root);
+    }
+
     cache()->put('upgrade-test', 'kept', 60);
 
     $this->artisan('inventaire:upgrade')->expectsOutputToContain('The caches were cleared.')->assertExitCode(0);
@@ -191,30 +153,87 @@ it('clears the configuration, route, event and view caches, and only those', fun
         expect(is_file($cache))->toBeFalse($cache);
     }
 
-    expect(cache()->get('upgrade-test'))->toBe('kept')
+    expect($this->calls->getArrayCopy())->toBe(['icons:clear'])
+        ->and(cache()->get('upgrade-test'))->toBe('kept')
         ->and(is_file($kept) ? filemtime($kept) : null)->toBe($keptBefore);
 });
 
-it('rebuilds the caches only with --optimize, after clearing them', function (): void {
-    $calls = [];
-    recordOptimizeCalls($calls);
+describe('--optimize', function (): void {
+    /**
+     * A runner that records the commands it is given, and fails the ones listed (command => output).
+     *
+     * @param  array<string, string>  $failing
+     */
+    function recordingRunner(ArrayObject $commands, array $failing = []): ArtisanRunner
+    {
+        return new class($commands, $failing) implements ArtisanRunner
+        {
+            /** @param array<string, string> $failing */
+            public function __construct(private readonly ArrayObject $commands, private readonly array $failing) {}
 
-    $this->artisan('inventaire:upgrade')->assertExitCode(0);
+            public function run(string $command): array
+            {
+                $this->commands[] = $command;
 
-    expect($calls)->toBe([]);
+                return isset($this->failing[$command]) ? [1, $this->failing[$command]] : [0, ''];
+            }
+        };
+    }
 
-    $this->artisan('inventaire:upgrade', ['--optimize' => true])->assertExitCode(0);
+    /** The commands `optimize` runs, in its order, plus the one the Blade icons package adds. */
+    $commands = ['config:cache', 'event:cache', 'route:cache', 'view:cache', 'icons:cache'];
 
-    expect($calls)->toBe(['optimize']);
+    it('rebuilds the caches, each in a process of its own, only when asked', function () use ($commands): void {
+        $ran = new ArrayObject;
+        app()->instance(ArtisanRunner::class, recordingRunner($ran));
+
+        $this->artisan('inventaire:upgrade')->assertExitCode(0);
+
+        expect($ran->getArrayCopy())->toBe([]);
+
+        $this->artisan('inventaire:upgrade', ['--optimize' => true])->assertExitCode(0);
+
+        expect($ran->getArrayCopy())->toBe($commands);
+    });
+
+    it('reports a cache that cannot be rebuilt with its own error, goes on with the others and still succeeds', function () use ($commands): void {
+        $ran = new ArrayObject;
+        app()->instance(ArtisanRunner::class, recordingRunner($ran, ['route:cache' => 'Unable to prepare route [home] for serialization. Uses Closure.', 'view:cache' => 'The options for the "tabler" set don\'t have a prefix defined.']));
+
+        $this->artisan('inventaire:upgrade', ['--optimize' => true])
+            ->expectsOutputToContain('Unable to prepare route [home] for serialization')
+            ->expectsOutputToContain('set don\'t have a prefix defined')
+            ->expectsOutputToContain('The command route:cache failed')
+            ->expectsOutputToContain('The command view:cache failed')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
+
+        expect($ran->getArrayCopy())->toBe($commands);
+    });
+
+    it('still fails when the migrations fail, before touching any cache', function (): void {
+        $ran = new ArrayObject;
+        app()->instance(ArtisanRunner::class, recordingRunner($ran));
+        $driver = config('database.default');
+        config(["database.connections.{$driver}.password" => 'wrong-password']);
+        DB::purge();
+
+        $this->artisan('inventaire:upgrade', ['--optimize' => true])->assertExitCode(1);
+
+        expect($ran->getArrayCopy())->toBe([]);
+    });
 });
 
-it('fails when the optimization fails', function (): void {
-    $calls = [];
-    recordOptimizeCalls($calls, exitCode: 1);
+describe('the process runner', function (): void {
+    it('runs an artisan command in a child process and reports its output and exit code', function (): void {
+        [$status, $output] = (new ProcessArtisanRunner)->run('inspire');
 
-    $this->artisan('inventaire:upgrade', ['--optimize' => true])
-        ->expectsOutputToContain('The command optimize failed.')
-        ->assertExitCode(1);
+        expect($status)->toBe(0)->and($output)->not->toBe('');
+
+        [$status, $output] = (new ProcessArtisanRunner)->run('no:such-command');
+
+        expect($status)->not->toBe(0)->and($output)->toContain('no:such-command');
+    });
 });
 
 it('speaks French', function (): void {

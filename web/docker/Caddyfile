@@ -1,0 +1,36 @@
+# Web server configuration of the inventaire.cloud image (FrankenPHP is Caddy with PHP).
+#
+# Plain HTTP on port 8080: put a reverse proxy in front of it for HTTPS.
+#
+# Only one PHP file ever runs here: public/index.php, the front controller. The
+# default `php_server` directive would also run any *.php file below public/, and
+# public/storage points to the storage volume, where uploads end up: a PHP file
+# uploaded there must never be executed. So the routing is spelled out:
+#
+#   1. a file that exists below public/ is served as it is, unless its name ends in .php
+#   2. everything else, including every .php URL, is handed to the front controller
+{
+	skip_install_trust
+	admin off
+	auto_https off
+
+	frankenphp
+}
+
+:8080 {
+	root * /app/public
+	encode zstd br gzip
+
+	route {
+		@static {
+			file {path}
+			not path *.php
+			# A URL ending in a slash is a page of the application, not a folder to list.
+			not path */
+		}
+		file_server @static
+
+		rewrite * /index.php
+		php
+	}
+}

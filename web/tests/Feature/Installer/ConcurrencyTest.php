@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Installer\DatabaseMigrator;
 use App\Installer\EnvironmentFile;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\Exceptions\LockBusyException;
@@ -14,6 +15,9 @@ use App\Installer\Mail\MailCodeOutcome;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\MailProbe;
 use App\Installer\Support\FileLock;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schema;
+use Symfony\Component\Process\Process;
 
 /**
  * Runs several PHP processes at once, each hammering one change of a shared file, and waits for all of them.
@@ -141,9 +145,99 @@ describe('finalizing twice at once', function (): void {
 
         $this->fail('Expected an InstallationException.');
     });
+});
 
-    it('runs the migrations in isolated mode', function (): void {
-        expect(file_get_contents(base_path('app/Installer/DatabaseMigrator.php')))->toContain("'--isolated' => 1");
+describe('migrating at the same time', function (): void {
+    /**
+     * Starts a PHP process that takes the migration lock and keeps it for a while, and returns once it holds it.
+     */
+    function holdMigrationLock(string $statePath, float $seconds): Process
+    {
+        $code = '$handle = fopen($argv[1], "c"); flock($handle, LOCK_EX); echo "locked"; usleep((int) ((float) $argv[2] * 1000000));';
+        $process = new Process([PHP_BINARY, '-r', $code, $statePath.'/migrate.lock', (string) $seconds]);
+        $process->start();
+
+        for ($waited = 0; ! str_contains($process->getOutput(), 'locked'); $waited++) {
+            if ($waited > 500 || ! $process->isRunning()) {
+                throw new RuntimeException('The lock holder did not start: '.$process->getErrorOutput());
+            }
+
+            usleep(20_000);
+        }
+
+        return $process;
+    }
+
+    /**
+     * A migrator that waits at most the given time for a running migration.
+     */
+    function migratorWaiting(float $seconds): DatabaseMigrator
+    {
+        return app()->make(DatabaseMigrator::class, ['lockWait' => $seconds]);
+    }
+
+    it('waits for the migration in progress, then finds nothing left to do', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        $holder = holdMigrationLock(app(InstallationState::class)->directory(), 1.0);
+        $start = microtime(true);
+
+        $output = migratorWaiting(30)->migrate();
+
+        expect(microtime(true) - $start)->toBeGreaterThan(0.5)
+            ->and($output)->toContain('Running migrations')
+            ->and(Schema::hasTable('users'))->toBeTrue();
+
+        $holder->stop();
+    });
+
+    it('gives up with a clear error when the migration in progress does not finish', function (): void {
+        $holder = holdMigrationLock(app(InstallationState::class)->directory(), 30);
+        $start = microtime(true);
+
+        try {
+            migratorWaiting(0.3)->migrate();
+        } catch (InstallationException $exception) {
+            expect($exception->userMessage())->toContain('Another migration is still running')->and(microtime(true) - $start)->toBeLessThan(5);
+
+            return;
+        } finally {
+            $holder->stop();
+        }
+
+        $this->fail('Expected an InstallationException.');
+    });
+
+    it('is not blocked for good by a process that was killed while it held the lock', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        $holder = holdMigrationLock(app(InstallationState::class)->directory(), 60);
+        $holder->signal(SIGKILL);
+        $holder->wait();
+        $start = microtime(true);
+
+        migratorWaiting(5)->migrate();
+
+        expect(microtime(true) - $start)->toBeLessThan(4)->and(Schema::hasTable('users'))->toBeTrue();
+    });
+
+    it('lets two processes migrate an empty database at once without a clash', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        $script = 'require $argv[1]."/vendor/autoload.php"; $app = require $argv[1]."/bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); echo $app->make(App\Installer\DatabaseMigrator::class)->migrate();';
+        $processes = [new Process([PHP_BINARY, '-r', $script, base_path()], base_path()), new Process([PHP_BINARY, '-r', $script, base_path()], base_path())];
+
+        foreach ($processes as $process) {
+            $process->start();
+        }
+
+        foreach ($processes as $process) {
+            $process->wait();
+            expect($process->getExitCode())->toBe(0, $process->getOutput().$process->getErrorOutput());
+        }
+
+        // One of them did the work, the other waited and found nothing to migrate.
+        $outputs = $processes[0]->getOutput().$processes[1]->getOutput();
+
+        expect($outputs)->toContain('Running migrations')->toContain('Nothing to migrate')
+            ->and(Schema::hasTable('users'))->toBeTrue();
     });
 });
 

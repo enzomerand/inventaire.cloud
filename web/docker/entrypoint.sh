@@ -14,7 +14,8 @@
 #                                starts as it is and the install wizard (/install)
 #                                does the rest.
 #              If the preparation fails the container stops with a non-zero status
-#              instead of serving a half-updated instance.
+#              instead of serving a half-updated instance. (A cache that cannot be
+#              rebuilt is only a warning: the application works without it.)
 #   worker     The queue worker. It waits until the instance is installed.
 #   scheduler  The task scheduler. It waits until the instance is installed.
 #   other      Any other command is run as it is, e.g.
@@ -38,17 +39,24 @@ log() {
 # Recreates the storage skeleton on an empty volume.
 prepare_storage() {
     if [ ! -w storage ]; then
-        log "storage/ is not writable by user $(id -u): give that user the volume (chown -R $(id -u) on the mounted folder)."
+        log "/app/storage is not writable by uid $(id -u): give that user the volume (chown -R $(id -u) on the mounted folder)."
         exit 1
     fi
 
     for directory in framework/cache/data framework/sessions framework/views logs app/public app/private installer; do
-        mkdir -p "storage/$directory"
+        if ! mkdir -p "storage/$directory"; then
+            log "Cannot create /app/storage/$directory as uid $(id -u): a folder of the storage volume belongs to someone else (chown -R $(id -u) on the mounted folder)."
+            exit 1
+        fi
     done
 }
 
-# The web server and, once the instance is ready, nothing else to do but serve.
+# Prepares the instance, then becomes the web server.
 run_app() {
+    # A configuration cache left in this container by an earlier run must not hide edits of the
+    # configuration file (a new database password, say): everything below reads it afresh.
+    php artisan config:clear --quiet
+
     status=$(php artisan inventaire:install-status)
 
     case "$status" in
@@ -59,12 +67,10 @@ run_app() {
         environment)
             log "Not installed, and the whole configuration comes from the environment: installing."
             php artisan inventaire:install --from-env --no-interaction
-            php artisan optimize
+            php artisan inventaire:upgrade --optimize
             ;;
         wizard)
             log "Not installed: open /install to run the install wizard (setup token: php artisan inventaire:install-token)."
-            # A configuration cache left by an earlier run would hide the not-installed runtime.
-            php artisan config:clear
             ;;
         *)
             log "Unexpected answer of inventaire:install-status: '$status'."
@@ -76,12 +82,30 @@ run_app() {
 }
 
 # Blocks until the instance is installed (by the app container: wizard or environment).
+# A status check that keeps failing (its error is in the log) stops the container instead of
+# waiting for ever in silence.
 wait_until_installed() {
     # `sleep` in the background keeps the shell able to react to docker stop.
     trap 'log "Stopping."; exit 0' TERM INT
 
-    until [ "$(php artisan inventaire:install-status || true)" = "installed" ]; do
-        log "Waiting for the instance to be installed..."
+    failures=0
+
+    while true; do
+        if status=$(php artisan inventaire:install-status); then
+            failures=0
+
+            [ "$status" = "installed" ] && break
+
+            log "Waiting for the instance to be installed..."
+        else
+            failures=$((failures + 1))
+            log "The install status could not be read (attempt $failures of 3)."
+
+            if [ "$failures" -ge 3 ]; then
+                exit 1
+            fi
+        fi
+
         sleep 5 &
         wait $!
     done

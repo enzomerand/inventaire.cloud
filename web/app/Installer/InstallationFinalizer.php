@@ -33,6 +33,8 @@ final class InstallationFinalizer
         private readonly EnvironmentLocks $locks,
         private readonly SetupToken $token,
         private readonly DatabaseMigrator $migrator,
+        /** @var iterable<PostMigrationHook> */
+        private readonly iterable $hooks = [],
     ) {}
 
     /**
@@ -86,7 +88,7 @@ final class InstallationFinalizer
 
         // 1. The tables. 2. Whatever else needs them. 3. Settings. 4. The marker, which ends the installation: last.
         $this->migrate();
-        $this->migrator->runHooks();
+        $this->runHooks();
 
         if ($productionDefaults) {
             $this->applyProductionDefaults();
@@ -100,6 +102,22 @@ final class InstallationFinalizer
         $this->state->forgetProgress();
 
         return route('home', absolute: false);
+    }
+
+    /**
+     * Runs the {@see PostMigrationHook}s, in registration order.
+     *
+     * Only the installation runs them (`inventaire:upgrade` does not): they
+     * come before the "installed" marker and may read what the wizard
+     * collected, which is deleted once the installation is complete.
+     *
+     * @throws InstallationException When a hook aborts the installation.
+     */
+    private function runHooks(): void
+    {
+        foreach ($this->hooks as $hook) {
+            $hook->run();
+        }
     }
 
     /**

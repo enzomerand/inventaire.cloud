@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Installer\ApplicationKey;
-use App\Installer\DatabaseMigrator;
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use App\Installer\Exceptions\InstallationException;
+use App\Installer\InstallationFinalizer;
 use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
 use App\Installer\PostMigrationHook;
@@ -61,7 +61,7 @@ final class InstallerServiceProvider extends ServiceProvider
 
         $this->app->singleton(InstallerSettings::class);
         $this->app->singleton(SetupToken::class);
-        $this->app->when(DatabaseMigrator::class)->needs('$hooks')->giveTagged(PostMigrationHook::TAG);
+        $this->app->when(InstallationFinalizer::class)->needs('$hooks')->giveTagged(PostMigrationHook::TAG);
         $this->app->bind(StorageProbe::class, FilesystemStorageProbe::class);
         $this->app->singleton(ApplicationKey::class);
 

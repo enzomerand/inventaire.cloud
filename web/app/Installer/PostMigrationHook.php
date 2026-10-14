@@ -23,6 +23,11 @@ namespace App\Installer;
  * (or after another hook) and be run again, so a hook may see the effect of a
  * previous, interrupted run and must cope with it. An exception aborts the
  * installation, which then stays not installed and can be retried.
+ *
+ * Hooks belong to the installation only: `inventaire:upgrade` never runs them.
+ * They run before the "installed" marker, while the values collected by the
+ * wizard still exist (they are deleted when the installation completes), so
+ * running them later would find those values gone.
  */
 interface PostMigrationHook
 {

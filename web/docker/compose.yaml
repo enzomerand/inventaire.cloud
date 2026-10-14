@@ -61,9 +61,12 @@ services:
         # The image's health check queries the web server, which this container does not run.
         healthcheck:
             disable: true
+        # restart: Compose restarts this container whenever it recreates or restarts app, so that
+        # an update reaches the worker too, once the new app container is healthy.
         depends_on:
             app:
                 condition: service_healthy
+                restart: true
 
     scheduler:
         <<: *app
@@ -73,6 +76,7 @@ services:
         depends_on:
             app:
                 condition: service_healthy
+                restart: true
 
     db:
         image: postgres:18-alpine
@@ -90,9 +94,14 @@ services:
             timeout: 5s
             retries: 12
 
-    # MySQL instead of PostgreSQL: replace the `db` service above with this one, and set
-    # DB_CONNECTION=mysql and DB_PORT=3306 in .env. Volume and healthcheck as in
-    # compose.dev.yaml of the repository.
+    # Another database. To use a server you already have (PostgreSQL, MySQL or MariaDB), delete
+    # the `db` service, the `depends_on` of `app` that waits for it and the DB_* lines of the
+    # environment above: the wizard's database step is then editable, or put DB_CONNECTION,
+    # DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME and DB_PASSWORD in .env to skip the wizard.
+    #
+    # To run MySQL or MariaDB here instead of PostgreSQL, replace the `db` service with one of
+    # these, and set DB_CONNECTION (mysql or mariadb) and DB_PORT=3306 in .env. Volume and
+    # healthcheck as in compose.dev.yaml of the repository.
     #
     # db:
     #     image: mysql:9.7

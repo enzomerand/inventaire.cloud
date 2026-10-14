@@ -101,7 +101,7 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
-7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`.
+7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`. Only the installation runs them: `inventaire:upgrade` does not.
 
 Creating the first administrator account is not part of the installer yet (it comes with the accounts lot).
 
@@ -149,7 +149,7 @@ npm ci && npm run build
 php artisan inventaire:upgrade --optimize
 ```
 
-`inventaire:upgrade` applies the pending migrations (isolated: it stops with an error if another migration is already running), runs the post-migration hooks, then clears the configuration, route, view and event caches (never the application cache) and, with `--optimize`, rebuilds them. It refuses an instance that is not installed, exits non-zero as soon as a step fails, and can be run as often as you like: when everything is up to date it changes nothing. Run it as the user that owns `storage/`. With Docker the update is automatic (see below).
+`inventaire:upgrade` first clears the cached configuration and reloads the settings (so an edited `.env` is used), then applies the pending migrations under a file lock: if another upgrade is running at the same time, it waits for it (up to 10 minutes) and finds nothing left to do. It then clears the route, view and event caches (never the application cache) and, with `--optimize`, rebuilds them; a cache that cannot be rebuilt is reported as a warning and does not fail the upgrade, since the application simply runs without it. The post-migration hooks are not run: they belong to the installation. The command refuses an instance that is not installed, exits non-zero as soon as the configuration cannot be refreshed or a migration fails, and can be run as often as you like: when everything is up to date it changes nothing. Run it as the user that owns `storage/`. With Docker the update is automatic (see below).
 
 ## Self-hosting with Docker
 
@@ -173,6 +173,28 @@ The application listens on <http://localhost:8080> (`APP_PORT` in `.env` changes
 The `storage` volume is `/app/storage`: it holds the configuration the installer generates (`.env`, with `APP_KEY` and the secrets entered in the wizard), the uploaded files, the installer state (including the "installed" marker) and the logs. **Back it up together with the database, and keep it private**: whoever reads it can read your secrets, and an instance whose database survives but whose `APP_KEY` is lost cannot decrypt what it stored. Do not delete the volume unless you mean to erase the instance. If you replace it with a host folder, make it writable by user ID 1000, the unprivileged user every process of the container runs as.
 
 `APP_ENVIRONMENT_FILE` (default `/app/storage/.env`) tells Laravel and the installer which file holds that configuration. It must be an absolute path; Laravel prefers a file named like it followed by `.` and `APP_ENV` (`.env.production`) when one exists in the same folder, so keep none there.
+
+`APP_ENV`, `APP_DEBUG` and `LOG_CHANNEL` are environment variables of the image (production mode, errors on stderr), not entries of that file: a real environment variable always wins over it. To change them, set them in `docker/.env`, not in `/app/storage/.env`.
+
+### Updating
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If a migration fails the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. Compose restarts the worker and the scheduler whenever it recreates or restarts `app` (`restart: true` in their `depends_on`), so they run the new code once the application is healthy. Back up before updating.
+
+To run the update by hand, without recreating the containers:
+
+```bash
+docker compose exec app php artisan inventaire:upgrade --optimize
+docker compose restart worker scheduler
+```
+
+### Another database server
+
+`docker/compose.yaml` bundles PostgreSQL. To use a server you already have (PostgreSQL, MySQL or MariaDB), delete the `db` service, the `depends_on` entry of `app` that waits for it, and the `DB_*` lines of the shared environment. The wizard's database step is then editable; or put `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` in `docker/.env` to install without the wizard. Commented examples of bundled MySQL and MariaDB services are at the end of the file.
 
 ### Updating
 
@@ -229,7 +251,7 @@ composer test:mariadb # MariaDB only
 
 `phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` and `composer test:mariadb` override `DB_*` to use their own service and its `inventaire_test` schema.
 
-The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE`, `APP_EVENTS_CACHE` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
+The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE`, `APP_EVENTS_CACHE`, `VIEW_COMPILED_PATH` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
 
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
@@ -266,7 +288,7 @@ tests/
   js/               Vitest tests
 compose.dev.yaml    Development services
 Dockerfile          Self-hosting image (see "Self-hosting with Docker")
-docker/             Image entrypoint and php.ini, compose.yaml and .env.example for self-hosters
+docker/             Image entrypoint, Caddyfile and php.ini; compose.yaml and .env.example for self-hosters
 ```
 
 ## Conventions

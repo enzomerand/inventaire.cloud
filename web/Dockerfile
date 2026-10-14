@@ -64,6 +64,11 @@ FROM base AS runtime
 ARG USER=inventaire
 ARG UID=1000
 
+# Our own web server configuration, not the image's: only public/index.php may run PHP
+# (see the comments in the file). Checked now so that a mistake fails the build.
+COPY docker/Caddyfile /etc/caddy/Caddyfile
+RUN frankenphp validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
 # One dedicated user for every process of the container (web server, queue worker,
 # scheduler, artisan): the files they share in the storage volume belong to it.
 # FrankenPHP's own recipe for running without root: the binary gets no file
@@ -90,22 +95,26 @@ USER $USER
 # Registers the packages' service providers (composer ran with --no-scripts).
 RUN php artisan package:discover --ansi
 
-# Defaults a self-hoster can override with real environment variables:
+# Defaults, all plain environment variables: change them in docker/.env (they reach the
+# containers through compose.yaml), not in the generated configuration file.
 # - APP_ENVIRONMENT_FILE: where the installer keeps the generated configuration (APP_KEY,
 #   settings entered in the wizard), on the storage volume so that it survives updates;
-# - production mode, with logs on stderr (`docker compose logs`);
-# - SERVER_NAME=:8080: plain HTTP on 8080, put a reverse proxy in front for HTTPS.
+# - production mode, with logs on stderr (`docker compose logs`).
+# The web server listens on plain HTTP on port 8080 (docker/Caddyfile): HTTPS is the job of
+# a reverse proxy in front of the container.
 ENV APP_ENV=production \
     APP_DEBUG=false \
     APP_ENVIRONMENT_FILE=/app/storage/.env \
-    LOG_CHANNEL=stderr \
-    SERVER_NAME=:8080
+    LOG_CHANNEL=stderr
 
 EXPOSE 8080
 
-# /up answers 200 before and after the installation. The start period covers the update
-# or the automatic installation the entrypoint performs before the server starts.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=3 \
+# /up answers 200 before and after the installation. Before the server starts the entrypoint
+# updates or installs the instance, and a migration can take minutes: failed probes do not
+# count during the start period (10 minutes, the longest a second upgrade waits for a running
+# migration), and start-interval probes every 5 seconds meanwhile so that the container turns
+# healthy as soon as it can.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10m --start-interval=5s --retries=3 \
     CMD curl -fsS -o /dev/null http://127.0.0.1:8080/up || exit 1
 
 LABEL org.opencontainers.image.title="inventaire.cloud" \
