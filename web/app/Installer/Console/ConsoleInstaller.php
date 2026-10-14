@@ -116,14 +116,11 @@ final class ConsoleInstaller
                 return Command::FAILURE;
             }
 
-            foreach ([InstallStep::Database, InstallStep::Application, InstallStep::Mail, InstallStep::Storage] as $step) {
-                if (! $this->configure($step)) {
+            // The same registry as the web wizard: every step, in order.
+            foreach (InstallStep::cases() as $step) {
+                if (! ($step->isOptional() ? $this->configureOptional($step) : $this->configure($step))) {
                     return Command::FAILURE;
                 }
-            }
-
-            if (! $this->configureDocumenso()) {
-                return Command::FAILURE;
             }
 
             return $this->finalize();
@@ -212,11 +209,11 @@ final class ConsoleInstaller
 
             $result = $this->save($step, $values);
 
-            foreach ($result->warnings ?? [] as $warning) {
+            foreach ($result->warnings as $warning) {
                 $this->components->warn($warning);
             }
 
-            if ($result === null || $result->ok) {
+            if ($result->ok) {
                 $this->components->info(__(':step: done.', ['step' => $step->title()]));
 
                 return true;
@@ -231,21 +228,27 @@ final class ConsoleInstaller
     }
 
     /**
-     * Optional step: configured when asked for, or when both values are present.
+     * Optional step: configured when asked for, or when every value it needs is
+     * already present (options or configuration), skipped otherwise.
      */
-    private function configureDocumenso(): bool
+    private function configureOptional(InstallStep $step): bool
     {
-        $step = InstallStep::Documenso;
         $provided = $this->providedOptions($step);
         $current = $this->settings->current($step);
-        $available = ($provided['url'] ?? $current['url']) !== '' && ($provided['api_key'] ?? $current['api_key']) !== '';
+        $available = true;
+
+        foreach ($step->fields() as $field) {
+            if ($field->required && ($provided[$field->name] ?? $current[$field->name]) === '') {
+                $available = false;
+            }
+        }
 
         if ($this->interactive) {
             $this->command->newLine();
             $this->components->info($step->title());
 
-            if (! confirm(label: __('Configure the electronic signature (Documenso) now?'), default: $available)) {
-                $this->steps->skipDocumenso();
+            if (! confirm(label: $step->configureQuestion(), default: $available)) {
+                $this->steps->skip($step);
 
                 return true;
             }
@@ -254,7 +257,7 @@ final class ConsoleInstaller
         }
 
         if (! $available) {
-            $this->steps->skipDocumenso();
+            $this->steps->skip($step);
             $this->components->twoColumnDetail($step->title(), '<fg=yellow>'.__('Skipped').'</>');
 
             return true;
@@ -264,50 +267,34 @@ final class ConsoleInstaller
     }
 
     /**
-     * Tests and saves a step; returns null when there was nothing to test.
+     * Tests and saves a step.
      *
      * @param  array<string, mixed>  $values
      */
-    private function save(InstallStep $step, array $values): ?ProbeResult
+    private function save(InstallStep $step, array $values): ProbeResult
     {
-        return match ($step) {
-            InstallStep::Database => $this->steps->saveDatabase($values),
-            InstallStep::Application => $this->saveApplication($values),
-            InstallStep::Mail => $this->saveMail($values),
-            InstallStep::Storage => $this->steps->saveStorage($values),
-            InstallStep::Documenso => $this->steps->saveDocumenso($values),
-        };
-    }
-
-    /**
-     * @param  array<string, mixed>  $values
-     */
-    private function saveApplication(array $values): null
-    {
-        $this->steps->saveApplication($values);
-
-        return null;
-    }
-
-    /**
-     * Mail is proven by a code read from a real inbox when a person is there to
-     * read it, and by an SMTP session otherwise.
-     *
-     * @param  array<string, mixed>  $values
-     */
-    private function saveMail(array $values): ProbeResult
-    {
-        if (! $this->interactive) {
-            if ($this->command->option('skip-mail-test')) {
-                $this->components->warn(__('The mail settings were not tested (--skip-mail-test): check that emails can be sent.'));
-                $this->steps->saveMailUntested($values);
-
-                return ProbeResult::success();
-            }
-
-            return $this->steps->saveMailAfterConnection($values);
+        if ($step->sendsEmail() && $this->interactive) {
+            return $this->saveMailWithCode($values);
         }
 
+        if ($step->sendsEmail() && $this->command->option('skip-mail-test')) {
+            $this->components->warn(__('The mail settings were not tested (--skip-mail-test): check that emails can be sent.'));
+            $this->steps->saveMailUntested($values);
+
+            return ProbeResult::success();
+        }
+
+        return $this->steps->save($step, $values);
+    }
+
+    /**
+     * Mail is proven by a code read from a real inbox: a person is here to read it.
+     * Non-interactive runs check the SMTP server instead (see {@see InstallerSteps::save()}).
+     *
+     * @param  array<string, mixed>  $values
+     */
+    private function saveMailWithCode(array $values): ProbeResult
+    {
         [$result, $challenge] = $this->steps->beginMail($values);
 
         if (! $result->ok || $challenge === null) {

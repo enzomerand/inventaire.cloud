@@ -41,10 +41,15 @@ final class InstallationFinalizer
         private readonly SetupToken $token,
         private readonly DatabaseManager $db,
         private readonly Kernel $artisan,
+        private readonly ConfigCache $configCache,
+        /** @var iterable<PostMigrationHook> */
+        private readonly iterable $hooks = [],
     ) {}
 
     /**
-     * Runs the migrations, optionally switches to production mode and marks the instance installed.
+     * Completes the installation, in this order: the migrations, the
+     * {@see PostMigrationHook}s, the production defaults, and finally the
+     * "installed" marker.
      *
      * The migrations run on a connection built from the stored settings rather
      * than on the application's default one: in a web request the default
@@ -90,18 +95,33 @@ final class InstallationFinalizer
         // Creating dozens of tables can outlast the default execution limit of a web request.
         @set_time_limit(300);
 
+        // 1. The tables. 2. Whatever else needs them. 3. Settings. 4. The marker, which ends the installation: last.
         $this->migrate();
+        $this->runHooks();
+
         if ($productionDefaults) {
             $this->applyProductionDefaults();
         }
 
-        $this->artisan->call('config:clear');
+        $this->configCache->clear();
 
         $this->state->markInstalled();
         $this->token->forget();
         $this->state->forgetProgress();
 
         return route('home', absolute: false);
+    }
+
+    /**
+     * Runs the {@see PostMigrationHook}s, in registration order.
+     *
+     * @throws InstallationException When a hook aborts the installation.
+     */
+    private function runHooks(): void
+    {
+        foreach ($this->hooks as $hook) {
+            $hook->run();
+        }
     }
 
     /**

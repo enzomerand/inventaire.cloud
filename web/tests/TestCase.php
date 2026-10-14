@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace Tests;
 
 use App\Installer\EnvironmentLocks;
-use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
-use Illuminate\Foundation\Bootstrap\RegisterProviders;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Env;
 use Tests\Support\InstallerSandbox;
 use Tests\Support\TestDatabaseGuard;
 
@@ -47,35 +46,29 @@ abstract class TestCase extends BaseTestCase
     protected array $processEnvironment = [];
 
     /**
-     * Boots the application inside a sandbox, then checks the database before
-     * any trait (such as RefreshDatabase) gets the chance to migrate it.
+     * Boots the application against the installer sandbox, then checks the
+     * database before any trait (such as RefreshDatabase) gets the chance to
+     * migrate it.
      *
-     * This mirrors the framework's own createApplication() except for one hook:
-     * the installer decides at provider-registration time whether the instance is
-     * installed, so the sandbox must be applied between the configuration loading
-     * and the provider registration, which the parent implementation offers no
-     * way to do. (Cached config and route traits are not supported here; the
-     * suite does not use them.)
+     * The sandbox needs no special bootstrapping: phpunit.xml points the
+     * installer's state, its .env and the config cache at it with environment
+     * variables, so only the installation state (a marker file) and, when a
+     * test wants it, the absence of an application key are arranged first.
      *
      * @return Application
      */
     public function createApplication()
     {
         $this->sandbox ??= InstallerSandbox::create();
+        $this->sandbox->prepare($this->installed);
 
-        $app = require Application::inferBasePath().'/bootstrap/app.php';
+        $app = $this->withAppKey ? parent::createApplication() : $this->withoutAppKey(fn () => parent::createApplication());
 
-        $this->traitsUsedByTest = class_uses_recursive(static::class);
+        $this->sandbox->configure($app);
 
-        $app->beforeBootstrapping(RegisterProviders::class, function (Application $app): void {
-            $this->sandbox?->apply($app, $this->installed, $this->withAppKey);
-
-            if ($this->language !== null) {
-                $app->make('config')->set('app.locale', $this->language);
-            }
-        });
-
-        $app->make(Kernel::class)->bootstrap();
+        if ($this->language !== null) {
+            $app->make('config')->set('app.locale', $this->language);
+        }
 
         TestDatabaseGuard::assertSafe($app->make('config'));
 
@@ -112,7 +105,7 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
-     * Removes the sandbox once the test is over.
+     * Empties the sandbox once the test is over.
      */
     protected function tearDown(): void
     {
@@ -120,5 +113,43 @@ abstract class TestCase extends BaseTestCase
 
         $this->sandbox?->destroy();
         $this->sandbox = null;
+    }
+
+    /**
+     * Runs a callback with APP_KEY defined as empty in the process environment,
+     * so the configuration is loaded without a key (dotenv never overrides a
+     * variable that is already defined), then puts the environment back.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    private function withoutAppKey(callable $callback): mixed
+    {
+        $previous = ['env' => $_ENV['APP_KEY'] ?? null, 'server' => $_SERVER['APP_KEY'] ?? null, 'getenv' => getenv('APP_KEY')];
+
+        $_ENV['APP_KEY'] = $_SERVER['APP_KEY'] = '';
+        putenv('APP_KEY=');
+
+        // The framework remembers which variables a previous application loaded from .env and overwrites
+        // them on the next load: a fresh repository treats the empty APP_KEY as defined by the environment.
+        Env::enablePutenv();
+
+        try {
+            return $callback();
+        } finally {
+            Env::enablePutenv();
+
+            foreach (['env' => &$_ENV, 'server' => &$_SERVER] as $name => &$target) {
+                if ($previous[$name] === null) {
+                    unset($target['APP_KEY']);
+                } else {
+                    $target['APP_KEY'] = $previous[$name];
+                }
+            }
+
+            putenv($previous['getenv'] === false ? 'APP_KEY' : 'APP_KEY='.$previous['getenv']);
+        }
     }
 }

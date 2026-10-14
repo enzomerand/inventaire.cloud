@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use App\Installer\Exceptions\InstallationException;
 use App\Installer\Mail\MailChallenge;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\DatabaseProbe;
@@ -56,11 +57,34 @@ final class InstallerSteps
     }
 
     /**
+     * Tests a step and, if it works, saves it: the one entry point both
+     * installers loop over.
+     *
+     * The mail step is saved here by opening an SMTP session, which is what a
+     * non-interactive run can do; interactive runs prove it with a code instead
+     * ({@see self::beginMail()}).
+     *
+     * @param  array<string, mixed>  $values
+     *
+     * @throws InstallationException When .env cannot be written.
+     */
+    public function save(InstallStep $step, array $values): ProbeResult
+    {
+        return match ($step) {
+            InstallStep::Database => $this->saveDatabase($values),
+            InstallStep::Application => $this->saveApplication($values),
+            InstallStep::Mail => $this->saveMailAfterConnection($values),
+            InstallStep::Storage => $this->saveStorage($values),
+            InstallStep::Documenso => $this->saveDocumenso($values),
+        };
+    }
+
+    /**
      * Tests the database connection and, if it works, saves it.
      *
      * @param  array<string, mixed>  $values
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
     public function saveDatabase(array $values): ProbeResult
     {
@@ -73,11 +97,13 @@ final class InstallerSteps
      *
      * @param  array<string, mixed>  $values
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
-    public function saveApplication(array $values): void
+    public function saveApplication(array $values): ProbeResult
     {
         $this->complete(InstallStep::Application, $values);
+
+        return ProbeResult::success();
     }
 
     /**
@@ -98,7 +124,7 @@ final class InstallerSteps
     /**
      * Saves the mail settings of a confirmed challenge.
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
     public function completeMail(MailChallenge $challenge): void
     {
@@ -111,7 +137,7 @@ final class InstallerSteps
      *
      * @param  array<string, mixed>  $values
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
     public function saveMailAfterConnection(array $values): ProbeResult
     {
@@ -123,7 +149,7 @@ final class InstallerSteps
      *
      * @param  array<string, mixed>  $values
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
     public function saveMailUntested(array $values): void
     {
@@ -135,7 +161,7 @@ final class InstallerSteps
      *
      * @param  array<string, mixed>  $values
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
     public function saveStorage(array $values): ProbeResult
     {
@@ -147,7 +173,7 @@ final class InstallerSteps
      *
      * @param  array<string, mixed>  $values
      *
-     * @throws Exceptions\InstallationException When .env cannot be written.
+     * @throws InstallationException When .env cannot be written.
      */
     public function saveDocumenso(array $values): ProbeResult
     {
@@ -155,11 +181,17 @@ final class InstallerSteps
     }
 
     /**
-     * Skips the optional Documenso step.
+     * Skips an optional step.
+     *
+     * @throws InstallationException When the step is required.
      */
-    public function skipDocumenso(): void
+    public function skip(InstallStep $step): void
     {
-        $this->state->record(InstallStep::Documenso, InstallationState::STATUS_SKIPPED);
+        if (! $step->isOptional()) {
+            throw new InstallationException('This step cannot be skipped.');
+        }
+
+        $this->state->record($step, InstallationState::STATUS_SKIPPED);
     }
 
     /**

@@ -51,7 +51,12 @@ return [
 
         'file' => [
             'driver' => 'file',
-            'path' => storage_path('framework/cache/data'),
+            // CACHE_FILE_PATH relocates the cache files (tests keep theirs in a throw-away folder); relative paths start at the application.
+            'path' => (static function (): string {
+                $path = env('CACHE_FILE_PATH');
+
+                return is_string($path) && $path !== '' ? (str_starts_with($path, '/') ? $path : base_path($path)) : storage_path('framework/cache/data');
+            })(),
             'lock_path' => storage_path('framework/cache/locks'),
         ],
 

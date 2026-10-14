@@ -20,7 +20,22 @@ return [
     | readable by the group so the web server and the person running the console
     | installer can both use it.
     */
-    'state_path' => storage_path('installer'),
+    'state_path' => (static function (): string {
+        $path = env('INSTALLER_STATE_PATH');
+
+        return is_string($path) && $path !== '' ? (str_starts_with($path, '/') ? $path : base_path($path)) : storage_path('installer');
+    })(),
+
+    /*
+    | The .env file the installer reads and writes, when it is not the one
+    | Laravel loads (tests keep theirs apart; a container may mount the file
+    | elsewhere). Null: the file Laravel loads.
+    */
+    'env_file' => (static function (): ?string {
+        $path = env('INSTALLER_ENV_FILE');
+
+        return is_string($path) && $path !== '' ? (str_starts_with($path, '/') ? $path : base_path($path)) : null;
+    })(),
 
     /*
     | Oldest server version accepted for each database engine. Lower versions

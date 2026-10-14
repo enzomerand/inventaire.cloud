@@ -8,70 +8,79 @@ use Illuminate\Foundation\Application;
 use RuntimeException;
 
 /**
- * A throwaway directory holding everything the installer touches during a test.
+ * A throwaway folder holding everything the installer touches during a test.
  *
  * The installer writes the .env file, its state files (marker, progress,
- * token), sessions, cache files and the local storage disk. Tests must never
- * change the real ones, so each test gets its own temporary directory and the
- * application is pointed at it before any provider registers.
+ * token), the cached configuration, sessions, cache files and the local
+ * storage disk. Tests must never change the real ones, so all of them live in
+ * one folder below storage/framework/testing, which phpunit.xml points the
+ * installer at through plain environment variables (INSTALLER_STATE_PATH,
+ * INSTALLER_ENV_FILE, APP_CONFIG_CACHE): the application boots against the
+ * sandbox with no special bootstrapping. The folder is emptied at the start and
+ * at the end of every test.
+ *
+ * The settings that are read lazily (sessions, cache, disk, logs) are redirected
+ * after the application has booted, see {@see self::configure()}.
  */
 final class InstallerSandbox
 {
+    /** Where the sandbox lives, relative to the application; keep in sync with phpunit.xml. */
+    private const DIRECTORY = 'storage/framework/testing/installer';
+
     private function __construct(public readonly string $root) {}
 
     /**
-     * Creates the temporary directory.
+     * Creates the sandbox: an empty folder.
      */
     public static function create(): self
     {
-        $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'inventaire-tests-'.bin2hex(random_bytes(6));
+        $sandbox = new self(dirname(__DIR__, 2).'/'.self::DIRECTORY);
 
-        if (! mkdir($root, 0700, true)) {
-            throw new RuntimeException("Cannot create the test sandbox {$root}.");
-        }
+        $sandbox->destroy();
 
-        return new self($root);
-    }
-
-    /**
-     * Redirects the application's writable paths to the sandbox and sets the
-     * installation state. Called while the application bootstraps, after the
-     * configuration is loaded and before the providers register.
-     *
-     * @param  bool  $installed  Whether the "installed" marker exists.
-     * @param  bool  $appKey  Whether the configured application key is kept; false empties it.
-     */
-    public function apply(Application $app, bool $installed, bool $appKey): void
-    {
-        $config = $app->make('config');
-
-        $config->set('installer.state_path', $this->statePath());
-        $config->set('session.files', $this->root.'/sessions');
-        $config->set('cache.stores.file.path', $this->root.'/cache');
-        $config->set('filesystems.disks.local.root', $this->root.'/storage');
-        // The setup token is logged on the first web access: keep test tokens out of the real log file.
-        $config->set('logging.default', 'null');
-        $config->set('logging.channels.installer.path', $this->root.'/installer.log');
-
-        if (! $appKey) {
-            $config->set('app.key', '');
+        if (! mkdir($sandbox->root, 0700, true) && ! is_dir($sandbox->root)) {
+            throw new RuntimeException("Cannot create the test sandbox {$sandbox->root}.");
         }
 
         foreach (['sessions', 'cache', 'storage'] as $directory) {
-            @mkdir($this->root.'/'.$directory, 0700, true);
+            mkdir($sandbox->root.'/'.$directory, 0700);
         }
 
-        $app->useEnvironmentPath($this->root);
-        $app->loadEnvironmentFrom('.env');
+        return $sandbox;
+    }
 
+    /**
+     * Sets the installation state before the application boots: the provider
+     * decides whether the instance is installed when it registers.
+     *
+     * @param  bool  $installed  Whether the "installed" marker exists.
+     */
+    public function prepare(bool $installed): void
+    {
         $marker = $this->statePath().'/installed.json';
 
         if ($installed) {
-            @mkdir($this->statePath(), 0700, true);
+            @mkdir($this->statePath(), 0750, true);
             file_put_contents($marker, '{"installed_at":"2000-01-01T00:00:00+00:00"}');
         } else {
             @unlink($marker);
         }
+    }
+
+    /**
+     * Redirects what the application reads lazily to the sandbox. Called once
+     * the application has booted.
+     */
+    public function configure(Application $app): void
+    {
+        $config = $app->make('config');
+
+        $config->set('session.files', $this->root.'/sessions');
+        $config->set('cache.stores.file.path', $this->root.'/cache');
+        $config->set('filesystems.disks.local.root', $this->root.'/storage');
+        // The setup token is logged on the first web access: keep test tokens out of the real log files.
+        $config->set('logging.default', 'null');
+        $config->set('logging.channels.installer.path', $this->root.'/installer.log');
     }
 
     /**
@@ -83,7 +92,7 @@ final class InstallerSandbox
     }
 
     /**
-     * The directory of the installer's state files.
+     * The folder of the installer's state files.
      */
     public function statePath(): string
     {

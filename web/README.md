@@ -71,6 +71,8 @@ There are three ways to install, and they share the same checks:
 | `php artisan inventaire:install` | A terminal: interactive prompts, or options for scripts                 |
 | `inventaire:install --from-env`  | Configuration that already exists (Docker variables, `composer setup`)  |
 
+The installer keeps its own files (installed marker, progress, setup token, locks) in `storage/installer/`, readable by the owner and the group so that the web server and the person running the console installer can both use them; `INSTALLER_STATE_PATH` relocates the folder (for example onto a persistent volume). Steps are registered once, in the `App\Installer\InstallStep` enum: the web routes, the wizard and the console installer all iterate over it.
+
 ### The setup token (web wizard)
 
 Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to its own log file, `storage/logs/installer.log` (a dedicated channel, so it does not depend on `LOG_CHANNEL`, `LOG_STACK` or `LOG_LEVEL`) and printed by:
@@ -99,7 +101,7 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
-7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token.
+7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`.
 
 Creating the first administrator account is not part of the installer yet (it comes with the accounts lot).
 
@@ -167,7 +169,7 @@ composer test:mariadb # MariaDB only
 
 `phpunit.xml` points at the PostgreSQL service and its dedicated `inventaire_test` schema, so `composer test:pgsql` (and a plain `php artisan test`) need no extra setup; `composer test:mysql` and `composer test:mariadb` override `DB_*` to use their own service and its `inventaire_test` schema.
 
-The tests never touch the real `.env`, installer state or storage: `tests/TestCase.php` boots every test in a temporary sandbox directory (its own `.env`, installer state, sessions, cache and local disk) in the "installed" state, so existing tests are unaffected. A test that needs a fresh instance calls `$this->bootInstaller(installed: false)`.
+The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
 
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 

@@ -22,6 +22,11 @@
         <env name="APP_LOCALE" value="fr"/>
         <env name="APP_FALLBACK_LOCALE" value="en"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <!-- Everything the installer writes lives in one throw-away folder (see Tests\Support\InstallerSandbox). -->
+        <env name="INSTALLER_STATE_PATH" value="storage/framework/testing/installer/state"/>
+        <env name="INSTALLER_ENV_FILE" value="storage/framework/testing/installer/.env"/>
+        <env name="APP_CONFIG_CACHE" value="storage/framework/testing/installer/config.php"/>
+        <env name="CACHE_FILE_PATH" value="storage/framework/testing/installer/cache"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>

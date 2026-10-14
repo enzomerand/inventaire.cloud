@@ -8,8 +8,10 @@ use App\Installer\ApplicationKey;
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
 use App\Installer\Exceptions\InstallationException;
+use App\Installer\InstallationFinalizer;
 use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
+use App\Installer\PostMigrationHook;
 use App\Installer\PreInstallRuntime;
 use App\Installer\Probes\FilesystemStorageProbe;
 use App\Installer\Probes\StorageProbe;
@@ -48,7 +50,7 @@ final class InstallerServiceProvider extends ServiceProvider
         ));
 
         $this->app->singleton(EnvironmentFile::class, fn (Application $app): EnvironmentFile => new EnvironmentFile(
-            $app->environmentFilePath(),
+            $app->make('config')->get('installer.env_file') ?? $app->environmentFilePath(),
             $app->basePath('.env.example'),
             $app->make(InstallationState::class)->path('env.backup'),
             $app->make(InstallationState::class)->path('env.lock'),
@@ -60,6 +62,7 @@ final class InstallerServiceProvider extends ServiceProvider
 
         $this->app->singleton(InstallerSettings::class);
         $this->app->singleton(SetupToken::class);
+        $this->app->when(InstallationFinalizer::class)->needs('$hooks')->giveTagged(PostMigrationHook::TAG);
         $this->app->bind(StorageProbe::class, FilesystemStorageProbe::class);
         $this->app->singleton(ApplicationKey::class);
         $this->app->singleton(PreInstallRuntime::class);

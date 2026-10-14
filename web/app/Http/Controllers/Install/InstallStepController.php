@@ -9,12 +9,14 @@ use App\Http\Requests\Install\InstallStepRequest;
 use App\Http\Requests\Install\MailCodeRequest;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\InstallerSteps;
+use App\Installer\InstallStep;
 use App\Installer\Mail\MailChallengeStore;
 use App\Installer\Mail\MailCodeOutcome;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\ProbeResult;
 use App\Installer\WizardState;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -32,30 +34,40 @@ final class InstallStepController extends Controller
     ) {}
 
     /**
-     * Tests the database connection and saves it.
+     * Saves one configuration step: validates the form, tests the real service
+     * and, only when it works, writes `.env` and records the step. The step is
+     * named by the route, so every step goes through here.
+     *
+     * The mail step does not save yet: it sends a verification code, and is
+     * saved once the code is confirmed by {@see self::verifyMail()}.
      */
-    public function database(InstallStepRequest $request): JsonResponse
+    public function save(InstallStepRequest $request, MailChallengeStore $store): JsonResponse
     {
-        return $this->saved(fn (): ProbeResult => $this->steps->saveDatabase($request->values()));
+        $step = $request->step();
+
+        if ($step->sendsEmail()) {
+            return $this->sendCode($request, $store);
+        }
+
+        return $this->saved(fn (): ProbeResult => $this->steps->save($step, $request->values()));
     }
 
     /**
-     * Saves the application settings.
+     * Skips an optional step.
      */
-    public function application(InstallStepRequest $request): JsonResponse
+    public function skip(Request $request): JsonResponse
     {
-        return $this->saved(function () use ($request): ProbeResult {
-            $this->steps->saveApplication($request->values());
+        $step = $request->route()?->defaults['step'] ?? null;
 
-            return ProbeResult::success();
-        });
+        $this->saving(fn () => $this->steps->skip(InstallStep::from(is_string($step) ? $step : '')));
+
+        return new JsonResponse($this->wizard->progress());
     }
 
     /**
-     * Sends the verification code to the test address. The step is saved once
-     * the code is confirmed by {@see self::verifyMail()}.
+     * Sends the verification code of the mail step.
      */
-    public function mail(InstallStepRequest $request, MailChallengeStore $store): JsonResponse
+    private function sendCode(InstallStepRequest $request, MailChallengeStore $store): JsonResponse
     {
         [$result, $challenge] = $this->steps->beginMail($request->values());
 
@@ -110,32 +122,6 @@ final class InstallStepController extends Controller
 
                 return $this->codeFailure(__('Too many incorrect codes: request a new one.'), 'mail_code_exhausted');
         }
-    }
-
-    /**
-     * Tests the file storage and saves it.
-     */
-    public function storage(InstallStepRequest $request): JsonResponse
-    {
-        return $this->saved(fn (): ProbeResult => $this->steps->saveStorage($request->values()));
-    }
-
-    /**
-     * Tests the Documenso address and token and saves them.
-     */
-    public function documenso(InstallStepRequest $request): JsonResponse
-    {
-        return $this->saved(fn (): ProbeResult => $this->steps->saveDocumenso($request->values()));
-    }
-
-    /**
-     * Skips the optional Documenso step.
-     */
-    public function skipDocumenso(): JsonResponse
-    {
-        $this->steps->skipDocumenso();
-
-        return new JsonResponse($this->wizard->progress());
     }
 
     /**

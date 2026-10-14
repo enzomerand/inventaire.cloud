@@ -10,6 +10,7 @@ use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthorizeSetupToken;
+use App\Installer\InstallStep;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home')->name('home');
@@ -31,13 +32,21 @@ Route::prefix('install')->name('install.')->middleware(AbortIfInstalled::class)-
     Route::middleware(AuthorizeSetupToken::class)->group(function (): void {
         Route::get('/requirements', [InstallController::class, 'requirements'])->name('requirements');
 
-        Route::post('/database', [InstallStepController::class, 'database'])->defaults('step', 'database')->name('database');
-        Route::post('/application', [InstallStepController::class, 'application'])->defaults('step', 'application')->name('application');
-        Route::post('/mail', [InstallStepController::class, 'mail'])->defaults('step', 'mail')->middleware('throttle:installer-mail')->name('mail');
-        Route::post('/mail/verify', [InstallStepController::class, 'verifyMail'])->name('mail.verify');
-        Route::post('/storage', [InstallStepController::class, 'storage'])->defaults('step', 'storage')->name('storage');
-        Route::post('/documenso', [InstallStepController::class, 'documenso'])->defaults('step', 'documenso')->name('documenso');
-        Route::post('/documenso/skip', [InstallStepController::class, 'skipDocumenso'])->name('documenso.skip');
+        // One endpoint per step of the registry (App\Installer\InstallStep), plus a skip endpoint for optional steps.
+        foreach (InstallStep::cases() as $step) {
+            $route = Route::post('/'.$step->value, [InstallStepController::class, 'save'])->defaults('step', $step->value)->name($step->value);
+
+            if ($step->sendsEmail()) {
+                // Each call sends an email to an address typed in the form.
+                $route->middleware('throttle:installer-mail');
+                Route::post('/'.$step->value.'/verify', [InstallStepController::class, 'verifyMail'])->name($step->value.'.verify');
+            }
+
+            if ($step->isOptional()) {
+                Route::post('/'.$step->value.'/skip', [InstallStepController::class, 'skip'])->defaults('step', $step->value)->name($step->value.'.skip');
+            }
+        }
+
         Route::post('/finalize', FinalizeController::class)->name('finalize');
     });
 });

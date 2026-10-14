@@ -9,6 +9,7 @@ use App\Installer\InstallationFinalizer;
 use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
 use App\Installer\InstallStep;
+use App\Installer\PostMigrationHook;
 use App\Installer\SetupToken;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
@@ -196,5 +197,114 @@ describe('leaving development defaults', function (): void {
         app(InstallationFinalizer::class)->finalize();
 
         expect((new EnvironmentFile($this->sandbox->envPath(), $this->sandbox->envPath()))->all())->toMatchArray(['APP_ENV' => 'staging', 'APP_DEBUG' => 'true']);
+    });
+});
+
+describe('the order of the finalization', function (): void {
+    /**
+     * A hook that records when it ran and what the installer looked like at that moment.
+     */
+    function recordingHook(array &$events): PostMigrationHook
+    {
+        return new class($events) implements PostMigrationHook
+        {
+            /** @param array<int, string> $events */
+            public function __construct(private array &$events) {}
+
+            public function run(): void
+            {
+                $this->events[] = 'hook: users table '.(Schema::hasTable('users') ? 'exists' : 'missing').', installed '.(app(InstallationState::class)->isInstalled() ? 'yes' : 'no');
+            }
+        };
+    }
+
+    /**
+     * Finalizer wired with the given hooks, exactly like the container does.
+     *
+     * @param  list<PostMigrationHook>  $hooks
+     */
+    function finalizerWith(array $hooks): InstallationFinalizer
+    {
+        app()->forgetInstance(InstallationFinalizer::class);
+        app()->when(InstallationFinalizer::class)->needs('$hooks')->give(fn (): array => $hooks);
+
+        return app(InstallationFinalizer::class);
+    }
+
+    it('runs the post-migration hooks after the migrations and before the instance is marked installed', function (): void {
+        readyInstance($this);
+        wipeTestDatabase();
+        $events = [];
+
+        finalizerWith([recordingHook($events)])->finalize();
+
+        expect($events)->toBe(['hook: users table exists, installed no'])
+            ->and(app(InstallationState::class)->isInstalled())->toBeTrue();
+    });
+
+    it('has no hook registered yet', function (): void {
+        readyInstance($this);
+        app()->forgetInstance(InstallationFinalizer::class);
+
+        $finalizer = new ReflectionProperty(InstallationFinalizer::class, 'hooks');
+
+        expect(iterator_to_array($finalizer->getValue(app(InstallationFinalizer::class))))->toBe([]);
+    });
+
+    it('registers hooks through the container tag', function (): void {
+        readyInstance($this);
+        $hook = new class implements PostMigrationHook
+        {
+            public function run(): void {}
+        };
+        app()->instance('test.hook', $hook);
+        app()->tag(['test.hook'], PostMigrationHook::TAG);
+        app()->forgetInstance(InstallationFinalizer::class);
+
+        $hooks = (new ReflectionProperty(InstallationFinalizer::class, 'hooks'))->getValue(app(InstallationFinalizer::class));
+
+        expect(iterator_to_array($hooks, false))->toBe([$hook]);
+    });
+
+    it('stays uninstalled when a hook aborts, and can be run again', function (): void {
+        readyInstance($this);
+        wipeTestDatabase();
+        $attempts = 0;
+        $hook = new class($attempts) implements PostMigrationHook
+        {
+            public function __construct(private int &$attempts) {}
+
+            public function run(): void
+            {
+                if (++$this->attempts === 1) {
+                    throw new InstallationException('The administrator account could not be created.');
+                }
+            }
+        };
+
+        expect(fn () => finalizerWith([$hook])->finalize())->toThrow(InstallationException::class, 'administrator account');
+        expect(app(InstallationState::class)->isInstalled())->toBeFalse()
+            ->and(is_file(app(SetupToken::class)->path()))->toBeTrue()
+            ->and(Schema::hasTable('users'))->toBeTrue();
+
+        // Second attempt: the migrations have nothing left to do, the hook now succeeds.
+        finalizerWith([$hook])->finalize();
+
+        expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and($attempts)->toBe(2);
+    });
+
+    it('clears the cached configuration the application is pointed at, never the real one', function (): void {
+        readyInstance($this);
+        $cache = app()->getCachedConfigPath();
+        $real = base_path('bootstrap/cache/config.php');
+        $realBefore = is_file($real) ? filemtime($real) : null;
+        file_put_contents($cache, '<?php return [];');
+
+        // phpunit.xml sets APP_CONFIG_CACHE: if it did not, this test would be deleting the real file.
+        expect($cache)->not->toBe($real)->and($cache)->toStartWith($this->sandbox->root);
+
+        finalizerWith([])->finalize();
+
+        expect(is_file($cache))->toBeFalse()->and(is_file($real) ? filemtime($real) : null)->toBe($realBefore);
     });
 });

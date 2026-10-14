@@ -12,10 +12,16 @@ use Illuminate\Validation\Rule;
 /**
  * The configuration steps of the install wizard, in the order they are shown.
  *
- * Each case describes its inputs ({@see self::fields()}) and the rules that
- * validate them ({@see self::rules()}) once, for the web wizard and the console
- * installer alike. The requirements check and the final "install" action are
- * not steps: they store nothing, so they are not tracked in the progress file.
+ * This enum is the step registry. Each case describes its inputs
+ * ({@see self::fields()}) and the rules that validate them ({@see self::rules()})
+ * once, and everything else iterates over `cases()` instead of listing steps by
+ * hand: the web routes, the wizard's state, the console installer, the progress
+ * file and {@see InstallerSteps::save()}. Adding a case, with its fields, rules
+ * and a branch in `InstallerSteps::save()`, adds a step to both installers.
+ *
+ * The requirements check and the final "install" action are not steps: they
+ * store nothing, so they are not tracked in the progress file. Work that needs
+ * the database belongs to a {@see PostMigrationHook}.
  */
 enum InstallStep: string
 {
@@ -32,6 +38,25 @@ enum InstallStep: string
     public function isOptional(): bool
     {
         return $this === self::Documenso;
+    }
+
+    /**
+     * The question the console installer asks before configuring an optional step.
+     */
+    public function configureQuestion(): string
+    {
+        return match ($this) {
+            self::Documenso => __('Configure the electronic signature (Documenso) now?'),
+            default => __('Configure :step now?', ['step' => $this->title()]),
+        };
+    }
+
+    /**
+     * Whether saving the step sends an email, which makes it worth rate-limiting.
+     */
+    public function sendsEmail(): bool
+    {
+        return $this === self::Mail;
     }
 
     /**
