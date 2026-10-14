@@ -21,16 +21,30 @@ use App\Rules\AsciiEmailAddress;
 final class EmailAddress
 {
     /**
+     * Longest address there is (RFC 5321: 254 characters in all), and the longest {@see self::rules()} accepts.
+     */
+    public const MAX_LENGTH = 254;
+
+    /**
      * The canonical form of an address: trimmed, in lowercase, with the domain
      * converted to ASCII (`gmäil.com` becomes `xn--gmil-moa.com`).
      *
      * It never fails: what cannot be converted comes back as typed (in
      * lowercase), and {@see self::rules()} refuses it. Normalizing a
-     * normalized address changes nothing.
+     * normalized address changes nothing. An address longer than
+     * {@see self::MAX_LENGTH} bytes is not worth converting, since it is refused
+     * whatever its form: it only comes back trimmed, so that a request carrying
+     * megabytes in place of an address costs next to nothing.
      */
     public static function normalize(string $email): string
     {
-        $email = mb_strtolower(trim($email));
+        $email = trim($email);
+
+        if (strlen($email) > self::MAX_LENGTH) {
+            return $email;
+        }
+
+        $email = mb_strtolower($email);
         $at = strrpos($email, '@');
 
         if ($at === false) {
@@ -49,13 +63,25 @@ final class EmailAddress
     }
 
     /**
+     * Whether the text is too long to be an address, which {@see self::rules()} refuses
+     * and nothing has to be computed for (hash, conversion...).
+     */
+    public static function isTooLong(string $email): bool
+    {
+        return strlen($email) > self::MAX_LENGTH;
+    }
+
+    /**
      * Validation rules of an address that is to be normalized first (see {@see self::normalize()}).
+     *
+     * The length is checked first, and the other rules do not run on an address
+     * that fails it: the `email` rule is not meant to parse megabytes.
      *
      * @return list<mixed>
      */
     public static function rules(): array
     {
-        return ['required', 'string', 'max:255', 'email', new AsciiEmailAddress];
+        return ['bail', 'required', 'string', 'max:'.self::MAX_LENGTH, 'email', new AsciiEmailAddress];
     }
 
     /**

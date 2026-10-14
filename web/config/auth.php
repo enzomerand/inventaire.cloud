@@ -90,8 +90,9 @@ return [
     | instance cannot be used to mail arbitrary people); an IPv6 client counts
     | as its whole /64. Typing codes back is limited per network and address, on
     | top of the attempts allowed for each code, and wrong codes are also
-    | counted per address over a longer period, whatever the codes they were
-    | typed against: asking for a new code does not give guesses back.
+    | counted per address over a longer, fixed period that opens with the first
+    | of them, whatever the codes they were typed against: asking for a new
+    | code does not give guesses back.
     |
     */
 

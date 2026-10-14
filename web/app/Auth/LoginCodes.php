@@ -19,7 +19,9 @@ use Illuminate\Database\DatabaseManager;
  * parallel requests cannot make more guesses than the limit allows. Asking for
  * a new code gives the guesses of that code back, but not the wrong codes the
  * address already collected over the last hour ({@see LoginFailures}): past a
- * limit, no code is judged any more, the right one included.
+ * limit, no code is judged any more, the right one included. Only a guess that
+ * is judged and found wrong counts: the right code, a code that was already
+ * burnt or spent, and an address without a pending code cost nothing.
  *
  * Addresses are compared in their canonical form (see {@see EmailAddress::normalize()}).
  * Nothing here looks at the users: a code is issued, and judged, in the same
@@ -59,15 +61,38 @@ final class LoginCodes
     }
 
     /**
+     * Takes the lock on the pending code of an address, and waits for whoever holds it.
+     *
+     * {@see self::verify()} takes it too. A caller that reads anything else before
+     * judging the code calls this one first: MySQL and MariaDB read from the snapshot
+     * their transaction took at its first plain query, so a request that waited for
+     * the lock after that would see the database as it was before the requests ahead
+     * of it committed (MariaDB then refuses to lock a row that changed since, with
+     * error 1020, which is a server error for the visitor). Locked first, the
+     * snapshot is taken once the others are done.
+     *
+     * Call it inside a transaction.
+     *
+     * @param  string  $email  Address, already normalized.
+     */
+    public function lock(string $email): void
+    {
+        LoginCode::query()->whereKey($email)->lockForUpdate()->first();
+    }
+
+    /**
      * Judges a submitted code.
      *
      * A wrong code costs an attempt; the right one is spent (the code cannot
      * be used twice) unless $consume is false, for a caller that needs one
      * more input before it can act on it. An address that collected too many
      * wrong codes lately is not judged at all ({@see LoginCodeOutcome::Locked}).
+     * Typing a code again that is already burnt is not a guess: it is refused
+     * without counting against the address.
      *
      * Call it inside the transaction that acts on the answer: the code is only
-     * really spent if that transaction commits.
+     * really spent if that transaction commits. Take {@see self::lock()} first
+     * if that transaction reads anything before.
      *
      * @param  string  $email  Address, already normalized.
      * @param  bool  $consume  Whether an accepted code is used up.
@@ -87,19 +112,24 @@ final class LoginCodes
                 return new LoginCodeVerdict(LoginCodeOutcome::Expired);
             }
 
-            if ($this->failures->exhausted($email)) {
+            // The guess is paid for before it is judged, and given back unless it turns out wrong: the budget of
+            // the address is checked by the same atomic step that spends it (see LoginFailures).
+            if (! $this->failures->reserve($email)) {
                 return new LoginCodeVerdict(LoginCodeOutcome::Locked, retryAfter: $this->failures->retryAfter($email));
             }
 
             $max = $this->maxAttempts();
 
             if ($code->attempts >= $max) {
-                $this->failures->record($email);
+                // Burnt already: nothing was guessed, so nothing is counted.
+                $this->failures->release($email);
 
                 return new LoginCodeVerdict(LoginCodeOutcome::TooManyAttempts);
             }
 
             if (OneTimeCode::matches($submitted, $code->code_hash, $this->key())) {
+                $this->failures->release($email);
+
                 if ($consume) {
                     $code->delete();
                 }
@@ -109,7 +139,6 @@ final class LoginCodes
 
             $code->attempts++;
             $code->save();
-            $this->failures->record($email);
 
             return $code->attempts >= $max
                 ? new LoginCodeVerdict(LoginCodeOutcome::TooManyAttempts)

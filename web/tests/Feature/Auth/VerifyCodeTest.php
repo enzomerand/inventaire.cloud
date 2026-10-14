@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Auth\Accounts;
+use App\Auth\LoginFailures;
 use App\Models\LoginCode;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -238,6 +239,18 @@ describe('a wrong code', function (): void {
         expect($first->getStatusCode())->toBe(422)
             ->and($first->json())->toBe($second->json())
             ->and($first->json('code'))->toBe('login_code_expired');
+    });
+
+    it('is refused for an address of a megabyte, before any code or counter is touched', function (): void {
+        $code = receiveCode($this, 'ada@example.com');
+
+        typeCode($this, str_repeat('a', 1_000_000).'@example.com', $code)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email')
+            ->assertJsonCount(1, 'errors.email');
+
+        expect(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(0)
+            ->and(app(LoginFailures::class)->count('ada@example.com'))->toBe(0);
     });
 
     it('is refused when it is not six digits, before touching the stored code', function (string $code): void {

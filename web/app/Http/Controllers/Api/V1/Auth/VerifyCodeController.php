@@ -67,6 +67,10 @@ final class VerifyCodeController extends Controller
      */
     private function accept(string $email, string $code, ?string $name, LoginCodes $codes, Accounts $accounts, LocaleResolver $locales): JsonResponse|User
     {
+        // Before anything is read: requests for one address queue here, and each one then reads the database as
+        // the previous one left it (see LoginCodes::lock()).
+        $codes->lock($email);
+
         $user = User::query()->where('email', $email)->first();
 
         // A name is needed to create an account: until it is known, a right code is checked but kept.

@@ -35,11 +35,12 @@ final class VerifyLoginCodeRequest extends FormRequest
     }
 
     /**
-     * The address in its canonical form ({@see EmailAddress::normalize()}).
+     * The address in its canonical form ({@see EmailAddress::normalize()}): it was
+     * normalized once, before the validation, and is not converted again here.
      */
     public function email(): string
     {
-        return EmailAddress::normalize($this->string('email')->toString());
+        return $this->string('email')->toString();
     }
 
     /**

@@ -41,7 +41,16 @@ describe('the rules of an address', function (): void {
         expect(addressErrors('not-an-address'))->toBe(['The email field must be a valid email address.']);
     });
 
-    it('refuse an address of more than 255 characters', function (): void {
-        expect(addressErrors(str_repeat('a', 250).'@example.com'))->not->toBe([]);
+    it('accept an address of 254 characters, and refuse one of 255', function (): void {
+        $this->useLanguage('en');
+        $longest = str_repeat('a', 64).'@'.str_repeat('b', 60).'.'.str_repeat('c', 60).'.'.str_repeat('d', 60).'.comxyz';
+
+        expect(strlen($longest))->toBe(254)
+            ->and(addressErrors($longest))->toBe([])
+            ->and(addressErrors($longest.'x'))->toBe(['The email field must not be greater than 254 characters.']);
+    });
+
+    it('does not parse an address that is too long, so it has one complaint and no more', function (): void {
+        expect(addressErrors(str_repeat('ä', 300).'@example.com'))->toHaveCount(1);
     });
 });

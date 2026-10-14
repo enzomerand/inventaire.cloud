@@ -50,7 +50,7 @@ class AppServiceProvider extends ServiceProvider
             $perEmailAndIp = config()->array('auth.login_codes.send_per_email_and_ip');
             $perEmail = config()->array('auth.login_codes.send_per_email');
             $perIp = config()->array('auth.login_codes.send_per_ip');
-            $email = sha1($this->submittedEmail($request));
+            $email = $this->submittedEmailKey($request);
             $network = ClientNetwork::key($request->ip());
 
             return [
@@ -62,16 +62,21 @@ class AppServiceProvider extends ServiceProvider
 
         // Typing codes back: on top of the attempts each code allows, so that guesses cannot hammer the database.
         RateLimiter::for('login-verify', fn (Request $request): Limit => Limit::perMinute(config()->integer('auth.login_codes.verify_per_minute'))
-            ->by('ip:'.ClientNetwork::key($request->ip()).'|email:'.sha1($this->submittedEmail($request))));
+            ->by('ip:'.ClientNetwork::key($request->ip()).'|email:'.$this->submittedEmailKey($request)));
     }
 
     /**
-     * The address a request carries, in canonical form, for use in a limiter key.
+     * The address a request carries, in canonical form, as it goes into a limiter key (hashed).
+     *
+     * Text too long to be an address (validation refuses it) shares one key
+     * instead of being converted and hashed: the limiters run before the
+     * validation, on whatever size of body the server accepts.
      */
-    private function submittedEmail(Request $request): string
+    private function submittedEmailKey(Request $request): string
     {
         $email = $request->input('email');
+        $email = EmailAddress::normalize(is_string($email) ? $email : '');
 
-        return EmailAddress::normalize(is_string($email) ? $email : '');
+        return EmailAddress::isTooLong($email) ? 'too-long' : sha1($email);
     }
 }

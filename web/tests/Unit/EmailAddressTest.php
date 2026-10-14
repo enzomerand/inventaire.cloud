@@ -38,6 +38,22 @@ describe('the canonical form of an address', function (): void {
         'a domain that is not valid in any form' => ['ada@-bäd-.com', 'ada@-bäd-.com'],
     ]);
 
+    it('only trims what is too long to be an address, since it is refused whatever its form', function (): void {
+        $long = str_repeat('A', 250).'@GMÄIL.com';
+
+        expect(EmailAddress::normalize("  {$long}\n"))->toBe($long)
+            ->and(EmailAddress::isTooLong($long))->toBeTrue();
+    });
+
+    it('converts an address up to the longest there is', function (): void {
+        $address = str_repeat('A', 64).'@'.str_repeat('B', 60).'.'.str_repeat('C', 60).'.'.str_repeat('D', 60).'.COMXYZ';
+
+        expect(strlen($address))->toBe(EmailAddress::MAX_LENGTH)
+            ->and(EmailAddress::isTooLong($address))->toBeFalse()
+            ->and(EmailAddress::normalize($address))->toBe(strtolower($address))
+            ->and(EmailAddress::isTooLong($address.'x'))->toBeTrue();
+    });
+
     it('judges the part after the last @', function (): void {
         expect(EmailAddress::normalize('"a@b"@gmäil.com'))->toBe('"a@b"@xn--gmil-moa.com');
     });

@@ -4,88 +4,118 @@ declare(strict_types=1);
 
 namespace App\Auth;
 
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Config\Repository as Config;
-use Illuminate\Contracts\Cache\Repository as Cache;
+use RuntimeException;
 
 /**
- * Counts the wrong sign-in codes typed for an address over a sliding period.
+ * Counts the wrong sign-in codes typed for an address over a period.
  *
  * Each code tolerates a few wrong guesses ({@see LoginCodes::maxAttempts()}),
  * but a new code can always be requested, which would give those guesses back.
  * This count does not depend on the code: whatever was requested in between,
- * an address that collected too many wrong codes in the last hour accepts no
- * more until the oldest of them is an hour old.
+ * an address that collected too many wrong codes in the period accepts no more
+ * until the period is over.
  *
- * The failures are kept in the cache (the cache store the instance is
- * configured with), as the time of each. Emptying the cache forgets them,
- * which only ever gives guesses back to the attacker once; the lock on the
- * code's row makes the read-and-write sequence safe for one address.
+ * The period is a fixed one (one hour by default): it opens with the first wrong
+ * code and ends one period later, then the count starts again from zero. A
+ * sliding period cannot be counted atomically, and a count that is not atomic is
+ * worthless here (see below).
+ *
+ * The count is kept in the cache (the cache store the rate limiter is configured
+ * with) and every change of it is one atomic increment or decrement. That is
+ * what makes it hold under parallel requests. The state of the cache is never
+ * read to decide anything: a plain read would be answered from the snapshot the
+ * surrounding database transaction opened (MySQL and MariaDB read from a
+ * snapshot taken at the transaction's first query, which a request that waited
+ * for a lock may have taken before the others committed), whereas an increment
+ * is a locking read that always sees the latest value. The guess is therefore
+ * paid for in advance ({@see self::reserve()}): the answer to "may this guess be
+ * judged?" is the value the increment returned. Emptying the cache forgets the
+ * count, which gives the guesses back once.
  */
 final class LoginFailures
 {
     public function __construct(
-        private readonly Cache $cache,
+        private readonly RateLimiter $limiter,
         private readonly Config $config,
     ) {}
 
     /**
-     * Whether the address has reached the limit and must wait.
+     * Takes one place in the budget of wrong codes of the address, before a guess is judged.
+     *
+     * It returns false, and takes nothing, when the budget is spent: the guess
+     * must not be judged at all. Otherwise the place stays taken until
+     * {@see self::release()} gives it back, which the caller does for whatever
+     * turns out not to be a wrong code (the right one, a code that was already
+     * burnt). Call it where the guesses of one address cannot overlap (the
+     * caller holds the lock of the code's row): the count itself is atomic, but
+     * a place given back later would be missing to a guess that came in between.
+     *
+     * @param  string  $email  Address, already normalized.
+     *
+     * @throws RuntimeException When the count cannot be written: refusing to judge is the only safe answer.
+     */
+    public function reserve(string $email): bool
+    {
+        $hits = $this->limiter->hit($this->key($email), $this->windowSeconds());
+
+        // Not a count: the cache store could not increment (a "null" store, a value that is not a number...).
+        // Letting the guess through would silently switch the limit off.
+        if ($hits < 1) {
+            throw new RuntimeException('The count of wrong sign-in codes could not be updated: check the cache store (CACHE_STORE).');
+        }
+
+        if ($hits > $this->limit()) {
+            $this->release($email);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Gives back a place taken by {@see self::reserve()}.
+     *
+     * When nothing is left to count the period is over: the next wrong code
+     * opens a new one.
      *
      * @param  string  $email  Address, already normalized.
      */
-    public function exhausted(string $email): bool
+    public function release(string $email): void
     {
-        return count($this->recent($email)) >= $this->limit();
+        if ($this->limiter->decrement($this->key($email), $this->windowSeconds()) <= 0) {
+            $this->limiter->clear($this->key($email));
+        }
     }
 
     /**
      * Seconds until the address may try again (at least one).
      *
+     * The end of the period is read as is, which can be a little late for a
+     * request that began before the period did: it then gets the length of a
+     * whole period, the most that can be asked of it.
+     *
      * @param  string  $email  Address, already normalized.
      */
     public function retryAfter(string $email): int
     {
-        $recent = $this->recent($email);
+        $wait = $this->limiter->availableIn($this->key($email));
 
-        if ($recent === []) {
-            return 1;
-        }
-
-        return max(1, min($recent) + $this->windowSeconds() - $this->now());
+        return max(1, $wait > 0 ? $wait : $this->windowSeconds());
     }
 
     /**
-     * Counts one more wrong code.
+     * Wrong codes counted for the address in the current period.
      *
      * @param  string  $email  Address, already normalized.
      */
-    public function record(string $email): void
+    public function count(string $email): int
     {
-        $times = $this->recent($email);
-        $times[] = $this->now();
+        $count = $this->limiter->attempts($this->key($email));
 
-        // Only the latest ones matter to the limit: the list cannot grow without bound.
-        $this->cache->put($this->key($email), array_slice($times, -$this->limit()), $this->windowSeconds());
-    }
-
-    /**
-     * The failures of the last period, as timestamps, oldest first.
-     *
-     * @return list<int>
-     */
-    private function recent(string $email): array
-    {
-        $stored = $this->cache->get($this->key($email));
-        $since = $this->now() - $this->windowSeconds();
-        $recent = [];
-
-        foreach (is_array($stored) ? $stored : [] as $time) {
-            if (is_int($time) && $time > $since) {
-                $recent[] = $time;
-            }
-        }
-
-        return $recent;
+        return is_numeric($count) ? max(0, (int) $count) : 0;
     }
 
     /**
@@ -118,10 +148,5 @@ final class LoginFailures
     private function key(string $email): string
     {
         return 'login-failures:'.sha1($email);
-    }
-
-    private function now(): int
-    {
-        return now()->getTimestamp();
     }
 }

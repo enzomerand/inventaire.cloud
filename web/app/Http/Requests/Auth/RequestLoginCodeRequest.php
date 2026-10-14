@@ -32,10 +32,11 @@ final class RequestLoginCodeRequest extends FormRequest
 
     /**
      * The address in its canonical form ({@see EmailAddress::normalize()}), the only form that is stored and looked up.
+     * It was normalized once, before the validation, and is not converted again here.
      */
     public function email(): string
     {
-        return EmailAddress::normalize($this->string('email')->toString());
+        return $this->string('email')->toString();
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Auth\LoginCodeOutcome;
 use App\Auth\LoginCodes;
+use App\Auth\LoginFailures;
 use App\Models\LoginCode;
 use App\Services\OneTimeCode;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -215,14 +216,14 @@ describe('wrong codes over an hour', function (): void {
             ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Locked);
     });
 
-    it('slide: the address is released when the oldest of them is an hour old', function (): void {
+    it('are forgotten once the period that opened with the first of them is over', function (): void {
         $this->freezeSecond();
 
         fiveWrongCodes('ada@example.com');
         $this->travel(30)->minutes();
         fiveWrongCodes('ada@example.com');
 
-        // Ten in the last hour: locked until the first five are an hour old, that is for 30 more minutes.
+        // Ten in the period: locked until it is over, that is for 30 more minutes (the later failures do not push it back).
         $code = codes()->issue('ada@example.com');
         expect(codes()->verify('ada@example.com', $code, consume: false)->retryAfter)->toBe(1800);
 
@@ -233,19 +234,56 @@ describe('wrong codes over an hour', function (): void {
 
         $this->travel(1)->seconds();
         $code = codes()->issue('ada@example.com');
-        expect(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue();
+        expect(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue()
+            ->and(app(LoginFailures::class)->count('ada@example.com'))->toBe(0);
     });
 
-    it('count the guesses made at a code that is already burnt', function (): void {
+    it('start a new period with the first wrong code after the previous one', function (): void {
+        $this->freezeSecond();
+
+        $code = codes()->issue('ada@example.com');
+        codes()->verify('ada@example.com', wrongCode($code));
+
+        $this->travel(61)->minutes();
+
+        // The first one is forgotten, and the period that opens now is a whole hour.
+        $code = codes()->issue('ada@example.com');
+        codes()->verify('ada@example.com', wrongCode($code));
+
+        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(1)
+            ->and(app(LoginFailures::class)->retryAfter('ada@example.com'))->toBe(3600);
+    });
+
+    it('do not count what is typed again at a code that is already burnt', function (): void {
         $code = fiveWrongCodes('ada@example.com');
 
-        foreach (range(1, 4) as $ignored) {
-            expect(codes()->verify('ada@example.com', wrongCode($code))->outcome)->toBe(LoginCodeOutcome::TooManyAttempts);
+        // Whoever retypes a burnt code (the right one included) is told so, over and over, and it costs the address nothing.
+        foreach (range(1, 12) as $ignored) {
+            expect(codes()->verify('ada@example.com', wrongCode($code))->outcome)->toBe(LoginCodeOutcome::TooManyAttempts)
+                ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::TooManyAttempts);
         }
 
-        // Five wrong codes and four more at the burnt code are nine: the tenth is still judged (and counted), the next one is locked.
-        expect(codes()->verify('ada@example.com', wrongCode($code))->outcome)->toBe(LoginCodeOutcome::TooManyAttempts)
-            ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Locked);
+        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(5);
+
+        // Five more wrong codes at a new code make ten: only now is the address locked.
+        fiveWrongCodes('ada@example.com');
+
+        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(10)
+            ->and(codes()->verify('ada@example.com', codes()->issue('ada@example.com'))->outcome)->toBe(LoginCodeOutcome::Locked);
+    });
+
+    it('do not count a code that was spent already, typed again', function (): void {
+        $code = codes()->issue('ada@example.com');
+        codes()->verify('ada@example.com', $code);
+
+        foreach (range(1, 12) as $ignored) {
+            expect(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Expired);
+        }
+
+        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(0);
+
+        $fresh = codes()->issue('ada@example.com');
+        expect(codes()->verify('ada@example.com', $fresh)->accepted())->toBeTrue();
     });
 
     it('do not count a right code, nor codes typed for an address that has none', function (): void {
@@ -259,7 +297,9 @@ describe('wrong codes over an hour', function (): void {
         }
 
         $code = codes()->issue('nobody@example.com');
-        expect(codes()->verify('nobody@example.com', $code)->accepted())->toBeTrue();
+        expect(codes()->verify('nobody@example.com', $code)->accepted())->toBeTrue()
+            ->and(app(LoginFailures::class)->count('ada@example.com'))->toBe(0)
+            ->and(app(LoginFailures::class)->count('nobody@example.com'))->toBe(0);
     });
 
     it('are counted for each address on its own', function (): void {

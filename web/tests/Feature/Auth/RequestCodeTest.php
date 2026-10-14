@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use App\Models\LoginCode;
 use App\Models\User;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Testing\TestResponse;
 
 uses(RefreshDatabase::class);
@@ -171,6 +174,34 @@ describe('validation', function (): void {
         'too long' => [str_repeat('a', 250).'@example.com'],
         'a list' => [['a@example.com']],
     ]);
+
+    it('refuses an address of a megabyte as one that is too long, without sending anything', function (): void {
+        $this->postJson('/api/v1/auth/code', ['email' => str_repeat('Ä', 500_000).'@Example.com'], frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email')
+            ->assertJsonCount(1, 'errors.email');
+
+        expect(sentMails())->toBe([])->and(LoginCode::query()->count())->toBe(0);
+    });
+
+    it('keys the limiters of a text too long to be an address on a constant, not on a hash of it', function (): void {
+        $request = fn (string $email): Request => Request::create('/api/v1/auth/code', 'POST', ['email' => $email], server: ['REMOTE_ADDR' => '203.0.113.9']);
+        $keys = function (string $limiter, string $email) use ($request): array {
+            $limits = RateLimiter::limiter($limiter)($request($email));
+
+            return array_map(fn (Limit $limit): string => $limit->key, is_array($limits) ? $limits : [$limits]);
+        };
+
+        $oversized = $keys('login-code', str_repeat('a', 5_000_000));
+
+        expect($oversized)->toBe(['email-ip:too-long|203.0.113.9', 'email:too-long', 'ip:203.0.113.9'])
+            // Whatever it holds: two such texts are one and the same bucket.
+            ->and($keys('login-code', str_repeat('b', 1_000)))->toBe($oversized)
+            // An address of a normal size is still told apart, in its canonical form.
+            ->and($keys('login-code', ' Ada@Example.com')[1])->toBe('email:'.sha1('ada@example.com'))
+            ->and($keys('login-verify', str_repeat('a', 5_000_000)))->toBe(['ip:203.0.113.9|email:too-long'])
+            ->and($keys('login-verify', 'ada@example.com'))->toBe(['ip:203.0.113.9|email:'.sha1('ada@example.com')]);
+    });
 
     it('answers in JSON even without an Accept header', function (): void {
         $response = $this->call('POST', '/api/v1/auth/code', server: ['HTTP_REFERER' => 'http://localhost/login', 'CONTENT_TYPE' => 'application/json'], content: '{"email":"nope"}');
