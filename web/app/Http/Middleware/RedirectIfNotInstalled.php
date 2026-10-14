@@ -30,11 +30,12 @@ use Throwable;
 final class RedirectIfNotInstalled
 {
     /**
-     * Paths still served before the installation: the wizard itself, the
-     * health check, built assets, and the two endpoints the wizard page calls
-     * (CSRF token refresh and language switch).
+     * Paths still served before the installation: the wizard itself, built
+     * assets, and the two endpoints the wizard page calls (CSRF token refresh
+     * and language switch). The health check never gets here: it is let
+     * through first.
      */
-    private const EXEMPT = ['up', 'install', 'install/*', 'build/*', 'csrf-token', 'locale'];
+    private const EXEMPT = ['install', 'install/*', 'build/*', 'csrf-token', 'locale'];
 
     public function __construct(
         private readonly Application $app,

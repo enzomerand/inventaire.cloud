@@ -155,7 +155,7 @@ it('expands variables like Laravel when reading', function (): void {
 it('creates the file from the example when it does not exist', function (): void {
     $file = environmentFile($this, null, "# template\nAPP_NAME=example\nAPP_KEY=\n");
 
-    expect($file->exists())->toBeFalse();
+    expect(is_file($file->path()))->toBeFalse();
 
     $created = $file->set(['APP_KEY' => 'base64:abc=']);
 

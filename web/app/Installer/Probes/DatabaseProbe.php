@@ -151,7 +151,7 @@ final class DatabaseProbe
             return $failure;
         }
 
-        return ProbeResult::success(['engine' => $server->engine(), 'version' => $server->version]);
+        return ProbeResult::success();
     }
 
     /**

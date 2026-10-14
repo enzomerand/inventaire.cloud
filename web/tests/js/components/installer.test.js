@@ -20,7 +20,6 @@ function field(name, overrides = {}) {
         label: name,
         type: 'text',
         value: '',
-        required: true,
         secret: false,
         secretSet: false,
         locked: false,

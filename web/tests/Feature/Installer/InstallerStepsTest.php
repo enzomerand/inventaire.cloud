@@ -31,7 +31,3 @@ it('has an endpoint for every step of the registry and no other', function (): v
         'install.database', 'install.application', 'install.mail', 'install.mail.verify', 'install.storage', 'install.documenso', 'install.documenso.skip',
     ]);
 });
-
-it('saves every step through the one entry point', function (): void {
-    expect((new ReflectionMethod(InstallerSteps::class, 'save'))->getNumberOfRequiredParameters())->toBe(2);
-});

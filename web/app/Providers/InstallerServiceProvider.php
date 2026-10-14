@@ -12,7 +12,6 @@ use App\Installer\InstallationFinalizer;
 use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
 use App\Installer\PostMigrationHook;
-use App\Installer\PreInstallRuntime;
 use App\Installer\Probes\FilesystemStorageProbe;
 use App\Installer\Probes\StorageProbe;
 use App\Installer\ProcessEnvironment;
@@ -41,7 +40,7 @@ final class InstallerServiceProvider extends ServiceProvider
     public const STARTUP_FAILURE = 'installer.startup-failure';
 
     /**
-     * Registers the installer services and applies the pre-install runtime.
+     * Registers the installer services and, until the instance is installed, the not-installed runtime.
      */
     public function register(): void
     {
@@ -65,13 +64,18 @@ final class InstallerServiceProvider extends ServiceProvider
         $this->app->when(InstallationFinalizer::class)->needs('$hooks')->giveTagged(PostMigrationHook::TAG);
         $this->app->bind(StorageProbe::class, FilesystemStorageProbe::class);
         $this->app->singleton(ApplicationKey::class);
-        $this->app->singleton(PreInstallRuntime::class);
 
         if ($this->app->make(InstallationState::class)->isInstalled()) {
             return;
         }
 
-        $this->app->make(PreInstallRuntime::class)->apply();
+        // The not-installed runtime: a new instance has no database yet and the default session, cache and queue
+        // drivers all live there, so they are swapped for ones that need nothing (files, jobs run inline). Nothing
+        // is written to .env; the configured drivers apply again as soon as the instance is installed.
+        $config = $this->app->make('config');
+        $config->set('session.driver', 'file');
+        $config->set('cache.default', 'file');
+        $config->set('queue.default', 'sync');
 
         $this->ensureApplicationKey();
     }

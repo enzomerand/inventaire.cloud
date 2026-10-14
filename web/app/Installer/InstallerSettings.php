@@ -103,15 +103,6 @@ final class InstallerSettings
     }
 
     /**
-     * Whether a value can be written to .env (the file exists and is writable,
-     * or can be created).
-     */
-    public function canWrite(): bool
-    {
-        return $this->file->isWritable();
-    }
-
-    /**
      * The configured value of a variable: the imposed one, else the one in
      * .env, else null. The word "null" counts as unset, as it does for Laravel.
      */

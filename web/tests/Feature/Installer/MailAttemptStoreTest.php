@@ -62,7 +62,7 @@ it('forgets the oldest challenges beyond the ones it keeps, digits or not', func
 });
 
 it('enforces the attempt limit on a challenge whose id is made only of digits', function (): void {
-    $verification = new MailVerification(app(MailProbe::class), config(), null, $this->store);
+    $verification = new MailVerification(app(MailProbe::class), config(), $this->store);
     $issued = MailChallenge::issue(['host' => 'h'], 'me@example.test', '123456', config('app.key'), 15);
     $challenge = new MailChallenge($issued->values, $issued->recipient, $issued->codeHash, $issued->expiresAt, 0, ALL_DIGIT_CHALLENGE_ID);
 

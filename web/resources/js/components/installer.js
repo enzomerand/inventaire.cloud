@@ -162,17 +162,9 @@ export default function installer() {
             return this.isCurrent(step) ? 'step' : null;
         },
 
-        /**
-         * @param {WizardStep} step
-         * @returns {boolean}
-         */
-        hasFields(step) {
-            return step.fields.length > 0;
-        },
-
         /** Whether the form of a step is showing (the mail step swaps it for the code box). */
         showFields(step) {
-            return this.hasFields(step) && !(step.id === 'mail' && this.mailPhase === 'code');
+            return step.fields.length > 0 && !(step.id === 'mail' && this.mailPhase === 'code');
         },
 
         /**

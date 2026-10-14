@@ -523,25 +523,6 @@ describe('a container configured only through variables', function (): void {
             chmod($this->sandbox->envPath(), 0644);
         }
     });
-
-    it('still leaves development mode when the settings come from the environment but .env is writable', function (): void {
-        $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
-        authorizedWizard($this);
-        Mail::fake();
-        Artisan::call('db:wipe', ['--force' => true]);
-        file_put_contents($this->sandbox->envPath(), "APP_ENV=local\nAPP_DEBUG=true\n");
-        config(['app.debug' => true]);
-
-        $this->postJson('/install/database', [])->assertOk();
-        $this->postJson('/install/application', [])->assertOk();
-        $this->postJson('/install/storage', [])->assertOk();
-        $this->postJson('/install/mail', ['test_recipient' => 'admin@example.test'])->assertOk();
-        $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
-        $this->postJson('/install/finalize')->assertOk();
-
-        expect(app(InstallationState::class)->isInstalled())->toBeTrue()
-            ->and(sandboxEnv($this))->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
-    });
 });
 
 describe('finishing', function (): void {

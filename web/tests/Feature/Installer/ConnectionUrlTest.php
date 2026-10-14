@@ -59,7 +59,7 @@ describe('DB_URL', function (): void {
 
         $result = $probe->check(DatabaseSettings::fromArray(['driver' => $db->driver], databaseUrl()));
 
-        expect($result->ok)->toBeTrue()->and($result->meta['version'])->toMatch('/^\d+/');
+        expect($result->ok)->toBeTrue()->and($result->message)->toBeNull();
     });
 
     it('fails with the URL it was given, not with the form fields, and never reveals its password', function (): void {

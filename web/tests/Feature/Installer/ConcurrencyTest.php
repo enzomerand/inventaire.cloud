@@ -151,7 +151,7 @@ describe('the verification code attempts', function (): void {
     /**
      * A verification service counting attempts on disk, as in production.
      */
-    $service = fn (): MailVerification => new MailVerification(app(MailProbe::class), config(), null, new MailAttemptStore(app(InstallationState::class)));
+    $service = fn (): MailVerification => new MailVerification(app(MailProbe::class), config(), new MailAttemptStore(app(InstallationState::class)));
 
     it('count across requests that hold stale copies of the same challenge', function () use ($service): void {
         $this->bootInstaller(installed: false);

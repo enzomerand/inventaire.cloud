@@ -286,15 +286,6 @@ describe('the order of the finalization', function (): void {
             ->and(app(InstallationState::class)->isInstalled())->toBeTrue();
     });
 
-    it('has no hook registered yet', function (): void {
-        readyInstance($this);
-        app()->forgetInstance(InstallationFinalizer::class);
-
-        $finalizer = new ReflectionProperty(InstallationFinalizer::class, 'hooks');
-
-        expect(iterator_to_array($finalizer->getValue(app(InstallationFinalizer::class))))->toBe([]);
-    });
-
     it('registers hooks through the container tag', function (): void {
         readyInstance($this);
         $hook = new class implements PostMigrationHook

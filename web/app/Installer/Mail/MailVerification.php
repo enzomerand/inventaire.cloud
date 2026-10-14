@@ -20,14 +20,14 @@ use Illuminate\Config\Repository;
 final class MailVerification
 {
     /**
-     * @param  Closure(): string|null  $codeGenerator  Produces the code; defaults to a random 6-digit one. Tests inject a fixed one.
-     * @param  MailAttemptStore|null  $attempts  Where wrong codes are counted, under a lock; without one the challenge's own count is used.
+     * @param  MailAttemptStore  $attempts  Where wrong codes are counted, under a lock.
+     * @param  (Closure(): string)|null  $codeGenerator  Produces the code; defaults to a random 6-digit one. Tests inject a fixed one.
      */
     public function __construct(
         private readonly MailProbe $probe,
         private readonly Repository $config,
+        private readonly MailAttemptStore $attempts,
         private readonly ?Closure $codeGenerator = null,
-        private readonly ?MailAttemptStore $attempts = null,
     ) {}
 
     /**
@@ -59,18 +59,10 @@ final class MailVerification
      */
     public function confirm(MailChallenge $challenge, string $code): array
     {
-        $judge = function (MailChallenge $current) use ($code): array {
-            return $current->verify($code, $this->config->string('app.key'), $this->config->integer('installer.mail_code.max_attempts'));
-        };
-
-        if ($this->attempts === null) {
-            return $judge($challenge);
-        }
-
         // Parallel requests hold copies of the same challenge: the count that matters is the one on disk.
-        return $this->attempts->exclusively(function () use ($challenge, $judge): array {
+        return $this->attempts->exclusively(function () use ($challenge, $code): array {
             $used = max($challenge->attempts, $this->attempts->count($challenge->id));
-            [$outcome, $next] = $judge($challenge->withAttempts($used));
+            [$outcome, $next] = $challenge->withAttempts($used)->verify($code, $this->config->string('app.key'), $this->config->integer('installer.mail_code.max_attempts'));
 
             if ($next->attempts > $used) {
                 $this->attempts->record($challenge->id, $next->attempts);

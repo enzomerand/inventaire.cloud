@@ -14,24 +14,21 @@ namespace App\Installer\Probes;
 final readonly class ProbeResult
 {
     /**
-     * @param  array<string, string>  $meta  Facts learned on success (server version...), for display.
      * @param  array<string, string>  $warnings  Things worth knowing that do not block: code => translated message. The web wizard sends the codes and translates them client-side.
      */
     private function __construct(
         public bool $ok,
         public ?string $field,
         public ?string $message,
-        public array $meta,
         public array $warnings = [],
     ) {}
 
     /**
-     * @param  array<string, string>  $meta
-     * @param  array<string, string>  $warnings
+     * @param  array<string, string>  $warnings  Non-blocking remarks, code => translated message.
      */
-    public static function success(array $meta = [], array $warnings = []): self
+    public static function success(array $warnings = []): self
     {
-        return new self(true, null, null, $meta, $warnings);
+        return new self(true, null, null, $warnings);
     }
 
     /**
@@ -40,6 +37,6 @@ final readonly class ProbeResult
      */
     public static function failure(string $message, ?string $field = null): self
     {
-        return new self(false, $field, $message, []);
+        return new self(false, $field, $message);
     }
 }

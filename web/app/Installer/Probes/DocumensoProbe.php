@@ -52,7 +52,7 @@ final class DocumensoProbe
         }
 
         return match (true) {
-            $response->successful() => ProbeResult::success([], $this->warnings($settings)),
+            $response->successful() => ProbeResult::success($this->warnings($settings)),
             in_array($response->status(), [401, 403], true) => ProbeResult::failure(__('Documenso refused this API token.'), 'api_key'),
             $response->redirect() => ProbeResult::failure(__('Documenso redirected the request: use the final address of the instance.'), 'url'),
             $response->status() === 404 => ProbeResult::failure(__('This address does not look like a Documenso instance (API not found).'), 'url'),

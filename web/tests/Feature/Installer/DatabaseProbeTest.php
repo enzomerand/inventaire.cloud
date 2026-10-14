@@ -15,9 +15,7 @@ use Illuminate\Support\Facades\Schema;
 it('accepts a reachable database that only holds our tables', function (): void {
     $result = app(DatabaseProbe::class)->check(testDatabaseSettings());
 
-    expect($result->ok)->toBeTrue()
-        ->and($result->meta['version'])->toMatch('/^\d+/')
-        ->and($result->meta['engine'])->toBeIn(['PostgreSQL', 'MySQL', 'MariaDB']);
+    expect($result->ok)->toBeTrue()->and($result->message)->toBeNull()->and($result->warnings)->toBe([]);
 });
 
 it('leaves no temporary connection or table behind', function (): void {

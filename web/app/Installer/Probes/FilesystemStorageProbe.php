@@ -38,7 +38,7 @@ final class FilesystemStorageProbe implements StorageProbe
         $disk = null;
 
         try {
-            $disk = Storage::build($settings->diskConfig($this->localDisk()));
+            $disk = Storage::build($settings->diskConfig($this->config->array('filesystems.disks.local')));
 
             return $this->roundTrip($disk, $name, $payload, $settings);
         } catch (Throwable $exception) {
@@ -63,18 +63,6 @@ final class FilesystemStorageProbe implements StorageProbe
         $disk->delete($name);
 
         return ProbeResult::success();
-    }
-
-    /**
-     * The application's own local disk configuration.
-     *
-     * @return array<string, mixed>
-     */
-    private function localDisk(): array
-    {
-        $disk = $this->config->get('filesystems.disks.local');
-
-        return is_array($disk) ? $disk : ['driver' => 'local', 'root' => storage_path('app/private')];
     }
 
     /**

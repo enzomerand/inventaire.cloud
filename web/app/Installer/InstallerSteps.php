@@ -70,40 +70,19 @@ final class InstallerSteps
      */
     public function save(InstallStep $step, array $values): ProbeResult
     {
-        return match ($step) {
-            InstallStep::Database => $this->saveDatabase($values),
-            InstallStep::Application => $this->saveApplication($values),
-            InstallStep::Mail => $this->saveMailAfterConnection($values),
-            InstallStep::Storage => $this->saveStorage($values),
-            InstallStep::Documenso => $this->saveDocumenso($values),
+        $result = match ($step) {
+            InstallStep::Database => $this->database->check(DatabaseSettings::fromArray($values, $this->settings->providedUrl($step))),
+            InstallStep::Application => ProbeResult::success(), // Nothing to test: the rules alone validate it.
+            InstallStep::Mail => $this->mail->checkConnection(MailSettings::fromArray($values, $this->settings->providedUrl($step))),
+            InstallStep::Storage => $this->storage->check(StorageSettings::fromArray($values)),
+            InstallStep::Documenso => $this->documenso->check(DocumensoSettings::fromArray($values)),
         };
-    }
 
-    /**
-     * Tests the database connection and, if it works, saves it.
-     *
-     * @param  array<string, mixed>  $values
-     *
-     * @throws InstallationException When .env cannot be written.
-     */
-    public function saveDatabase(array $values): ProbeResult
-    {
-        return $this->saveIfWorking(InstallStep::Database, $values, $this->database->check(DatabaseSettings::fromArray($values, $this->settings->providedUrl(InstallStep::Database))));
-    }
+        if ($result->ok) {
+            $this->complete($step, $values);
+        }
 
-    /**
-     * Saves the application settings (nothing to test: they are validated by
-     * their rules alone).
-     *
-     * @param  array<string, mixed>  $values
-     *
-     * @throws InstallationException When .env cannot be written.
-     */
-    public function saveApplication(array $values): ProbeResult
-    {
-        $this->complete(InstallStep::Application, $values);
-
-        return ProbeResult::success();
+        return $result;
     }
 
     /**
@@ -132,19 +111,6 @@ final class InstallerSteps
     }
 
     /**
-     * Validates the mail settings by opening an SMTP session, for the
-     * non-interactive installs where nobody can read a code, and saves them.
-     *
-     * @param  array<string, mixed>  $values
-     *
-     * @throws InstallationException When .env cannot be written.
-     */
-    public function saveMailAfterConnection(array $values): ProbeResult
-    {
-        return $this->saveIfWorking(InstallStep::Mail, $values, $this->mail->checkConnection(MailSettings::fromArray($values, $this->settings->providedUrl(InstallStep::Mail))));
-    }
-
-    /**
      * Saves the mail settings without testing them (`--skip-mail-test`).
      *
      * @param  array<string, mixed>  $values
@@ -154,30 +120,6 @@ final class InstallerSteps
     public function saveMailUntested(array $values): void
     {
         $this->complete(InstallStep::Mail, $values);
-    }
-
-    /**
-     * Tests the storage by writing a file and, if it works, saves it.
-     *
-     * @param  array<string, mixed>  $values
-     *
-     * @throws InstallationException When .env cannot be written.
-     */
-    public function saveStorage(array $values): ProbeResult
-    {
-        return $this->saveIfWorking(InstallStep::Storage, $values, $this->storage->check(StorageSettings::fromArray($values)));
-    }
-
-    /**
-     * Tests the Documenso address and token and, if they work, saves them.
-     *
-     * @param  array<string, mixed>  $values
-     *
-     * @throws InstallationException When .env cannot be written.
-     */
-    public function saveDocumenso(array $values): ProbeResult
-    {
-        return $this->saveIfWorking(InstallStep::Documenso, $values, $this->documenso->check(DocumensoSettings::fromArray($values)));
     }
 
     /**
@@ -192,20 +134,6 @@ final class InstallerSteps
         }
 
         $this->state->record($step, InstallationState::STATUS_SKIPPED);
-    }
-
-    /**
-     * Persists a step once its probe succeeded.
-     *
-     * @param  array<string, mixed>  $values
-     */
-    private function saveIfWorking(InstallStep $step, array $values, ProbeResult $result): ProbeResult
-    {
-        if ($result->ok) {
-            $this->complete($step, $values);
-        }
-
-        return $result;
     }
 
     /**

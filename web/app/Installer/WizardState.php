@@ -126,7 +126,6 @@ final class WizardState
                 'label' => $field->label,
                 'type' => $field->type,
                 'value' => $value,
-                'required' => $field->required,
                 'secret' => $field->secret,
                 'secretSet' => $field->secret && $this->settings->hasValue($field),
                 'locked' => $locked,

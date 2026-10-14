@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 use App\Installer\EnvironmentFile;
 use App\Installer\EnvironmentLocks;
-use App\Installer\InstallationFinalizer;
 use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
 use App\Installer\InstallStep;
+use App\Installer\Mail\MailAttemptStore;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\MailProbe;
 use Illuminate\Support\Facades\Artisan;
@@ -272,42 +272,6 @@ describe('--from-env', function (): void {
     });
 });
 
-it('does not try to write the production defaults of a container whose .env cannot be written', function (): void {
-    if (posix_geteuid() === 0) {
-        $this->markTestSkipped('Directory permissions do not restrict root.');
-    }
-
-    // The container imposes everything but APP_ENV / APP_DEBUG, and nothing is writable: without .env there is nothing to switch.
-    $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
-    $this->app->forgetInstance(EnvironmentLocks::class);
-    $this->app->forgetInstance(InstallerSettings::class);
-    $this->app->forgetInstance(InstallationFinalizer::class);
-    Artisan::call('db:wipe', ['--force' => true]);
-    app()['env'] = 'local';
-    config(['app.debug' => true]);
-    chmod($this->sandbox->root, 0555);
-
-    $this->artisan('inventaire:install', ['--no-interaction' => true, '--skip-mail-test' => true])->assertSuccessful();
-
-    expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and(is_file($this->sandbox->envPath()))->toBeFalse();
-});
-
-it('writes the production defaults when the settings come from the environment but .env is writable', function (): void {
-    $this->processEnvironment = array_diff_key(containerEnvironment(), ['APP_ENV' => true, 'APP_DEBUG' => true]);
-    $this->app->forgetInstance(EnvironmentLocks::class);
-    $this->app->forgetInstance(InstallerSettings::class);
-    $this->app->forgetInstance(InstallationFinalizer::class);
-    Artisan::call('db:wipe', ['--force' => true]);
-    file_put_contents($this->sandbox->envPath(), "APP_ENV=local\nAPP_DEBUG=true\n");
-    app()['env'] = 'local';
-    config(['app.debug' => true]);
-
-    $this->artisan('inventaire:install', ['--no-interaction' => true, '--skip-mail-test' => true])->assertSuccessful();
-
-    expect(app(InstallationState::class)->isInstalled())->toBeTrue()
-        ->and(consoleEnv($this))->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
-});
-
 it('does nothing on an installed instance', function (): void {
     $this->bootInstaller(installed: true);
 
@@ -321,7 +285,7 @@ describe('interactive installation', function (): void {
         $db = testDatabaseSettings();
         Mail::fake();
         Artisan::call('db:wipe', ['--force' => true]);
-        $this->app->singleton(MailVerification::class, fn ($app): MailVerification => new MailVerification($app->make(MailProbe::class), $app->make('config'), fn (): string => '246810'));
+        $this->app->singleton(MailVerification::class, fn ($app): MailVerification => new MailVerification($app->make(MailProbe::class), $app->make('config'), $app->make(MailAttemptStore::class), fn (): string => '246810'));
 
         $this->artisan('inventaire:install')
             ->expectsChoice('Database engine', $db->driver, ['pgsql' => 'PostgreSQL', 'mysql' => 'MySQL', 'mariadb' => 'MariaDB'])

@@ -41,7 +41,6 @@ final class InstallationFinalizer
         private readonly SetupToken $token,
         private readonly DatabaseManager $db,
         private readonly Kernel $artisan,
-        private readonly ConfigCache $configCache,
         /** @var iterable<PostMigrationHook> */
         private readonly iterable $hooks = [],
     ) {}
@@ -103,7 +102,8 @@ final class InstallationFinalizer
             $this->applyProductionDefaults();
         }
 
-        $this->configCache->clear();
+        // A stale cache would keep serving the old settings. getCachedConfigPath() honours APP_CONFIG_CACHE, so tests clear their own file.
+        @unlink($this->app->getCachedConfigPath());
 
         $this->state->markInstalled();
         $this->token->forget();

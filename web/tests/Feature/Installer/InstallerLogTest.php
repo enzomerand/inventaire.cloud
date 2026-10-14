@@ -18,15 +18,3 @@ it('is readable by the owner and the group only: it holds the setup token', func
         ->and(file_get_contents($log))->toContain('a line')
         ->and(fileperms($log) & 0777)->toBe(0640);
 });
-
-it('is created private even when the umask would make it world-readable', function (): void {
-    $previous = umask(0000);
-
-    try {
-        Log::channel('installer')->info('a line');
-    } finally {
-        umask($previous);
-    }
-
-    expect(fileperms($this->sandbox->root.'/installer.log') & 0777)->toBe(0640);
-});

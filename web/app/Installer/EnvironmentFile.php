@@ -70,14 +70,6 @@ final class EnvironmentFile
     }
 
     /**
-     * Whether the file exists.
-     */
-    public function exists(): bool
-    {
-        return is_file($this->path);
-    }
-
-    /**
      * Whether {@see self::set()} can succeed: the file is writable, or it can
      * be created in its (writable) directory.
      */
