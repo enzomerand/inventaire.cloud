@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Installer;
 
+use RuntimeException;
+
 /**
  * The environment variables the process was started with, taken before the
  * .env file is loaded.
@@ -54,5 +56,37 @@ final class ProcessEnvironment
         self::capture();
 
         return self::$snapshot ?? [];
+    }
+
+    /**
+     * The configuration file the process was told to use, if any.
+     *
+     * APP_ENVIRONMENT_FILE is a real environment variable (it has to be known
+     * before any file is read, so it cannot live in the file it names). It
+     * lets a container keep the file on a persistent volume, outside the
+     * application folder. Unset or empty: Laravel keeps loading `.env` next to
+     * the application.
+     *
+     * Beware of Laravel's own rule: when a file named like this one followed by
+     * `.` and APP_ENV exists in the same folder (`.env.production` next to
+     * `.env`), it is loaded instead. Keep such files out of that folder.
+     *
+     * @return string|null An absolute path, or null when the variable is not set.
+     *
+     * @throws RuntimeException When the value is not an absolute path: silently ignoring it would leave the instance on the wrong file.
+     */
+    public static function environmentFile(): ?string
+    {
+        $path = self::variables()['APP_ENVIRONMENT_FILE'] ?? '';
+
+        if ($path === '') {
+            return null;
+        }
+
+        if (! str_starts_with($path, '/') && preg_match('~^[A-Za-z]:[\\\\/]~', $path) !== 1) {
+            throw new RuntimeException('APP_ENVIRONMENT_FILE must be an absolute path, got "'.$path.'".');
+        }
+
+        return $path;
     }
 }
