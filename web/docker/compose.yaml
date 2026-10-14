@@ -14,9 +14,6 @@
 # The `storage` volume holds the generated configuration (APP_KEY, secrets), the
 # uploaded files and the installed marker: back it up, keep it private, and never
 # delete it unless you mean to erase the instance.
-#
-# To update: `git pull && docker compose up -d --build`. The migrations run by themselves
-# when the app container starts.
 
 name: inventaire
 
@@ -25,7 +22,7 @@ x-app: &app
     build:
         context: ..
         dockerfile: Dockerfile
-    image: ${INVENTAIRE_IMAGE:-inventaire-cloud:latest}
+    image: inventaire-cloud:latest
     restart: unless-stopped
     # A tiny init process as PID 1, so that docker stop reaches the queue worker and the scheduler.
     init: true
@@ -94,11 +91,6 @@ services:
             timeout: 5s
             retries: 12
 
-    # Another database. To use a server you already have (PostgreSQL, MySQL or MariaDB), delete
-    # the `db` service, the `depends_on` of `app` that waits for it and the DB_* lines of the
-    # environment above: the wizard's database step is then editable, or put DB_CONNECTION,
-    # DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME and DB_PASSWORD in .env to skip the wizard.
-    #
     # To run MySQL or MariaDB here instead of PostgreSQL, replace the `db` service with one of
     # these, and set DB_CONNECTION (mysql or mariadb) and DB_PORT=3306 in .env. Volume and
     # healthcheck as in compose.dev.yaml of the repository.

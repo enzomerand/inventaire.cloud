@@ -107,10 +107,6 @@ final class InstallationFinalizer
     /**
      * Runs the {@see PostMigrationHook}s, in registration order.
      *
-     * Only the installation runs them (`inventaire:upgrade` does not): they
-     * come before the "installed" marker and may read what the wizard
-     * collected, which is deleted once the installation is complete.
-     *
      * @throws InstallationException When a hook aborts the installation.
      */
     private function runHooks(): void

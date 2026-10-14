@@ -83,7 +83,7 @@ final class ProcessEnvironment
             return null;
         }
 
-        if (! str_starts_with($path, '/') && preg_match('~^[A-Za-z]:[\\\\/]~', $path) !== 1) {
+        if (! str_starts_with($path, '/')) {
             throw new RuntimeException('APP_ENVIRONMENT_FILE must be an absolute path, got "'.$path.'".');
         }
 

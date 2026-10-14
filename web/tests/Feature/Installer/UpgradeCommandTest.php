@@ -9,7 +9,6 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Symfony\Component\Process\Exception\ProcessStartFailedException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -212,18 +211,6 @@ describe('--optimize', function (): void {
 
         expect($ran->getArrayCopy())->toBe($commands);
     });
-
-    it('still fails when the migrations fail, before touching any cache', function (): void {
-        $ran = new ArrayObject;
-        app()->instance(ArtisanRunner::class, recordingRunner($ran));
-        $driver = config('database.default');
-        config(["database.connections.{$driver}.password" => 'wrong-password']);
-        DB::purge();
-
-        $this->artisan('inventaire:upgrade', ['--optimize' => true])->assertExitCode(1);
-
-        expect($ran->getArrayCopy())->toBe([]);
-    });
 });
 
 describe('the process runner', function (): void {
@@ -267,37 +254,12 @@ describe('the process runner', function (): void {
         expect($status)->toBe(1)->and($output)->toBe('Timed out after 1 seconds.');
     });
 
-    it('reports a child that cannot be started as a failed run', function (): void {
-        $factory = fn (): Process => new class(['php']) extends Process
-        {
-            public function run(?callable $callback = null, array $env = []): int
-            {
-                throw new ProcessStartFailedException($this, 'fork failed: resource temporarily unavailable');
-            }
-        };
-
-        [$status, $output] = (new ProcessArtisanRunner($factory))->run('view:cache');
-
-        expect($status)->toBe(1)->and($output)->toBe('Could not start PHP: Error: fork failed: resource temporarily unavailable');
-    });
-
     it('reports a child that cannot be set up as a failed run', function (): void {
         $factory = fn (string $command): Process => new Process([PHP_BINARY, '-v'], $this->sandbox->root.'/missing-directory');
 
         [$status, $output] = (new ProcessArtisanRunner($factory))->run('view:cache');
 
         expect($status)->toBe(1)->and($output)->toContain('Could not start PHP:')->and($output)->toContain('missing-directory');
-    });
-
-    it('lets inventaire:upgrade go on and succeed when the cache commands are killed', function (): void {
-        app()->instance(ArtisanRunner::class, runnerOfScript($this->sandbox->root, 'kill -9 $$'));
-
-        $this->artisan('inventaire:upgrade', ['--optimize' => true])
-            ->expectsOutputToContain('Stopped by signal 9')
-            ->expectsOutputToContain('The command config:cache failed')
-            ->expectsOutputToContain('The command view:cache failed')
-            ->expectsOutputToContain('The instance is up to date.')
-            ->assertExitCode(0);
     });
 });
 

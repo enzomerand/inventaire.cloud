@@ -25,13 +25,7 @@ use Throwable;
  * WAITS for it, up to {@see self::LOCK_WAIT} seconds, and then finds nothing
  * left to migrate: this is what lets several containers start together. The
  * lock is a `flock`, which the system drops when the process ends, even when it
- * is killed: no stale lock can block later upgrades. (Laravel's own
- * `migrate --isolated` is not used: it keeps its lock in the cache store, which
- * is the database once the instance is installed, and so fails when the
- * database is empty and leaves an hour-long lock behind a killed process.)
- *
- * The {@see PostMigrationHook}s are not run here: they belong to the
- * installation only, see {@see InstallationFinalizer}.
+ * is killed: no stale lock can block later upgrades.
  */
 final class DatabaseMigrator
 {

@@ -101,7 +101,7 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
-7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`. Only the installation runs them: `inventaire:upgrade` does not.
+7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`.
 
 Creating the first administrator account is not part of the installer yet (it comes with the accounts lot).
 
@@ -149,7 +149,7 @@ npm ci && npm run build
 php artisan inventaire:upgrade --optimize
 ```
 
-`inventaire:upgrade` first clears the cached configuration and reloads the settings (so an edited `.env` is used), then applies the pending migrations under a file lock: if another upgrade is running at the same time, it waits for it (up to 10 minutes) and finds nothing left to do. It then clears the route, view and event caches (never the application cache) and, with `--optimize`, rebuilds them; a cache that cannot be rebuilt is reported as a warning and does not fail the upgrade, since the application simply runs without it. The post-migration hooks are not run: they belong to the installation. The command refuses an instance that is not installed, exits non-zero as soon as the configuration cannot be refreshed or a migration fails, and can be run as often as you like: when everything is up to date it changes nothing. Run it as the user that owns `storage/`. With Docker the update is automatic (see below).
+`inventaire:upgrade` reloads the configuration (so an edited `.env` is used), applies the pending migrations under a file lock (a second upgrade running at the same time waits for it, up to 10 minutes) and clears the route, view and event caches. With `--optimize` it rebuilds them afterwards; it can be run as often as you like, and with Docker the update is automatic (see below).
 
 ## Self-hosting with Docker
 
@@ -203,13 +203,10 @@ The container speaks plain HTTP on port 8080. Terminate TLS in a reverse proxy i
 ### Day-to-day commands
 
 ```bash
-docker compose exec app php artisan inventaire:upgrade   # the update step, by hand
 docker compose exec app php artisan inventaire:install-token
 docker compose run --rm app php artisan tinker           # any other command, in a throw-away container
 docker compose logs -f app                               # application errors go to stderr
 ```
-
-The image is built from `Dockerfile` (multi-stage; no `.env`, installer state or development dependency in it) and its `HEALTHCHECK` queries `/up`. `docker/entrypoint.sh` documents how each role (`app`, `worker`, `scheduler`) starts.
 
 ## Quality commands
 

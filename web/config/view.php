@@ -17,17 +17,10 @@ declare(strict_types=1);
 
 return [
 
-    /*
-    | Where the Blade templates are looked up.
-    */
     'paths' => [
         resource_path('views'),
     ],
 
-    /*
-    | Where the compiled templates are stored: storage/framework/views unless
-    | VIEW_COMPILED_PATH says otherwise.
-    */
     'compiled' => (static function (): string|false {
         $path = env('VIEW_COMPILED_PATH');
 

@@ -27,8 +27,6 @@ use Illuminate\Support\ServiceProvider;
  *    serving the previous version;
  * 4. with `--optimize`, rebuilds the caches.
  *
- * The post-migration hooks are not run: they belong to the installation.
- *
  * It can be run as often as needed. The exit code is 0 when the instance is up
  * to date, so a container entrypoint or a deployment script can rely on it. A
  * cache that cannot be rebuilt does not make the upgrade fail (the application

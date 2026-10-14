@@ -3,29 +3,10 @@
 #
 # The first argument chooses what the container does; "app" is the default.
 #
-#   app        The web server. Before it starts, the instance is prepared according
-#              to what `php artisan inventaire:install-status` reports:
-#                installed    -> `inventaire:upgrade --optimize` applies the pending
-#                                migrations and rebuilds the caches;
-#                environment  -> not installed, but every setting comes from the
-#                                environment: `inventaire:install --from-env` installs
-#                                the instance by itself, then the caches are built;
-#                wizard       -> not installed and not fully configured: the server
-#                                starts as it is and the install wizard (/install)
-#                                does the rest.
-#              If the preparation fails the container stops with a non-zero status
-#              instead of serving a half-updated instance. (A cache that cannot be
-#              rebuilt is only a warning: the application works without it.)
+#   app        The web server, after updating or installing the instance.
 #   worker     The queue worker. It waits until the instance is installed.
 #   scheduler  The task scheduler. It waits until the instance is installed.
-#   other      Any other command is run as it is, e.g.
-#              `docker compose run --rm app php artisan tinker`.
-#
-# Whatever the role, the folders Laravel writes to are created first: a new, empty
-# volume mounted on /app/storage hides the ones the image ships.
-#
-# Only the "app" role migrates, so that running several workers or schedulers never
-# races a migration. All roles run as the same non-root user (see the Dockerfile).
+#   other      Any other command is run as it is.
 
 set -eu
 
@@ -109,8 +90,6 @@ wait_until_installed() {
         sleep 5 &
         wait $!
     done
-
-    trap - TERM INT
 }
 
 prepare_storage

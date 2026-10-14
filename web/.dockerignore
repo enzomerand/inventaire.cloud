@@ -59,9 +59,8 @@ vitest.config.js
 .prettierrc.json
 .prettierignore
 
-# Docker files themselves; docker/entrypoint.sh and docker/php.ini are the exceptions
+# Docker files themselves; docker/Caddyfile, docker/entrypoint.sh and docker/php.ini are the exceptions
 Dockerfile
 .dockerignore
 compose*.yaml
-docker/compose.yaml
 README.md

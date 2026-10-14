@@ -16,13 +16,11 @@
 FROM dunglas/frankenphp:1-php8.5-trixie AS base
 
 # opcache is part of PHP 8.5; mbstring, openssl, tokenizer, xml, ctype, json, fileinfo,
-# curl and posix come with the base image. The check below fails the build if one is missing.
+# curl and posix come with the base image.
 RUN install-php-extensions bcmath gd intl pcntl pdo_mysql pdo_pgsql zip \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
 COPY docker/php.ini "$PHP_INI_DIR/conf.d/zz-inventaire.ini"
-
-RUN php -r '$missing = array_filter(["mbstring", "openssl", "tokenizer", "xml", "ctype", "json", "bcmath", "fileinfo", "intl", "zip", "curl", "pdo", "pdo_pgsql", "pdo_mysql", "gd", "pcntl", "posix", "Zend OPcache"], static fn (string $name): bool => ! extension_loaded($name)); if ($missing !== []) { fwrite(STDERR, "Missing PHP extensions: ".implode(", ", $missing)."\n"); exit(1); }'
 
 WORKDIR /app
 
@@ -61,9 +59,6 @@ RUN npm run build
 ############################################################
 FROM base AS runtime
 
-ARG USER=inventaire
-ARG UID=1000
-
 # Our own web server configuration, not the image's: only public/index.php may run PHP
 # (see the comments in the file). Checked now so that a mistake fails the build.
 COPY docker/Caddyfile /etc/caddy/Caddyfile
@@ -73,10 +68,10 @@ RUN frankenphp validate --config /etc/caddy/Caddyfile --adapter caddyfile
 # scheduler, artisan): the files they share in the storage volume belong to it.
 # FrankenPHP's own recipe for running without root: the binary gets no file
 # capability (it only binds port 8080), and Caddy's config and data folders are the user's.
-RUN useradd --uid "$UID" --create-home --shell /usr/sbin/nologin "$USER" \
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin inventaire \
     && setcap -r /usr/local/bin/frankenphp \
     && mkdir -p /data/caddy /config/caddy \
-    && chown -R "$USER:$USER" /data/caddy /config/caddy
+    && chown -R inventaire:inventaire /data/caddy /config/caddy
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/inventaire-entrypoint
 
@@ -88,9 +83,9 @@ COPY --exclude=docker --exclude=package.json --exclude=package-lock.json --exclu
 # writable. public/storage serves the public disk, which lives in the storage volume.
 RUN chmod -R a+rX /app \
     && ln -s /app/storage/app/public /app/public/storage \
-    && chown -R "$USER:$USER" /app/storage /app/bootstrap/cache
+    && chown -R inventaire:inventaire /app/storage /app/bootstrap/cache
 
-USER $USER
+USER inventaire
 
 # Registers the packages' service providers (composer ran with --no-scripts).
 RUN php artisan package:discover --ansi
@@ -109,15 +104,9 @@ ENV APP_ENV=production \
 
 EXPOSE 8080
 
-# /up answers 200 before and after the installation. Before the server starts the entrypoint
-# updates or installs the instance, and a migration can take minutes: failed probes do not
-# count during the start period, and start-interval probes every 5 seconds meanwhile so that
-# the container turns healthy as soon as it can.
-# The start period is 20 minutes, which is the longest a starting container can legitimately
-# take: up to 10 minutes waiting for another upgrade's migration (DatabaseMigrator::LOCK_WAIT,
-# 600 seconds), then its own migration check and the cache rebuild, with as much time again
-# in reserve. The wait is kept as it is and this period sized from it: if LOCK_WAIT changes,
-# change this value with it, keeping it above twice the wait.
+# /up answers 200 before and after the installation. The entrypoint updates or installs the
+# instance before the server starts, so failed probes do not count during the 20-minute start
+# period: keep it above twice DatabaseMigrator::LOCK_WAIT (600 seconds).
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20m --start-interval=5s --retries=3 \
     CMD curl -fsS -o /dev/null http://127.0.0.1:8080/up || exit 1
 

@@ -82,8 +82,8 @@ final class ProcessArtisanRunner implements ArtisanRunner
      */
     private static function lastLine(string $message): string
     {
-        $lines = array_values(array_filter(array_map(trim(...), explode("\n", $message)), static fn (string $line): bool => $line !== ''));
+        $lines = explode("\n", trim($message));
 
-        return $lines === [] ? 'unknown error.' : $lines[array_key_last($lines)];
+        return trim($lines[array_key_last($lines)]);
     }
 }
