@@ -23,16 +23,12 @@ use RuntimeException;
  * worthless here (see below).
  *
  * The count is kept in the cache (the cache store the rate limiter is configured
- * with) and every change of it is one atomic increment or decrement. That is
- * what makes it hold under parallel requests. The state of the cache is never
- * read to decide anything: a plain read would be answered from the snapshot the
- * surrounding database transaction opened (MySQL and MariaDB read from a
- * snapshot taken at the transaction's first query, which a request that waited
- * for a lock may have taken before the others committed), whereas an increment
- * is a locking read that always sees the latest value. The guess is therefore
- * paid for in advance ({@see self::reserve()}): the answer to "may this guess be
- * judged?" is the value the increment returned. Emptying the cache forgets the
- * count, which gives the guesses back once.
+ * with) and every change of it is one atomic increment or decrement, so it holds
+ * under parallel requests. It is never read to decide anything, because a plain
+ * read can be stale inside a transaction (see {@see LoginCodes::lock()}): the
+ * guess is paid for in advance ({@see self::reserve()}), and the answer to "may
+ * this guess be judged?" is the value the increment returned. Emptying the cache
+ * forgets the count, which gives the guesses back once.
  */
 final class LoginFailures
 {
@@ -104,18 +100,6 @@ final class LoginFailures
         $wait = $this->limiter->availableIn($this->key($email));
 
         return max(1, $wait > 0 ? $wait : $this->windowSeconds());
-    }
-
-    /**
-     * Wrong codes counted for the address in the current period.
-     *
-     * @param  string  $email  Address, already normalized.
-     */
-    public function count(string $email): int
-    {
-        $count = $this->limiter->attempts($this->key($email));
-
-        return is_numeric($count) ? max(0, (int) $count) : 0;
     }
 
     /**

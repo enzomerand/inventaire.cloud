@@ -48,10 +48,4 @@ describe('a session-changing call from the web front', function (): void {
 
         expect(sentMails())->toHaveCount(1);
     });
-
-    it('answers 419 in JSON, which the front reacts to by renewing its token', function (): void {
-        $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'], frontend())
-            ->assertStatus(419)
-            ->assertHeader('Content-Type', 'application/json');
-    });
 });

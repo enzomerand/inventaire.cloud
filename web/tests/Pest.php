@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Installer\Settings\DatabaseSettings;
+use Illuminate\Cache\RateLimiter;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\Mime\Email;
@@ -143,6 +145,19 @@ function receiveCode(object $test, string $email, string $language = 'en'): stri
 function typeCode(object $test, string $email, string $code, array $fields = [], array $headers = []): TestResponse
 {
     return $test->postJson('/api/v1/auth/verify', ['email' => $email, 'code' => $code] + $fields, frontend($headers));
+}
+
+/**
+ * Wrong sign-in codes counted for an address in the current period, read where the application keeps the count (the
+ * rate limiter's cache, under the key LoginFailures uses).
+ *
+ * @param  string|null  $store  Cache store to read, or null for the one the rate limiter uses.
+ */
+function loginFailureCount(string $email, ?string $store = null): int
+{
+    $limiter = $store === null ? app(RateLimiter::class) : new RateLimiter(Cache::store($store));
+
+    return (int) $limiter->attempts('login-failures:'.sha1($email));
 }
 
 /**

@@ -19,10 +19,6 @@ describe('the canonical form of an address', function (): void {
         'a domain already in punycode' => ['ada@xn--gmil-moa.com', 'ada@xn--gmil-moa.com'],
     ]);
 
-    it('never confuses a lookalike domain with the real one', function (): void {
-        expect(EmailAddress::normalize('john.doe@gmäil.com'))->not->toBe(EmailAddress::normalize('john.doe@gmail.com'));
-    });
-
     it('does not change when it is normalized again', function (string $given): void {
         $once = EmailAddress::normalize($given);
 

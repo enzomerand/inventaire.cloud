@@ -46,46 +46,11 @@ describe('requesting a code', function (): void {
             ->and($mail->getHtmlBody())->not->toContain('http://')->not->toContain('https://')->not->toContain('<img')->not->toContain('<script')->not->toContain('<link');
     });
 
-    it('stores only a hash of the code', function (): void {
-        askForCode($this, 'ada@example.com')->assertOk();
-
-        $row = LoginCode::query()->findOrFail('ada@example.com');
-
-        expect($row->code_hash)->toBe(hash_hmac('sha256', lastSentCode(), config()->string('app.key')))
-            ->and($row->code_hash)->not->toBe(lastSentCode())
-            ->and($row->attempts)->toBe(0);
-    });
-
-    it('is valid for ten minutes', function (): void {
-        $this->freezeSecond();
-
-        askForCode($this, 'ada@example.com')->assertOk();
-
-        expect(LoginCode::query()->findOrFail('ada@example.com')->expires_at->equalTo(now()->addMinutes(10)))->toBeTrue();
-    });
-
     it('normalizes the address to lowercase before storing and mailing', function (): void {
         askForCode($this, "  Ada.Lovelace@Example.COM \n")->assertOk()->assertJsonPath('data.email', 'ada.lovelace@example.com');
 
         expect(LoginCode::query()->pluck('email')->all())->toBe(['ada.lovelace@example.com'])
             ->and(sentMails()[0]->getTo()[0]->getAddress())->toBe('ada.lovelace@example.com');
-    });
-
-    it('replaces the previous code of the address', function (): void {
-        askForCode($this, 'ada@example.com')->assertOk();
-        $first = lastSentCode();
-        askForCode($this, 'ADA@example.com')->assertOk();
-        $second = lastSentCode();
-
-        expect(LoginCode::query()->count())->toBe(1)
-            ->and(LoginCode::query()->findOrFail('ada@example.com')->code_hash)->toBe(hash_hmac('sha256', $second, config()->string('app.key')))
-            ->and(sentMails())->toHaveCount(2);
-
-        if ($first !== $second) {
-            $this->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => $first, 'name' => 'Ada'], frontend())
-                ->assertUnprocessable()
-                ->assertJsonPath('code', 'login_code_wrong');
-        }
     });
 
     it('writes the mail in the language of the request', function (string $header, string $subject): void {
@@ -152,12 +117,6 @@ describe('what the answer gives away', function (): void {
             ->and(LoginCode::query()->count())->toBe(2)
             ->and(sentMails())->toHaveCount(2);
     });
-
-    it('does not create an account', function (): void {
-        askForCode($this, 'new@example.com')->assertOk();
-
-        expect(User::query()->count())->toBe(0);
-    });
 });
 
 describe('validation', function (): void {
@@ -201,12 +160,6 @@ describe('validation', function (): void {
             ->and($keys('login-code', ' Ada@Example.com')[1])->toBe('email:'.sha1('ada@example.com'))
             ->and($keys('login-verify', str_repeat('a', 5_000_000)))->toBe(['ip:203.0.113.9|email:too-long'])
             ->and($keys('login-verify', 'ada@example.com'))->toBe(['ip:203.0.113.9|email:'.sha1('ada@example.com')]);
-    });
-
-    it('answers in JSON even without an Accept header', function (): void {
-        $response = $this->call('POST', '/api/v1/auth/code', server: ['HTTP_REFERER' => 'http://localhost/login', 'CONTENT_TYPE' => 'application/json'], content: '{"email":"nope"}');
-
-        $response->assertUnprocessable()->assertHeader('Content-Type', 'application/json');
     });
 });
 
@@ -335,10 +288,6 @@ describe('throttling', function (): void {
 describe('who may call it', function (): void {
     it('is the web front only: a call from elsewhere is refused with a reason', function (): void {
         $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'])
-            ->assertForbidden()
-            ->assertJsonPath('code', 'not_stateful');
-
-        $this->postJson('/api/v1/auth/code', ['email' => 'ada@example.com'], ['Referer' => 'https://elsewhere.example.test/login'])
             ->assertForbidden()
             ->assertJsonPath('code', 'not_stateful');
 

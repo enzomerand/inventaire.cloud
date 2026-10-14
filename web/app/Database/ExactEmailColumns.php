@@ -30,27 +30,25 @@ final class ExactEmailColumns
     /**
      * Gives the column a binary collation. Does nothing on PostgreSQL.
      *
-     * @param  string  $table  Table whose column is an email address, up to 255 characters, not null.
-     * @param  string  $column  Name of the column.
+     * @param  string  $table  Table with an `email` column: an address up to 255 characters, not null.
      */
-    public static function apply(string $table, string $column = 'email'): void
+    public static function apply(string $table): void
     {
         if (! self::needsCollation()) {
             return;
         }
 
-        Schema::table($table, function (Blueprint $blueprint) use ($column): void {
-            $blueprint->string($column)->collation(self::COLLATION)->change();
+        Schema::table($table, function (Blueprint $blueprint): void {
+            $blueprint->string('email')->collation(self::COLLATION)->change();
         });
     }
 
     /**
      * Gives the column back the default collation of the connection. Does nothing on PostgreSQL.
      *
-     * @param  string  $table  Table whose column is an email address, up to 255 characters, not null.
-     * @param  string  $column  Name of the column.
+     * @param  string  $table  Table with an `email` column: an address up to 255 characters, not null.
      */
-    public static function revert(string $table, string $column = 'email'): void
+    public static function revert(string $table): void
     {
         if (! self::needsCollation()) {
             return;
@@ -58,8 +56,8 @@ final class ExactEmailColumns
 
         $default = Schema::getConnection()->getConfig('collation');
 
-        Schema::table($table, function (Blueprint $blueprint) use ($column, $default): void {
-            $blueprint->string($column)->collation(is_string($default) ? $default : 'utf8mb4_unicode_ci')->change();
+        Schema::table($table, function (Blueprint $blueprint) use ($default): void {
+            $blueprint->string('email')->collation(is_string($default) ? $default : 'utf8mb4_unicode_ci')->change();
         });
     }
 

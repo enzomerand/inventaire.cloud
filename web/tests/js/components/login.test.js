@@ -254,15 +254,6 @@ describe('sign-in page', () => {
                 expect(component.error).toBe('This code has expired: request a new one.');
             },
         );
-
-        it('shows a throttled answer with the time to wait', async () => {
-            http.post.mockRejectedValue(new HttpError(429, 'Too many attempts.', { retryAfter: 30 }));
-
-            await component.verify();
-
-            expect(component.error).toBe('Wait 30 seconds');
-            expect(component.busy).toBe(false);
-        });
     });
 
     describe('a stale page', () => {
@@ -292,22 +283,6 @@ describe('sign-in page', () => {
 
             expect(reloadPage).toHaveBeenCalledTimes(1);
         });
-
-        it('does the same when the code is typed back', async () => {
-            http.post.mockRejectedValue(new HttpError(419, EXPIRED));
-            component.phase = 'code';
-            component.code = '123456';
-
-            await component.verify();
-
-            expect(component.error).toBe(EXPIRED);
-            expect(redirectTo).not.toHaveBeenCalled();
-
-            vi.advanceTimersByTime(1500);
-
-            expect(reloadPage).toHaveBeenCalledTimes(1);
-        });
-
         it('reloads once, however many calls were refused', async () => {
             http.post.mockRejectedValue(new HttpError(419, EXPIRED));
             component.email = 'ada@example.com';

@@ -7,9 +7,7 @@
     <meta name="csrf-refresh-url" content="{{ route('csrf.refresh', absolute: false) }}">
     {{-- The HTTP helper sends signed-out users here on a 401 instead of reloading: a page that calls the API as a
          visitor must pass `silent: true` and handle the error itself. --}}
-    @if (Route::has('login'))
-        <meta name="login-url" content="{{ route('login', absolute: false) }}">
-    @endif
+    <meta name="login-url" content="{{ route('login', absolute: false) }}">
 
     <title>@hasSection('title')@yield('title') · @endif{{ config('app.name') }}</title>
 

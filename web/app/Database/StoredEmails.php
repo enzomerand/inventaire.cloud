@@ -15,20 +15,18 @@ use RuntimeException;
 final class StoredEmails
 {
     /**
-     * Normalizes every address of the table, or changes nothing and fails when
-     * two addresses would become the same.
-     *
-     * @param  string  $table  A table with an `id` column and an `email` column.
+     * Normalizes every address of the `users` table, or changes nothing and
+     * fails when two addresses would become the same.
      *
      * @throws RuntimeException When different rows would end up with one address.
      */
-    public static function normalize(string $table = 'users'): void
+    public static function normalize(): void
     {
         $owners = [];
         $duplicates = [];
         $changes = [];
 
-        foreach (DB::table($table)->select(['id', 'email'])->orderBy('id')->lazyById(500) as $row) {
+        foreach (DB::table('users')->select(['id', 'email'])->orderBy('id')->lazyById(500) as $row) {
             $stored = (string) $row->email;
             $canonical = EmailAddress::normalize($stored);
 
@@ -51,13 +49,13 @@ final class StoredEmails
             }
 
             throw new RuntimeException(
-                "Cannot bring the email addresses of {$table} to their canonical form (lowercase, domain in punycode): these rows would share an address: "
+                'Cannot bring the email addresses of users to their canonical form (lowercase, domain in punycode): these rows would share an address: '
                 .implode('; ', $listed).'. Merge or delete the duplicates, then run the migration again.'
             );
         }
 
         foreach ($changes as $id => $email) {
-            DB::table($table)->where('id', $id)->update(['email' => $email]);
+            DB::table('users')->where('id', $id)->update(['email' => $email]);
         }
     }
 }

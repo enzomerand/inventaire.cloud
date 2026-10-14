@@ -21,9 +21,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SetReferrerPolicy
 {
-    /** Value of the header. */
-    public const POLICY = 'same-origin';
-
     /**
      * Adds the header to the response.
      *
@@ -33,7 +30,7 @@ final class SetReferrerPolicy
     {
         $response = $next($request);
 
-        $response->headers->set('Referrer-Policy', self::POLICY);
+        $response->headers->set('Referrer-Policy', 'same-origin');
 
         return $response;
     }

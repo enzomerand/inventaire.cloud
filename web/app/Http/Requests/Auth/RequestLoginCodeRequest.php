@@ -13,14 +13,6 @@ use Illuminate\Foundation\Http\FormRequest;
 final class RequestLoginCodeRequest extends FormRequest
 {
     /**
-     * Anybody may ask for a code: that is how an account is reached or created.
-     */
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /**
      * @return array<string, list<mixed>>
      */
     public function rules(): array

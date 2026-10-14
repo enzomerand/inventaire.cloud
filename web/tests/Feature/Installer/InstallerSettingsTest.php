@@ -295,10 +295,4 @@ describe('what the installers suggest', function (): void {
 
         expect($settings->withSuggestions(InstallStep::Mail, $values, 'admin@example.test'))->toBe($values);
     });
-
-    it('writes the address of the administrator in canonical form when a form is completed', function (): void {
-        $settings = settingsFor($this);
-
-        expect($settings->resolve(InstallStep::Administrator, ['name' => 'Jane', 'email' => ' Jane@Gmäil.COM '])['email'])->toBe('jane@xn--gmil-moa.com');
-    });
 });

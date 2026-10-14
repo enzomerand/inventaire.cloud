@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Request;
-use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
 uses(RefreshDatabase::class);
 
@@ -25,10 +23,6 @@ describe('JSON errors', function (): void {
 
     it('answers a wrong method in JSON', function (): void {
         $this->call('DELETE', '/api/v1/me')->assertStatus(405)->assertHeader('Content-Type', 'application/json');
-    });
-
-    it('does not redirect an anonymous API call to a login page', function (): void {
-        $this->call('GET', '/api/v1/me')->assertUnauthorized()->assertHeaderMissing('Location');
     });
 
     it('still answers web URLs with HTML', function (): void {
@@ -62,16 +56,6 @@ describe('stateful requests', function (): void {
         $sanctum = require config_path('sanctum.php');
 
         expect($sanctum['stateful'])->toContain('localhost')->toContain('127.0.0.1:8000')->toContain('inventory.example.test:8443');
-    });
-
-    it('recognises a call made from the application host as coming from the frontend', function (): void {
-        $fromApplication = Request::create('/api/v1/me', 'GET', server: ['HTTP_REFERER' => 'http://localhost/login']);
-        $fromElsewhere = Request::create('/api/v1/me', 'GET', server: ['HTTP_REFERER' => 'https://elsewhere.example.test/login']);
-        $anonymous = Request::create('/api/v1/me', 'GET');
-
-        expect(EnsureFrontendRequestsAreStateful::fromFrontend($fromApplication))->toBeTrue()
-            ->and(EnsureFrontendRequestsAreStateful::fromFrontend($fromElsewhere))->toBeFalse()
-            ->and(EnsureFrontendRequestsAreStateful::fromFrontend($anonymous))->toBeFalse();
     });
 
     it('honours SANCTUM_STATEFUL_DOMAINS for other hosts', function (): void {

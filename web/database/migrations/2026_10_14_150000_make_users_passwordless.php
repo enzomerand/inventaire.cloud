@@ -23,7 +23,7 @@ return new class extends Migration
     public function up(): void
     {
         // First, so that a refusal leaves the schema as it was.
-        StoredEmails::normalize('users');
+        StoredEmails::normalize();
 
         Schema::table('users', function (Blueprint $table) {
             $table->dropColumn('password');

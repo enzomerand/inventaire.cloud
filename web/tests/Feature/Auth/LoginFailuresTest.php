@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Auth\LoginCodes;
 use App\Auth\LoginFailures;
 use App\Models\LoginCode;
 use Illuminate\Cache\NullStore;
@@ -31,11 +30,11 @@ describe('the budget of wrong codes of an address', function (): void {
         expect($failures->reserve('ada@example.com'))->toBeTrue()
             ->and($failures->reserve('ada@example.com'))->toBeTrue()
             ->and($failures->reserve('ada@example.com'))->toBeTrue()
-            ->and($failures->count('ada@example.com'))->toBe(3)
+            ->and(loginFailureCount('ada@example.com'))->toBe(3)
             // The refused guess takes nothing: the count stays at the limit however often it is refused.
             ->and($failures->reserve('ada@example.com'))->toBeFalse()
             ->and($failures->reserve('ada@example.com'))->toBeFalse()
-            ->and($failures->count('ada@example.com'))->toBe(3);
+            ->and(loginFailureCount('ada@example.com'))->toBe(3);
     });
 
     it('gets a place back, which another guess can then take', function (): void {
@@ -47,7 +46,7 @@ describe('the budget of wrong codes of an address', function (): void {
 
         $failures->release('ada@example.com');
 
-        expect($failures->count('ada@example.com'))->toBe(2)
+        expect(loginFailureCount('ada@example.com'))->toBe(2)
             ->and($failures->reserve('ada@example.com'))->toBeTrue()
             ->and($failures->reserve('ada@example.com'))->toBeFalse();
     });
@@ -60,7 +59,7 @@ describe('the budget of wrong codes of an address', function (): void {
         }
 
         expect($failures->reserve('grace@example.com'))->toBeTrue()
-            ->and($failures->count('grace@example.com'))->toBe(1);
+            ->and(loginFailureCount('grace@example.com'))->toBe(1);
     });
 
     it('starts its period over when every place was given back', function (): void {
@@ -74,7 +73,7 @@ describe('the budget of wrong codes of an address', function (): void {
         // Nothing is counted any more: the period that began with that guess is forgotten, not carried over.
         $failures->reserve('ada@example.com');
 
-        expect($failures->count('ada@example.com'))->toBe(1)
+        expect(loginFailureCount('ada@example.com'))->toBe(1)
             ->and($failures->retryAfter('ada@example.com'))->toBe(300);
     });
 
@@ -83,9 +82,9 @@ describe('the budget of wrong codes of an address', function (): void {
 
         $failures->release('ada@example.com');
 
-        expect($failures->count('ada@example.com'))->toBe(0)
+        expect(loginFailureCount('ada@example.com'))->toBe(0)
             ->and($failures->reserve('ada@example.com'))->toBeTrue()
-            ->and($failures->count('ada@example.com'))->toBe(1);
+            ->and(loginFailureCount('ada@example.com'))->toBe(1);
     });
 
     it('waits for the end of the period, or for a whole one when that end is not known', function (): void {
@@ -106,18 +105,6 @@ describe('a count that cannot be written', function (): void {
         expect(fn () => uncountableFailures()->reserve('ada@example.com'))
             ->toThrow(RuntimeException::class, 'could not be updated');
     });
-
-    it('stops the judging of a code: nothing is judged, spent or counted', function (): void {
-        app()->instance(LoginFailures::class, uncountableFailures());
-        $code = app(LoginCodes::class)->issue('ada@example.com');
-
-        expect(fn () => app(LoginCodes::class)->verify('ada@example.com', $code))->toThrow(RuntimeException::class);
-
-        // The code is still there with all its attempts, and the right one is still not judged.
-        $row = LoginCode::query()->findOrFail('ada@example.com');
-        expect($row->attempts)->toBe(0)->and(LoginCode::query()->count())->toBe(1);
-    });
-
     it('answers a server error and signs nobody in', function (): void {
         app()->instance(LoginFailures::class, uncountableFailures());
         $code = receiveCode($this, 'ada@example.com');

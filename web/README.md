@@ -236,7 +236,7 @@ docker compose restart worker scheduler
 
 ### Reverse proxy and HTTPS
 
-The container speaks plain HTTP on port 8080. Terminate TLS in a reverse proxy in front of it, set `APP_URL` to the public `https://` address, and set `TRUSTED_PROXIES` in `.env` to the proxy's address or CIDR range (see "Behind a reverse proxy"): otherwise every visitor looks like the proxy and the setup token throttle counts them together. With an `https://` `APP_URL`, the session and CSRF cookies are sent over HTTPS only (`Secure`) unless you set `SESSION_SECURE_COOKIE` yourself, so plain-`http` direct access to the container (for instance `http://localhost:8080`, bypassing the proxy) loses the session: for such a local setup only, set `SESSION_SECURE_COOKIE=false` in `.env`. Keep the proxy from overriding the `Referrer-Policy: same-origin` header the application sends (see "Behind a reverse proxy").
+The container speaks plain HTTP on port 8080. Terminate TLS in a reverse proxy in front of it, set `APP_URL` to the public `https://` address, and set `TRUSTED_PROXIES` in `.env` to the proxy's address or CIDR range (see "Behind a reverse proxy"): otherwise every visitor looks like the proxy and the setup token throttle counts them together. Opening the container directly over plain `http` (for instance `http://localhost:8080`) with an `https://` `APP_URL` loses the session: see `SESSION_SECURE_COOKIE` under "Behind a reverse proxy". Keep the proxy from overriding the `Referrer-Policy: same-origin` header the application sends (see "Behind a reverse proxy").
 
 ### Day-to-day commands
 

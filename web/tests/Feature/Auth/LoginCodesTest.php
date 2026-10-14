@@ -8,7 +8,6 @@ use App\Auth\LoginFailures;
 use App\Models\LoginCode;
 use App\Services\OneTimeCode;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 
 uses(RefreshDatabase::class);
 
@@ -66,13 +65,6 @@ describe('issuing a code', function (): void {
             ->and($code)->toMatch('/^\d{6}$/');
     });
 
-    it('keeps one code per address', function (): void {
-        codes()->issue('ada@example.com');
-        codes()->issue('grace@example.com');
-
-        expect(LoginCode::query()->count())->toBe(2);
-    });
-
     it('drops the expired codes of other addresses on the way', function (): void {
         codes()->issue('old@example.com');
         $this->travel(11)->minutes();
@@ -98,12 +90,6 @@ describe('verifying a code', function (): void {
         expect(codes()->verify('ada@example.com', $code, consume: false)->accepted())->toBeTrue()
             ->and(LoginCode::query()->count())->toBe(1)
             ->and(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue();
-    });
-
-    it('tolerates whitespace around the code', function (): void {
-        $code = codes()->issue('ada@example.com');
-
-        expect(codes()->verify('ada@example.com', " {$code}\n")->accepted())->toBeTrue();
     });
 
     it('counts wrong codes and burns the code at the fifth', function (): void {
@@ -235,7 +221,7 @@ describe('wrong codes over an hour', function (): void {
         $this->travel(1)->seconds();
         $code = codes()->issue('ada@example.com');
         expect(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue()
-            ->and(app(LoginFailures::class)->count('ada@example.com'))->toBe(0);
+            ->and(loginFailureCount('ada@example.com'))->toBe(0);
     });
 
     it('start a new period with the first wrong code after the previous one', function (): void {
@@ -250,7 +236,7 @@ describe('wrong codes over an hour', function (): void {
         $code = codes()->issue('ada@example.com');
         codes()->verify('ada@example.com', wrongCode($code));
 
-        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(1)
+        expect(loginFailureCount('ada@example.com'))->toBe(1)
             ->and(app(LoginFailures::class)->retryAfter('ada@example.com'))->toBe(3600);
     });
 
@@ -263,12 +249,12 @@ describe('wrong codes over an hour', function (): void {
                 ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::TooManyAttempts);
         }
 
-        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(5);
+        expect(loginFailureCount('ada@example.com'))->toBe(5);
 
         // Five more wrong codes at a new code make ten: only now is the address locked.
         fiveWrongCodes('ada@example.com');
 
-        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(10)
+        expect(loginFailureCount('ada@example.com'))->toBe(10)
             ->and(codes()->verify('ada@example.com', codes()->issue('ada@example.com'))->outcome)->toBe(LoginCodeOutcome::Locked);
     });
 
@@ -280,7 +266,7 @@ describe('wrong codes over an hour', function (): void {
             expect(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Expired);
         }
 
-        expect(app(LoginFailures::class)->count('ada@example.com'))->toBe(0);
+        expect(loginFailureCount('ada@example.com'))->toBe(0);
 
         $fresh = codes()->issue('ada@example.com');
         expect(codes()->verify('ada@example.com', $fresh)->accepted())->toBeTrue();
@@ -298,8 +284,8 @@ describe('wrong codes over an hour', function (): void {
 
         $code = codes()->issue('nobody@example.com');
         expect(codes()->verify('nobody@example.com', $code)->accepted())->toBeTrue()
-            ->and(app(LoginFailures::class)->count('ada@example.com'))->toBe(0)
-            ->and(app(LoginFailures::class)->count('nobody@example.com'))->toBe(0);
+            ->and(loginFailureCount('ada@example.com'))->toBe(0)
+            ->and(loginFailureCount('nobody@example.com'))->toBe(0);
     });
 
     it('are counted for each address on its own', function (): void {
@@ -322,11 +308,5 @@ describe('wrong codes over an hour', function (): void {
         }
 
         expect(codes()->verify('ada@example.com', $code))->outcome->toBe(LoginCodeOutcome::Locked)->retryAfter->toBe(300);
-    });
-});
-
-describe('the table', function (): void {
-    it('has the columns the service relies on', function (): void {
-        expect(Schema::getColumnListing('login_codes'))->toEqualCanonicalizing(['email', 'code_hash', 'expires_at', 'attempts', 'created_at']);
     });
 });

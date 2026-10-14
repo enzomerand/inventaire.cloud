@@ -3,10 +3,7 @@
 declare(strict_types=1);
 
 use App\Auth\LoginCodes;
-use App\Auth\LoginFailures;
 use App\Models\LoginCode;
-use Illuminate\Cache\RateLimiter;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 use Tests\Support\CommitsDatabaseChanges;
@@ -35,14 +32,6 @@ function removeCommittedRows(): void
     DB::table('login_codes')->delete();
     DB::table('users')->delete();
     DB::table((string) config('cache.stores.database.table'))->delete();
-}
-
-/**
- * The failure count as the database cache store holds it (the processes under test write it there).
- */
-function databaseFailures(): LoginFailures
-{
-    return new LoginFailures(new RateLimiter(Cache::store('database')), config());
 }
 
 /**
@@ -116,7 +105,7 @@ describe('wrong codes typed in parallel', function (): void {
         expect(answersCount($answers, 422, 'login_code_wrong'))->toBe(10)
             ->and(answersCount($answers, 429, 'login_code_locked'))->toBe(6)
             ->and(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(10)
-            ->and(databaseFailures()->count('ada@example.com'))->toBe(10);
+            ->and(loginFailureCount('ada@example.com', 'database'))->toBe(10);
     });
 
     it('add up over the codes asked for in between', function (): void {
@@ -124,7 +113,7 @@ describe('wrong codes typed in parallel', function (): void {
         $answers = typeCodeInParallel($this->sandbox->root, 'ada@example.com', wrongCode($first), 6);
 
         expect(answersCount($answers, 422, 'login_code_wrong'))->toBe(6)
-            ->and(databaseFailures()->count('ada@example.com'))->toBe(6);
+            ->and(loginFailureCount('ada@example.com', 'database'))->toBe(6);
 
         // A fresh code gives its own attempts back, not the six wrong codes already counted: four places are left.
         $second = app(LoginCodes::class)->issue('ada@example.com');
@@ -133,7 +122,7 @@ describe('wrong codes typed in parallel', function (): void {
         expect(answersCount($answers, 422, 'login_code_wrong'))->toBe(4)
             ->and(answersCount($answers, 429, 'login_code_locked'))->toBe(4)
             ->and(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(4)
-            ->and(databaseFailures()->count('ada@example.com'))->toBe(10);
+            ->and(loginFailureCount('ada@example.com', 'database'))->toBe(10);
     });
 
     it('lock the right code too, however many ask at once', function (): void {

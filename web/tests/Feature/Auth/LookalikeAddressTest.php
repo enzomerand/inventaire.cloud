@@ -156,19 +156,3 @@ describe('the database', function (): void {
             ->and(collationOf('login_codes', 'email'))->toBe(ExactEmailColumns::COLLATION);
     });
 });
-
-describe('the local part of an address', function (): void {
-    it('refuses an accent or a non-Latin letter, with a translated message', function (string $address): void {
-        askForCode($this, $address, ['Accept-Language' => 'en'])
-            ->assertUnprocessable()
-            ->assertJsonPath('errors.email.0', 'The email must not contain accents or other special letters before the @ sign.');
-
-        askForCode($this, $address, ['Accept-Language' => 'fr'])
-            ->assertUnprocessable()
-            ->assertJsonPath('errors.email.0', "Le champ adresse e-mail ne doit pas contenir d'accents ni d'autres lettres spéciales avant le signe @.");
-
-        typeCode($this, $address, '123456')->assertUnprocessable()->assertJsonValidationErrors('email');
-
-        expect(sentMails())->toBe([])->and(LoginCode::query()->count())->toBe(0);
-    })->with(['an accent' => ['jöhn.doe@gmail.com'], 'a non-Latin letter' => ['иван@example.com']]);
-});

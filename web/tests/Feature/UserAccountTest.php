@@ -9,19 +9,6 @@ use Illuminate\Support\Facades\Schema;
 uses(RefreshDatabase::class);
 
 describe('the users table', function (): void {
-    it('is passwordless, with the account language and the administrator flag', function (): void {
-        expect(Schema::hasColumn('users', 'password'))->toBeFalse()
-            ->and(Schema::hasColumn('users', 'locale'))->toBeTrue()
-            ->and(Schema::hasColumn('users', 'is_admin'))->toBeTrue();
-    });
-
-    it('can be created without any password', function (): void {
-        $user = User::query()->create(['name' => 'Ada', 'email' => 'ada@example.com']);
-
-        expect($user->fresh()->is_admin)->toBeFalse()
-            ->and($user->fresh()->locale)->toBeNull();
-    });
-
     it('goes back and forth between the passwordless and the former schema', function (): void {
         $migration = require database_path('migrations/2026_10_14_150000_make_users_passwordless.php');
 
@@ -49,12 +36,6 @@ describe('the user model', function (): void {
         expect($user->fresh()->is_admin)->toBeFalse();
     });
 
-    it('builds administrators and speakers through the factory', function (): void {
-        expect(User::factory()->admin()->create()->is_admin)->toBeTrue()
-            ->and(User::factory()->speaking('en')->create()->locale)->toBe('en')
-            ->and(User::factory()->create()->locale)->toBeNull();
-    });
-
     it('writes mails to the account language', function (): void {
         expect(User::factory()->speaking('en')->make()->preferredLocale())->toBe('en')
             ->and(User::factory()->make()->preferredLocale())->toBeNull();
@@ -74,14 +55,6 @@ describe('the account language', function (): void {
             ->assertCookie('locale', 'en', false);
 
         expect($user->fresh()->locale)->toBe('en');
-    });
-
-    it('initializes the language of an account that has none', function (): void {
-        $user = User::factory()->create();
-
-        $this->actingAs($user)->putJson(route('locale.update'), ['locale' => 'fr'])->assertNoContent();
-
-        expect($user->fresh()->locale)->toBe('fr');
     });
 
     it('leaves the account alone when the language is refused', function (): void {

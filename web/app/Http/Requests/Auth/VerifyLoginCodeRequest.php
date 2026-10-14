@@ -15,14 +15,6 @@ use Illuminate\Foundation\Http\FormRequest;
 final class VerifyLoginCodeRequest extends FormRequest
 {
     /**
-     * Anybody holding a valid code may use it.
-     */
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /**
      * @return array<string, list<mixed>>
      */
     public function rules(): array

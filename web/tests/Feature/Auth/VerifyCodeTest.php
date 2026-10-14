@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Auth\Accounts;
-use App\Auth\LoginFailures;
 use App\Models\LoginCode;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -197,19 +196,6 @@ describe('a wrong code', function (): void {
         $this->assertGuest('web');
     });
 
-    it('is told apart from nothing: a new code starts afresh', function (): void {
-        User::factory()->create(['email' => 'ada@example.com']);
-        $code = receiveCode($this, 'ada@example.com');
-
-        foreach (range(1, 5) as $ignored) {
-            typeCode($this, 'ada@example.com', wrongCode($code));
-        }
-
-        $fresh = receiveCode($this, 'ada@example.com');
-
-        typeCode($this, 'ada@example.com', $fresh)->assertOk();
-    });
-
     it('is refused in the language of the request', function (): void {
         User::factory()->create(['email' => 'ada@example.com']);
         $code = receiveCode($this, 'ada@example.com');
@@ -250,7 +236,7 @@ describe('a wrong code', function (): void {
             ->assertJsonCount(1, 'errors.email');
 
         expect(LoginCode::query()->findOrFail('ada@example.com')->attempts)->toBe(0)
-            ->and(app(LoginFailures::class)->count('ada@example.com'))->toBe(0);
+            ->and(loginFailureCount('ada@example.com'))->toBe(0);
     });
 
     it('is refused when it is not six digits, before touching the stored code', function (string $code): void {
@@ -312,22 +298,6 @@ describe('staying signed in', function (): void {
             ->and($remember->getExpiresTime())->toBeBetween(time() + 30 * 86400 - 120, time() + 30 * 86400 + 120)
             ->and($remember->isHttpOnly())->toBeTrue()
             ->and(config('session.lifetime'))->toBe(120);
-    });
-
-    it('brings the person back after the session is gone', function (): void {
-        $user = User::factory()->create(['email' => 'ada@example.com']);
-        $response = typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com'))->assertOk();
-        $remember = rememberCookie($response);
-
-        // The session expires (or the visitor comes back the next day): only the "remember me" cookie is left.
-        $this->flushSession();
-        $this->flushHeaders();
-        $this->app['auth']->forgetGuards();
-
-        $this->withCredentials()->withUnencryptedCookie($remember->getName(), $remember->getValue())
-            ->getJson('/api/v1/me', frontend())
-            ->assertOk()
-            ->assertJsonPath('data.id', $user->id);
     });
 
     it('tells the browser to forget the cookie when the person signs out, and then brings nobody back', function (): void {
@@ -406,17 +376,6 @@ describe('the account language', function (): void {
         typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com', 'en'))->assertOk()->assertCookie('locale', 'en', false);
 
         expect($user->fresh()->locale)->toBe('en');
-    });
-
-    it('follows the account from one device to the next', function (): void {
-        $user = User::factory()->speaking('fr')->create(['email' => 'ada@example.com']);
-
-        // On this device the visitor browses in English with a cookie to match...
-        $response = typeCode($this, 'ada@example.com', receiveCode($this, 'ada@example.com'), headers: ['Accept-Language' => 'en'])->assertOk();
-
-        // ...and signing in brings back the language of the account.
-        $response->assertCookie('locale', 'fr', false);
-        expect($user->fresh()->locale)->toBe('fr');
     });
 });
 

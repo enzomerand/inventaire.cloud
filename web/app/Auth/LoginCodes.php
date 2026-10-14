@@ -134,7 +134,7 @@ final class LoginCodes
                     $code->delete();
                 }
 
-                return new LoginCodeVerdict(LoginCodeOutcome::Accepted, $max - $code->attempts);
+                return new LoginCodeVerdict(LoginCodeOutcome::Accepted);
             }
 
             $code->attempts++;
