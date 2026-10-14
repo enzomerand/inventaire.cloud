@@ -72,6 +72,35 @@ final class WizardState
     }
 
     /**
+     * The values the steps can suggest now that the mail step proved an address.
+     *
+     * The page is built once, before the mail step, so the answer to the
+     * verification code carries these: the steps after the mail step are filled
+     * in without a reload. Only the fields where {@see InstallerSettings::withSuggestions()}
+     * changes something are listed (a configured, imposed or locked value never
+     * is), and the page leaves alone whatever was typed in the meantime.
+     *
+     * @return array<string, array<string, mixed>> Step id => field name => suggested value.
+     */
+    public function suggestions(Request $request): array
+    {
+        $verified = $this->mailChallenges->verifiedAddress($request->session());
+        $suggestions = [];
+
+        foreach (InstallStep::cases() as $step) {
+            $current = $this->settings->current($step);
+
+            foreach ($this->settings->withSuggestions($step, $current, $verified) as $name => $value) {
+                if ($value !== $current[$name]) {
+                    $suggestions[$step->value][$name] = $value;
+                }
+            }
+        }
+
+        return $suggestions;
+    }
+
+    /**
      * The requirements check, ready to serialize.
      *
      * @return array{passed: bool, items: list<array{id: string, label: string, ok: bool, detail: ?string}>}

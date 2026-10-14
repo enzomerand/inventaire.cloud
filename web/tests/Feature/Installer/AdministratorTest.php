@@ -19,6 +19,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Testing\TestResponse;
 
 /**
  * Persists the settings of every required step except the administrator against the test database, and records them as
@@ -81,6 +82,23 @@ function adminConnectionsRestored(): bool
     return config('database.connections.installer_migrate') === null
         && ! array_key_exists('installer_migrate', app('db')->getConnections())
         && config('database.default') === 'stale';
+}
+
+/**
+ * Runs the mail step the way the page does: the form, then the code typed back. Nothing reloads in between.
+ *
+ * @return TestResponse The answer to the code, the last request the page sends before showing the administrator step.
+ */
+function adminVerifyMail(object $test, string $recipient = 'Admin@Example.test'): TestResponse
+{
+    Mail::fake();
+
+    // Sending a code proves nothing yet: the page learns nothing about a suggestion.
+    $test->postJson('/install/mail', ['host' => 'smtp.example.test', 'port' => 587, 'scheme' => '', 'username' => '', 'password' => '', 'from_address' => 'hello@example.test', 'from_name' => 'My Shop', 'test_recipient' => $recipient])
+        ->assertOk()
+        ->assertJsonMissingPath('suggestions');
+
+    return $test->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code]);
 }
 
 describe('the administrator step', function (): void {
@@ -146,6 +164,37 @@ describe('the administrator step', function (): void {
 
         expect($administratorEmail())->toBe('jane@example.test');
     });
+
+    it('hands the verified address over in the answer to the code, so the page shows it without a reload', function (): void {
+        adminVerifyMail($this)->assertOk()
+            ->assertJsonPath('statuses.mail', 'done')
+            ->assertJsonPath('suggestions', ['administrator' => ['email' => 'admin@example.test']]);
+    });
+
+    it('says nothing about an address while the code is wrong', function (): void {
+        Mail::fake();
+        $this->postJson('/install/mail', ['host' => 'smtp.example.test', 'port' => 587, 'scheme' => '', 'username' => '', 'password' => '', 'from_address' => 'hello@example.test', 'from_name' => 'My Shop', 'test_recipient' => 'admin@example.test'])->assertOk();
+        $wrong = Mail::sent(SetupCodeMail::class)->last()->code === '000000' ? '111111' : '000000';
+
+        $this->postJson('/install/mail/verify', ['code' => $wrong])->assertUnprocessable()->assertJsonMissingPath('suggestions');
+    });
+
+    it('suggests nothing where an address is already configured', function (): void {
+        $this->postJson('/install/administrator', ['name' => 'Jane Doe', 'email' => 'jane@example.test'])->assertOk();
+
+        adminVerifyMail($this)->assertOk()->assertJsonPath('suggestions', []);
+    });
+
+    it('suggests nothing where the environment imposes the address, even an empty one', function (?string $imposed): void {
+        $this->processEnvironment = ['ADMIN_EMAIL' => $imposed ?? 'imposed@example.test'];
+        $this->app->forgetInstance(EnvironmentLocks::class);
+        $this->app->forgetInstance(InstallerSettings::class);
+
+        adminVerifyMail($this)->assertOk()->assertJsonPath('suggestions', []);
+    })->with([
+        'empty' => [''],
+        'filled' => [null],
+    ]);
 
     it('is described to the page like every step, and cannot be skipped', function (): void {
         preg_match('#id="installer-state">(.*?)</script>#s', $this->get('/install')->getContent(), $match);

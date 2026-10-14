@@ -150,7 +150,7 @@ final class InstallerSettings
      * The administrator is most likely the person who just proved their
      * address at the mail step: that address is suggested for the
      * administrator's (it stays editable, and a configured or imposed address
-     * wins).
+     * wins, an imposed empty one included).
      *
      * @param  array<string, mixed>  $values  Field name => value, as returned by {@see self::current()}.
      * @param  string|null  $verifiedAddress  The address that read a verification code back at the mail step, if any.
@@ -158,7 +158,13 @@ final class InstallerSettings
      */
     public function withSuggestions(InstallStep $step, array $values, ?string $verifiedAddress): array
     {
-        if ($step === InstallStep::Administrator && ($values['email'] ?? '') === '' && $verifiedAddress !== null && $verifiedAddress !== '') {
+        if ($step !== InstallStep::Administrator || ($values['email'] ?? '') !== '' || $verifiedAddress === null || $verifiedAddress === '') {
+            return $values;
+        }
+
+        $email = array_find($step->fields(), static fn (Field $field): bool => $field->name === 'email');
+
+        if ($email !== null && ! $this->isLocked($email)) {
             $values['email'] = EmailAddress::normalize($verifiedAddress);
         }
 

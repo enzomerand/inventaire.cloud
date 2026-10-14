@@ -82,6 +82,8 @@ final class InstallStepController extends Controller
 
     /**
      * Checks the code typed back and, if right, saves the mail settings.
+     * The answer then carries the suggestions the verified address allows
+     * (the administrator's), since the page is not reloaded.
      *
      * An expired or exhausted code answers with a `code` so the page returns to
      * the form, where a new code can be requested.
@@ -103,7 +105,7 @@ final class InstallStepController extends Controller
                 $store->forget($session);
                 $store->rememberVerified($session, $kept->recipient);
 
-                return new JsonResponse($this->wizard->progress() + ['mailPending' => false]);
+                return new JsonResponse($this->wizard->progress() + ['mailPending' => false, 'suggestions' => $this->wizard->suggestions($request)]);
 
             case MailCodeOutcome::Wrong:
                 $store->put($session, $kept);

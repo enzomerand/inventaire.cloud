@@ -289,6 +289,12 @@ describe('what the installers suggest', function (): void {
         expect($imposed->withSuggestions(InstallStep::Administrator, $imposed->current(InstallStep::Administrator), 'admin@example.test')['email'])->toBe('imposed@example.test');
     });
 
+    it('keeps an imposed address even when it is empty', function (): void {
+        $imposed = settingsFor($this, '', ['ADMIN_EMAIL' => '']);
+
+        expect($imposed->withSuggestions(InstallStep::Administrator, $imposed->current(InstallStep::Administrator), 'admin@example.test')['email'])->toBe('');
+    });
+
     it('suggests nothing for the other steps', function (): void {
         $settings = settingsFor($this);
         $values = $settings->current(InstallStep::Mail);
