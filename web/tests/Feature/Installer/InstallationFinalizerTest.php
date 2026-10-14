@@ -134,12 +134,12 @@ it('stays uninstalled when the migrations fail', function (): void {
  *
  * @return array<string, string>
  */
-function finalizeIn(object $test, string $environment, bool $debug = true): array
+function finalizeIn(object $test, string $environment, bool $debug = true, bool $productionDefaults = true): array
 {
     app()['env'] = $environment;
     config(['app.debug' => $debug]);
 
-    app(InstallationFinalizer::class)->finalize();
+    app(InstallationFinalizer::class)->finalize($productionDefaults);
 
     return (new EnvironmentFile($test->sandbox->envPath(), $test->sandbox->envPath()))->all();
 }
@@ -154,8 +154,22 @@ describe('leaving development defaults', function (): void {
         expect(finalizeIn($this, 'staging'))->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
     });
 
-    it('leaves a local instance alone', function (): void {
-        expect(finalizeIn($this, 'local'))->toMatchArray(['APP_ENV' => 'staging', 'APP_DEBUG' => 'true']);
+    it('switches a local instance too: the web wizard always leaves development mode', function (): void {
+        expect(finalizeIn($this, 'local'))->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
+    });
+
+    it('leaves the environment alone when asked to (the developer path)', function (): void {
+        expect(finalizeIn($this, 'local', productionDefaults: false))->toMatchArray(['APP_ENV' => 'staging', 'APP_DEBUG' => 'true']);
+    });
+
+    it('says whether the instance still has development settings', function (): void {
+        app()['env'] = 'local';
+        config(['app.debug' => true]);
+        expect(app(InstallationFinalizer::class)->needsProductionDefaults())->toBeTrue();
+
+        app()['env'] = 'production';
+        config(['app.debug' => false]);
+        expect(app(InstallationFinalizer::class)->needsProductionDefaults())->toBeFalse();
     });
 
     it('only turns debug off when already in production', function (): void {

@@ -29,7 +29,9 @@ final class InstallerSettings
      */
     public function isLocked(Field $field): bool
     {
-        return ($field->envKey !== null && $this->locks->isLocked($field->envKey)) || $this->isProvidedByUrl($field);
+        $key = $field->envKey ?? $field->lockKey;
+
+        return ($key !== null && $this->locks->isLocked($key)) || $this->isProvidedByUrl($field);
     }
 
     /**
@@ -155,7 +157,9 @@ final class InstallerSettings
      *
      * Imposed values replace whatever was submitted, a missing field keeps its
      * configured value, and an empty secret keeps the stored secret (secrets
-     * are never sent to browsers, so an empty box means "unchanged").
+     * are never sent to browsers, so an empty box means "unchanged"). To store
+     * an empty secret on purpose, the secret's "no password" checkbox is ticked:
+     * it wins over whatever is typed in the box.
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed> One entry per field of the step.
@@ -164,9 +168,23 @@ final class InstallerSettings
     {
         $current = $this->current($step);
         $resolved = [];
+        $cleared = [];
+
+        foreach ($step->fields() as $field) {
+            if ($field->clears !== null) {
+                $cleared[$field->clears] = ! $this->isLocked($field) && filter_var($input[$field->name] ?? false, FILTER_VALIDATE_BOOLEAN);
+            }
+        }
 
         foreach ($step->fields() as $field) {
             $name = $field->name;
+
+            if ($field->secret && ($cleared[$name] ?? false)) {
+                $resolved[$name] = '';
+
+                continue;
+            }
+
             $keep = $this->isLocked($field)
                 || ! array_key_exists($name, $input)
                 || ($field->secret && ($input[$name] === null || $input[$name] === ''));

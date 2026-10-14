@@ -92,6 +92,20 @@ describe('completing a submitted form', function (): void {
         expect($settings->resolve(InstallStep::Database, ['password' => $submitted])['password'])->toBe('hunter2');
     })->with(['null' => null, 'empty string' => '']);
 
+    it('stores an empty secret when the "no password" box is ticked, whatever is typed', function (?string $typed): void {
+        $settings = settingsFor($this, "DB_PASSWORD=hunter2\n");
+
+        $resolved = $settings->resolve(InstallStep::Database, ['password' => $typed, 'password_clear' => true]);
+
+        expect($resolved['password'])->toBe('')->and($resolved['password_clear'])->toBeTrue();
+    })->with(['nothing typed' => null, 'something typed' => 'typed']);
+
+    it('does not clear a secret that the environment imposes', function (): void {
+        $settings = settingsFor($this, '', ['DB_PASSWORD' => 'from-docker']);
+
+        expect($settings->resolve(InstallStep::Database, ['password' => '', 'password_clear' => true])['password'])->toBe('from-docker');
+    });
+
     it('takes a new secret', function (): void {
         $settings = settingsFor($this, "DB_PASSWORD=hunter2\n");
 
@@ -180,6 +194,19 @@ describe('storing the values of a step', function (): void {
             ->toContain('APP_LOCALE=en')->toContain('APP_TIMEZONE=Europe/Paris')
             // The example's development defaults must not leak into a file the installer creates.
             ->toContain('APP_ENV=production')->toContain('APP_DEBUG=false');
+    });
+
+    it('does not pre-fill the wizard with the development credentials of the example', function (): void {
+        $settings = settingsFor($this);
+        $settings->persist(InstallStep::Application, ['url' => 'https://inventory.example.com', 'locale' => 'en', 'timezone' => 'UTC']);
+
+        $database = $settings->current(InstallStep::Database);
+        $mail = $settings->current(InstallStep::Mail);
+        $fields = collect(InstallStep::Database->fields())->keyBy('name');
+
+        expect($database)->toMatchArray(['username' => '', 'password' => '', 'port' => '5432'])
+            ->and($settings->hasValue($fields['password']))->toBeFalse()
+            ->and($mail)->toMatchArray(['host' => '', 'username' => '', 'password' => '', 'from_address' => '']);
     });
 
     it('leaves the environment of an existing .env alone', function (): void {

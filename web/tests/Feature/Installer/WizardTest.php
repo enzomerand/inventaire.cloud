@@ -533,3 +533,31 @@ describe('finishing', function (): void {
         $this->postJson('/install/finalize')->assertOk();
     });
 });
+
+describe('the "no password" box', function (): void {
+    it('is offered next to optional secrets only', function (): void {
+        authorizedWizard($this);
+
+        preg_match('#id="installer-state">(.*?)</script>#s', $this->get('/install')->getContent(), $match);
+        $steps = collect(json_decode($match[1], true)['steps'])->keyBy('id');
+
+        expect(collect($steps['database']['fields'])->pluck('name')->all())->toContain('password_clear')
+            ->and(collect($steps['mail']['fields'])->pluck('name')->all())->toContain('password_clear')
+            ->and(collect($steps['documenso']['fields'])->pluck('name')->all())->not->toContain('api_key_clear')
+            ->and(collect($steps['storage']['fields'])->pluck('name')->all())->not->toContain('secret_clear');
+    });
+
+    it('stores an empty password on purpose, which an empty box never does', function (): void {
+        authorizedWizard($this);
+        app(EnvironmentFile::class)->set(['MAIL_PASSWORD' => 'old-secret']);
+        Mail::fake();
+
+        $this->postJson('/install/mail', mailForm(['password' => '']))->assertOk();
+        $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+        expect(sandboxEnv($this)['MAIL_PASSWORD'])->toBe('old-secret');
+
+        $this->postJson('/install/mail', mailForm(['password' => '', 'password_clear' => true]))->assertOk();
+        $this->postJson('/install/mail/verify', ['code' => Mail::sent(SetupCodeMail::class)->last()->code])->assertOk();
+        expect(sandboxEnv($this)['MAIL_PASSWORD'])->toBe('');
+    });
+});

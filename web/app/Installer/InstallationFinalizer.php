@@ -44,21 +44,22 @@ final class InstallationFinalizer
     ) {}
 
     /**
-     * Runs the migrations, hardens the environment and marks the instance installed.
+     * Runs the migrations, optionally switches to production mode and marks the instance installed.
      *
      * The migrations run on a connection built from the stored settings rather
      * than on the application's default one: in a web request the default
      * connection was configured before the wizard wrote the database settings.
      *
+     * @param  bool  $productionDefaults  Whether to set APP_ENV=production and APP_DEBUG=false. The web wizard always does; the console installer asks, and `--from-env` (the developer path) does not.
      * @return string Where to send the administrator next (the home page).
      *
      * @throws InstallationException When a step is missing or something fails; the instance stays uninstalled.
      */
-    public function finalize(): string
+    public function finalize(bool $productionDefaults = true): string
     {
         // One finalization at a time: a second request (a double click, a script) must not migrate in parallel.
         try {
-            return FileLock::exclusively($this->state->path(self::LOCK), fn (): string => $this->run(), 0);
+            return FileLock::exclusively($this->state->path(self::LOCK), fn (): string => $this->run($productionDefaults), 0);
         } catch (LockBusyException) {
             throw new InstallationException('The installation is already running.');
         }
@@ -72,7 +73,7 @@ final class InstallationFinalizer
      *
      * @throws InstallationException
      */
-    private function run(): string
+    private function run(bool $productionDefaults): string
     {
         if ($this->state->isInstalled()) {
             throw new InstallationException('The instance is already installed.');
@@ -90,7 +91,10 @@ final class InstallationFinalizer
         @set_time_limit(300);
 
         $this->migrate();
-        $this->leaveDevelopmentDefaults();
+        if ($productionDefaults) {
+            $this->applyProductionDefaults();
+        }
+
         $this->artisan->call('config:clear');
 
         $this->state->markInstalled();
@@ -138,20 +142,48 @@ final class InstallationFinalizer
     }
 
     /**
-     * Switches a production instance out of debug mode.
+     * Whether the instance still runs with development settings that
+     * {@see self::applyProductionDefaults()} would change.
+     */
+    public function needsProductionDefaults(): bool
+    {
+        return $this->productionUpdates() !== [];
+    }
+
+    /**
+     * Switches the instance to production mode: APP_ENV=production and
+     * APP_DEBUG=false.
      *
-     * A development instance (`local`) keeps its settings, and nothing is
-     * written when the instance already runs in production or when the
-     * environment imposes the value.
+     * Debug mode shows stack traces, configuration and credentials to anybody
+     * who triggers an error, so an instance that has just been installed must
+     * not keep it. Values imposed by the environment are left alone (the
+     * installer cannot change them), and nothing is written when the instance
+     * already runs in production without debug.
      *
      * @throws InstallationException When .env cannot be written.
      */
-    private function leaveDevelopmentDefaults(): void
+    private function applyProductionDefaults(): void
     {
-        if ($this->app->environment('local')) {
+        $updates = $this->productionUpdates();
+
+        if ($updates === []) {
             return;
         }
 
+        if (! $this->environment->isWritable()) {
+            throw new InstallationException('The .env file is not writable.');
+        }
+
+        $this->environment->set($updates, EnvironmentFile::NEW_FILE_DEFAULTS);
+    }
+
+    /**
+     * The .env assignments needed to reach production defaults.
+     *
+     * @return array<string, string>
+     */
+    private function productionUpdates(): array
+    {
         $updates = [];
 
         if (! $this->app->environment('production') && ! $this->locks->isLocked('APP_ENV')) {
@@ -162,15 +194,7 @@ final class InstallationFinalizer
             $updates['APP_DEBUG'] = 'false';
         }
 
-        if ($updates === []) {
-            return;
-        }
-
-        if (! $this->environment->isWritable()) {
-            throw new InstallationException('The .env file is not writable.');
-        }
-
-        $this->environment->set($updates);
+        return $updates;
     }
 
     /**

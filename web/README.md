@@ -99,19 +99,19 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
-7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` unless it runs with `APP_ENV=local`, clears the configuration cache, writes the "installed" marker and deletes the token.
+7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token.
 
 Creating the first administrator account is not part of the installer yet (it comes with the accounts lot).
 
 ### Values provided by the environment
 
-With Docker, configuration usually arrives as real environment variables, which Laravel prefers over `.env`. The installer records the environment the process started with, at the very top of `bootstrap/app.php` (before `.env` is read): every variable in it is **imposed**, even when `.env` holds the same value. The wizard shows imposed values read-only with a "set by the environment" badge, probes them as is, and never writes them. Secrets are never sent back to the browser (an empty box means "unchanged"), and a `.env` that cannot be written is reported with a clear message instead of being silently ignored.
+With Docker, configuration usually arrives as real environment variables, which Laravel prefers over `.env`. The installer records the environment the process started with, at the very top of `bootstrap/app.php` (before `.env` is read): every variable in it is **imposed**, even when `.env` holds the same value. The wizard shows imposed values read-only with a "set by the environment" badge, probes them as is, and never writes them. Secrets are never sent back to the browser (an empty box means "unchanged"; to store an empty password on purpose, tick "No password" next to it), and a `.env` that cannot be written is reported with a clear message instead of being silently ignored.
 
 `DB_URL` and `MAIL_URL` are honoured: when one is set (environment or `.env`), the corresponding step treats the connection as provided. Its fields are read-only and masked (a URL usually contains a password), and the checks and the migrations use exactly the configuration the application will use, URL included.
 
 When every setting the installation needs is provided by the environment, nothing has to be written: the wizard does not require `.env` or `bootstrap/cache/` to be writable, which suits read-only containers.
 
-When `.env` does not exist, the installer creates it from `.env.example`. A file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production` and `APP_DEBUG=false` instead of the example's development values; if you copy `.env.example` yourself on a server, set these two values yourself, because the installation only leaves `local` untouched. For development, run `composer setup`, which copies the example first.
+When `.env` does not exist, the installer creates it from `.env.example`, minus the development defaults: a file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production`, `APP_DEBUG=false`, no database or SMTP credentials, no SMTP host and no sender address, instead of the example's local services. If you copy `.env.example` yourself on a server, set these values yourself. For development, run `composer setup`, which copies the example first and leaves the environment alone.
 
 ### From the terminal
 
@@ -127,7 +127,8 @@ php artisan inventaire:install --from-env      # validate the current configurat
 
 - In interactive mode every value is prompted and the mail step is proven with a code, like in the web wizard.
 - In non-interactive mode (`--no-interaction`) the values come from the options (one per wizard field: `php artisan inventaire:install --help`), completed by what `.env` and the environment already provide; the first failing check stops the command with a non-zero exit code. The SMTP server is checked with an authenticated SMTP session, since nobody can read a code. `--skip-mail-test` skips that check (with a warning) and is refused when prompts are possible. Options end up in the shell history and the process list: for passwords, prefer `.env` or the environment.
-- `--from-env` asks nothing and writes nothing to `.env` (it does not even need it to be writable): it validates the current configuration with the same live checks, then runs the migrations and finalizes. It is what `composer setup` runs, and what a container entrypoint can run.
+- Switching to production mode is asked interactively (default yes, except on a `local` instance) and done by default in non-interactive mode; `--keep-environment` leaves `APP_ENV` and `APP_DEBUG` alone. `--db-no-password` and `--mail-no-password` store an empty password on purpose.
+- `--from-env` asks nothing, never touches `APP_ENV` or `APP_DEBUG` (the developer path) and writes nothing to `.env` (it does not even need it to be writable): it validates the current configuration with the same live checks, then runs the migrations and finalizes. It is what `composer setup` runs, and what a container entrypoint can run.
 
 ### Troubleshooting
 

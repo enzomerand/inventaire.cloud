@@ -23,6 +23,8 @@ final readonly class Field
      * @param  list<array{value: string, label: string}>  $options  Choices of a select.
      * @param  array{field: string, value: string}|null  $showWhen  Display condition: another field must hold this value.
      * @param  string|null  $urlKey  Variable holding a connection URL (DB_URL, MAIL_URL) that replaces this field when set.
+     * @param  string|null  $clears  For a checkbox that empties a secret: the name of that secret. An empty box means "unchanged", so this is the explicit way to store an empty value.
+     * @param  string|null  $lockKey  The variable whose environment lock this field follows, when it has no variable of its own.
      */
     public function __construct(
         public string $name,
@@ -37,5 +39,7 @@ final readonly class Field
         public array $options = [],
         public ?array $showWhen = null,
         public ?string $urlKey = null,
+        public ?string $clears = null,
+        public ?string $lockKey = null,
     ) {}
 }

@@ -149,7 +149,9 @@ it('applies the creation defaults only when it creates the file', function (): v
     $file = environmentFile($this, null, "APP_ENV=local\nAPP_DEBUG=true\n");
 
     $file->set(['APP_KEY' => 'k'], EnvironmentFile::NEW_FILE_DEFAULTS);
-    expect(file_get_contents($file->path()))->toBe("APP_ENV=production\nAPP_DEBUG=false\n\nAPP_KEY=k\n");
+    expect(file_get_contents($file->path()))->toStartWith("APP_ENV=production\nAPP_DEBUG=false\n\nAPP_KEY=k\n")
+        // The development credentials and services of the example are cleared too, not pre-filled in the wizard.
+        ->toContain("DB_USERNAME=\n")->toContain("DB_PASSWORD=\n")->toContain("MAIL_HOST=\n")->toContain("MAIL_FROM_ADDRESS=\n");
 
     file_put_contents($file->path(), "APP_ENV=local\n");
     $file->set(['APP_KEY' => 'k'], EnvironmentFile::NEW_FILE_DEFAULTS);

@@ -55,9 +55,9 @@ final class ConsoleInstaller
      * @var array<string, array<string, string>>
      */
     public const OPTIONS = [
-        'database' => ['driver' => 'db-driver', 'host' => 'db-host', 'port' => 'db-port', 'database' => 'db-name', 'username' => 'db-user', 'password' => 'db-password'],
+        'database' => ['driver' => 'db-driver', 'host' => 'db-host', 'port' => 'db-port', 'database' => 'db-name', 'username' => 'db-user', 'password' => 'db-password', 'password_clear' => 'db-no-password'],
         'application' => ['url' => 'app-url', 'locale' => 'locale', 'timezone' => 'timezone'],
-        'mail' => ['host' => 'mail-host', 'port' => 'mail-port', 'scheme' => 'mail-scheme', 'username' => 'mail-user', 'password' => 'mail-password', 'from_address' => 'mail-from-address', 'from_name' => 'mail-from-name', 'test_recipient' => 'mail-test-recipient'],
+        'mail' => ['host' => 'mail-host', 'port' => 'mail-port', 'scheme' => 'mail-scheme', 'username' => 'mail-user', 'password' => 'mail-password', 'password_clear' => 'mail-no-password', 'from_address' => 'mail-from-address', 'from_name' => 'mail-from-name', 'test_recipient' => 'mail-test-recipient'],
         'storage' => ['disk' => 'storage', 'key' => 's3-key', 'secret' => 's3-secret', 'region' => 's3-region', 'bucket' => 's3-bucket', 'endpoint' => 's3-endpoint', 'path_style' => 's3-path-style'],
         'documenso' => ['url' => 'documenso-url', 'api_key' => 'documenso-api-key'],
     ];
@@ -422,6 +422,11 @@ final class ConsoleInstaller
                 continue;
             }
 
+            // "No password" only matters when a password is already stored.
+            if ($field->clears !== null && ! $this->hasStoredSecret($step, $field->clears)) {
+                continue;
+            }
+
             if ($this->settings->isLocked($field)) {
                 $this->components->twoColumnDetail($field->label, $field->secret || $this->settings->isProvidedByUrl($field) ? '••••••••' : (string) $defaults[$field->name]);
                 $this->command->line('    <fg=gray>'.__('Set by the environment.').'</>');
@@ -433,6 +438,20 @@ final class ConsoleInstaller
         }
 
         return $values;
+    }
+
+    /**
+     * Whether the secret field of a step already has a value.
+     */
+    private function hasStoredSecret(InstallStep $step, string $name): bool
+    {
+        foreach ($step->fields() as $field) {
+            if ($field->name === $name) {
+                return $this->settings->hasValue($field);
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -489,12 +508,37 @@ final class ConsoleInstaller
     }
 
     /**
+     * Whether to switch the instance to production mode (APP_ENV=production, APP_DEBUG=false).
+     *
+     * `--from-env` is the developer path and never touches them. Interactively
+     * the person is asked (defaulting to yes, except on a local instance);
+     * otherwise it happens unless `--keep-environment` says not to. Nothing is
+     * asked when the instance already runs in production.
+     */
+    private function wantsProductionDefaults(): bool
+    {
+        if ($this->fromEnv || ! $this->finalizer->needsProductionDefaults()) {
+            return false;
+        }
+
+        if ($this->interactive) {
+            return confirm(
+                label: __('Switch this instance to production mode (APP_ENV=production, APP_DEBUG=false)?'),
+                default: ! app()->environment('local'),
+                hint: __('Debug mode shows stack traces and settings to anybody who triggers an error: keep it for development only.'),
+            );
+        }
+
+        return ! $this->command->option('keep-environment');
+    }
+
+    /**
      * Creates the tables and switches the instance on.
      */
     private function finalize(): int
     {
         $this->command->newLine();
-        $this->finalizer->finalize();
+        $this->finalizer->finalize($this->wantsProductionDefaults());
 
         $url = $this->settings->current(InstallStep::Application)['url'];
 

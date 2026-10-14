@@ -18,12 +18,14 @@ final class InstallCommand extends Command
     protected $signature = 'inventaire:install
         {--from-env : Validate the current configuration (.env and environment) with the live checks and finalize, without asking or writing anything}
         {--skip-mail-test : Do not test the mail settings (non-interactive mode only)}
+        {--keep-environment : Leave APP_ENV and APP_DEBUG as they are instead of switching to production (non-interactive mode)}
         {--db-driver= : Database engine: pgsql, mysql or mariadb}
         {--db-host= : Database host}
         {--db-port= : Database port}
         {--db-name= : Database name}
         {--db-user= : Database user}
         {--db-password= : Database password (visible in the process list: prefer .env or the environment)}
+        {--db-no-password : Store an empty database password}
         {--app-url= : Public URL of the instance}
         {--locale= : Default language (fr or en)}
         {--timezone= : Timezone, e.g. Europe/Paris}
@@ -32,6 +34,7 @@ final class InstallCommand extends Command
         {--mail-scheme= : smtp (STARTTLS when offered) or smtps (implicit TLS)}
         {--mail-user= : SMTP user}
         {--mail-password= : SMTP password (visible in the process list: prefer .env or the environment)}
+        {--mail-no-password : Store an empty SMTP password}
         {--mail-from-address= : Sender address}
         {--mail-from-name= : Sender name}
         {--mail-test-recipient= : Address receiving the verification code (interactive mode)}

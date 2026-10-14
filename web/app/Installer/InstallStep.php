@@ -96,6 +96,27 @@ enum InstallStep: string
      */
     public function fields(): array
     {
+        $fields = [];
+
+        foreach ($this->definedFields() as $field) {
+            $fields[] = $field;
+
+            // An empty secret box means "unchanged": an optional secret gets a checkbox to store an empty value on purpose.
+            if ($field->secret && ! $field->required) {
+                $fields[] = new Field($field->name.'_clear', null, __('No password'), 'checkbox', required: false, default: 'false', urlKey: $field->urlKey, clears: $field->name, lockKey: $field->envKey);
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * The inputs as declared, before the companions of optional secrets are added.
+     *
+     * @return list<Field>
+     */
+    private function definedFields(): array
+    {
         return match ($this) {
             self::Database => [
                 new Field('driver', 'DB_CONNECTION', __('Database engine'), 'select', default: 'pgsql', options: [
@@ -153,6 +174,22 @@ enum InstallStep: string
      * @return array<string, list<mixed>>
      */
     public function rules(): array
+    {
+        $rules = $this->definedRules();
+
+        foreach ($this->fields() as $field) {
+            if ($field->clears !== null) {
+                $rules[$field->name] = ['nullable', 'boolean'];
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
+     * @return array<string, list<mixed>>
+     */
+    private function definedRules(): array
     {
         return match ($this) {
             self::Database => [

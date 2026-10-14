@@ -24,10 +24,23 @@ final class EnvironmentFile
 {
     /**
      * Settings given to a .env that the installer creates: .env.example holds
-     * development defaults (local environment, debug on), which must not
-     * leak into a server. An existing file is never touched this way.
+     * development defaults (local environment, debug on, the credentials and
+     * ports of the docker services of compose.dev.yaml, the product's own
+     * sender address), which must not leak into a server or be pre-filled in
+     * the wizard. An existing file is never touched this way.
      */
-    public const NEW_FILE_DEFAULTS = ['APP_ENV' => 'production', 'APP_DEBUG' => 'false'];
+    public const NEW_FILE_DEFAULTS = [
+        'APP_ENV' => 'production',
+        'APP_DEBUG' => 'false',
+        'DB_PORT' => '5432',
+        'DB_USERNAME' => '',
+        'DB_PASSWORD' => '',
+        'MAIL_HOST' => '',
+        'MAIL_PORT' => '587',
+        'MAIL_USERNAME' => 'null',
+        'MAIL_PASSWORD' => 'null',
+        'MAIL_FROM_ADDRESS' => '',
+    ];
 
     /**
      * @param  string  $path  The file to maintain (usually base_path('.env')).

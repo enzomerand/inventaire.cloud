@@ -83,6 +83,36 @@ describe('non-interactive installation', function (): void {
         expect(file_get_contents($this->sandbox->envPath()))->not->toContain('--mail-test-recipient');
     });
 
+    it('switches to production mode by default, like the web wizard', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        app()['env'] = 'local';
+        config(['app.debug' => true]);
+
+        $this->artisan('inventaire:install', installOptions(['--skip-mail-test' => true]))->assertSuccessful();
+
+        expect(consoleEnv($this))->toMatchArray(['APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
+    });
+
+    it('keeps APP_ENV and APP_DEBUG with --keep-environment', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        app(EnvironmentFile::class)->set(['APP_ENV' => 'local', 'APP_DEBUG' => 'true']);
+        app()['env'] = 'local';
+        config(['app.debug' => true]);
+
+        $this->artisan('inventaire:install', installOptions(['--skip-mail-test' => true, '--keep-environment' => true]))->assertSuccessful();
+
+        expect(consoleEnv($this))->toMatchArray(['APP_ENV' => 'local', 'APP_DEBUG' => 'true']);
+    });
+
+    it('stores an empty SMTP password on purpose with --mail-no-password', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        app(EnvironmentFile::class)->set(['MAIL_PASSWORD' => 'old-secret']);
+
+        $this->artisan('inventaire:install', installOptions(['--skip-mail-test' => true, '--mail-no-password' => true]))->assertSuccessful();
+
+        expect(consoleEnv($this)['MAIL_PASSWORD'])->toBe('');
+    });
+
     it('checks the SMTP server instead of a code when mail is not skipped', function (): void {
         Mail::fake();
         Artisan::call('db:wipe', ['--force' => true]);
@@ -170,7 +200,9 @@ describe('--from-env', function (): void {
         Artisan::call('db:wipe', ['--force' => true]);
         app()['env'] = 'local';
         $before = file_get_contents($this->sandbox->envPath());
+        config(['app.debug' => true]);
 
+        // The developer path: neither APP_ENV nor APP_DEBUG is touched, and nothing is asked.
         $this->artisan('inventaire:install', ['--from-env' => true])->assertSuccessful();
 
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()
@@ -255,11 +287,12 @@ describe('interactive installation', function (): void {
             ->expectsQuestion('Verification code', '246810')
             ->expectsChoice('Storage', 'local', ['local' => 'This server (local disk)', 's3' => 'S3-compatible storage'])
             ->expectsConfirmation('Configure the electronic signature (Documenso) now?', 'no')
+            ->expectsConfirmation('Switch this instance to production mode (APP_ENV=production, APP_DEBUG=false)?', 'yes')
             ->expectsOutputToContain('Installation complete')
             ->assertSuccessful();
 
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()
-            ->and(consoleEnv($this))->toMatchArray(['MAIL_HOST' => 'smtp.example.test', 'APP_LOCALE' => 'en', 'FILESYSTEM_DISK' => 'local']);
+            ->and(consoleEnv($this))->toMatchArray(['MAIL_HOST' => 'smtp.example.test', 'APP_LOCALE' => 'en', 'FILESYSTEM_DISK' => 'local', 'APP_ENV' => 'production', 'APP_DEBUG' => 'false']);
     });
 
     it('lets the person correct a step whose test failed', function (): void {
