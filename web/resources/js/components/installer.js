@@ -398,6 +398,11 @@ export default function installer() {
                     this.markSecretsSet(step);
                     this.advance(step);
                 }
+
+                // Non-blocking remarks arrive as codes and are translated here, never taken from the response.
+                for (const code of response.warnings ?? []) {
+                    notify('warning', t('install.warning.' + code));
+                }
             } catch (error) {
                 this.fail(step, error);
             } finally {

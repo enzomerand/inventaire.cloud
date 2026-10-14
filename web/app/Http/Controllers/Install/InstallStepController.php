@@ -146,9 +146,12 @@ final class InstallStepController extends Controller
      */
     private function saved(callable $save): JsonResponse
     {
-        $this->failUnless($this->saving($save));
+        $result = $this->saving($save);
 
-        return new JsonResponse($this->wizard->progress());
+        $this->failUnless($result);
+
+        // Warnings go as codes: the page translates them, it never shows text taken from a response.
+        return new JsonResponse($this->wizard->progress() + ($result->warnings === [] ? [] : ['warnings' => array_keys($result->warnings)]));
     }
 
     /**

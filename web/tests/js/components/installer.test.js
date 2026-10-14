@@ -150,6 +150,10 @@ describe('installer wizard', () => {
             expect(wizard.fieldClass(host)).toBe('is-invalid');
         });
 
+        it('masks a value that comes from a connection URL', () => {
+            expect(wizard.placeholder(field('host', { masked: true, locked: true }))).toBe('••••••••');
+        });
+
         it('masks a secret that is already set', () => {
             const [, , , password] = wizard.steps[1].fields;
 
@@ -251,6 +255,14 @@ describe('installer wizard', () => {
             expect(database.status).toBe('done');
             expect(wizard.current).toBe('mail');
             expect(wizard.busy).toBe(false);
+        });
+
+        it('tells about non-blocking warnings by code, never with text taken from the response', async () => {
+            http.post.mockResolvedValue({ ...progress({ database: 'done' }), warnings: ['documenso_insecure_url'] });
+
+            await wizard.submit(wizard.steps[1]);
+
+            expect(notify).toHaveBeenCalledWith('warning', 'install.warning.documenso_insecure_url');
         });
 
         it('empties a secret that was just saved and remembers it is set', async () => {

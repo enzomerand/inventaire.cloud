@@ -6,6 +6,7 @@ use App\Http\Middleware\RedirectIfNotInstalled;
 use App\Http\Middleware\SetLocale;
 use App\Installer\ProcessEnvironment;
 use App\Services\LocaleResolver;
+use App\Services\TrustedProxies;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -13,7 +14,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 // Before anything reads .env: the installer must know which variables the process really started with.
 ProcessEnvironment::capture();
 
-return Application::configure(basePath: dirname(__DIR__))
+$app = Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
@@ -28,3 +29,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
+
+// Read once the configuration (and so .env) is loaded: the middleware callback above runs earlier.
+$app->booted(fn () => TrustedProxies::apply($app->make('config')->get('app.trusted_proxies')));
+
+return $app;

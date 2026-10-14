@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Installer\Probes\DatabaseProbe;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -85,4 +86,67 @@ it('rejects the MySQL driver for a MariaDB server and the other way round', func
 
 it('refuses an unsupported engine', function (): void {
     expect(app(DatabaseProbe::class)->check(testDatabaseSettings(['driver' => 'sqlsrv']))->field)->toBe('driver');
+});
+
+describe('what the database already holds', function (): void {
+    // These tests change the test database outside a transaction: leave it fully migrated, as the rest of the suite expects.
+    // (migrate:fresh only wipes a database that has a migrations table, which these tests sometimes remove.)
+    afterEach(function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        Artisan::call('migrate', ['--force' => true]);
+    });
+
+    it('accepts an empty database', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+
+        expect(app(DatabaseProbe::class)->check(testDatabaseSettings())->ok)->toBeTrue();
+    });
+
+    it('accepts a database an earlier run of the installer already migrated, so an installation can be resumed', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        Artisan::call('migrate', ['--force' => true]);
+
+        expect(app(DatabaseProbe::class)->check(testDatabaseSettings())->ok)->toBeTrue();
+    });
+
+    it('refuses a database with our table names but no migrations table', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        Schema::create('users', static function ($table): void {
+            $table->id();
+        });
+
+        $result = app(DatabaseProbe::class)->check(testDatabaseSettings());
+
+        expect($result->ok)->toBeFalse()->and($result->field)->toBe('database')->and($result->message)->toContain('migrations table');
+    });
+
+    it('refuses a migrations table that holds the migrations of another application', function (): void {
+        Artisan::call('migrate:fresh', ['--force' => true]);
+        DB::table('migrations')->insert(['migration' => '2020_01_01_000000_create_orders_table', 'batch' => 99]);
+
+        $result = app(DatabaseProbe::class)->check(testDatabaseSettings());
+
+        expect($result->ok)->toBeFalse()->and($result->field)->toBe('database')->and($result->message)->toContain('migrations of another application');
+    });
+
+    it('removes a probe table left behind by an earlier crash and does not count it as foreign', function (): void {
+        Artisan::call('migrate:fresh', ['--force' => true]);
+        Schema::create('installer_probe_check', static function ($table): void {
+            $table->id();
+        });
+
+        $result = app(DatabaseProbe::class)->check(testDatabaseSettings());
+
+        expect($result->ok)->toBeTrue()->and(Schema::hasTable('installer_probe_check'))->toBeFalse();
+    });
+
+    it('opens its connection with a timeout so that an unreachable host answers within seconds', function (): void {
+        $config = app(DatabaseProbe::class)->configurationFor(testDatabaseSettings());
+
+        expect($config['options'][PDO::ATTR_TIMEOUT])->toBe(5);
+    });
+
+    it('has no configuration for an engine it does not support', function (): void {
+        expect(app(DatabaseProbe::class)->configurationFor(testDatabaseSettings(['driver' => 'sqlsrv'])))->toBeNull();
+    });
 });

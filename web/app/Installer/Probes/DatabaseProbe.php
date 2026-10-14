@@ -9,6 +9,7 @@ use App\Installer\Settings\DatabaseSettings;
 use Illuminate\Config\Repository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\ConfigurationUrlParser;
 use Illuminate\Support\Str;
@@ -27,9 +28,16 @@ final class DatabaseProbe
     /** Name of the throw-away connection. */
     private const CONNECTION = 'installer_probe';
 
+    /** Table created, then dropped, to prove the user may do so. A fixed name, so a leftover is recognised and removed. */
+    private const PROBE_TABLE = 'installer_probe_check';
+
+    /** Seconds to establish the connection. */
+    private const CONNECT_TIMEOUT = 5;
+
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Repository $config,
+        private readonly Migrator $migrator,
     ) {}
 
     /**
@@ -42,17 +50,10 @@ final class DatabaseProbe
      */
     public function check(DatabaseSettings $settings): ProbeResult
     {
-        $base = $this->config->get('database.connections.'.$settings->driver);
+        $config = $this->configurationFor($settings);
+        $driver = is_array($config) && is_string($config['driver'] ?? null) ? $config['driver'] : null;
 
-        if (! in_array($settings->driver, DatabaseSettings::DRIVERS, true) || ! is_array($base)) {
-            return ProbeResult::failure(__('This database engine is not supported.'), 'driver');
-        }
-
-        // Exactly what the application will open: with a DB_URL, Laravel parses it over the connection's own settings.
-        $config = (new ConfigurationUrlParser)->parseConfiguration($settings->connectionConfig($base));
-        $driver = is_string($config['driver'] ?? null) ? $config['driver'] : $settings->driver;
-
-        if (! in_array($driver, DatabaseSettings::DRIVERS, true)) {
+        if ($config === null || ! in_array($driver, DatabaseSettings::DRIVERS, true)) {
             return ProbeResult::failure(__('This database engine is not supported.'), 'driver');
         }
 
@@ -86,6 +87,30 @@ final class DatabaseProbe
     }
 
     /**
+     * The connection configuration to test, or null for an engine that is not supported.
+     *
+     * It is exactly what the application will open: the engine's own entry of
+     * config/database.php, with the form's fields or, when one is provided, the
+     * connection URL parsed the way Laravel parses it. A connect timeout is
+     * added so an unreachable host answers within seconds.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function configurationFor(DatabaseSettings $settings): ?array
+    {
+        $base = $this->config->get('database.connections.'.$settings->driver);
+
+        if (! in_array($settings->driver, DatabaseSettings::DRIVERS, true) || ! is_array($base)) {
+            return null;
+        }
+
+        $config = (new ConfigurationUrlParser)->parseConfiguration($settings->connectionConfig($base));
+        $config['options'] = array_replace(is_array($config['options'] ?? null) ? $config['options'] : [], [PDO::ATTR_TIMEOUT => self::CONNECT_TIMEOUT]);
+
+        return $config;
+    }
+
+    /**
      * @param  array<string, mixed>  $config  The connection configuration, URL already parsed.
      */
     private function inspect(Connection $connection, string $driver, array $config): ProbeResult
@@ -110,15 +135,14 @@ final class DatabaseProbe
             ]), 'host');
         }
 
-        $foreign = array_values(array_filter(
+        // A leftover of an earlier probe is ours and is about to be dropped: it does not count.
+        $tables = array_values(array_filter(
             $this->tableNames($connection, $driver, $config),
-            static fn (string $table): bool => ! ApplicationTables::owns($table),
+            static fn (string $table): bool => $table !== self::PROBE_TABLE,
         ));
 
-        if ($foreign !== []) {
-            return ProbeResult::failure(__('This database already contains tables that do not belong to inventaire.cloud (:tables). Use an empty database.', [
-                'tables' => implode(', ', array_slice($foreign, 0, 5)).(count($foreign) > 5 ? ', …' : ''),
-            ]), 'database');
+        if (($failure = $this->checkExistingTables($connection, $tables)) !== null) {
+            return $failure;
         }
 
         if (($failure = $this->checkPrivileges($connection)) !== null) {
@@ -151,17 +175,53 @@ final class DatabaseProbe
     }
 
     /**
+     * Accepts an empty database, or one an earlier run of this installer already
+     * started: it has a `migrations` table whose entries are all migrations of
+     * this application. Anything else is somebody else's data.
+     *
+     * @param  list<string>  $tables
+     */
+    private function checkExistingTables(Connection $connection, array $tables): ?ProbeResult
+    {
+        if ($tables === []) {
+            return null;
+        }
+
+        $foreign = array_values(array_filter($tables, static fn (string $table): bool => ! ApplicationTables::owns($table)));
+
+        if ($foreign !== []) {
+            return ProbeResult::failure(__('This database already contains tables that do not belong to inventaire.cloud (:tables). Use an empty database.', [
+                'tables' => implode(', ', array_slice($foreign, 0, 5)).(count($foreign) > 5 ? ', …' : ''),
+            ]), 'database');
+        }
+
+        if (! in_array('migrations', $tables, true)) {
+            return ProbeResult::failure(__('This database is not empty and was not created by inventaire.cloud (it has no migrations table). Use an empty database.'), 'database');
+        }
+
+        $recorded = $connection->table('migrations')->pluck('migration')->all();
+        $ours = array_keys($this->migrator->getMigrationFiles(database_path('migrations')));
+
+        if (array_diff($recorded, $ours) !== []) {
+            return ProbeResult::failure(__('This database holds migrations of another application. Use an empty database.'), 'database');
+        }
+
+        return null;
+    }
+
+    /**
      * Creates and drops a table to prove the user may do so; a read-only user
      * (or PostgreSQL 15+, which no longer lets every user create in "public")
      * would otherwise only fail at the very end, in the migrations.
      */
     private function checkPrivileges(Connection $connection): ?ProbeResult
     {
-        $table = 'installer_probe_'.Str::lower(Str::random(8));
         $schema = $connection->getSchemaBuilder();
 
         try {
-            $schema->create($table, static function (Blueprint $blueprint): void {
+            $schema->dropIfExists(self::PROBE_TABLE);
+
+            $schema->create(self::PROBE_TABLE, static function (Blueprint $blueprint): void {
                 $blueprint->id();
             });
         } catch (Throwable) {
@@ -169,7 +229,7 @@ final class DatabaseProbe
         }
 
         try {
-            $schema->drop($table);
+            $schema->drop(self::PROBE_TABLE);
         } catch (Throwable) {
             return ProbeResult::failure(__('This user can create tables but not drop them. Grant it the right to drop tables.'), 'username');
         }

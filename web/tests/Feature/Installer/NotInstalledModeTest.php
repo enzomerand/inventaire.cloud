@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Installer\SetupToken;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 
 describe('on an installed instance', function (): void {
@@ -66,18 +65,47 @@ describe('on a fresh instance', function (): void {
         $this->get('/install')->assertOk()->assertSee('x-data="installerToken"', false)->assertSee('inventaire:install-token');
     });
 
-    it('writes the setup token to the log on the first web access only', function (): void {
-        Log::spy();
+    it('writes the setup token to the installer log on the first web access only', function (): void {
+        $log = $this->sandbox->root.'/installer.log';
 
         $this->get('/');
         $token = app(SetupToken::class)->current();
 
-        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message): bool => str_contains($message, $token));
+        expect(file_get_contents($log))->toContain($token)->toContain('inventaire:install-token')->and(substr_count((string) file_get_contents($log), $token))->toBe(1);
+
+        $this->get('/');
+        $this->get('/install');
+
+        expect(substr_count((string) file_get_contents($log), $token))->toBe(1)
+            ->and(fileperms(app(SetupToken::class)->path()) & 0777)->toBe(0640);
+    });
+
+    it('logs the token whatever the application log level is', function (): void {
+        // LOG_LEVEL=error would drop a warning from the default channel; the installer channel has its own level.
+        config(['logging.default' => 'single', 'logging.channels.single.level' => 'error', 'logging.channels.single.path' => $this->sandbox->root.'/laravel.log']);
 
         $this->get('/');
 
-        Log::shouldHaveReceived('warning')->once();
-        expect(fileperms(app(SetupToken::class)->path()) & 0777)->toBe(0640);
+        expect(file_get_contents($this->sandbox->root.'/installer.log'))->toContain(app(SetupToken::class)->current())
+            ->and(is_file($this->sandbox->root.'/laravel.log'))->toBeFalse();
+    });
+
+    it('keeps serving the page and retries the log later when the log cannot be written', function (): void {
+        config(['logging.channels.installer.path' => $this->sandbox->root.'/missing-dir/deeper/installer.log']);
+        // A path that cannot be created: a regular file where the directory should be.
+        file_put_contents($this->sandbox->root.'/missing-dir', 'x');
+
+        $this->get('/install')->assertOk();
+
+        $token = app(SetupToken::class)->current();
+        expect(is_file(app(SetupToken::class)->path()))->toBeTrue()->and(app(SetupToken::class)->isAnnounced())->toBeFalse();
+
+        // Once the log is writable again the next visit records the token.
+        config(['logging.channels.installer.path' => $this->sandbox->root.'/installer.log']);
+        $this->app['log']->forgetChannel('installer');
+        $this->get('/install')->assertOk();
+
+        expect(file_get_contents($this->sandbox->root.'/installer.log'))->toContain($token)->and(app(SetupToken::class)->isAnnounced())->toBeTrue();
     });
 
     it('does not create the token for the health check', function (): void {

@@ -73,6 +73,9 @@ final readonly class StorageSettings
             'bucket' => $this->bucket,
             'endpoint' => $this->endpoint,
             'use_path_style_endpoint' => $this->pathStyle,
+            // A wrong endpoint must answer quickly, not after the SDK's retries and default timeouts.
+            'http' => ['connect_timeout' => 5, 'timeout' => 20],
+            'retries' => 1,
             'throw' => true,
         ];
     }

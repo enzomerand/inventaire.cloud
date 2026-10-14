@@ -6,6 +6,7 @@ namespace App\Installer;
 
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\Support\AtomicFile;
+use Closure;
 use Illuminate\Contracts\Session\Session;
 
 /**
@@ -23,6 +24,9 @@ use Illuminate\Contracts\Session\Session;
 final class SetupToken
 {
     private const FILE = 'setup-token';
+
+    /** Created once the token has been written to the log, so a failed write is retried on the next visit. */
+    private const ANNOUNCED = 'setup-token.announced';
 
     /** Session key remembering which token a browser entered. */
     private const SESSION_KEY = 'installer.token';
@@ -98,7 +102,8 @@ final class SetupToken
      */
     public function authorize(Session $session): void
     {
-        $session->regenerate();
+        // true: the old session is destroyed, not just left behind with its (possibly known) id.
+        $session->regenerate(true);
         $session->put(self::SESSION_KEY, $this->fingerprint());
     }
 
@@ -119,7 +124,48 @@ final class SetupToken
     public function forget(): void
     {
         @unlink($this->path());
+        @unlink($this->state->path(self::ANNOUNCED));
         clearstatcache(true, $this->path());
+    }
+
+    /**
+     * Whether the token has been written to the installer log.
+     */
+    public function isAnnounced(): bool
+    {
+        clearstatcache(true, $this->state->path(self::ANNOUNCED));
+
+        return is_file($this->state->path(self::ANNOUNCED));
+    }
+
+    /**
+     * Hands the token to a logger exactly once.
+     *
+     * The token file is written first and survives whatever happens next. The
+     * "announced" mark is only set once the logger returned: if logging fails
+     * the exception propagates, the mark stays unset and the next visit tries
+     * again, while the token remains available through
+     * `php artisan inventaire:install-token`.
+     *
+     * @param  Closure(string): void  $log  Receives the token.
+     *
+     * @throws InstallationException When the token or the mark cannot be stored.
+     */
+    public function announce(Closure $log): void
+    {
+        if ($this->isAnnounced()) {
+            return;
+        }
+
+        $this->state->exclusively(function () use ($log): void {
+            if ($this->isAnnounced()) {
+                return;
+            }
+
+            $log($this->current());
+
+            AtomicFile::touch($this->state->path(self::ANNOUNCED));
+        });
     }
 
     /**

@@ -42,6 +42,8 @@ it('builds the S3 disk from the settings', function (): void {
     expect($config)->toMatchArray([
         'driver' => 's3', 'key' => 'key', 'secret' => 'secret', 'region' => 'eu-west-3', 'bucket' => 'photos',
         'endpoint' => 'https://s3.example.test', 'use_path_style_endpoint' => true, 'throw' => true,
+        // Like SMTP and Documenso, a dead endpoint must answer within seconds.
+        'http' => ['connect_timeout' => 5, 'timeout' => 20],
     ]);
 });
 

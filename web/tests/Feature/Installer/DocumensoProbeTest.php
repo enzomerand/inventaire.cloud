@@ -68,3 +68,28 @@ it('accepts the instance address in several shapes', function (string $url): voi
     'api address with slash' => 'https://sign.example.test/documenso/api/v2/',
     'padded' => '  https://sign.example.test/documenso ',
 ]);
+
+it('warns, without blocking, when the address uses plain http away from this machine', function (string $url, bool $warns): void {
+    Http::fake(['*' => Http::response(['data' => []])]);
+
+    $result = app(DocumensoProbe::class)->check(new DocumensoSettings($url, 'api_x'));
+
+    expect($result->ok)->toBeTrue()->and(array_keys($result->warnings))->toBe($warns ? ['documenso_insecure_url'] : []);
+})->with([
+    'plain http on the internet' => ['http://sign.example.test', true],
+    'https' => ['https://sign.example.test', false],
+    'localhost' => ['http://localhost:9000', false],
+    'loopback' => ['http://127.0.0.1:9000', false],
+    'a .localhost name' => ['http://documenso.localhost', false],
+]);
+
+it('lets a real bug surface, logging it without the token', function (): void {
+    Http::fake(fn () => throw new LogicException('bug while using api_super_secret'));
+
+    expect(fn () => app(DocumensoProbe::class)->check(new DocumensoSettings('https://sign.example.test', 'api_super_secret')))
+        ->toThrow(LogicException::class);
+
+    $log = (string) file_get_contents($this->sandbox->root.'/installer.log');
+
+    expect($log)->toContain('LogicException')->toContain('bug while using')->not->toContain('api_super_secret');
+});

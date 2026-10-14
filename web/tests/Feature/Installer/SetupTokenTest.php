@@ -60,6 +60,48 @@ it('tells which session entered the current token and regenerates its id', funct
     expect($token->isAuthorized($session))->toBeTrue()->and($session->getId())->not->toBe($before);
 });
 
+it('destroys the old session when it authorizes a new one', function (): void {
+    $token = freshToken($this);
+    $token->ensure();
+    $handler = new ArraySessionHandler(120);
+    $session = new Store('test', $handler);
+    $session->setId(str_repeat('a', 40));
+    $session->start();
+    $session->put('before', 'login');
+    $session->save();
+    $old = $session->getId();
+    $session->start();
+
+    $token->authorize($session);
+    $session->save();
+
+    // Not just a new id: the old one no longer yields a session, so a fixated id is worthless.
+    expect($handler->read($old))->toBe('')->and($session->getId())->not->toBe($old);
+});
+
+it('hands the token to a logger once, and tries again when logging fails', function (): void {
+    $token = freshToken($this);
+    $logged = [];
+
+    expect(fn () => $token->announce(function (string $value): void {
+        throw new RuntimeException('disk full');
+    }))->toThrow(RuntimeException::class);
+    // The token itself is safe on disk and the failed write is not remembered as done.
+    expect(is_file($token->path()))->toBeTrue()->and($token->isAnnounced())->toBeFalse();
+
+    $token->announce(function (string $value) use (&$logged): void {
+        $logged[] = $value;
+    });
+    $token->announce(function (string $value) use (&$logged): void {
+        $logged[] = $value;
+    });
+
+    expect($logged)->toBe([$token->current()])->and($token->isAnnounced())->toBeTrue();
+
+    $token->forget();
+    expect($token->isAnnounced())->toBeFalse();
+});
+
 it('revokes authorized sessions when the token is deleted or replaced', function (): void {
     $token = freshToken($this);
     $token->ensure();

@@ -212,6 +212,10 @@ final class ConsoleInstaller
 
             $result = $this->save($step, $values);
 
+            foreach ($result->warnings ?? [] as $warning) {
+                $this->components->warn($warning);
+            }
+
             if ($result === null || $result->ok) {
                 $this->components->info(__(':step: done.', ['step' => $step->title()]));
 

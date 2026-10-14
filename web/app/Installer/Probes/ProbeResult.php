@@ -15,20 +15,23 @@ final readonly class ProbeResult
 {
     /**
      * @param  array<string, string>  $meta  Facts learned on success (server version...), for display.
+     * @param  array<string, string>  $warnings  Things worth knowing that do not block: code => translated message. The web wizard sends the codes and translates them client-side.
      */
     private function __construct(
         public bool $ok,
         public ?string $field,
         public ?string $message,
         public array $meta,
+        public array $warnings = [],
     ) {}
 
     /**
      * @param  array<string, string>  $meta
+     * @param  array<string, string>  $warnings
      */
-    public static function success(array $meta = []): self
+    public static function success(array $meta = [], array $warnings = []): self
     {
-        return new self(true, null, null, $meta);
+        return new self(true, null, null, $meta, $warnings);
     }
 
     /**

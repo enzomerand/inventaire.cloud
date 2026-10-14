@@ -21,7 +21,7 @@
                     <div class="card-body">
                         <h2 class="card-title mb-3">{{ __('Setup token') }}</h2>
                         <p class="text-secondary">
-                            {{ __('To prove you have access to this server, enter the setup token. It is written in the application log (storage/logs/laravel.log) and printed by this command:') }}
+                            {{ __('To prove you have access to this server, enter the setup token. It is written in storage/logs/installer.log and printed by this command:') }}
                         </p>
                         <pre class="p-2 rounded bg-body-secondary"><code>php artisan inventaire:install-token</code></pre>
 

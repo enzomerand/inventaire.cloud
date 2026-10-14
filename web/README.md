@@ -73,20 +73,28 @@ There are three ways to install, and they share the same checks:
 
 ### The setup token (web wizard)
 
-Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to the application log (`storage/logs/laravel.log`, or the container logs) and printed by:
+Whoever can open `/install` could point a fresh instance at their own database, so the wizard asks for a one-time **setup token** first. It is created on the first web access, stored in `storage/installer/setup-token` (readable by the owner and the group, so the web server and the person running the console installer can both use it), written to its own log file, `storage/logs/installer.log` (a dedicated channel, so it does not depend on `LOG_CHANNEL`, `LOG_STACK` or `LOG_LEVEL`) and printed by:
 
 ```bash
 php artisan inventaire:install-token
 ```
 
-The token is compared in constant time, the form accepts 5 attempts per minute and per IP address, the session id is regenerated once it is accepted, and the token is deleted when the installation completes. The console installer does not need it: running it already proves access to the server.
+The token is compared in constant time, the form accepts 5 attempts per minute and per IP address, the old session is destroyed and a new id issued once it is accepted, and the token is deleted when the installation completes. If the log cannot be written, the page still works and `inventaire:install-token` still prints the token. The console installer does not need it: running it already proves access to the server.
+
+### Behind a reverse proxy
+
+Behind a reverse proxy or a load balancer every request seems to come from the proxy, so the 5-attempts throttle would count all visitors together. Set `TRUSTED_PROXIES` in `.env` (or the environment) to a comma-separated list of the proxies' addresses or CIDR ranges, or `*` for any proxy; it is empty by default (no proxy is believed, so a forged `X-Forwarded-For` header is worthless). The application then reads the real client address from `X-Forwarded-For`.
+
+### Trust model
+
+Everything the wizard does is behind the setup token: whoever holds it is trusted like the server administrator. In particular the checks connect to the addresses typed in the forms (database, SMTP, S3 endpoint, Documenso), so they can reach hosts on the internal network, by design: do not hand the token to somebody who should not be able to probe your network. Checks use short timeouts (5 seconds to connect) and never show passwords or API tokens in their messages.
 
 ### The steps
 
 The wizard is one page with a progress bar and one AJAX endpoint per step. Each step **tests the real service before saving**, writes its values to `.env` immediately and is recorded in `storage/installer/progress.json`, so an interrupted installation resumes where it stopped (the token is asked again in a new browser session).
 
 1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` or `imagick`, `zip`, `curl`) and write access to `storage/`, `bootstrap/cache/` and `.env`.
-2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that already holds tables of another application, and the user must be able to create tables. An interrupted installation can be resumed on the same database.
+2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables. An interrupted installation can be resumed on the same database.
 3. **Application**: public URL, default language and timezone.
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.

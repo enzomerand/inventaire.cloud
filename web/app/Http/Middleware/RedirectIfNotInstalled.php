@@ -16,6 +16,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Sends every visitor to the install wizard until the instance is installed.
@@ -90,16 +91,35 @@ final class RedirectIfNotInstalled
         }
 
         try {
-            if ($this->token->ensure()) {
-                Log::warning(
-                    'inventaire.cloud setup token: '.$this->token->current()
-                    .' (also printed by "php artisan inventaire:install-token"). Open /install and enter it to start the installation.',
-                );
-            }
+            $this->token->ensure();
         } catch (InstallationException $exception) {
             return $exception;
         }
 
+        $this->announceToken();
+
         return null;
+    }
+
+    /**
+     * Writes the setup token to the installer log, once.
+     *
+     * The log is a channel of its own (one file, whatever LOG_CHANNEL and
+     * LOG_LEVEL say) so the token always reaches the administrator. A logging
+     * failure never breaks the page: the token stays on disk and is shown by
+     * `php artisan inventaire:install-token`; the write is retried next visit.
+     */
+    private function announceToken(): void
+    {
+        try {
+            $this->token->announce(static function (string $token): void {
+                Log::channel('installer')->warning(
+                    'inventaire.cloud setup token: '.$token
+                    .' (also printed by "php artisan inventaire:install-token"). Open /install and enter it to start the installation.',
+                );
+            });
+        } catch (Throwable) {
+            error_log('inventaire.cloud: the setup token could not be written to storage/logs/installer.log; run "php artisan inventaire:install-token" to read it.');
+        }
     }
 }
