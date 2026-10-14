@@ -2,7 +2,7 @@
 
 The web application behind [inventaire.cloud](https://inventaire.cloud), a free and simple inventory tool for professionals and individuals.
 
-It is built **API-first**: the pages are classic server-rendered navigation, but every action goes through one HTTP helper so the same JSON API (`/api/v1`, coming in a later lot) can serve the web front, the native apps and third-party tools.
+It is built **API-first**: the pages are classic server-rendered navigation, but every action goes through one HTTP helper so the same JSON API (`/api/v1`) can serve the web front, the native apps and third-party tools.
 
 ## Stack
 
@@ -59,6 +59,8 @@ Run every command from this `web/` directory.
 
    The app is then available on <http://localhost:8000> and the mail inbox on <http://localhost:8025>.
 
+4. **Sign in.** There are no passwords (see [Accounts and sign-in](#accounts-and-sign-in)). Open <http://localhost:8000/login>, give the `ADMIN_EMAIL` of `.env` (`admin@example.com` in the example, created as an administrator by `composer setup`) and read the 6-digit code in the mail inbox. `php artisan db:seed` adds a second administrator, `test@example.com`.
+
 ## Installing an instance
 
 A new instance is not usable until it is installed. Until then **every web URL redirects to `/install`** (JSON requests get a `503` with `"code": "not_installed"`), and the application runs without a database or a complete `.env`: sessions and cache use files and jobs run inline. The `APP_KEY` is generated on the first web access and written to `.env` (or a static error page explains what to fix when `.env` is not writable). Once the installation is finished, every `/install` URL answers `404`.
@@ -101,9 +103,10 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
-7. **Installation**: runs the migrations, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. Anything that has to happen once the tables exist but before the instance is marked installed (the accounts lot will create the first administrator there) plugs in as a `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`.
+7. **Administrator**: the name and the email address of the first administrator (`ADMIN_NAME` and `ADMIN_EMAIL` in `.env`). Nothing to test here: the account is created by the next step, once the tables exist. There is no password: the administrator signs in with a code sent to this address, so it must be one they can read.
+8. **Installation**: runs the migrations, then the post-migration hooks, switches the instance to `APP_ENV=production` / `APP_DEBUG=false` (the web wizard always does, except for values the environment imposes), clears the configuration cache, writes the "installed" marker and deletes the token. The wizard then leads to `/login`.
 
-Creating the first administrator account is not part of the installer yet (it comes with the accounts lot).
+Anything that has to happen once the tables exist but before the instance is marked installed plugs in as an `App\Installer\PostMigrationHook`, tagged `installer.post-migration`: hooks run after the migrations, must be idempotent (the installation can be run again after a failure) and abort it by throwing an `InstallationException`. The first one is `CreateAdministrator`, which creates the administrator account (or promotes the account that already has the address). Hooks run on the database being installed, whatever the application's default connection points at: in a web request, and in the interactive console installer, the configuration was loaded before the wizard wrote the database settings, so the finalizer makes its temporary connection (`installer_migrate`) the default one while the migrations and the hooks run, then puts everything back. A hook uses `DB` and its models without naming a connection.
 
 ### Values provided by the environment
 
@@ -113,7 +116,7 @@ With Docker, configuration usually arrives as real environment variables, which 
 
 When every setting the installation needs is provided by the environment, nothing has to be written: the wizard does not require `.env` or `bootstrap/cache/` to be writable, which suits read-only containers: when `.env` cannot be written, finalizing such an instance writes nothing but the "installed" marker (set `APP_ENV` and `APP_DEBUG` in the environment too); when it can, the production defaults are written as usual. A `.env` the installer creates is readable by the owner and the group only (`0640`); an existing one keeps its permissions, which the installer never widens.
 
-When `.env` does not exist, the installer creates it from `.env.example`, minus the development defaults: a file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production`, `APP_DEBUG=false`, no database or SMTP credentials, no SMTP host and no sender address, instead of the example's local services. If you copy `.env.example` yourself on a server, set these values yourself. For development, run `composer setup`, which copies the example first and leaves the environment alone.
+When `.env` does not exist, the installer creates it from `.env.example`, minus the development defaults: a file created by the installer (on the first web access or by the console command) starts with `APP_ENV=production`, `APP_DEBUG=false`, no database or SMTP credentials, no SMTP host, no sender address and no placeholder administrator, instead of the example's local services. If you copy `.env.example` yourself on a server, set these values yourself. For development, run `composer setup`, which copies the example first and leaves the environment alone.
 
 ### From the terminal
 
@@ -123,20 +126,48 @@ php artisan inventaire:install --no-interaction \
     --db-driver=pgsql --db-host=127.0.0.1 --db-port=5432 --db-name=inventaire --db-user=inventaire \
     --app-url=https://inventory.example.com --locale=fr --timezone=Europe/Paris \
     --mail-host=smtp.example.com --mail-port=587 --mail-from-address=hello@example.com --mail-from-name="My Company" \
-    --storage=local
+    --storage=local --admin-name="Jane Doe" --admin-email=jane@example.com
 php artisan inventaire:install --from-env      # validate the current configuration and finalize
 ```
 
 - In interactive mode every value is prompted and the mail step is proven with a code, like in the web wizard.
 - In non-interactive mode (`--no-interaction`) the values come from the options (one per wizard field: `php artisan inventaire:install --help`), completed by what `.env` and the environment already provide; the first failing check stops the command with a non-zero exit code. The SMTP server is checked with an authenticated SMTP session, since nobody can read a code. `--skip-mail-test` skips that check (with a warning) and is refused when prompts are possible. Options end up in the shell history and the process list: for passwords, prefer `.env` or the environment.
 - Switching to production mode is asked interactively (default yes, except on a `local` instance) and done by default in non-interactive mode; `--keep-environment` leaves `APP_ENV` and `APP_DEBUG` alone. `--db-no-password` and `--mail-no-password` store an empty password on purpose.
-- `--from-env` asks nothing, never touches `APP_ENV` or `APP_DEBUG` (the developer path) and writes nothing to `.env` (it does not even need it to be writable): it validates the current configuration with the same live checks, then runs the migrations and finalizes. It is what `composer setup` runs, and what a container entrypoint can run.
+- `--from-env` asks nothing, never touches `APP_ENV` or `APP_DEBUG` (the developer path) and writes nothing to `.env` (it does not even need it to be writable): it validates the current configuration with the same live checks, then runs the migrations and finalizes. It is what `composer setup` runs, and what a container entrypoint can run. It needs `ADMIN_NAME` and `ADMIN_EMAIL` among the configuration, like the other required settings.
 
 ### Troubleshooting
 
 - *I lost the setup token*: `php artisan inventaire:install-token`.
 - *The wizard keeps showing finished steps*: the progress lives in `storage/installer/progress.json`; delete that file to start over (the configuration stays in `.env`).
 - *I want to run the wizard again on an installed instance*: delete `storage/installer/installed.json`. This only re-enables the installer; it does not touch the database.
+
+## Accounts and sign-in
+
+Accounts have **no password**: an email address is all it takes. The `/login` page asks for the address, emails a 6-digit code, and typing the code back signs the person in; an address that has no account yet is asked for a name at that moment, so signing in and signing up are the same flow. The same steps are available to API clients as `/api/v1` endpoints:
+
+| Endpoint                      | What it does                                                                                        |
+|-------------------------------|-----------------------------------------------------------------------------------------------------|
+| `POST /api/v1/auth/code`      | `email`: emails a code. The answer is the same whether the address has an account or not.            |
+| `POST /api/v1/auth/verify`    | `email`, `code`, and `name` for a new account: signs in. `201` when the account was created.        |
+| `POST /api/v1/auth/logout`    | Ends the session (`204`).                                                                           |
+| `GET /api/v1/me`              | The signed-in user (`401` in JSON when nobody is).                                                  |
+
+Every answer under `/api` is JSON, even for a client that sends no `Accept` header. Refusals of a code are `422` with `errors` and a machine-readable `code`: `login_code_wrong`, `login_code_expired`, `login_code_exhausted`, or `name_required` (right code, unknown address: send it again with `name`, the code is still valid).
+
+- **Codes.** A code is valid for 10 minutes and 5 wrong guesses, and works once. Only a keyed hash (HMAC-SHA256 with `APP_KEY`) is stored, in the `login_codes` table, one row per address: asking again replaces the previous code. The mail is sent immediately, not queued (an instance without a queue worker still delivers it), in the language of the request, as plain text and simple HTML with nothing fetched from outside.
+- **Limits** (`login_codes` in `config/auth.php`; `429` with `Retry-After`). Sending: 3 codes per address and 10 minutes, and 20 per IP address and 10 minutes. Typing codes back: 10 per minute and per IP address and address. Behind a reverse proxy, set `TRUSTED_PROXIES` or every visitor shares one IP address.
+- **No user enumeration.** Asking for a code does the same work and gives the same answer whether the address has an account or not, and wrong codes are answered the same too. Whether an address has an account is only revealed to somebody who holds a valid code for it.
+- **Addresses** are stored and looked up in lowercase (PostgreSQL's unique index is case-sensitive, MySQL's and MariaDB's is not).
+- **Staying signed in.** Signing in is remembered for 30 days by the "remember me" cookie (`remember` of the `web` guard in `config/auth.php`). The session itself keeps `SESSION_LIFETIME`, since visitors who are not signed in have sessions too.
+- **Language.** `users.locale` is the language of the account. The language of a request is decided before the session starts (see [Translations](#translations)), so the account's language travels in the `locale` cookie: signing in sets the cookie from `users.locale` (an account without one takes the language in use), and the language switcher updates the cookie and `users.locale` together.
+- **Stateful requests (Sanctum).** The web front calls the API with its session cookie and CSRF token. Laravel Sanctum treats a request as coming from the front when its `Referer` or `Origin` host is listed in `SANCTUM_STATEFUL_DOMAINS`; by default that is the usual development hosts and the host (with the port) of `APP_URL`, so an instance works when it is reached on its public address. If it is also reached on another host (a second domain, a LAN address, another port), signing in from there answers `403` with `"code": "not_stateful"`: list every such host, with its port when it is not the default one, in `.env`:
+
+  ```dotenv
+  SANCTUM_STATEFUL_DOMAINS=inventory.example.com,inventory.example.net:8443
+  ```
+
+  The variable replaces the default list, so repeat the host of `APP_URL` in it. The sign-in endpoints refuse any other caller on purpose: the session and the CSRF check are what keep a forged form on another site from signing a visitor into somebody else's account.
+- **Administrators.** `users.is_admin` marks the people who administer the instance. The installer creates the first one; to add one later, or to recover when nobody can sign in as one, run `php artisan inventaire:make-admin jane@example.com --name="Jane Doe"` (with Docker: `docker compose exec app php artisan inventaire:make-admin ...`). It creates the account or promotes the existing one (keeping its name), and can be run again safely.
 
 ## Upgrading an instance
 
@@ -148,6 +179,8 @@ composer install --no-dev --optimize-autoloader
 npm ci && npm run build
 php artisan inventaire:upgrade --optimize
 ```
+
+An instance installed before sign-in existed has no administrator and the upgrade does not create one (the installer's hooks only run during the installation): create one with `php artisan inventaire:make-admin you@example.com --name="Your Name"`. The same upgrade removes the `password` column and the `password_reset_tokens` table, which accounts no longer use.
 
 `inventaire:upgrade` reloads the configuration (so an edited `.env` is used), applies the pending migrations under a file lock (a second upgrade running at the same time waits for it, up to 10 minutes) and clears the route, view and event caches. With `--optimize` it rebuilds them afterwards; it can be run as often as you like, and with Docker the update is automatic (see below).
 
@@ -166,7 +199,7 @@ The application listens on <http://localhost:8080> (`APP_PORT` in `.env` changes
 ### Two ways to configure it
 
 - **Wizard.** Set `DB_PASSWORD` only. Open the application: it redirects to the install wizard, which asks for the rest. Its one-time setup token is printed by `docker compose exec app php artisan inventaire:install-token`. The database settings come from the compose file, so the wizard shows them read-only.
-- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, timezone, SMTP, file storage...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
+- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, timezone, SMTP, file storage, the first administrator `ADMIN_NAME` and `ADMIN_EMAIL`...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
 
 ### What is kept where
 
@@ -204,6 +237,7 @@ The container speaks plain HTTP on port 8080. Terminate TLS in a reverse proxy i
 
 ```bash
 docker compose exec app php artisan inventaire:install-token
+docker compose exec app php artisan inventaire:make-admin jane@example.com --name="Jane Doe"
 docker compose run --rm app php artisan tinker           # any other command, in a throw-away container
 docker compose logs -f app                               # application errors go to stderr
 ```
@@ -247,15 +281,20 @@ Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless t
 
 ```text
 app/
-  Console/Commands/ inventaire:install (console wizard), inventaire:install-token, inventaire:install-status, inventaire:upgrade
+  Auth/             Sign-in codes (LoginCodes), account creation (Accounts)
+  Console/Commands/ inventaire:install (console wizard), inventaire:install-token, inventaire:install-status, inventaire:upgrade, inventaire:make-admin
   Http/
-    Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints)
+    Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints, Api/V1/ the JSON API)
     Middleware/     SetLocale (global): applies the language chosen by LocaleResolver;
-                    RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate
+                    RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate;
+                    RequireStatefulRequest: sign-in endpoints are for the web front only
     Requests/       Form requests (validation)
-  Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator (see "Installing an instance")
-  Providers/        InstallerServiceProvider: pre-install runtime and application key
-  Services/         LocaleResolver: which language a request is answered in
+    Resources/      JSON resources of the API (UserResource)
+  Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator, post-migration hooks (see "Installing an instance")
+  Mail/             LoginCodeMail
+  Models/           User, LoginCode
+  Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: sign-in rate limiters
+  Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   View/Components/  Blade component classes (ClientMessages)
 config/             Laravel configuration (app.php lists the supported locales)
 lang/               fr.json (UI strings) and fr/ (framework messages)
@@ -265,11 +304,13 @@ resources/
     app.js          Entry point: Tabler, Alpine, stores, components
     lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js
     stores/         Alpine stores (toasts)
-    components/     Alpine components (toasts, locale switcher, install wizard)
+    components/     Alpine components (toasts, locale switcher, install wizard, sign-in page, account menu)
   views/
     layouts/        app.blade.php, the Tabler page layout
-    components/     Anonymous Blade components (<x-toasts />, <x-locale-switcher />)
+    components/     Anonymous Blade components (<x-toasts />, <x-locale-switcher />, <x-account-menu />)
+    auth/, app/     The sign-in page and the signed-in user's space
 routes/web.php      Web routes
+routes/api.php      JSON API, versioned in the path (/api/v1)
 tests/
   Feature/          Pest feature tests (HTTP, database)
   Unit/             Pest unit tests
@@ -300,7 +341,7 @@ Failures throw an `HttpError` (`status`, `message`, `errors`, `code` from `body.
 
 | Situation              | Central handling (skip all with `{ silent: true }`)                                              |
 |------------------------|--------------------------------------------------------------------------------------------------|
-| `401`                  | Toast, then redirect to the `login-url` meta tag if the page has one, else reload                |
+| `401`                  | Toast, then redirect to the `login-url` meta tag (every page has it: the `login` route exists), else reload |
 | `403`, `404`           | Toast                                                                                            |
 | `419`                  | Refresh the token (`csrf-refresh-url` meta tag) and replay once; only a second failure toasts and reloads |
 | `422`, other `4xx`     | Nothing: the caller handles it (`errors`, `code`)                                                |
@@ -309,13 +350,15 @@ Failures throw an `HttpError` (`status`, `message`, `errors`, `code` from `body.
 | Network, timeout       | Toast (`HttpError.status === 0`, `kind` is `network` or `timeout`)                               |
 | `2xx` that is not JSON | Toast and `HttpError` with `kind === 'unexpected_response'`                                      |
 
-A request cancelled through the caller's `signal` rejects with the raw `AbortError` and no toast.
+A page that is open to visitors (the sign-in page, the user menu's sign-out) must pass `{ silent: true }` and show the failures itself: the central handling would answer a `401` or a `403` by redirecting to the very page the visitor is on.
+
+A request cancelled through the caller's `signal` rejects with the raw `AbortError` and no toast. `t('key', { name: value })` fills the `:name` placeholders of a message.
 
 ## Translations
 
 French is the default language and English the fallback. Interface strings are written in English in the code with `__()` and translated in `lang/fr.json`; framework messages (validation, authentication, pagination, passwords) come from [laravel-lang](https://laravel-lang.com).
 
-The language of a request is chosen by `App\Services\LocaleResolver`, trying in order: the signed-in user's saved preference (a documented hook, filled in with the accounts lot), the one-year `locale` cookie written by `PUT /locale`, the best `Accept-Language` match, then the default. The `SetLocale` middleware is global and runs first, so 404 pages, expired-session errors and the future API are localized too, and responses carry `Content-Language` and `Vary: Accept-Language, Cookie`. The `locale` cookie is excluded from encryption because its value is validated against the supported list on every read.
+The language of a request is chosen by `App\Services\LocaleResolver`, trying in order: the one-year `locale` cookie written by `PUT /locale` (and by signing in, from the account's `users.locale`), the best `Accept-Language` match, then the default. The `SetLocale` middleware is global and runs first, so 404 pages, expired-session errors and the future API are localized too, and responses carry `Content-Language` and `Vary: Accept-Language, Cookie`. The `locale` cookie is excluded from encryption because its value is validated against the supported list on every read. The account's language is not a source of its own because the resolver runs before the session and the authentication, which a 404 page or the install wizard should not have to start: see [Accounts and sign-in](#accounts-and-sign-in).
 
 To add a language, for example Spanish:
 
