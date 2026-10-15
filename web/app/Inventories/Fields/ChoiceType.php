@@ -57,7 +57,7 @@ abstract class ChoiceType extends AbstractFieldType
                 $labels = [];
 
                 foreach ($value as $choice) {
-                    $label = is_array($choice) && is_string($choice['label'] ?? null) ? self::fold($choice['label']) : null;
+                    $label = is_array($choice) && is_string($choice['label'] ?? null) ? SingleLineText::fold($choice['label']) : null;
 
                     if ($label === null) {
                         continue;
@@ -181,13 +181,5 @@ abstract class ChoiceType extends AbstractFieldType
         } while (isset($taken[$id]));
 
         return $id;
-    }
-
-    /**
-     * A label as it is compared for duplicates: trimmed, with the case and the form of the letters folded away.
-     */
-    private static function fold(string $label): string
-    {
-        return mb_convert_case(SingleLineText::trim($label), MB_CASE_FOLD);
     }
 }

@@ -8,10 +8,12 @@ use App\Http\Middleware\SetReferrerPolicy;
 use App\Installer\ProcessEnvironment;
 use App\Services\LocaleResolver;
 use App\Services\TrustedProxies;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 // Before anything reads .env: the installer must know which variables the process really started with.
 ProcessEnvironment::capture();
@@ -45,6 +47,11 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // The API always answers JSON, whatever the client asked for: a script that forgets the Accept header must
         // not receive an HTML error page or a redirect to the login page.
         $exceptions->shouldRenderJsonWhen(fn (Request $request, Throwable $exception): bool => $request->is('api/*') || $request->expectsJson());
+
+        // A row that is not there is a plain 404. The framework's own message names the model class and the key that was
+        // looked up, which tells a row that does not exist from one the person may not see: that one is a 404 too, with
+        // the standard message (see the policies, "denyAsNotFound").
+        $exceptions->map(ModelNotFoundException::class, fn (ModelNotFoundException $exception): NotFoundHttpException => new NotFoundHttpException('Not Found', $exception));
     })->create();
 
 // APP_ENVIRONMENT_FILE moves the configuration file out of the application folder (a Docker volume): Laravel and the

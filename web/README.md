@@ -19,7 +19,7 @@ Privacy by design: no CDN, no Google Fonts, no external request from the browser
 
 ## Requirements
 
-- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB)
+- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB) and `intl` (currencies and their decimals, the sorting of names)
 - [Composer](https://getcomposer.org) 2
 - Node.js 20.19+ / 22.12+ and npm
 - [Docker](https://www.docker.com) with Compose, for the development database and mail services
@@ -200,6 +200,61 @@ Inventories live in workspaces. Every account belongs to at least one, in which 
 Answers are in the `data` envelope. Errors have a `message` in the language of the request and, for conflicts, a machine-readable `code`.
 
 In the interface, the header has a switcher (before the account menu) and `/app/workspaces` lists the workspaces to create, rename in place, delete (with a confirmation in the row) and choose between. The switcher and the page share one Alpine store, so a change shows in the header without a reload.
+
+## Inventories
+
+An inventory is a table of items that share the same typed fields, kept in a workspace. Its **fields** say what an item can hold, its **items** hold it; both go with the inventory when it is deleted, and an inventory goes with its workspace (foreign keys cascade, and the models' own `delete()` is what the application calls).
+
+- **Tables.** `inventories` (`workspace_id`, `name` 120, `description`), `inventory_fields` (`inventory_id`, `name` 120, `type`, `options` JSON, `required`, `position`) and `items` (`inventory_id`, `values` JSON, `created_by`, `updated_by`: forgotten, not deleted, with the account). Each has a unique `ulid` for the outside world (URLs, API) and keeps its numeric key to itself; ULIDs are looked up whatever their case, also as the child of another binding (`App\Models\Concerns\HasUlidRouteKey`).
+- **Values.** `items.values` is one JSON object keyed by the ULID of the field, always written as an object (`{}` when empty: `App\Models\Casts\JsonObject`). An empty value (null, an empty text, an empty list) is never stored: the key is removed. Numbers are stored as decimal **strings** (`"12.50"`), never as JSON numbers, which MySQL and MariaDB would turn into floating point values. What is read back goes through the type again (`present()`), and only for the fields that exist, in their order: a stray key left in a row is never given out.
+- **Roles** (`App\Policies\InventoryPolicy`; the abilities are mapped from `WorkspaceRole` in `InventoryPolicy::abilities()`, which the API also gives as `abilities`): every member reads; owners and editors add and change inventories, their fields and their items; only owners delete an inventory. A non-member gets `404`, like a workspace; a member without the right `403`. A row that does not exist and a row you may not see are answered alike (the framework's `ModelNotFoundException` is rendered as a plain `404`: its own message would name the model and the key).
+- **Quotas** (`config/inventories.php`): `max_per_workspace` inventories per workspace (100; `INVENTORIES_MAX_PER_WORKSPACE`, counted under the lock of the workspace's row), `max_fields` fields (100; `INVENTORIES_MAX_FIELDS`) and `max_items` items (10000; `INVENTORIES_MAX_ITEMS`) per inventory, counted under the lock of the inventory's row. Beyond one, the API answers `409` with `"code": "inventory_limit_reached"`, `field_limit_reached` or `item_limit_reached`, and the `limit`.
+- **Concurrency.** Every write to an inventory (its name, its fields, its items) locks the inventory first, then reads its fields under that lock (`App\Workspaces\Locks`, which documents the global order: ... workspaces, memberships, inventories, fields, items), in one transaction retried on a deadlock. That is what makes a quota exact, a field name unique (no portable unique index folds capitals and accents, so it is checked in PHP under the lock), a field deletion leave no orphan value in an item written at the same moment, and two updates of one item merge instead of overwriting each other.
+- **Fields.** Names are unique per inventory, capitals and accents not counted (`Straße` is `STRASSE`). A new field goes at the end; `PUT .../fields/order` takes the ULIDs of *all* the fields, each once, or answers `422`. The **type cannot change** once the field exists (`422` on `type`). Options sent in an update are merged over the ones the field has (an option sent as `null` goes back to its default) and judged together by the type; an option the type does not have is a `422` on `options.<name>`. Changing options never rewrites the items: a value written under older options stays as it is. **Deleting a field** removes its key from every item of the inventory in the same transaction, by chunks, through the query builder (the items keep their `updated_at`).
+- **Items.** `values` is keyed by the ULID of the field and validated against the fields as they are under the lock: a key that is no field of the inventory is a `422` on `values.<key>` (never ignored); a required field must have a value when the item is created and cannot be cleared when its key is sent (an update that does not mention it leaves it alone, whatever the item holds); an update only changes the keys it sends, an empty value clears; an update that changes nothing writes nothing. Messages name the field by its name. The list is 50 a page, newest first (`data`, `links`, `meta`).
+
+**Field types** (one class each in `app/Inventories/Fields/`, behind the `FieldType` contract and the `FieldTypes` registry; `GET /api/v1/field-types` lists them with their label). Every write goes `prepare` (trim) → empty? (clears) → rules → `normalize` (what is stored):
+
+| `type`        | Options (defaults)                                                                                   | A value, and what is stored                                                                                   |
+|---------------|------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| `text`        | `max_length` 1..1000 (255)                                                                           | One line, no control character (`App\Rules\SingleLineText`), trimmed.                                         |
+| `textarea`    |                                                                                                      | Up to 10000 characters; line breaks (stored as `\n`) and tabs allowed, other control characters refused.      |
+| `number`      | `decimals` 0..6 (0), `min`, `max`, `unit` (16)                                                       | A JSON number or a string with a dot, below 1e15; **more decimals than allowed is a `422`**, never rounded; stored `"12.50"`. |
+| `money`       | `currency`: ISO 4217 code known to ICU (`EUR`)                                                       | As a number, with the decimals of the currency (ICU: 2 euro, 0 yen, 3 dinar).                                 |
+| `percentage`  | `decimals` 0..4 (2)                                                                                  | As a number: `"12.50"` is 12.5 %.                                                                             |
+| `boolean`     |                                                                                                      | `true`/`false` (`1`/`0`); `false` is a value.                                                                 |
+| `date`        |                                                                                                      | `YYYY-MM-DD`, years 1000..9999.                                                                               |
+| `datetime`    |                                                                                                      | ISO 8601 **with its offset**, stored in UTC to the second (`2026-10-15T12:30:00Z`).                           |
+| `time`        |                                                                                                      | `HH:MM`.                                                                                                      |
+| `select`      | `choices`: 1..200 of `{id, label (100), color}`; `color` is one of `gray red orange yellow green teal blue indigo purple pink` | The id of a choice.                                                                          |
+| `multiselect` | the same                                                                                             | A list of ids, each once.                                                                                     |
+| `tags`        |                                                                                                      | Up to 30 lines of 1..50 characters; trimmed, repeats (capitals ignored) dropped.                              |
+| `url`         |                                                                                                      | `http` or `https`, at most 2048 characters.                                                                   |
+| `email`       |                                                                                                      | At most 254 characters, kept as written.                                                                      |
+| `phone`       |                                                                                                      | At most 32 characters: optional leading `+`, digits, spaces and `().-`, at least 3 digits.                    |
+| `rating`      | `max` 3..10 (5)                                                                                      | A whole number from 1 to `max`.                                                                               |
+| `color`       |                                                                                                      | `#rrggbb`, stored in lowercase.                                                                               |
+| `barcode`     | `format`: `any`, `ean13`, `ean8`, `upca`, `isbn10`, `isbn13` (`any`)                                 | The check digit is verified (ISBNs may be written with hyphens; stored as digits); `any`: 1..64 of letters, digits, `-` `.`. |
+
+The **choices** of a `select` or `multiselect` have ids made by the server (8 random characters, `a-z0-9`) when a choice is sent without one, and kept when the choice already exists. An id the field never had is **not** taken from the client: that choice gets a new one, so a deleted choice cannot come back with its old id and bring old values with it. Values hold ids, never labels, so a choice can be renamed freely; a value whose choice was deleted is dropped when read (the items are not rewritten).
+
+| Endpoint | What it does |
+|----------|--------------|
+| `GET /api/v1/field-types` | `[{type, label}]`. |
+| `GET /api/v1/workspaces/{id}/inventories` | Every inventory of the workspace, by name (capitals and accents ignored, numbers as numbers), with `fields_count`, `items_count` and `abilities` (`update`, `delete`, `manage_fields`, `edit_items`). |
+| `POST /api/v1/workspaces/{id}/inventories` | `name` (required, one line, 120), `description` (2000): adds one (`201`; editors and owners). |
+| `GET /api/v1/inventories/{id}` | One inventory with its `fields` in order. |
+| `PATCH /api/v1/inventories/{id}` | `name` and/or `description` (editors and owners). |
+| `DELETE /api/v1/inventories/{id}` | Deletes it with its fields and items (`204`; owners only). |
+| `POST /api/v1/inventories/{id}/fields` | `type`, `name`, `required`, `options`: adds a field at the end (`201`). |
+| `PATCH /api/v1/inventories/{id}/fields/{field}` | `name`, `required`, `options` (merged): changes it. |
+| `DELETE /api/v1/inventories/{id}/fields/{field}` | Deletes it and its values (`204`). |
+| `PUT /api/v1/inventories/{id}/fields/order` | `fields`: all the ULIDs, in the new order; answers the fields in that order. |
+| `GET /api/v1/inventories/{id}/items` | A page of items, newest first (`page`). |
+| `POST /api/v1/inventories/{id}/items` | `values`: adds an item (`201`). |
+| `GET`, `PATCH`, `DELETE /api/v1/inventories/{id}/items/{item}` | Reads, changes (`values`, partial) or deletes (`204`) an item of that inventory (any other is a `404`). |
+
+Answers are in the `data` envelope; ids are ULIDs and dates ISO 8601. Item, field and inventory ULIDs that belong to another inventory (or workspace) are a `404`, never a `403`.
 
 ## Administration
 
@@ -408,12 +463,13 @@ app/
                     RequireStatefulRequest: session endpoints are for the web front only;
                     AuthenticateSession (web, signed-in space) and AuthenticateApiSession (API): sign out the sessions of an account that signed out everywhere
     Requests/       Form requests (validation)
-    Resources/      JSON resources of the API (UserResource, WorkspaceResource, AdminUserResource)
+    Resources/      JSON resources of the API (UserResource, WorkspaceResource, AdminUserResource, InventoryResource, InventoryFieldResource, ItemResource, FieldTypeResource)
     Responses/      ApiError: the conflicts (409) and coded validation failures of the API
+  Inventories/      Inventories, InventoryFields, Items (the rules, under the locks), ItemValues (validates and presents the values of an item), the quota exceptions, and Fields/: one class per field type behind FieldType, with the FieldTypes registry
   Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator, post-migration hooks (see "Installing an instance")
   Mail/             LoginCodeMail, AccountDeletionCodeMail, WelcomeMail, and AfterResponse (sends a mail once the response has gone)
-  Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember
-  Policies/         WorkspacePolicy: who may do what with a workspace
+  Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember, Inventory, InventoryField, Item (Concerns/: HasUlidRouteKey; Casts/: JsonObject)
+  Policies/         WorkspacePolicy and InventoryPolicy: who may do what with a workspace, an inventory, its fields and its items
   Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: the rate limiters (sign-in, account, workspace creation) and the "admin" gate
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   Settings/         InstanceSettings: the settings of the instance, kept in the settings table

@@ -312,11 +312,12 @@ function removeConcurrencyRows(): void
  * ("deleted", "demoted", "refused:last_administrator"...).
  *
  * @param  list<list<int|string>>  $commands  The arguments of each process after the go file: the action, then its ids.
+ * @param  array<string, string>  $environment  Added to the environment of the processes (a quota, say).
  * @return list<string>
  */
-function actTogether(string $directory, array $commands): array
+function actTogether(string $directory, array $commands, array $environment = []): array
 {
-    $answers = ConcurrentChildren::run($directory, base_path('tests/Support/concurrent-action.php'), $commands);
+    $answers = ConcurrentChildren::run($directory, base_path('tests/Support/concurrent-action.php'), $commands, $environment);
     $words = array_map(fn (array $answer): string => $answer['result'].(isset($answer['reason']) ? ':'.$answer['reason'] : ''), $answers);
     sort($words);
 

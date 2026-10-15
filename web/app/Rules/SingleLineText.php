@@ -37,6 +37,15 @@ final class SingleLineText implements ValidationRule
     }
 
     /**
+     * The text as it is compared to find duplicates: trimmed, with the case and the form of the letters folded away
+     * ("Straße" and "STRASSE" are the same name).
+     */
+    public static function fold(string $text): string
+    {
+        return mb_convert_case(self::trim($text), MB_CASE_FOLD);
+    }
+
+    /**
      * Fails when the text holds a control character (line breaks and separators of lines or paragraphs included), a
      * text direction control, or is not valid UTF-8.
      *

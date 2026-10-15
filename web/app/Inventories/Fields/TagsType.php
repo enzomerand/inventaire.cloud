@@ -46,7 +46,7 @@ final class TagsType extends AbstractFieldType
 
         foreach ($value as $tag) {
             $tag = is_string($tag) ? SingleLineText::trim($tag) : $tag;
-            $key = is_string($tag) ? mb_convert_case($tag, MB_CASE_FOLD) : null;
+            $key = is_string($tag) ? SingleLineText::fold($tag) : null;
 
             if ($tag === '' || ($key !== null && isset($seen[$key]))) {
                 continue;
