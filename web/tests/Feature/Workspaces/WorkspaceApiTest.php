@@ -200,6 +200,15 @@ describe('renaming', function (): void {
         $this->actingAs(memberOfOne())->patchJson("/api/v1/workspaces/{$ulid}", ['name' => 'Home'], frontend())->assertNotFound();
     })->with(['01hzzzzzzzzzzzzzzzzzzzzzzz', '12', 'not-a-ulid']);
 
+    it('finds a workspace by its ULID in any case, on every engine', function (): void {
+        $user = memberOfOne();
+        $workspace = $user->workspaces()->sole();
+
+        $this->actingAs($user)->patchJson('/api/v1/workspaces/'.strtoupper($workspace->ulid), ['name' => 'Home'], frontend())
+            ->assertOk()
+            ->assertJsonPath('data.id', $workspace->ulid);
+    });
+
     it('validates the name', function (): void {
         $user = memberOfOne();
         $workspace = $user->workspaces()->sole();
@@ -312,6 +321,16 @@ describe('choosing the current workspace', function (): void {
 
         expect($stranger->json())->toBe($unknown->json())
             ->and($user->fresh()->current_workspace_id)->toBe($personal->id);
+    });
+
+    it('takes a ULID in any case', function (): void {
+        $user = memberOfOne();
+        $personal = $user->workspaces()->sole();
+        sharedWorkspace($user, 'Shop');
+
+        $this->actingAs($user->fresh())->putJson('/api/v1/me/current-workspace', ['workspace' => strtoupper($personal->ulid)], frontend())
+            ->assertOk()
+            ->assertJsonPath('data.id', $personal->ulid);
     });
 
     it('refuses a missing or malformed workspace', function (mixed $workspace): void {

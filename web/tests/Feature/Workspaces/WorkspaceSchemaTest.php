@@ -58,6 +58,31 @@ describe('the tables', function (): void {
     });
 });
 
+describe('the migrations', function (): void {
+    it('go back and forth', function (): void {
+        $workspaces = require database_path('migrations/2026_10_15_100000_create_workspaces_tables.php');
+        $deletionCodes = require database_path('migrations/2026_10_15_300000_create_account_deletion_codes_table.php');
+
+        $deletionCodes->down();
+        $workspaces->down();
+
+        try {
+            expect(Schema::hasTable('workspaces'))->toBeFalse()
+                ->and(Schema::hasTable('workspace_user'))->toBeFalse()
+                ->and(Schema::hasTable('account_deletion_codes'))->toBeFalse()
+                ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeFalse();
+        } finally {
+            $workspaces->up();
+            $deletionCodes->up();
+        }
+
+        expect(Schema::hasTable('workspaces'))->toBeTrue()
+            ->and(Schema::hasTable('workspace_user'))->toBeTrue()
+            ->and(Schema::hasTable('account_deletion_codes'))->toBeTrue()
+            ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeTrue();
+    });
+});
+
 describe('deleting', function (): void {
     it('a user deletes their memberships, with a raw query too', function (): void {
         $user = User::factory()->create();

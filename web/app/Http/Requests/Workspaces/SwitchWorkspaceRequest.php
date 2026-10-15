@@ -38,11 +38,24 @@ final class SwitchWorkspaceRequest extends FormRequest
     }
 
     /**
-     * The ULID of the workspace.
+     * The ULID of the workspace, in lowercase (the form it is stored in).
      */
     public function ulid(): string
     {
         return $this->string('workspace')->toString();
+    }
+
+    /**
+     * Lowers the case of the ULID before it is looked up: ULIDs are case-insensitive, and the engines do not agree
+     * on comparing strings.
+     */
+    protected function prepareForValidation(): void
+    {
+        $workspace = $this->input('workspace');
+
+        if (is_string($workspace)) {
+            $this->merge(['workspace' => strtolower($workspace)]);
+        }
     }
 
     /**

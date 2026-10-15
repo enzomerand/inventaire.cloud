@@ -47,6 +47,20 @@ final class Workspace extends Model
     }
 
     /**
+     * Finds a workspace by the ULID of a URL or of an API path, whatever its case.
+     *
+     * ULIDs are case-insensitive but stored in lowercase, which PostgreSQL compares exactly and MySQL and MariaDB
+     * (by default) do not: lowering the case here makes every engine answer the same.
+     *
+     * @param  mixed  $value
+     * @param  string|null  $field
+     */
+    public function resolveRouteBinding($value, $field = null): ?Model
+    {
+        return parent::resolveRouteBinding(is_string($value) ? strtolower($value) : $value, $field);
+    }
+
+    /**
      * The users who belong to the workspace, each with a `pivot` carrying their role.
      *
      * @return BelongsToMany<User, $this, WorkspaceMember>
