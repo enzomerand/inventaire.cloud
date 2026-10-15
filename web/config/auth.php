@@ -106,4 +106,25 @@ return [
         'failures_per_email' => ['attempts' => 10, 'minutes' => 60],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Account deletion and export
+    |--------------------------------------------------------------------------
+    |
+    | Deleting an account is confirmed with a 6-digit code sent to its address:
+    | a code of its own, valid for a few minutes and a few wrong guesses, that
+    | has nothing to do with the sign-in codes (see App\Auth\AccountDeletionCodes).
+    | Sending is limited per user over a short and a longer period, typing codes
+    | back per user and minute, and the export of the account's data per user.
+    */
+    'account_deletion' => [
+        'lifetime_minutes' => 10,
+        'max_attempts' => 5,
+        'send_per_user' => ['attempts' => 3, 'minutes' => 10],
+        'send_per_user_hourly' => ['attempts' => 6, 'minutes' => 60],
+        'verify_per_minute' => 5,
+    ],
+
+    'account_export' => ['attempts' => 5, 'minutes' => 10],
+
 ];

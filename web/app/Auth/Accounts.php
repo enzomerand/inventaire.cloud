@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Auth;
 
+use App\Database\DeadlockRetries;
 use App\Models\User;
+use App\Workspaces\Workspaces;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\UniqueConstraintViolationException;
 
@@ -15,10 +17,17 @@ use Illuminate\Database\UniqueConstraintViolationException;
  * in canonical form (see {@see EmailAddress::normalize()}) and that two requests
  * racing for the same address end up with one account. An address is marked
  * verified when its owner first signs in, with a code sent to it.
+ *
+ * Every account has at least one workspace: a personal one is created with the
+ * account, in the same transaction, so that no path (sign-up, installation,
+ * `inventaire:make-admin`) can leave an account without one.
  */
 final class Accounts
 {
-    public function __construct(private readonly DatabaseManager $db) {}
+    public function __construct(
+        private readonly DatabaseManager $db,
+        private readonly Workspaces $workspaces,
+    ) {}
 
     /**
      * Creates an account.
@@ -39,7 +48,10 @@ final class Accounts
             $user->is_admin = $administrator;
 
             // A transaction of its own (a savepoint inside another one) so that a refused insert leaves no aborted transaction behind.
-            $this->db->transaction(fn (): bool => $user->save());
+            $this->db->transaction(function () use ($user): void {
+                $user->save();
+                $this->workspaces->createPersonal($user);
+            });
 
             return [$user, true];
         } catch (UniqueConstraintViolationException) {
@@ -53,7 +65,13 @@ final class Accounts
      * or promotes the one that exists. Doing it again changes nothing, which
      * is what the installation (that can be run again) and recovery need.
      *
-     * An existing account keeps its name: the name only matters for a new one.
+     * An existing account keeps its name: the name only matters for a new one. An existing account that has no
+     * workspace (it predates them) is given its personal one.
+     *
+     * It is retried as a whole when the database picks it as the loser of a deadlock, as two accounts getting their
+     * first workspace at the same moment can: the transactions it opens enclose those of {@see Workspaces}, whose own
+     * retries do not apply inside another transaction (a deadlock rolls the whole of it back). Call it outside any
+     * transaction, as the installer and the command line do: inside one, that transaction is the one to retry.
      *
      * @param  string  $email  Address, in any case.
      * @param  string  $name  Name of the account, used when it has to be created.
@@ -62,6 +80,18 @@ final class Accounts
     public function administrator(string $email, string $name): array
     {
         $email = EmailAddress::normalize($email);
+
+        return DeadlockRetries::run(fn (): array => $this->makeAdministrator($email, $name));
+    }
+
+    /**
+     * One attempt at {@see self::administrator()}.
+     *
+     * @param  string  $email  Address, in canonical form.
+     * @return array{0: User, 1: AdministratorChange}
+     */
+    private function makeAdministrator(string $email, string $name): array
+    {
         $user = User::query()->where('email', $email)->first();
 
         if ($user === null) {
@@ -73,11 +103,16 @@ final class Accounts
         }
 
         if ($user->is_admin) {
+            $this->workspaces->ensure($user);
+
             return [$user, AdministratorChange::Unchanged];
         }
 
-        $user->is_admin = true;
-        $user->save();
+        $this->db->transaction(function () use ($user): void {
+            $user->is_admin = true;
+            $user->save();
+            $this->workspaces->ensure($user);
+        });
 
         return [$user, AdministratorChange::Promoted];
     }

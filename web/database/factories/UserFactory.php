@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Models\User;
+use App\Workspaces\Workspaces;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
@@ -49,6 +50,19 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'is_admin' => true,
         ]);
+    }
+
+    /**
+     * Give the account its personal workspace, as signing up does.
+     *
+     * The factory otherwise builds a bare user (as accounts that predate workspaces were), which is what most
+     * tests want: they ask for the workspace when they need one.
+     */
+    public function withPersonalWorkspace(): static
+    {
+        return $this->afterCreating(function (User $user): void {
+            app(Workspaces::class)->createPersonal($user);
+        });
     }
 
     /**

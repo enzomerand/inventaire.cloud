@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\AuthenticateApiSession;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Laravel\Sanctum\Sanctum;
 
 /*
- * Only what differs from the package's own configuration is set here: the rest (guard, token expiry and prefix,
- * middleware) is merged from vendor/laravel/sanctum/config/sanctum.php.
+ * Only what differs from the package's own configuration is set here: the rest (guard, token expiry and prefix)
+ * is merged from vendor/laravel/sanctum/config/sanctum.php.
  */
 
 return [
@@ -26,5 +29,23 @@ return [
         'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1',
         Sanctum::currentApplicationUrlWithPort(),
     ))),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sanctum middleware
+    |--------------------------------------------------------------------------
+    |
+    | The package's defaults, but for `authenticate_session`: the application's
+    | own, which also refuses a signed-in session that has no fingerprint (see
+    | App\Auth\SessionFingerprint). The array is merged as a whole, so the other
+    | two entries are repeated here as the package has them.
+    |
+    */
+
+    'middleware' => [
+        'authenticate_session' => AuthenticateApiSession::class,
+        'encrypt_cookies' => EncryptCookies::class,
+        'validate_csrf_token' => ValidateCsrfToken::class,
+    ],
 
 ];

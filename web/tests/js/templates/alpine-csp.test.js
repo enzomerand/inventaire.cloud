@@ -71,6 +71,67 @@ describe('Blade templates follow the Alpine CSP convention', () => {
 });
 
 /**
+ * Bootstrap and Tabler display utilities (`d-flex`, `d-md-block`, `d-none`...). Every one of them is declared
+ * `!important`, so it beats the inline `display: none` that Alpine's `x-show` sets: the element would never hide.
+ * The print variants (`d-print-*`) only apply to printed pages and are fine.
+ */
+const DISPLAY_UTILITY = /^d-(?!print-)[a-z-]+$/;
+
+/**
+ * Lists the opening tags of a template that carry `x-show` together with a display utility class.
+ *
+ * Tags are read with their attributes quoted-aware, so a tag spread over several lines, or holding a `>` inside an
+ * expression (`x-show="items.length > 0"`), is read whole.
+ *
+ * @param {string} source Blade source of a template.
+ * @returns {string[]} The offending tags, as written, each with the utilities it carries.
+ */
+function showWithDisplayUtility(source) {
+    const tag = /<([a-zA-Z][\w:.-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
+    const offenders = [];
+
+    for (const [opening, name, attributes] of withoutBladeComments(source).matchAll(tag)) {
+        const classes = attributes.match(/\sclass\s*=\s*"([^"]*)"/)?.[1].split(/\s+/) ?? [];
+        const utilities = classes.filter((token) => DISPLAY_UTILITY.test(token));
+
+        if (/\sx-show\s*=/.test(attributes) && utilities.length > 0) {
+            offenders.push(`<${name}> with ${utilities.join(' ')}: ${opening.replace(/\s+/g, ' ').slice(0, 120)}`);
+        }
+    }
+
+    return offenders;
+}
+
+describe('x-show is not defeated by a display utility', () => {
+    const templates = bladeFiles(VIEWS).map((file) => [relative(ROOT, file), readFileSync(file, 'utf8')]);
+
+    it.each(templates)(
+        '%s never puts x-show and a d-* class on the same element (wrap the content in an inner element instead)',
+        (_file, source) => {
+            expect(showWithDisplayUtility(source)).toEqual([]);
+        },
+    );
+
+    it('spots the combination, on one line or several, and leaves the rest alone', () => {
+        const bad = `<form class="d-flex gap-2" x-show="isEditing(item)">`;
+        const spread = `<div\n    class="card d-md-block"\n    x-show="items.length > 0"\n>`;
+        const fine = [
+            `<div class="d-flex gap-2"><span x-show="busy"></span></div>`,
+            `<div class="d-print-none" x-show="open"></div>`,
+            `<div class="btn" :class="{ 'd-flex': open }" x-show="open"></div>`,
+            `<div class="d-flex"></div>`,
+        ];
+
+        expect(showWithDisplayUtility(bad)).toHaveLength(1);
+        expect(showWithDisplayUtility(spread)).toHaveLength(1);
+
+        for (const html of fine) {
+            expect(showWithDisplayUtility(html), html).toEqual([]);
+        }
+    });
+});
+
+/**
  * Turns the Blade source of the toast stack into plain HTML. Only the few
  * constructs it uses are supported; anything else fails loudly so this helper
  * is extended on purpose rather than silently mis-rendering.

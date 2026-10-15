@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Auth\EmailAddress;
+use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Services\ClientNetwork;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -31,7 +34,61 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Every sign-in, "remember me" cookie included, leaves its session with the account's fingerprint (see the class).
+        Event::listen(Login::class, StoreSessionFingerprint::class);
+
         $this->registerSignInLimiters();
+        $this->registerAccountLimiters();
+        $this->registerWorkspaceLimiters();
+    }
+
+    /**
+     * The rate limiter of the workspace endpoints that create rows for anybody who is signed in (limit in
+     * config/workspaces.php, `create_per_hour`), keyed on the user.
+     */
+    private function registerWorkspaceLimiters(): void
+    {
+        RateLimiter::for('workspace-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('workspaces.create_per_hour'))
+            ->by('workspace-creation:'.$this->signedInKey($request)));
+    }
+
+    /**
+     * The rate limiters of the account endpoints that send a mail, confirm a deletion or hand out all of the
+     * account's data (limits in config/auth.php, `account_deletion` and `account_export`).
+     *
+     * They key on the signed-in user: these endpoints are never reached by anybody else.
+     */
+    private function registerAccountLimiters(): void
+    {
+        RateLimiter::for('account-deletion-code', function (Request $request): array {
+            $short = config()->array('auth.account_deletion.send_per_user');
+            $long = config()->array('auth.account_deletion.send_per_user_hourly');
+            $who = $this->signedInKey($request);
+
+            return [
+                Limit::perMinutes((int) $short['minutes'], (int) $short['attempts'])->by('deletion-code:'.$who),
+                Limit::perMinutes((int) $long['minutes'], (int) $long['attempts'])->by('deletion-code-hourly:'.$who),
+            ];
+        });
+
+        RateLimiter::for('account-deletion', fn (Request $request): Limit => Limit::perMinute(config()->integer('auth.account_deletion.verify_per_minute'))
+            ->by('deletion:'.$this->signedInKey($request)));
+
+        RateLimiter::for('account-export', function (Request $request): Limit {
+            $export = config()->array('auth.account_export');
+
+            return Limit::perMinutes((int) $export['minutes'], (int) $export['attempts'])->by('export:'.$this->signedInKey($request));
+        });
+    }
+
+    /**
+     * Who a request is from, for a limiter that runs after authentication: the user, or the network as a fallback.
+     */
+    private function signedInKey(Request $request): string
+    {
+        $user = $request->user();
+
+        return $user === null ? 'ip:'.ClientNetwork::key($request->ip()) : 'user:'.$user->getAuthIdentifier();
     }
 
     /**

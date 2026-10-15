@@ -8,11 +8,13 @@ use App\Auth\Accounts;
 use App\Auth\LoginCodeOutcome;
 use App\Auth\LoginCodes;
 use App\Auth\LoginCodeVerdict;
+use App\Database\DeadlockRetries;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\VerifyLoginCodeRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\LocaleResolver;
+use App\Workspaces\Workspaces;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -28,13 +30,16 @@ use Illuminate\Support\Str;
  * somebody who holds a valid code for it.
  *
  * Spending the code and everything that is saved because of it (the account,
- * its verified address, its language) is one transaction: if any of it fails,
+ * its verified address, its language, its workspace) is one transaction: if any of it fails,
  * the code is still there for the next try. The session is opened once the
  * transaction has committed.
  */
 final class VerifyCodeController extends Controller
 {
-    public function __construct(private readonly DatabaseManager $db) {}
+    public function __construct(
+        private readonly DatabaseManager $db,
+        private readonly Workspaces $workspaces,
+    ) {}
 
     /**
      * Checks the code and signs the person in, creating the account if needed.
@@ -45,7 +50,11 @@ final class VerifyCodeController extends Controller
         $code = $request->code();
         $name = $request->name();
 
-        $outcome = $this->db->transaction(fn (): JsonResponse|User => $this->accept($email, $code, $name, $codes, $accounts, $locales));
+        // Retried when the database picks it as the loser of a deadlock: accounts found without a workspace that sign
+        // in at the same moment can wait for each other's place among the memberships (see Workspaces::ensure()); a
+        // new account does not, it is given its workspace without that read. Nothing of the attempt that lost is
+        // kept, the code included, so the next one starts from the same state.
+        $outcome = DeadlockRetries::run(fn (): JsonResponse|User => $this->db->transaction(fn (): JsonResponse|User => $this->accept($email, $code, $name, $codes, $accounts, $locales)));
 
         if ($outcome instanceof JsonResponse) {
             return $outcome;
@@ -93,8 +102,11 @@ final class VerifyCodeController extends Controller
     }
 
     /**
-     * Makes sure the account carries a verified address, a language and a
-     * "remember me" token, so that opening the session afterwards saves nothing.
+     * Makes sure the account carries a verified address, a language, a
+     * "remember me" token and a workspace, so that opening the session
+     * afterwards saves nothing and the person's space always has somewhere to
+     * work (an account that predates workspaces, or lost its last one, gets
+     * its personal workspace here).
      */
     private function prepareSession(User $user, LocaleResolver $locales): void
     {
@@ -113,6 +125,8 @@ final class VerifyCodeController extends Controller
         }
 
         $user->save();
+
+        $this->workspaces->ensure($user);
     }
 
     /**

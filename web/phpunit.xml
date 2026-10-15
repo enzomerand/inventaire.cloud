@@ -18,6 +18,8 @@
         </include>
     </source>
     <php>
+        <!-- The whole suite runs in one process and boots the application for every test: its memory use grows with the number of tests, and had reached the default 128M (the Blade icons manifest, rebuilt in the sandbox, is what ran out). -->
+        <ini name="memory_limit" value="512M"/>
         <!-- APP_ENV=testing makes Laravel load .env.testing (empty) instead of the real .env: see that file. -->
         <env name="APP_ENV" value="testing"/>
         <!-- Test-only key, obviously fake (32 times the letter "a"): it protects nothing. The real one lives in the developer's .env, which tests never read. -->

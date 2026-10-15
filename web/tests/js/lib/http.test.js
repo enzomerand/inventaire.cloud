@@ -181,6 +181,17 @@ describe('http helper', () => {
             expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
             expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
         });
+
+        it('sends a body with a delete that asks for one (a confirmation code), as JSON', async () => {
+            answerWith(() => new Response(null, { status: 204 }));
+
+            await http.delete('/me', { data: { code: '123456' } });
+
+            const init = fetchMock.mock.calls[0][1];
+            expect(init.method).toBe('DELETE');
+            expect(init.body).toBe('{"code":"123456"}');
+            expect(init.headers['Content-Type']).toBe('application/json');
+        });
     });
 
     describe('successful responses', () => {

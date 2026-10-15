@@ -21,6 +21,10 @@
     --app-toast-width: 22rem;
     --app-toast-offset: 1rem;
     --app-skip-link-offset: 0.75rem;
+
+    /* Header menus: widest they grow, and the gap kept to the edge of the screen on a phone. */
+    --app-dropdown-max-width: 24rem;
+    --app-dropdown-gutter: 0.75rem;
 }
 
 /*
@@ -68,4 +72,38 @@
 
 .app-toasts .toast {
     --tblr-toast-max-width: var(--app-toast-width);
+}
+
+/* The current workspace in the header: long names are cut instead of pushing the account menu away. */
+.app-workspace-name {
+    max-width: 12rem;
+}
+
+/*
+ * Header menus (language, workspaces, account). They are as wide as their longest entry, but never wider than the
+ * screen, and a long workspace name is cut instead of stretching the menu.
+ */
+.navbar .dropdown-menu {
+    max-width: min(var(--app-dropdown-max-width), calc(100vw - 2 * var(--app-dropdown-gutter)));
+}
+
+.navbar .dropdown-item {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/*
+ * Below the breakpoint where the header expands (md), the menus hang from the header, not from their own button.
+ * The buttons sit wherever the brand leaves room, so a menu aligned to the end of its button can run past the left
+ * edge of a phone (the language and workspace menus did). Anchored to the header, an end-aligned menu is flush with
+ * the right edge of the screen, whichever button opened it.
+ */
+@media (max-width: 767.98px) {
+    .navbar .nav-item.dropdown {
+        position: static;
+    }
+
+    .navbar .dropdown-menu {
+        margin-inline: var(--app-dropdown-gutter);
+    }
 }
