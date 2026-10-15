@@ -124,6 +124,7 @@
         data-url="{{ route('api.v1.inventories.show', ['inventory' => $inventory->ulid], absolute: false) }}"
         data-items-url="{{ route('api.v1.inventories.items.index', ['inventory' => $inventory->ulid], absolute: false) }}"
         data-item-url="{{ route('api.v1.inventories.items.show', ['inventory' => $inventory->ulid, 'item' => '__id__'], absolute: false) }}"
+        data-workspace-page="{{ route('app.workspace', ['workspace' => $workspace->ulid], absolute: false) }}"
         data-can-edit="{{ $abilities['edit_items'] ? '1' : '0' }}"
         data-can-manage-fields="{{ $abilities['manage_fields'] ? '1' : '0' }}"
     >
@@ -243,7 +244,7 @@
                         <div class="alert alert-danger" role="alert" x-show="formError" x-text="formError"></div>
 
                         <template x-if="confirming">
-                            <p class="m-0">{{ __('Delete this item? This cannot be undone.') }}</p>
+                            <p class="m-0" role="alert">{{ __('Delete this item? This cannot be undone.') }}</p>
                         </template>
 
                         <template x-if="isForm && !confirming">
@@ -336,16 +337,22 @@
                                             </div>
                                         </template>
 
+                                        {{-- A color picker cannot be empty and fires no event for the color it opens on, so a field without a
+                                             color shows "Set a color" (which gives it black, to move on from) instead of a picker. --}}
                                         <template x-if="control(field) === 'color'">
                                             <div class="d-flex align-items-center gap-2">
+                                                <span class="text-secondary" x-show="!hasText(field)">{{ __('Not set') }}</span>
+                                                <button type="button" class="btn btn-sm" :id="controlId(field)" x-show="!hasText(field)" @click="chooseColor(field)">{{ __('Set a color') }}</button>
                                                 <input
-                                                    :id="controlId(field)"
+                                                    :id="controlId(field) + '-picker'"
                                                     type="color"
                                                     class="form-control form-control-color"
-                                                    :value="colorValue(field)"
+                                                    x-show="hasText(field)"
+                                                    :value="inputValue(field)"
+                                                    :aria-label="field.name"
                                                     @input="onInput(field, $event)"
                                                 >
-                                                <span class="font-monospace text-secondary" x-text="inputValue(field)"></span>
+                                                <span class="font-monospace text-secondary" x-show="hasText(field)" x-text="inputValue(field)"></span>
                                                 <button type="button" class="btn btn-sm" x-show="hasText(field)" @click="clearValue(field)">{{ __('Clear') }}</button>
                                             </div>
                                         </template>
@@ -374,8 +381,14 @@
                         <button type="button" class="btn" x-show="isForm && !confirming" data-bs-dismiss="modal">{{ __('Cancel') }}</button>
                         <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
                         <button type="submit" class="btn btn-primary" x-show="isForm && !confirming" :disabled="busy">{{ __('Save') }}</button>
-                        <button type="button" class="btn" x-show="confirming" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
-                        <button type="button" class="btn btn-danger" x-show="confirming" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
+                        {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor
+                             is put on the confirming button the moment the question is asked. --}}
+                        <template x-if="confirming">
+                            <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
+                        </template>
+                        <template x-if="confirming">
+                            <button type="button" class="btn btn-danger" x-ref="confirmDelete" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
+                        </template>
                     </div>
                 </form>
             </div>

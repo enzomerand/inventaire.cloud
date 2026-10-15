@@ -4,6 +4,7 @@ import inventoryFields from '../../../resources/js/components/inventory-fields.j
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
+import { redirectTo } from '../../../resources/js/lib/page.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -11,6 +12,7 @@ vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     return { ...original, http: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() } };
 });
 vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
+vi.mock('../../../resources/js/lib/page.js', () => ({ redirectTo: vi.fn() }));
 vi.mock('../../../resources/js/lib/modal.js', () => ({
     showModal: vi.fn(),
     hideModal: vi.fn(),
@@ -73,6 +75,7 @@ describe('the fields of an inventory', () => {
                 fieldsUrl: INVENTORY + '/fields',
                 orderUrl: INVENTORY + '/fields/order',
                 fieldUrl: INVENTORY + '/fields/__id__',
+                workspacePage: '/app/w/shop',
                 types: JSON.stringify(TYPES),
                 currencies: JSON.stringify(CURRENCIES),
             },
@@ -178,6 +181,17 @@ describe('the fields of an inventory', () => {
             await component.load();
 
             expect(notify).toHaveBeenCalledWith('danger', 'Conflict');
+        });
+
+        it('takes the person back to the workspace when the inventory itself is gone', async () => {
+            const gone = new HttpError(404, 'This item no longer exists.');
+            gone.reported = true;
+            http.get.mockRejectedValue(gone);
+
+            await component.load();
+
+            expect(redirectTo).toHaveBeenCalledWith('/app/w/shop');
+            expect(notify).not.toHaveBeenCalled();
         });
     });
 
@@ -462,19 +476,59 @@ describe('the fields of an inventory', () => {
     });
 
     describe('changing a field', () => {
-        it('opens the dialog with the field as it is, its type fixed', () => {
-            component.startEdit(FIELDS[1]);
+        it('opens the dialog with the field as it is, its type fixed', async () => {
+            await component.startEdit(FIELDS[1]);
 
             expect(component.editing).toBe(true);
             expect(component.modalTitle).toBe('Edit the field');
             expect(component.form).toMatchObject({ id: 'b', type: 'number', name: 'Weight', required: false });
             expect(component.form.options).toMatchObject({ decimals: '2', unit: 'kg', min: '0', max: '' });
             expect(showModal).toHaveBeenCalledWith(fieldModal);
+            expect(component.busy).toBe(false);
+        });
+
+        it('reads the list again before it opens, and shows the field as the server holds it now', async () => {
+            http.get.mockClear();
+            http.get.mockResolvedValue(
+                inventoryAnswer([FIELDS[0], { ...FIELDS[1], name: 'Mass', options: { decimals: 3 } }, FIELDS[2]]),
+            );
+
+            await component.startEdit(FIELDS[1]);
+
+            expect(http.get).toHaveBeenCalledWith(INVENTORY);
+            expect(component.form).toMatchObject({ id: 'b', name: 'Mass' });
+            expect(component.form.options.decimals).toBe('3');
+        });
+
+        it('opens nothing for a field that was deleted meanwhile, and shows what is left', async () => {
+            http.get.mockResolvedValue(inventoryAnswer([FIELDS[0], FIELDS[2]]));
+
+            await component.startEdit(FIELDS[1]);
+
+            expect(showModal).not.toHaveBeenCalled();
+            expect(component.fields.map((one) => one.id)).toEqual(['a', 'c']);
+            expect(component.busy).toBe(false);
+        });
+
+        it('opens nothing when the list could not be read', async () => {
+            http.get.mockRejectedValue(new HttpError(0, 'Network down', { kind: 'network' }));
+
+            await component.startEdit(FIELDS[1]);
+
+            expect(showModal).not.toHaveBeenCalled();
+            expect(component.loadFailed).toBe(true);
+            expect(component.busy).toBe(false);
+        });
+
+        it('ignores a second click while the list is being read', async () => {
+            await Promise.all([component.startEdit(FIELDS[1]), component.startEdit(FIELDS[1])]);
+
+            expect(showModal).toHaveBeenCalledTimes(1);
         });
 
         it('sends the name, whether it is required and the options, without the type', async () => {
             http.patch.mockResolvedValue({ data: FIELDS[1] });
-            component.startEdit(FIELDS[1]);
+            await component.startEdit(FIELDS[1]);
             component.form.name = 'Mass';
             component.form.required = true;
             component.form.options.min = '';
@@ -492,7 +546,7 @@ describe('the fields of an inventory', () => {
 
         it('keeps the id of a choice that is renamed or recolored, and takes a removed one out', async () => {
             http.patch.mockResolvedValue({ data: FIELDS[2] });
-            component.startEdit(FIELDS[2]);
+            await component.startEdit(FIELDS[2]);
             component.form.options.choices[0].label = 'Brand new';
             component.selectColor(component.form.options.choices[0], { target: { value: 'blue' } });
             component.removeChoice(1);
@@ -509,14 +563,79 @@ describe('the fields of an inventory', () => {
             });
         });
 
+        it('does not send the choices when the person only renamed the field: choices added meanwhile survive', async () => {
+            http.patch.mockResolvedValue({ data: FIELDS[2] });
+            await component.startEdit(FIELDS[2]);
+            component.form.name = 'Condition';
+
+            await component.save();
+
+            expect(http.patch).toHaveBeenCalledWith(INVENTORY + '/fields/c', {
+                name: 'Condition',
+                required: false,
+                options: {},
+            });
+        });
+
+        it('sends the choices of a new select, which has no earlier list to compare with', async () => {
+            http.post.mockResolvedValue({ data: FIELDS[2] });
+            component.startCreate();
+            component.selectType({ target: { value: 'select' } });
+            component.form.name = 'State';
+            component.form.options.choices[0].label = 'New';
+
+            await component.save();
+
+            expect(http.post.mock.calls[0][1].options).toEqual({ choices: [{ label: 'New', color: null }] });
+        });
+
+        it('forgets the earlier list when a new field is added after one was changed', async () => {
+            await component.startEdit(FIELDS[2]);
+            component.startCreate();
+
+            expect(component.opened).toBeNull();
+        });
+
         it('reads the list again after a change', async () => {
             http.patch.mockResolvedValue({ data: FIELDS[0] });
-            component.startEdit(FIELDS[0]);
+            await component.startEdit(FIELDS[0]);
             http.get.mockClear();
 
             await component.save();
 
             expect(http.get).toHaveBeenCalledWith(INVENTORY);
+        });
+
+        it('closes the dialog and shows what is left when the field was deleted meanwhile', async () => {
+            const gone = new HttpError(404, 'This item no longer exists.');
+            gone.reported = true;
+            http.patch.mockRejectedValue(gone);
+            await component.startEdit(FIELDS[1]);
+            component.form.name = 'Mass';
+            http.get.mockClear();
+            http.get.mockResolvedValue(inventoryAnswer([FIELDS[0], FIELDS[2]]));
+
+            await component.save();
+            await vi.waitFor(() => expect(component.fields.map((one) => one.id)).toEqual(['a', 'c']));
+
+            expect(hideModal).toHaveBeenCalledWith(fieldModal);
+            expect(http.get).toHaveBeenCalledWith(INVENTORY);
+            expect(notify).not.toHaveBeenCalled();
+            expect(component.busy).toBe(false);
+        });
+
+        it('takes the person back to the workspace when the inventory itself is gone', async () => {
+            const gone = new HttpError(404, 'This item no longer exists.');
+            gone.reported = true;
+            http.post.mockRejectedValue(gone);
+            component.startCreate();
+            component.form.name = 'Name';
+            http.get.mockRejectedValue(gone);
+
+            await component.save();
+            await vi.waitFor(() => expect(redirectTo).toHaveBeenCalledWith('/app/w/shop'));
+
+            expect(hideModal).toHaveBeenCalledWith(fieldModal);
         });
     });
 
@@ -557,6 +676,21 @@ describe('the fields of an inventory', () => {
             await Promise.all([component.confirmDelete(), component.confirmDelete()]);
 
             expect(http.delete).toHaveBeenCalledTimes(1);
+        });
+
+        it('closes the dialog and shows what is left when the field was already deleted by somebody else', async () => {
+            const gone = new HttpError(404, 'This item no longer exists.');
+            gone.reported = true;
+            http.delete.mockRejectedValue(gone);
+            component.askDelete(FIELDS[1]);
+            http.get.mockResolvedValue(inventoryAnswer([FIELDS[0], FIELDS[2]]));
+
+            await component.confirmDelete();
+
+            expect(hideModal).toHaveBeenCalledWith(deleteModal);
+            expect(component.fields.map((one) => one.id)).toEqual(['a', 'c']);
+            expect(notify).not.toHaveBeenCalled();
+            expect(component.busy).toBe(false);
         });
 
         it('keeps the dialog open when the deletion fails', async () => {

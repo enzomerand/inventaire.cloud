@@ -35,9 +35,10 @@ import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
+import { redirectTo } from '../lib/page.js';
 
-/** The color a color picker shows while the field has none. */
-const NO_COLOR = '#000000';
+/** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
+const FIRST_COLOR = '#000000';
 
 /** The prefix of the names the API gives the errors of the values of an item (`values.<field ULID>`). */
 const VALUES_PREFIX = 'values.';
@@ -138,6 +139,11 @@ export default function inventoryItems() {
         /** Endpoint of one item, with `__id__` where its ULID goes, from `data-item-url` on the component root. */
         get itemUrl() {
             return this.$root.dataset.itemUrl;
+        },
+
+        /** Page of the workspace the inventory belongs to, where the person goes if it was deleted, from `data-workspace-page`. */
+        get workspacePage() {
+            return this.$root.dataset.workspacePage;
         },
 
         /** Whether the person may add, change and delete items, from `data-can-edit` on the component root. */
@@ -243,7 +249,10 @@ export default function inventoryItems() {
                 this.rebuild();
             } catch (error) {
                 this.inventoryFailed = true;
-                this.fail(error);
+
+                if (!this.leaveIfGone(error)) {
+                    this.fail(error);
+                }
             } finally {
                 this.loadingInventory = false;
             }
@@ -287,7 +296,10 @@ export default function inventoryItems() {
             } catch (error) {
                 if (ticket === this.ticket) {
                     this.itemsFailed = true;
-                    this.fail(error);
+
+                    if (!this.leaveIfGone(error)) {
+                        this.fail(error);
+                    }
                 }
             } finally {
                 if (ticket === this.ticket) {
@@ -324,14 +336,32 @@ export default function inventoryItems() {
          * How each field shows its value in an item.
          *
          * @param {Item} item
+         * @param {boolean} [full] Whether to show the whole values (the details of an item) rather than what fits a table cell.
          * @returns {Record<string, any>[]}
          */
-        cellsOf(item) {
+        cellsOf(item, full = false) {
             return this.fields.map((field) => ({
                 key: field.id,
                 name: field.name,
-                ...describeValue(field, item.values?.[field.id]),
+                ...describeValue(field, item.values?.[field.id], { full }),
             }));
+        },
+
+        /**
+         * Takes the person back to the workspace when the inventory itself is gone (a 404 on its own address: it was deleted
+         * by somebody else, or the person was taken out of the workspace), since nothing on this page means anything now.
+         *
+         * @param {unknown} error
+         * @returns {boolean} Whether the person was sent away.
+         */
+        leaveIfGone(error) {
+            if (!(error instanceof HttpError) || error.status !== 404) {
+                return false;
+            }
+
+            redirectTo(this.workspacePage);
+
+            return true;
         },
 
         /** Goes to the previous page of items. */
@@ -405,7 +435,7 @@ export default function inventoryItems() {
                 ]),
             );
             this.original = JSON.parse(JSON.stringify(this.values));
-            this.details = item === null ? [] : this.cellsOf(item);
+            this.details = item === null ? [] : this.cellsOf(item, true);
             showModal(this.$refs.modal);
         },
 
@@ -754,17 +784,19 @@ export default function inventoryItems() {
         },
 
         /**
-         * What the color picker of a field shows: its color, or black while it has none (a picker cannot be empty).
+         * Gives a field its first color, black, which the picker then shows and lets the person move on from. A picker cannot
+         * be empty and fires no event for the color it opens on, so black could never be chosen if the field showed the
+         * picker while it had no color: a field without one shows "Set a color" instead.
          *
          * @param {Field} field
-         * @returns {string}
+         * @returns {void}
          */
-        colorValue(field) {
-            return this.values[field.id] || NO_COLOR;
+        chooseColor(field) {
+            this.set(field, FIRST_COLOR);
         },
 
         /**
-         * Whether a field holds a text (a color has to be cleared with its own button).
+         * Whether a field holds a text (a color is emptied with its own button).
          *
          * @param {Field} field
          * @returns {boolean}
@@ -874,6 +906,8 @@ export default function inventoryItems() {
          */
         askDelete() {
             this.confirming = true;
+            // The button that was pressed is gone: the keyboard goes to the one that confirms.
+            this.$nextTick(() => this.$refs.confirmDelete?.focus());
         },
 
         /**
@@ -933,15 +967,22 @@ export default function inventoryItems() {
 
         /**
          * Tells the person why a change to an item failed. An item that is gone (the helper has said so) closes the dialog and
-         * reads the page again: what is shown is not what the server holds any more.
+         * reads the page again: what is shown is not what the server holds any more. An inventory that is gone sends the
+         * person back to the workspace.
          *
          * @param {unknown} error
          * @returns {void}
          */
         failChange(error) {
-            if (error instanceof HttpError && error.status === 404 && this.itemId !== null) {
-                hideModal(this.$refs.modal);
-                this.loadItems(this.page);
+            if (error instanceof HttpError && error.status === 404) {
+                if (this.itemId === null) {
+                    // Adding an item: the address that is gone is the inventory's own.
+                    this.leaveIfGone(error);
+                } else {
+                    hideModal(this.$refs.modal);
+                    // If it is the inventory that is gone, this reading finds out and takes the person away.
+                    this.loadItems(this.page);
+                }
 
                 return;
             }

@@ -18,6 +18,7 @@
         x-data="inventoryFields"
         data-url="{{ route('api.v1.inventories.show', ['inventory' => $inventory->ulid], absolute: false) }}"
         data-fields-url="{{ route('api.v1.inventories.fields.store', ['inventory' => $inventory->ulid], absolute: false) }}"
+        data-workspace-page="{{ route('app.workspace', ['workspace' => $workspace->ulid], absolute: false) }}"
         data-order-url="{{ route('api.v1.inventories.fields.order', ['inventory' => $inventory->ulid], absolute: false) }}"
         data-field-url="{{ route('api.v1.inventories.fields.update', ['inventory' => $inventory->ulid, 'field' => '__id__'], absolute: false) }}"
         data-types="{{ json_encode($types, JSON_THROW_ON_ERROR) }}"

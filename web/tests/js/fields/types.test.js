@@ -161,6 +161,18 @@ describe('showing a value', () => {
             expect(describeValue(field('text'), 'Hammer')).toMatchObject({ kind: 'text', text: 'Hammer' });
         });
 
+        it('shows a long text whole, with its line breaks, in the details of an item', () => {
+            const long = 'Line one\nLine two ' + 'x'.repeat(100);
+            const cell = describeValue(field('textarea'), long, { full: true });
+
+            expect(cell).toMatchObject({ kind: 'text', text: long, multiline: true, title: null });
+            expect(describeValue(field('textarea'), long).multiline).toBe(false);
+            expect(describeValue(field('text'), 'Hammer', { full: true })).toMatchObject({
+                text: 'Hammer',
+                multiline: false,
+            });
+        });
+
         it('shows a text with markup as text, never as markup', () => {
             const cell = describeValue(field('text'), '<img src=x onerror=alert(1)>');
 
@@ -197,6 +209,15 @@ describe('showing a value', () => {
 
             document.documentElement.lang = 'fr';
             expect(plain(describeValue(kilograms, '1234.50').text)).toBe('1 234,50 kg');
+        });
+
+        it('shows a stored number with the decimals it was written with when the field has fewer now, never rounded', () => {
+            expect(describeValue(field('number', { decimals: 0, unit: 'kg' }), '12.50').text).toBe('12.50 kg');
+            expect(describeValue(field('number', { decimals: 1 }), '12.567').text).toBe('12.567');
+            expect(describeValue(field('money', { currency: 'EUR', decimals: 0 }), '12.50').text).toBe('€12.50');
+            expect(describeValue(field('money', { currency: 'EUR', decimals: 2 }), '12.5').text).toBe('€12.50');
+            expect(describeValue(field('money', { currency: 'EUR', decimals: 3 }), '12.5').text).toBe('€12.500');
+            expect(describeValue(field('percentage', { decimals: 0 }), '12.5').text).toBe('12.5%');
         });
 
         it('shows a whole number without a decimal point', () => {
@@ -432,6 +453,17 @@ describe('typing a value', () => {
             expect(fromInput(number, '12.5')).toBe('12.5');
             expect(fromInput(field('money', { currency: 'EUR' }), '1 299,90')).toBe('1299.90');
             expect(fromInput(field('percentage', {}), '7,25')).toBe('7.25');
+        });
+
+        it('reads a lone comma by the language of the page: thousands where the decimal separator is the dot', () => {
+            const number = field('number', { decimals: 2 });
+
+            expect(fromInput(number, '1,234')).toBe('1234');
+
+            document.documentElement.lang = 'fr';
+
+            expect(fromInput(number, '1,234')).toBe('1.234');
+            expect(fromInput(field('money', { currency: 'EUR' }), '1,234')).toBe('1.234');
         });
 
         it('sends nothing for an empty box', () => {

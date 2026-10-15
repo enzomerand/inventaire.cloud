@@ -223,6 +223,14 @@ export default function inventoryHeader() {
          * @returns {void}
          */
         fail(error) {
+            // The inventory itself is gone (deleted by somebody else, or the person left the workspace): the helper has
+            // said so, and there is nothing to show here any more.
+            if (error instanceof HttpError && error.status === 404) {
+                redirectTo(this.workspacePage);
+
+                return;
+            }
+
             // Anything else than an HttpError is a cancelled request: nothing to tell.
             if (!(error instanceof HttpError) || error.reported) {
                 return;

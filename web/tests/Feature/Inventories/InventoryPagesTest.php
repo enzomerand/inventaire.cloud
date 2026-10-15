@@ -412,14 +412,60 @@ describe('the workspace switcher on the pages of a workspace', function (): void
             ->assertSee('data-workspace-url="/app/w/__id__"', false);
     });
 
-    it('leaves the choice of the account alone: looking at a workspace does not make it the current one', function (): void {
+    it('agrees with /app and with the list of workspaces: opening a page makes its workspace the current one', function (string $page): void {
         $user = inventoryPerson();
         $shop = app(Workspaces::class)->create($user, 'Shop');
         $garage = app(Workspaces::class)->create($user->fresh(), 'Garage');
+        $inventory = inventoryIn($shop);
+        $url = match ($page) {
+            'workspace' => workspacePage($shop),
+            'inventory' => inventoryPage($shop, $inventory),
+            'fields' => fieldsPage($shop, $inventory),
+        };
 
+        // The account works in the Garage until it opens a page of the Shop.
+        $this->actingAs($user->fresh())->get(route('app'))->assertRedirect(workspacePage($garage));
+
+        $this->actingAs($user->fresh())->get($url)->assertOk();
+
+        expect($user->fresh()->current_workspace_id)->toBe($shop->id);
+        $this->actingAs($user->fresh())->get(route('app'))->assertRedirect(workspacePage($shop));
+        expect(switcherMarks($this->actingAs($user->fresh())->get(route('app.workspaces'))))
+            ->toBe(['Espace personnel' => false, 'Shop' => true, 'Garage' => false]);
+    })->with(['the workspace' => 'workspace', 'an inventory' => 'inventory', 'its fields' => 'fields']);
+
+    it('writes nothing when the workspace is already the current one', function (): void {
+        $user = inventoryPerson();
+        $shop = app(Workspaces::class)->create($user, 'Shop');
+        $before = $user->fresh()->updated_at;
+
+        $this->travel(1)->hour();
         $this->actingAs($user->fresh())->get(workspacePage($shop))->assertOk();
 
-        $this->actingAs($user->fresh())->get(route('app'))->assertRedirect(workspacePage($garage));
+        expect($user->fresh()->updated_at->equalTo($before))->toBeTrue();
+    });
+
+    it('changes nothing for a page that is refused', function (): void {
+        $team = inventoryTeam();
+        $personal = $team['owner']->workspaces()->orderBy('workspace_user.id')->firstOrFail();
+        $other = app(Workspaces::class)->create($team['owner'], 'Other');
+        $elsewhere = inventoryIn($other);
+        app(Workspaces::class)->makeCurrent($team['owner']->fresh(), $personal);
+
+        // An inventory of another workspace of the path, a workspace the person is not in, a field editor a viewer may not open.
+        $this->actingAs($team['owner']->fresh())->get(inventoryPage($team['workspace'], $elsewhere))->assertNotFound();
+        expect($team['owner']->fresh()->current_workspace_id)->toBe($personal->id);
+
+        $this->flushSession();
+        app('auth')->forgetGuards();
+        $this->actingAs($team['stranger'])->get(workspacePage($team['workspace']))->assertNotFound();
+        expect($team['stranger']->fresh()->current_workspace_id)->not->toBe($team['workspace']->id);
+
+        $this->flushSession();
+        app('auth')->forgetGuards();
+        $viewerBefore = $team['viewer']->fresh()->current_workspace_id;
+        $this->actingAs($team['viewer'])->get(fieldsPage($team['workspace'], inventoryIn($team['workspace'])))->assertForbidden();
+        expect($team['viewer']->fresh()->current_workspace_id)->toBe($viewerBefore);
     });
 });
 

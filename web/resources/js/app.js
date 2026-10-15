@@ -35,10 +35,14 @@ import toasts from './components/toasts.js';
 import workspaceInventories from './components/workspace-inventories.js';
 import workspaceSwitcher from './components/workspace-switcher.js';
 import workspaces from './components/workspaces.js';
+import { reloadWhenRestored } from './lib/restore.js';
 import { createToastsStore } from './stores/toasts.js';
 import { createWorkspacesStore } from './stores/workspaces.js';
 
 window.Alpine = Alpine;
+
+// A page restored from the back/forward cache comes back with the state it was left in: reload it instead.
+reloadWhenRestored();
 
 Alpine.store('toasts', createToastsStore());
 Alpine.store('workspaces', createWorkspacesStore());

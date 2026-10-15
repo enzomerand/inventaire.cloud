@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const instance = vi.hoisted(() => ({ show: vi.fn(), hide: vi.fn() }));
+const instance = vi.hoisted(() => ({ element: null, show: vi.fn(), hide: vi.fn() }));
 
 vi.mock('@tabler/core', () => ({
     Modal: {
-        getOrCreateInstance: vi.fn(() => instance),
+        getOrCreateInstance: vi.fn((element) => {
+            instance.element = element;
+
+            return instance;
+        }),
         getInstance: vi.fn(() => instance),
     },
 }));
@@ -15,6 +19,7 @@ const { hideModal, onModalHidden, showModal } = await import('../../../resources
 /** A dialog with a name box and a note box. */
 function dialog() {
     document.body.innerHTML = `
+        <button id="opener">Open</button>
         <div class="modal">
             <div class="modal-body">
                 <input type="hidden" name="token">
@@ -29,6 +34,8 @@ function dialog() {
 describe('the dialogs', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
+        // Bootstrap fires `show.bs.modal` as it starts to open the dialog, and nothing when it ignores the call.
+        instance.show.mockImplementation(() => instance.element.dispatchEvent(new Event('show.bs.modal')));
     });
 
     it('opens a dialog', () => {
@@ -57,6 +64,76 @@ describe('the dialogs', () => {
         element.dispatchEvent(new Event('shown.bs.modal'));
 
         expect(document.activeElement).toBe(document.querySelector('#first'));
+    });
+
+    it('gives the focus back to the button that opened it when it is closed, however it was', () => {
+        const element = dialog();
+        const opener = document.querySelector('#opener');
+        opener.focus();
+
+        showModal(element);
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).not.toBe(opener);
+
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+
+        expect(document.activeElement).toBe(opener);
+    });
+
+    it('does not take the focus back to the opener on a later closing: it is done once per opening', () => {
+        const element = dialog();
+        const opener = document.querySelector('#opener');
+        opener.focus();
+        showModal(element);
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+        document.querySelector('#first').focus();
+
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#first'));
+    });
+
+    it('leaves the focus alone when the opener is no longer on the page', () => {
+        const element = dialog();
+        const opener = document.querySelector('#opener');
+        opener.focus();
+        showModal(element);
+        opener.remove();
+
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+
+        expect(document.activeElement).toBe(document.body);
+    });
+
+    it('has nothing to give the focus back to when it was opened from nothing in particular', () => {
+        const element = dialog();
+
+        showModal(element);
+
+        expect(() => element.dispatchEvent(new Event('hidden.bs.modal'))).not.toThrow();
+        expect(document.activeElement).toBe(document.body);
+    });
+
+    it('adds no listener when Bootstrap ignores the call, as it does while the dialog opens or closes', () => {
+        const element = dialog();
+        const opener = document.querySelector('#opener');
+        opener.focus();
+        instance.show.mockImplementationOnce(() => {});
+
+        showModal(element);
+        element.dispatchEvent(new Event('shown.bs.modal'));
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+
+        // Nothing moved the cursor, and the listeners that would have waited for an opening that never came are not there:
+        // the next, real opening is not met by the focus of a call that was ignored.
+        expect(document.activeElement).toBe(opener);
+
+        document.querySelector('#first').focus();
+        showModal(element);
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#second'));
     });
 
     it('closes a dialog', () => {

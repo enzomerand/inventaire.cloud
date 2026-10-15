@@ -157,6 +157,47 @@ describe('the options to send', () => {
         });
     });
 
+    it('sends the choices of an existing field only when the person changed them', () => {
+        const stored = {
+            choices: [
+                { id: 'aaaaaaaa', label: 'New', color: 'green' },
+                { id: 'bbbbbbbb', label: 'Used' },
+            ],
+        };
+        const opened = optionsToForm('select', stored);
+        const form = optionsToForm('select', stored);
+
+        // A dialog older than the field must not send back a list that lacks the choices added since.
+        expect(formToOptions('select', form, opened)).toEqual({});
+
+        form.choices[0].label = 'Brand new';
+
+        expect(formToOptions('select', form, opened).choices).toEqual([
+            { id: 'aaaaaaaa', label: 'Brand new', color: 'green' },
+            { id: 'bbbbbbbb', label: 'Used', color: null },
+        ]);
+    });
+
+    it('sends the choices of a field that is being created, and the other options of an existing one, whatever changed', () => {
+        const opened = optionsToForm('select', { choices: [{ id: 'aaaaaaaa', label: 'New' }] });
+        const created = optionsToForm('select');
+        created.choices[0].label = 'First';
+
+        expect(formToOptions('select', created, null).choices).toEqual([{ label: 'First', color: null }]);
+        expect(
+            formToOptions('select', optionsToForm('select', { choices: [{ id: 'aaaaaaaa', label: 'New' }] }), opened),
+        ).toEqual({});
+
+        const number = optionsToForm('number', { decimals: 2 });
+
+        expect(formToOptions('number', number, optionsToForm('number', { decimals: 2 }))).toEqual({
+            decimals: 2,
+            min: null,
+            max: null,
+            unit: null,
+        });
+    });
+
     it('leaves out a choice that was added and not filled in, but never one that exists', () => {
         const form = optionsToForm('select', { choices: [{ id: 'aaaaaaaa', label: 'New' }] });
         form.choices.push(blankChoice());

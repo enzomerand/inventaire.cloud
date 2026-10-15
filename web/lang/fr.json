@@ -81,6 +81,7 @@
     "Remove the tag :name": "Retirer l'étiquette :name",
     "Renaming or recoloring a choice keeps it on the items that have it. Removing it takes it off them.": "Renommer ou recolorer un choix le conserve sur les articles qui l'ont. Le supprimer le retire de ces articles.",
     "Required": "Obligatoire",
+    "Set a color": "Définir une couleur",
     "Shown after the value: kg, m, pieces...": "Affichée après la valeur : kg, m, pièces...",
     "Show the details of the item": "Voir le détail de l'article",
     "--skip-mail-test is only allowed in non-interactive mode.": "--skip-mail-test n'est autorisé qu'en mode non interactif.",

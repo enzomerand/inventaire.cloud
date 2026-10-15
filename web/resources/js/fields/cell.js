@@ -14,6 +14,7 @@
  * @property {string} text The text of the cell (the label of a link, the stars of a rating, the code of a color...).
  * @property {string | null} href Where a link leads.
  * @property {string | null} target Where a link opens (`_blank` for a web page, nothing for a mail or a call).
+ * @property {boolean} multiline Whether the text keeps its line breaks (a long text shown whole).
  * @property {string | null} title A tooltip: the full text of a shortened one, the grade of a rating.
  * @property {Badge[]} badges The badges of a choice or of tags.
  * @property {Record<string, string> | null} style Style of the swatch of a color (an object: Alpine sets it without an inline style attribute).
@@ -27,7 +28,17 @@
  * @returns {Cell}
  */
 export function cell(kind, properties = {}) {
-    return { kind, text: '', href: null, target: null, title: null, badges: [], style: null, ...properties };
+    return {
+        kind,
+        text: '',
+        multiline: false,
+        href: null,
+        target: null,
+        title: null,
+        badges: [],
+        style: null,
+        ...properties,
+    };
 }
 
 /**

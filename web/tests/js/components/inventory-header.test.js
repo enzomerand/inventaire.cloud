@@ -190,6 +190,40 @@ describe('the header of an inventory', () => {
         });
     });
 
+    describe('when the inventory is gone', () => {
+        const gone = () => {
+            const error = new HttpError(404, 'This item no longer exists.');
+            error.reported = true;
+
+            return error;
+        };
+
+        it('takes the person back to the workspace instead of renaming something that is not there', async () => {
+            http.patch.mockRejectedValue(gone());
+            component.form = { name: 'Workshop', description: '' };
+
+            await component.save();
+
+            expect(redirectTo).toHaveBeenCalledWith('/app/w/shop');
+            expect(notify).not.toHaveBeenCalled();
+            expect(component.busy).toBe(false);
+        });
+
+        it('does so when the count of items cannot be read, and when the deletion finds nothing to delete', async () => {
+            http.get.mockRejectedValue(gone());
+            await component.askDelete();
+
+            expect(redirectTo).toHaveBeenCalledTimes(1);
+            expect(showModal).not.toHaveBeenCalled();
+
+            http.delete.mockRejectedValue(gone());
+            await component.confirmDelete();
+
+            expect(redirectTo).toHaveBeenCalledTimes(2);
+            expect(redirectTo).toHaveBeenLastCalledWith('/app/w/shop');
+        });
+    });
+
     describe('deleting', () => {
         it('reads how many items go with the inventory, then asks for the confirmation', async () => {
             http.get.mockResolvedValue({ data: { items_count: 12 } });

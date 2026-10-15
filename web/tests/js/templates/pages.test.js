@@ -1523,7 +1523,10 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(control('qty').getAttribute('inputmode')).toBe('decimal');
                 expect(control('bought').type).toBe('date');
                 expect(control('site').type).toBe('url');
-                expect(control('tint').type).toBe('color');
+                // A color picker cannot be empty, so a field without a color offers to set one instead.
+                expect(control('tint').tagName).toBe('BUTTON');
+                expect(control('tint').textContent.trim()).toBe('Set a color');
+                expect(visible(control('tint-picker'))).toBe(false);
                 expect([...control('state').options].map((option) => option.textContent)).toEqual([
                     'Not set',
                     'New',
@@ -1557,7 +1560,12 @@ describe('the pages under the real Alpine CSP build', () => {
                 await flush();
                 itemDialog().querySelectorAll('button[aria-label$="out of 5"]')[3].click();
                 await flush();
-                await type(control('tint'), '#ff0000');
+                await press('Set a color', itemDialog());
+
+                expect(visible(control('tint-picker'))).toBe(true);
+                expect(control('tint-picker').value).toBe('#000000');
+
+                await type(control('tint-picker'), '#ff0000');
                 await submit(itemDialog().querySelector('form'));
 
                 expect(http.post).toHaveBeenCalledWith('/api/v1/inventories/tools/items', {
@@ -1647,7 +1655,8 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(control('state').value).toBe('aaaaaaaa');
                 expect(control('fragile').value).toBe('false');
                 expect(control('bought').value).toBe('2026-10-15');
-                expect(control('tint').value).toBe('#aabbcc');
+                expect(control('tint-picker').value).toBe('#aabbcc');
+                expect(visible(control('tint-picker'))).toBe(true);
                 expect([...itemDialog().querySelectorAll('input[type="checkbox"]')].map((box) => box.checked)).toEqual([
                     true,
                     true,
@@ -1698,6 +1707,11 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(itemDialog().querySelector('.modal-body').textContent).toContain(
                     'Delete this item? This cannot be undone.',
                 );
+                // The question is announced, and the cursor is on the button that answers it.
+                expect(itemDialog().querySelector('.modal-body p[role="alert"]').textContent).toContain(
+                    'Delete this item?',
+                );
+                expect(document.activeElement.textContent.trim()).toBe('Delete the item');
                 expect(http.delete).not.toHaveBeenCalled();
                 expect(control('name')).toBeNull();
 
@@ -1724,6 +1738,32 @@ describe('the pages under the real Alpine CSP build', () => {
             beforeEach(async () => {
                 PAGE.abilities = { edit_items: false };
                 await open({ items: [HAMMER] });
+            });
+
+            it('shows a long text whole in the details, with its line breaks, and cut to one line in the table', async () => {
+                const long = 'Line one\nLine two ' + 'x'.repeat(100);
+                const notes = {
+                    id: 'notes',
+                    name: 'Notes',
+                    type: 'textarea',
+                    options: {},
+                    required: false,
+                    position: 0,
+                };
+                await open({ fields: [notes], items: [{ id: 'i7', values: { notes: long } }] });
+
+                expect(cellsOf(bodyRows()[0])[0].textContent.trim().endsWith('…')).toBe(true);
+                expect(cellsOf(bodyRows()[0])[0].textContent).not.toContain(
+                    'Line two xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+                );
+
+                bodyRows()[0].querySelector('td').click();
+                await flush();
+
+                const detail = itemDialog().querySelector('dl dd span');
+
+                expect(detail.textContent).toBe(long);
+                expect(detail.classList.contains('app-multiline')).toBe(true);
             });
 
             it('shows the details of the item, read only', async () => {

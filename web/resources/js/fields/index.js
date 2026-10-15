@@ -105,15 +105,16 @@ export function fromInput(field, input) {
  *
  * @param {Field} field
  * @param {any} value The value of the field in an item (undefined when the item has none).
+ * @param {import('./types.js').DescribeOptions} [options] `{ full: true }` for the details of an item: nothing is cut short.
  * @returns {Cell}
  */
-export function describeValue(field, value) {
+export function describeValue(field, value, options = {}) {
     if (isBlank(value)) {
         return emptyCell();
     }
 
     try {
-        return typeOf(field).describe(value, field);
+        return typeOf(field).describe(value, field, options);
     } catch {
         // A value the type cannot make sense of (stored by hand, say) is shown as it is rather than breaking the table.
         return cell('text', { text: String(value) });

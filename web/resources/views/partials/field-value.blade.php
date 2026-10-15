@@ -9,7 +9,7 @@
     <span class="text-secondary" x-text="cell.text"></span>
 </template>
 <template x-if="cell.kind === 'text'">
-    <span class="text-break" :title="cell.title" x-text="cell.text"></span>
+    <span :class="cell.multiline ? 'text-break app-multiline' : 'text-break'" :title="cell.title" x-text="cell.text"></span>
 </template>
 <template x-if="cell.kind === 'mono'">
     <span class="font-monospace text-break" x-text="cell.text"></span>

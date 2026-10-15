@@ -112,11 +112,16 @@ function wholeNumber(text) {
  * Choices that were just added and have no label are left out (an empty row is not a choice); one that already exists
  * is always sent, so that emptying its label is refused instead of silently deleting the choice.
  *
+ * When the options of an existing field are sent, pass the form as it was when the dialog opened: the choices are then
+ * sent only if the person changed them. A dialog can be older than the field (another editor added choices meanwhile),
+ * and sending the whole list back would delete the choices it never heard of, and their values from every item.
+ *
  * @param {string} type
  * @param {OptionsForm} form
+ * @param {OptionsForm | null} [opened] The form as it was when the dialog opened on an existing field; null for a new one.
  * @returns {Record<string, any>}
  */
-export function formToOptions(type, form) {
+export function formToOptions(type, form, opened = null) {
     /** @type {Record<string, () => any>} */
     const readers = {
         max_length: () => wholeNumber(form.max_length),
@@ -127,16 +132,22 @@ export function formToOptions(type, form) {
         currency: () => form.currency || null,
         format: () => form.format || null,
         choices: () =>
-            form.choices
-                .filter((choice) => choice.id !== null || choice.label.trim() !== '')
-                .map((choice) => ({
-                    ...(choice.id === null ? {} : { id: choice.id }),
-                    label: choice.label.trim(),
-                    color: choice.color || null,
-                })),
+            opened !== null && JSON.stringify(form.choices) === JSON.stringify(opened.choices)
+                ? undefined
+                : form.choices
+                      .filter((choice) => choice.id !== null || choice.label.trim() !== '')
+                      .map((choice) => ({
+                          ...(choice.id === null ? {} : { id: choice.id }),
+                          label: choice.label.trim(),
+                          color: choice.color || null,
+                      })),
     };
 
-    return Object.fromEntries(optionNames(type).map((name) => [name, readers[name]()]));
+    return Object.fromEntries(
+        optionNames(type)
+            .map((name) => [name, readers[name]()])
+            .filter(([, value]) => value !== undefined),
+    );
 }
 
 /**

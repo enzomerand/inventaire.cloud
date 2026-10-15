@@ -12,6 +12,12 @@
  * (`data-*` attributes on the root), because the CSP build of Alpine does not allow Blade to inject values into
  * expressions.
  *
+ * What a person sees can be older than the data: before the dialog opens on a field the list is read again (a field
+ * changed or deleted since, or choices another editor added, must not be overwritten by what this page remembers),
+ * and the choices of a select are sent only when the person changed them. A 404 on a change (the field was deleted
+ * meanwhile) closes the dialog and reads the list again; if it is the inventory that is gone, that reading takes the
+ * person back to the workspace.
+ *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the input they are about, in the dialog, or as a toast.
  */
@@ -30,6 +36,7 @@ import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
+import { redirectTo } from '../lib/page.js';
 
 /** The type a new field starts as. */
 const DEFAULT_TYPE = 'text';
@@ -76,6 +83,9 @@ export default function inventoryFields() {
         /** The field the deletion dialog is about, or null. */
         deleting: null,
 
+        /** The options of the field as they were when the dialog opened on it, to send only what the person changed. */
+        opened: null,
+
         /** Endpoint of the inventory (GET), from `data-url` on the component root. */
         get url() {
             return this.$root.dataset.url;
@@ -89,6 +99,11 @@ export default function inventoryFields() {
         /** Endpoint that orders the fields (PUT), from `data-order-url` on the component root. */
         get orderUrl() {
             return this.$root.dataset.orderUrl;
+        },
+
+        /** Page of the workspace the inventory belongs to, where the person goes if it was deleted, from `data-workspace-page`. */
+        get workspacePage() {
+            return this.$root.dataset.workspacePage;
         },
 
         /** Endpoint of one field, with `__id__` where its ULID goes, from `data-field-url` on the component root. */
@@ -172,7 +187,13 @@ export default function inventoryFields() {
                 this.fields = (await http.get(this.url)).data.fields ?? [];
             } catch (error) {
                 this.loadFailed = true;
-                this.fail(error);
+
+                if (error instanceof HttpError && error.status === 404) {
+                    // The inventory itself is gone (deleted by somebody else): there is nothing to edit here any more.
+                    redirectTo(this.workspacePage);
+                } else {
+                    this.fail(error);
+                }
             } finally {
                 this.loading = false;
             }
@@ -327,6 +348,7 @@ export default function inventoryFields() {
          */
         startCreate() {
             this.resetDialog();
+            this.opened = null;
             this.form = {
                 id: null,
                 type: DEFAULT_TYPE,
@@ -338,20 +360,42 @@ export default function inventoryFields() {
         },
 
         /**
-         * Opens the dialog that changes a field, with its current name, requirement and options.
+         * Opens the dialog that changes a field, with its name, requirement and options as the server holds them now: the
+         * list is read again first, since this page may be older than a change another editor made (choices added to a
+         * select, say, which saving a stale dialog would delete). A field that is gone, or a list that could not be read,
+         * opens nothing.
          *
          * @param {Field} field
-         * @returns {void}
+         * @returns {Promise<void>}
          */
-        startEdit(field) {
+        async startEdit(field) {
+            if (this.busy) {
+                return;
+            }
+
+            this.busy = true;
+
+            try {
+                await this.load();
+            } finally {
+                this.busy = false;
+            }
+
+            const fresh = this.fields.find((other) => other.id === field.id);
+
+            if (this.loadFailed || fresh === undefined) {
+                return;
+            }
+
             this.resetDialog();
             this.form = {
-                id: field.id,
-                type: field.type,
-                name: field.name,
-                required: field.required,
-                options: optionsToForm(field.type, field.options),
+                id: fresh.id,
+                type: fresh.type,
+                name: fresh.name,
+                required: fresh.required,
+                options: optionsToForm(fresh.type, fresh.options),
             };
+            this.opened = optionsToForm(fresh.type, fresh.options);
             showModal(this.$refs.fieldModal);
         },
 
@@ -557,7 +601,7 @@ export default function inventoryFields() {
             const body = {
                 name: this.form.name.trim(),
                 required: this.form.required,
-                options: formToOptions(this.form.type, this.form.options),
+                options: formToOptions(this.form.type, this.form.options, this.editing ? this.opened : null),
             };
 
             try {
@@ -606,10 +650,26 @@ export default function inventoryFields() {
                 notify('success', t('fields.notice.deleted'));
                 await this.load();
             } catch (error) {
-                this.fail(error);
+                if (this.isGone(error)) {
+                    // Already deleted by somebody else (the helper said so): the list is not what the server holds any more.
+                    hideModal(this.$refs.deleteModal);
+                    await this.load();
+                } else {
+                    this.fail(error);
+                }
             } finally {
                 this.busy = false;
             }
+        },
+
+        /**
+         * Whether a request failed because what it was about no longer exists (a 404, which the HTTP helper has told).
+         *
+         * @param {unknown} error
+         * @returns {boolean}
+         */
+        isGone(error) {
+            return error instanceof HttpError && error.status === 404;
         },
 
         /**
@@ -620,6 +680,14 @@ export default function inventoryFields() {
          * @returns {void}
          */
         failForm(error) {
+            if (this.isGone(error)) {
+                // The field was deleted meanwhile (or the inventory: the reading finds out): close and show what is left.
+                hideModal(this.$refs.fieldModal);
+                this.load();
+
+                return;
+            }
+
             if (!(error instanceof HttpError) || error.reported) {
                 return;
             }

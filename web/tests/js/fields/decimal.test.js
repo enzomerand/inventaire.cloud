@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+    decimalScale,
     decimalSeparator,
     formatDecimal,
     formatMoney,
@@ -59,6 +60,50 @@ describe('shiftDecimalLeft()', () => {
 describe('with the language of the page', () => {
     afterEach(() => {
         document.documentElement.lang = 'en';
+    });
+
+    it('shows a number with the decimals it was written with when the field has fewer now: nothing is rounded', () => {
+        document.documentElement.lang = 'en';
+
+        expect(formatDecimal('12.50', 0)).toBe('12.50');
+        expect(formatDecimal('12.567', 2)).toBe('12.567');
+        expect(formatDecimal('12.5', 2)).toBe('12.50');
+        expect(formatDecimal('1234', 0)).toBe('1,234');
+        expect(formatMoney('12.567', 'EUR', 2)).toBe('€12.567');
+        expect(formatMoney('12.50', 'JPY')).toBe('¥12.50');
+        expect(formatMoney('12.5', 'EUR', 3)).toBe('€12.500');
+        expect(formatMoney('12', 'JPY', 0)).toBe('¥12');
+        expect(formatPercentage('12.567', 1)).toBe('12.567%');
+        expect(formatPercentage('12.5', 3)).toBe('12.500%');
+    });
+
+    it('counts the decimals a stored number really has', () => {
+        expect(decimalScale('12.50')).toBe(2);
+        expect(decimalScale('7')).toBe(0);
+        expect(decimalScale('-0.125')).toBe(3);
+    });
+
+    it('reads a comma followed by exactly three digits as a thousands separator where the decimal one is the dot', () => {
+        document.documentElement.lang = 'en';
+
+        expect(parseDecimal('1,234')).toBe('1234');
+        expect(parseDecimal('-1,234')).toBe('-1234');
+        expect(parseDecimal('12,345,678')).toBe('12345678');
+        expect(parseDecimal('1,234', 'en')).toBe('1234');
+        expect(parseDecimal('1,23')).toBe('1.23');
+        expect(parseDecimal('1,2345')).toBe('1.2345');
+        expect(parseDecimal('0,500')).toBe('0.500');
+        expect(parseDecimal('1,2')).toBe('1.2');
+    });
+
+    it('reads that same comma as a decimal separator where the decimal one is the comma', () => {
+        document.documentElement.lang = 'fr';
+
+        expect(parseDecimal('1,234')).toBe('1.234');
+        expect(parseDecimal('12,345,678')).toBe('12.345,678');
+        expect(parseDecimal('1,234', 'fr')).toBe('1.234');
+        expect(parseDecimal('1,234', 'en')).toBe('1234');
+        expect(parseDecimal('12,5')).toBe('12.5');
     });
 
     it('knows the decimal separator of a language', () => {

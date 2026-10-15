@@ -4,6 +4,7 @@ import inventoryItems from '../../../resources/js/components/inventory-items.js'
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
+import { redirectTo } from '../../../resources/js/lib/page.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -11,6 +12,7 @@ vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     return { ...original, http: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } };
 });
 vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
+vi.mock('../../../resources/js/lib/page.js', () => ({ redirectTo: vi.fn() }));
 vi.mock('../../../resources/js/lib/modal.js', () => ({
     showModal: vi.fn(),
     hideModal: vi.fn(),
@@ -96,6 +98,7 @@ describe('the items of an inventory', () => {
                 url: INVENTORY,
                 itemsUrl: ITEMS,
                 itemUrl: ITEMS + '/__id__',
+                workspacePage: '/app/w/shop',
                 canEdit: '1',
                 canManageFields: '1',
             },
@@ -335,6 +338,42 @@ describe('the items of an inventory', () => {
                 expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1 } });
             });
 
+            it('takes the person back to the workspace when the inventory itself is gone (deleted elsewhere)', async () => {
+                const gone = new HttpError(404, 'This item no longer exists.');
+                gone.reported = true;
+                http.get.mockRejectedValue(gone);
+
+                await component.init();
+
+                expect(redirectTo).toHaveBeenCalledWith('/app/w/shop');
+                expect(notify).not.toHaveBeenCalled();
+            });
+
+            it("does so when only the items answer 404, since they are the inventory's own", async () => {
+                const gone = new HttpError(404, 'This item no longer exists.');
+                gone.reported = true;
+                http.get.mockImplementation(async (url) => {
+                    if (url === ITEMS) {
+                        throw gone;
+                    }
+
+                    return inventoryAnswer();
+                });
+
+                await component.init();
+
+                expect(redirectTo).toHaveBeenCalledTimes(1);
+                expect(redirectTo).toHaveBeenCalledWith('/app/w/shop');
+            });
+
+            it('does not send the person away for other failures', async () => {
+                http.get.mockRejectedValue(down());
+
+                await component.init();
+
+                expect(redirectTo).not.toHaveBeenCalled();
+            });
+
             it('forgets the failure of a page that a more recent reading made obsolete', async () => {
                 answer([item('i1')]);
                 await component.init();
@@ -506,6 +545,21 @@ describe('the items of an inventory', () => {
             expect(showModal).toHaveBeenCalledWith(modal);
         });
 
+        it('shows a long text whole in the details, and cut to one line in the table', async () => {
+            const long = 'Line one\nLine two ' + 'x'.repeat(100);
+            component.fields = [field('notes', 'textarea', {}, { name: 'Notes' })];
+            component.items = [item('i9', { notes: long })];
+            component.$root.dataset.canEdit = '0';
+            component.rebuild();
+
+            expect(component.rows[0].cells[0].text.endsWith('…')).toBe(true);
+            expect(component.rows[0].cells[0].multiline).toBe(false);
+
+            component.open({ id: 'i9' });
+
+            expect(component.details[0]).toMatchObject({ key: 'notes', kind: 'text', text: long, multiline: true });
+        });
+
         it('opens the item of a row that was clicked, but not when the click was on a link or a button of the row', () => {
             const cell = document.createElement('td');
             const link = document.createElement('a');
@@ -670,21 +724,33 @@ describe('the items of an inventory', () => {
                 expect(component.isRated(grade, 1)).toBe(false);
             });
 
-            it('shows black in a color picker that has no color, and clears a color', () => {
+            it('has no color picker while a field has no color, so that black can be chosen: it is given with "Set a color"', () => {
                 const tint = FIELDS[10];
 
-                expect(component.colorValue(tint)).toBe('#000000');
+                // Nothing to pick from while empty: the picker opens on black and fires no event for it.
                 expect(component.hasText(tint)).toBe(false);
+                expect(component.inputValue(tint)).toBe('');
 
+                component.chooseColor(tint);
+
+                expect(component.inputValue(tint)).toBe('#000000');
+                expect(component.hasText(tint)).toBe(true);
+
+                // The picker then moves on from black.
                 component.onInput(tint, { target: { value: '#ff0000' } });
 
-                expect(component.colorValue(tint)).toBe('#ff0000');
-                expect(component.hasText(tint)).toBe(true);
+                expect(component.inputValue(tint)).toBe('#ff0000');
+            });
+
+            it('clears a color, which shows "Set a color" again and is sent as nothing', () => {
+                const tint = FIELDS[10];
+                component.chooseColor(tint);
 
                 component.clearValue(tint);
 
                 expect(component.inputValue(tint)).toBe('');
                 expect(component.hasText(tint)).toBe(false);
+                expect(component.createValues()).toEqual({});
             });
         });
     });
@@ -818,6 +884,17 @@ describe('the items of an inventory', () => {
             expect(component.formError).toBe('Item limit reached (10000 per inventory).');
         });
 
+        it('takes the person back to the workspace when the inventory was deleted while the form was open', async () => {
+            const gone = new HttpError(404, 'This item no longer exists.');
+            gone.reported = true;
+            http.post.mockRejectedValue(gone);
+
+            await component.save();
+
+            expect(redirectTo).toHaveBeenCalledWith('/app/w/shop');
+            expect(component.busy).toBe(false);
+        });
+
         it('shows other failures as a toast, but not the ones the HTTP helper already told', async () => {
             http.post.mockRejectedValueOnce(new HttpError(409, 'Conflict', { code: 'odd' }));
             await component.save();
@@ -936,6 +1013,19 @@ describe('the items of an inventory', () => {
             expect(hideModal).toHaveBeenCalledWith(modal);
             expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1 } });
             expect(notify).not.toHaveBeenCalled();
+            expect(redirectTo).not.toHaveBeenCalled();
+        });
+
+        it('takes the person back to the workspace when it is the inventory that was deleted', async () => {
+            const gone = new HttpError(404, 'This item no longer exists.');
+            gone.reported = true;
+            http.patch.mockRejectedValue(gone);
+            component.open({ id: 'i1' });
+            component.onInput(FIELDS[0], { target: { value: 'Big hammer' } });
+            http.get.mockRejectedValue(gone);
+
+            await component.save();
+            await vi.waitFor(() => expect(redirectTo).toHaveBeenCalledWith('/app/w/shop'));
         });
     });
 
@@ -945,6 +1035,15 @@ describe('the items of an inventory', () => {
             await component.init();
             component.open({ id: 'i1' });
             http.delete.mockResolvedValue(null);
+        });
+
+        it('puts the cursor on the button that confirms, since the one that was pressed has gone', () => {
+            const confirm = { focus: vi.fn() };
+            component.$refs.confirmDelete = confirm;
+
+            component.askDelete();
+
+            expect(confirm.focus).toHaveBeenCalledTimes(1);
         });
 
         it('asks for a confirmation first, which can be given up', async () => {

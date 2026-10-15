@@ -9,7 +9,8 @@
  * - `inputType` and `inputMode` shape the `<input>` of the controls that are one;
  * - `toInput(value, field)` is the value of the control for a stored value, `fromInput(input, field)` is the value to
  *   send for what the control holds (null for nothing, which clears the field);
- * - `describe(value, field)` is the {@link Cell} that shows a stored value.
+ * - `describe(value, field, options)` is the {@link Cell} that shows a stored value; with `{ full: true }` (the details of an
+ *   item) a long text is shown whole, with its line breaks, instead of cut to one line for a table cell.
  *
  * Everything shown is data for `x-text` and attribute bindings, never markup.
  */
@@ -37,13 +38,16 @@ import { t } from '../lib/i18n.js';
  * @property {boolean} required
  * @property {number} position
  *
+ * @typedef {object} DescribeOptions
+ * @property {boolean} [full] Whether to show the whole value (the details of an item) rather than what fits a table cell.
+ *
  * @typedef {object} FieldType
  * @property {Control} control
  * @property {string} [inputType] The `type` of the `<input>`; `text` when not given.
  * @property {string} [inputMode] The `inputmode` of the `<input>`.
  * @property {(value: any, field: Field) => any} toInput
  * @property {(input: any, field: Field) => any} fromInput
- * @property {(value: any, field: Field) => import('./cell.js').Cell} describe
+ * @property {(value: any, field: Field, options?: DescribeOptions) => import('./cell.js').Cell} describe
  */
 
 /** How many characters of a long text the table shows. */
@@ -155,7 +159,11 @@ export const FIELD_TYPES = {
         toInput: (value) => value ?? '',
         // Line breaks are kept: only the ends are trimmed, as the server does.
         fromInput: textOrNull,
-        describe: (value) => {
+        describe: (value, _field, options) => {
+            if (options?.full) {
+                return cell('text', { text: String(value), multiline: true });
+            }
+
             const short = preview(String(value));
 
             return cell('text', { text: short.text, title: short.shortened ? String(value) : null });
@@ -166,7 +174,7 @@ export const FIELD_TYPES = {
         control: 'input',
         inputMode: 'decimal',
         toInput: (value) => toDecimalInput(value, pageLocale()),
-        fromInput: parseDecimal,
+        fromInput: (input) => parseDecimal(input, pageLocale()),
         describe: (value, field) => {
             const unit = field.options?.unit ? ' ' + field.options.unit : '';
 
@@ -178,16 +186,18 @@ export const FIELD_TYPES = {
         control: 'input',
         inputMode: 'decimal',
         toInput: (value) => toDecimalInput(value, pageLocale()),
-        fromInput: parseDecimal,
+        fromInput: (input) => parseDecimal(input, pageLocale()),
         describe: (value, field) =>
-            cell('text', { text: formatMoney(String(value), field.options?.currency ?? 'EUR') }),
+            cell('text', {
+                text: formatMoney(String(value), field.options?.currency ?? 'EUR', field.options?.decimals ?? null),
+            }),
     },
 
     percentage: {
         control: 'input',
         inputMode: 'decimal',
         toInput: (value) => toDecimalInput(value, pageLocale()),
-        fromInput: parseDecimal,
+        fromInput: (input) => parseDecimal(input, pageLocale()),
         describe: (value, field) =>
             cell('text', { text: formatPercentage(String(value), Number(field.options?.decimals ?? 2)) }),
     },
