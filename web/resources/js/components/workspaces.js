@@ -79,6 +79,17 @@ export default function workspaces() {
         },
 
         /**
+         * Whether the delete button is offered for a workspace: to its owners, and never for the last workspace of the
+         * person, which the server refuses to delete (`last_workspace`) anyway.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {boolean}
+         */
+        canDelete(item) {
+            return this.canManage(item) && this.items.length > 1;
+        },
+
+        /**
          * The role of the person in a workspace, as they read it.
          *
          * @param {import('../stores/workspaces.js').WorkspaceItem} item

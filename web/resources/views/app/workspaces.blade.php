@@ -31,60 +31,68 @@
                         <div class="list-group-item">
                             <div class="row align-items-center g-2">
                                 <div class="col-12 col-md">
-                                    <form class="d-flex gap-2" x-show="isEditing(item)" @submit.prevent="saveRename(item)" novalidate>
-                                        <label class="visually-hidden" :for="'workspace-name-' + item.id">{{ __('Name') }}</label>
-                                        <input
-                                            :id="'workspace-name-' + item.id"
-                                            type="text"
-                                            class="form-control"
-                                            x-model="editName"
-                                            maxlength="100"
-                                            autocomplete="off"
-                                        >
-                                        <button type="submit" class="btn btn-primary" :disabled="busy">{{ __('Save') }}</button>
-                                        <button type="button" class="btn" @click="cancelRename" :disabled="busy">{{ __('Cancel') }}</button>
+                                    <form x-show="isEditing(item)" @submit.prevent="saveRename(item)" novalidate>
+                                        <div class="d-flex gap-2">
+                                            <label class="visually-hidden" :for="'workspace-name-' + item.id">{{ __('Name') }}</label>
+                                            <input
+                                                :id="'workspace-name-' + item.id"
+                                                type="text"
+                                                class="form-control"
+                                                x-model="editName"
+                                                maxlength="100"
+                                                autocomplete="off"
+                                            >
+                                            <button type="submit" class="btn btn-primary" :disabled="busy">{{ __('Save') }}</button>
+                                            <button type="button" class="btn" @click="cancelRename" :disabled="busy">{{ __('Cancel') }}</button>
+                                        </div>
                                     </form>
 
-                                    <div class="d-flex flex-wrap align-items-center gap-2" x-show="!isEditing(item)">
-                                        <span class="fw-bold text-break" x-text="item.name"></span>
-                                        <span class="badge bg-primary-lt" x-show="item.current">{{ __('Current') }}</span>
-                                        <span class="badge" x-text="roleLabel(item)"></span>
+                                    <div x-show="!isEditing(item)">
+                                        <div class="d-flex flex-wrap align-items-center gap-2">
+                                            <span class="fw-bold text-break" x-text="item.name"></span>
+                                            <span class="badge bg-primary-lt" x-show="item.current">{{ __('Current') }}</span>
+                                            <span class="badge" x-text="roleLabel(item)"></span>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <div class="col-12 col-md-auto">
-                                    <div class="d-flex flex-wrap align-items-center gap-2" x-show="isConfirming(item)">
-                                        <span class="text-danger" x-text="confirmText(item)"></span>
-                                        <button type="button" class="btn btn-danger" @click="confirmDelete(item)" :disabled="busy">{{ __('Delete') }}</button>
-                                        <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
+                                    <div x-show="isConfirming(item)">
+                                        <div class="d-flex flex-wrap align-items-center gap-2">
+                                            <span class="text-danger" x-text="confirmText(item)"></span>
+                                            <button type="button" class="btn btn-danger" @click="confirmDelete(item)" :disabled="busy">{{ __('Delete') }}</button>
+                                            <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
+                                        </div>
                                     </div>
 
-                                    <div class="d-flex flex-wrap gap-2" x-show="!isConfirming(item) && !isEditing(item)">
-                                        <button type="button" class="btn btn-sm" x-show="!item.current" @click="makeCurrent(item)" :disabled="busy">
-                                            {{ __('Work in this workspace') }}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm btn-icon"
-                                            x-show="canManage(item)"
-                                            :aria-label="renameLabel(item)"
-                                            :title="renameLabel(item)"
-                                            @click="startRename(item)"
-                                            :disabled="busy"
-                                        >
-                                            <x-tabler-pencil aria-hidden="true" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="btn btn-sm btn-icon btn-outline-danger"
-                                            x-show="canManage(item)"
-                                            :aria-label="deleteLabel(item)"
-                                            :title="deleteLabel(item)"
-                                            @click="askDelete(item)"
-                                            :disabled="busy"
-                                        >
-                                            <x-tabler-trash aria-hidden="true" />
-                                        </button>
+                                    <div x-show="!isConfirming(item) && !isEditing(item)">
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <button type="button" class="btn btn-sm" x-show="!item.current" @click="makeCurrent(item)" :disabled="busy">
+                                                {{ __('Work in this workspace') }}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-icon"
+                                                x-show="canManage(item)"
+                                                :aria-label="renameLabel(item)"
+                                                :title="renameLabel(item)"
+                                                @click="startRename(item)"
+                                                :disabled="busy"
+                                            >
+                                                <x-tabler-pencil aria-hidden="true" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-icon btn-outline-danger"
+                                                x-show="canDelete(item)"
+                                                :aria-label="deleteLabel(item)"
+                                                :title="deleteLabel(item)"
+                                                @click="askDelete(item)"
+                                                :disabled="busy"
+                                            >
+                                                <x-tabler-trash aria-hidden="true" />
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

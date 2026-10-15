@@ -504,6 +504,7 @@
     "Your :app verification code: :code": "Votre code de vérification :app : :code",
     "Your account deletion code is:": "Votre code de suppression de compte est :",
     "Your account deletion code is: :code": "Votre code de suppression de compte est : :code",
+    "Your account has been deleted.": "Votre compte a été supprimé.",
     "Your account was updated. The page is about to reload.": "Votre compte a été mis à jour. La page va se recharger.",
     "Your data": "Vos données",
     "Your session has expired. The page is about to reload.": "Votre session a expiré. La page va bientôt se recharger.",

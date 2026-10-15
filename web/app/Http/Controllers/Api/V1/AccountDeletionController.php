@@ -102,6 +102,10 @@ final class AccountDeletionController extends Controller
 
         $this->endSession($request);
 
+        // Said once on the next page, which is the home page (see components/flash-notice.blade.php): the session that
+        // carries it is the new, empty one that endSession() just started.
+        $request->session()->flash('account_deleted', true);
+
         return response()->noContent();
     }
 

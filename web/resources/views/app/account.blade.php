@@ -68,13 +68,15 @@
                             <x-tabler-logout aria-hidden="true" />
                             {{ __('Sign out everywhere') }}
                         </button>
-                        <div class="d-flex flex-wrap align-items-center gap-2" x-show="confirming">
-                            <span>{{ __('Sign out of all your other devices?') }}</span>
-                            <button type="button" class="btn btn-primary" @click="signOutEverywhere" :disabled="busy">
-                                <span class="spinner-border spinner-border-sm me-2" x-show="busy" aria-hidden="true"></span>
-                                {{ __('Sign out everywhere') }}
-                            </button>
-                            <button type="button" class="btn" @click="cancel" :disabled="busy">{{ __('Cancel') }}</button>
+                        <div x-show="confirming">
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                                <span>{{ __('Sign out of all your other devices?') }}</span>
+                                <button type="button" class="btn btn-primary" @click="signOutEverywhere" :disabled="busy">
+                                    <span class="spinner-border spinner-border-sm me-2" x-show="busy" aria-hidden="true"></span>
+                                    {{ __('Sign out everywhere') }}
+                                </button>
+                                <button type="button" class="btn" @click="cancel" :disabled="busy">{{ __('Cancel') }}</button>
+                            </div>
                         </div>
                     </div>
                 </div>

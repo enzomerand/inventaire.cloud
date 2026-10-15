@@ -70,6 +70,23 @@ describe('workspaces page', () => {
             expect(component.canManage({ id: 'x', name: 'X', role: 'editor', current: false })).toBe(false);
         });
 
+        it('offers to delete a workspace to its owner, but never the last one of the person', () => {
+            const second = { id: 'second', name: 'Second', role: 'owner', current: false };
+            store.replace([MINE, second]);
+
+            expect(component.canDelete(MINE)).toBe(true);
+            expect(component.canDelete(second)).toBe(true);
+
+            store.replace([MINE, SHARED]);
+
+            expect(component.canDelete(SHARED)).toBe(false);
+
+            store.replace([MINE]);
+
+            expect(component.canDelete(MINE)).toBe(false);
+            expect(component.canManage(MINE)).toBe(true);
+        });
+
         it('labels roles and actions with the name of the workspace', () => {
             expect(component.roleLabel(MINE)).toBe('Owner');
             expect(component.roleLabel(SHARED)).toBe('Viewer');

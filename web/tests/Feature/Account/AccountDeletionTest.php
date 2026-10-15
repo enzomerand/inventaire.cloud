@@ -126,6 +126,42 @@ describe('deleting the account', function (): void {
         expect($laptop->rememberCookieName())->toBeNull();
     });
 
+    it('tells the person once, on the next page, that the account is deleted', function (): void {
+        User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.com']);
+        $laptop = new Device($this);
+        $laptop->signIn('ada@example.com')->assertOk();
+        $laptop->request('POST', '/api/v1/me/deletion-code')->assertOk();
+        $laptop->request('DELETE', '/api/v1/me', ['code' => lastSentCode()])->assertNoContent();
+
+        // The page the browser goes to: signed out, with the notice for the front to show as a toast.
+        $laptop->visit('/')->assertOk()
+            ->assertSee('x-data="flashNotice"', false)
+            ->assertSee('data-message="Your account has been deleted."', false);
+
+        // Said once: a reload, or any other page, does not say it again.
+        $laptop->visit('/')->assertOk()->assertDontSee('flashNotice');
+    });
+
+    it('says it in the language of the person, which the browser keeps in a cookie', function (): void {
+        User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.com', 'locale' => 'fr']);
+        $laptop = new Device($this);
+        $laptop->signIn('ada@example.com')->assertOk();
+        $laptop->request('POST', '/api/v1/me/deletion-code')->assertOk();
+        $laptop->request('DELETE', '/api/v1/me', ['code' => lastSentCode()])->assertNoContent();
+
+        $laptop->visit('/')->assertSee('data-message="Votre compte a été supprimé."', false);
+    });
+
+    it('tells nothing when nothing was deleted', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $code = deletionCodeFor($this, $user);
+
+        forgetPreviousRequest($this);
+        confirmDeletion($this, $user, wrongCode($code))->assertUnprocessable();
+
+        $this->get('/')->assertOk()->assertDontSee('flashNotice');
+    });
+
     it('accepts the code with the spaces people paste around it', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
         $code = deletionCodeFor($this, $user);

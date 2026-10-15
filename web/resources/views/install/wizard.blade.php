@@ -141,9 +141,11 @@
                     <div>
                         <ul class="list-group mb-3">
                             <template x-for="item in steps" :key="item.id">
-                                <li class="list-group-item d-flex align-items-center justify-content-between" x-show="isSummaryItem(item)">
-                                    <span x-text="item.title"></span>
-                                    <span class="badge" :class="statusClass(item)" x-text="statusLabel(item)"></span>
+                                <li class="list-group-item" x-show="isSummaryItem(item)">
+                                    <div class="d-flex align-items-center justify-content-between">
+                                        <span x-text="item.title"></span>
+                                        <span class="badge" :class="statusClass(item)" x-text="statusLabel(item)"></span>
+                                    </div>
                                 </li>
                             </template>
                         </ul>

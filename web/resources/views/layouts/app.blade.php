@@ -87,6 +87,7 @@
     </div>
 
     <x-toasts />
+    <x-flash-notice />
     <x-client-messages />
 </body>
 </html>
