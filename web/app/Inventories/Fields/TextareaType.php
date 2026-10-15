@@ -35,6 +35,14 @@ final class TextareaType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * Writes every line break as "\n" (so the length is the same whatever system the text comes from), then trims.
      */
     public function prepare(mixed $value, InventoryField $field): mixed

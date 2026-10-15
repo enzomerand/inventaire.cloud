@@ -100,6 +100,14 @@ abstract class AbstractFieldType implements FieldType
     }
 
     /**
+     * Not added up, unless the type says so.
+     */
+    public function summable(): bool
+    {
+        return false;
+    }
+
+    /**
      * What a type that is stored as a plain string gives to the search: the string.
      */
     protected function stringSearchText(mixed $stored): ?string

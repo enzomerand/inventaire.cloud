@@ -40,6 +40,14 @@ final class BarcodeType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * The format the codes are limited to.
      *
      * @param  array<string, mixed>|null  $previous

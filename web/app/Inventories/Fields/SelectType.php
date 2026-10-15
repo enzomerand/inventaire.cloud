@@ -29,6 +29,14 @@ final class SelectType extends ChoiceType
     }
 
     /**
+     * How the list sorts and filters the values (one choice, sorted in the order of the choices of the field).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Choice;
+    }
+
+    /**
      * A text that is the id of one of the choices the field offers.
      *
      * @return list<mixed>

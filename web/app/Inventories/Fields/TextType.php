@@ -35,6 +35,14 @@ final class TextType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * The longest text the field accepts.
      *
      * @param  array<string, mixed>|null  $previous

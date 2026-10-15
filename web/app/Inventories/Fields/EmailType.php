@@ -35,6 +35,14 @@ final class EmailType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * A text of at most 254 characters that is an email address.
      *
      * @return list<mixed>

@@ -10,18 +10,22 @@ use Normalizer;
  * The form a text takes to be searched, and the pattern that looks for it.
  *
  * Searching ignores the case and the accents ("Électricité" is found by `electricite`, `ÉLEC` or `électr`), and the
- * letters that are written with two ("œuvre" by `oeuvre`, "Straße" by `strasse`). Neither the database collations nor
- * its `LIKE` agree on that from one engine to another, so both sides are brought to the same plain form here, in PHP: the
- * text of an item when it is written ({@see ItemSearchText}), and the words a person types when they search.
+ * letters that are written with two ("œuvre" by `oeuvre`, "Straße" by `strasse`) and the ones with a stroke ("Łódź" by
+ * `lodz`). Neither the database collations nor its `LIKE` agree on that from one engine to another, so both sides are
+ * brought to the same plain form here, in PHP: the text of an item when it is written ({@see ItemSearchText}), and the
+ * words a person types when they search.
  *
  * The form is: the compatibility decomposition of Unicode (NFKD: an accented letter becomes the letter and its accents,
  * a ligature or a full-width letter becomes plain letters), the combining marks dropped, the case lowered, `œ`, `æ` and
- * `ß` written out, every run of white space made one space, the ends trimmed.
+ * `ß` written out, `ø`, `ł` and `đ` made `o`, `l` and `d`, every run of white space made one space, the ends trimmed.
  */
 final class SearchText
 {
-    /** The letters that decomposing does not split, written the way a person types them on a plain keyboard. */
-    private const WRITTEN_OUT = ['œ' => 'oe', 'æ' => 'ae', 'ß' => 'ss'];
+    /**
+     * The letters that decomposing does not split (the ligatures, and the letters with a stroke), written the way a person
+     * types them on a plain keyboard. The text is lowered before, so the capitals need no entry.
+     */
+    private const WRITTEN_OUT = ['œ' => 'oe', 'æ' => 'ae', 'ß' => 'ss', 'ø' => 'o', 'ł' => 'l', 'đ' => 'd'];
 
     /** The character that escapes the wildcards of a `LIKE` pattern (see {@see self::pattern()}); the `ESCAPE` clause of {@see ItemSearchText::restrict()} names it. */
     public const ESCAPE = '!';

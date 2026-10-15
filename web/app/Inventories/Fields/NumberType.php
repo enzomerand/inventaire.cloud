@@ -37,6 +37,14 @@ final class NumberType extends DecimalType
     }
 
     /**
+     * Numbers are added up.
+     */
+    public function summable(): bool
+    {
+        return true;
+    }
+
+    /**
      * The decimals, the bounds and the unit.
      *
      * @param  array<string, mixed>|null  $previous
@@ -79,7 +87,10 @@ final class NumberType extends DecimalType
         ], fn (mixed $option): bool => $option !== null);
     }
 
-    protected function decimals(InventoryField $field): int
+    /**
+     * The decimals option of the field (none by default).
+     */
+    public function decimals(InventoryField $field): int
     {
         return (int) $field->option('decimals', 0);
     }

@@ -27,7 +27,8 @@ use Illuminate\Validation\ValidationException;
  *
  * And what is read back goes through {@see self::present()}, which drops what no longer makes sense (a choice that
  * was deleted from the field since the value was written). What a value adds to the text a person can search an item by
- * is told by {@see self::searchText()}.
+ * is told by {@see self::searchText()}. How the values are sorted and filtered when the items are listed is told by
+ * {@see self::queryKind()}, and whether they are added up by {@see self::summable()}.
  *
  * Options follow the same split: {@see self::optionRules()} checks each option one by one as it is sent, and
  * {@see self::normalizeOptions()} fills in the defaults, puts them in canonical form and judges the options together.
@@ -133,4 +134,16 @@ interface FieldType
      * field does not understand (a choice that is gone) adds nothing.
      */
     public function searchText(mixed $stored, InventoryField $field): ?string;
+
+    /**
+     * How the list of items sorts and filters the values of the type ({@see QueryKind}): what the stored value is made of
+     * decides, so that the application never has to know the types one by one.
+     */
+    public function queryKind(): QueryKind;
+
+    /**
+     * Whether the list gives the total of the field over the items it matches: true for the numbers and the amounts,
+     * which add up, false for everything else (adding up percentages or ratings means nothing).
+     */
+    public function summable(): bool;
 }

@@ -59,7 +59,10 @@ final class PercentageType extends DecimalType
         return ['decimals' => (int) ($options['decimals'] ?? self::DEFAULT_DECIMALS)];
     }
 
-    protected function decimals(InventoryField $field): int
+    /**
+     * The decimals option of the field (two by default).
+     */
+    public function decimals(InventoryField $field): int
     {
         return (int) $field->option('decimals', self::DEFAULT_DECIMALS);
     }

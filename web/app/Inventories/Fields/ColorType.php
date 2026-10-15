@@ -28,6 +28,14 @@ final class ColorType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * A color written `#rrggbb`.
      *
      * @return list<mixed>

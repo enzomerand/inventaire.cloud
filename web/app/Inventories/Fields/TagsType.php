@@ -39,6 +39,14 @@ final class TagsType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (free labels, not sorted).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Tags;
+    }
+
+    /**
      * Trims every tag, drops the empty ones and the repeats. Anything that is not a list of texts is left for the rules.
      */
     public function prepare(mixed $value, InventoryField $field): mixed

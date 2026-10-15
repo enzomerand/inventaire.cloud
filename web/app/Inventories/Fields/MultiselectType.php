@@ -30,6 +30,14 @@ final class MultiselectType extends ChoiceType
     }
 
     /**
+     * How the list sorts and filters the values (several choices, not sorted).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Choices;
+    }
+
+    /**
      * Trims the ids and keeps each one once.
      */
     public function prepare(mixed $value, InventoryField $field): mixed

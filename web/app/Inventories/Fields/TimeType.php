@@ -29,6 +29,14 @@ final class TimeType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (fixed-width text, sorted in the order of time).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Temporal;
+    }
+
+    /**
      * A time of day written HH:MM on 24 hours.
      *
      * @return list<mixed>
@@ -36,9 +44,17 @@ final class TimeType extends AbstractFieldType
     public function valueRules(InventoryField $field): array
     {
         return [function (string $attribute, mixed $value, Closure $fail): void {
-            if (! is_string($value) || preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]$/D', $value) !== 1) {
+            if (! is_string($value) || ! self::isTime($value)) {
                 $fail(__('The :attribute must be a time written HH:MM, on 24 hours.'));
             }
         }];
+    }
+
+    /**
+     * Whether the text is a time of day written HH:MM, on 24 hours.
+     */
+    public static function isTime(string $text): bool
+    {
+        return preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]$/D', $text) === 1;
     }
 }
