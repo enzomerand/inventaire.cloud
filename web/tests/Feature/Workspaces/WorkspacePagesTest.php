@@ -26,7 +26,7 @@ describe('the workspace switcher of the header', function (): void {
     it('is shown before the account menu, to somebody who is signed in', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
 
-        $page = $this->actingAs($user)->get(route('app'), ['Accept-Language' => 'en'])->assertOk()
+        $page = $this->actingAs($user)->get(route('app.workspaces'), ['Accept-Language' => 'en'])->assertOk()
             ->assertSee('x-data="workspaceSwitcher"', false)
             ->assertSee('data-url="/api/v1/me/current-workspace"', false)
             ->assertSee('New workspace')
@@ -55,7 +55,7 @@ describe('the workspace switcher of the header', function (): void {
         $shared->members()->attach($user->id, ['role' => WorkspaceRole::Viewer->value]);
         $personal = $user->workspaces()->orderBy('workspace_user.id')->firstOrFail();
 
-        $page = $this->actingAs($user->fresh())->get(route('app'), ['Accept-Language' => 'en'])->assertOk();
+        $page = $this->actingAs($user->fresh())->get(route('app.workspaces'), ['Accept-Language' => 'en'])->assertOk();
 
         expect(switcherItems($page))->toBe([
             ['id' => $personal->ulid, 'name' => 'Espace personnel', 'role' => 'owner', 'current' => false],
@@ -69,20 +69,20 @@ describe('the workspace switcher of the header', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
         app(Workspaces::class)->create($user, '<script>alert("x")</script> & "co"');
 
-        $page = $this->actingAs($user->fresh())->get(route('app'))->assertOk();
+        $page = $this->actingAs($user->fresh())->get(route('app.workspaces'))->assertOk();
 
         expect($page->getContent())->not->toContain('<script>alert("x")</script>')
             ->and(collect(switcherItems($page))->pluck('name')->all())->toContain('<script>alert("x")</script> & "co"');
     });
 
     it('still works for an account that has no workspace yet', function (): void {
-        $this->actingAs(User::factory()->create())->get(route('app'))
+        $this->actingAs(User::factory()->create())->get(route('app.workspaces'))
             ->assertOk()
             ->assertSee('data-workspaces="[]"', false);
     });
 
     it('is translated', function (): void {
-        $this->actingAs(User::factory()->withPersonalWorkspace()->create())->get(route('app'), ['Accept-Language' => 'fr'])
+        $this->actingAs(User::factory()->withPersonalWorkspace()->create())->get(route('app.workspaces'), ['Accept-Language' => 'fr'])
             ->assertOk()
             ->assertSee('Nouvel espace de travail')
             ->assertSee('Gérer les espaces de travail')
@@ -92,7 +92,7 @@ describe('the workspace switcher of the header', function (): void {
 
 describe('the account menu', function (): void {
     it('links to the workspaces and to the account', function (): void {
-        $this->actingAs(User::factory()->withPersonalWorkspace()->create())->get(route('app'), ['Accept-Language' => 'en'])
+        $this->actingAs(User::factory()->withPersonalWorkspace()->create())->get(route('app.workspaces'), ['Accept-Language' => 'en'])
             ->assertOk()
             ->assertSee('href="'.route('app.workspaces').'"', false)
             ->assertSee('href="'.route('app.account').'"', false)

@@ -56,3 +56,29 @@ export function t(key, replacements = {}) {
 
     return message;
 }
+
+/**
+ * Returns the translated message for a key, in the plural form that fits a count.
+ *
+ * A message with plural forms is several keys: `key.one`, `key.other` and, for the languages that need them, `key.few`,
+ * `key.many`, `key.two`, `key.zero`. The form is chosen by the plural rules of the language of the page; a language
+ * whose form has no message falls back to `key.other`. `:count` is always filled in.
+ *
+ * @param {string} key Message identifier without the plural suffix, e.g. "inventories.items".
+ * @param {number} count The number the message is about.
+ * @param {Record<string, string | number>} [replacements] Values for the other placeholders of the message.
+ * @returns {string}
+ */
+export function tn(key, count, replacements = {}) {
+    let category = 'other';
+
+    try {
+        category = new Intl.PluralRules(document.documentElement.lang || 'en').select(count);
+    } catch {
+        // A language tag the browser does not know: the "other" form is always provided.
+    }
+
+    const chosen = `${key}.${category}` in loadMessages() ? `${key}.${category}` : `${key}.other`;
+
+    return t(chosen, { count, ...replacements });
+}

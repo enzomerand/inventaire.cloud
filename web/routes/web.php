@@ -8,6 +8,10 @@ use App\Http\Controllers\Install\InstallStepController;
 use App\Http\Controllers\Install\TokenController;
 use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\UpdateLocaleController;
+use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
+use App\Http\Controllers\Web\InventoryFieldsPageController;
+use App\Http\Controllers\Web\InventoryPageController;
+use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
@@ -16,15 +20,27 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home')->name('home');
 
-// Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space, where
-// the pages drive the /api/v1 endpoints of their workspaces, their account and (for administrators) the instance.
-// Only these pages check that the session
-// was not revoked ("sign out everywhere"): the public ones never look the visitor up for that.
+// Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the
+// workspace they work in), where the pages drive the /api/v1 endpoints of their workspaces, their inventories, their
+// account and (for administrators) the instance. Only these pages check that the session was not revoked ("sign out
+// everywhere"): the public ones never look the visitor up for that.
 Route::view('/login', 'auth.login')->middleware('guest')->name('login');
 Route::middleware(['auth', AuthenticateSession::class])->group(function (): void {
-    Route::view('/app', 'app.dashboard')->name('app');
+    Route::get('/app', CurrentWorkspaceRedirectController::class)->name('app');
     Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
     Route::view('/app/account', 'app.account')->name('app.account');
+
+    // The pages of a workspace: its inventories, the items of one of them and its fields. The ULID of the workspace is in
+    // the path (not the "current" workspace of the account), so that a link always shows the same thing; the inventory
+    // is looked up inside that workspace (scoped binding) and every page refuses, as a 404, whoever does not belong to it.
+    Route::prefix('app/w/{workspace}')->name('app.')->group(function (): void {
+        Route::get('/', WorkspacePageController::class)->name('workspace');
+
+        Route::scopeBindings()->group(function (): void {
+            Route::get('/inventories/{inventory}', InventoryPageController::class)->name('inventory');
+            Route::get('/inventories/{inventory}/fields', InventoryFieldsPageController::class)->name('inventory.fields');
+        });
+    });
 
     // The administration of the instance: its administrators only (the "admin" gate), a 403 for everybody else.
     Route::middleware('can:admin')->prefix('app/admin')->name('app.admin.')->group(function (): void {

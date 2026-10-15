@@ -52,7 +52,7 @@ function accountOnTwoDevices(object $test): array
  */
 function assertSignedIn(Device $device): void
 {
-    $device->visit('/app')->assertOk();
+    $device->visit('/app/workspaces')->assertOk();
     $device->request('GET', '/api/v1/me')->assertOk()->assertJsonPath('data.email', 'ada@example.com');
 }
 
@@ -385,7 +385,8 @@ describe('the pages of the signed-in space and the others', function (): void {
     it('keeps the session of a device that is up to date on the signed-in space', function (): void {
         [, $laptop] = accountOnTwoDevices($this);
 
-        $laptop->visit('/app')->assertOk();
+        // /app sends a signed-in visitor on to their workspace; only a signed-out one is sent to the login page.
+        $laptop->visit('/app')->assertRedirectContains('/app/w/');
         $laptop->visit('/app/workspaces')->assertOk();
     });
 });

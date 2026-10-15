@@ -4,7 +4,7 @@
     Alpine runs in its CSP build: the "workspaces" component (resources/js/components/workspaces.js) is referenced by
     name and gets its endpoints from the data-* attributes of its root. The list itself is the shared "workspaces"
     store, which the switcher of the header fills from the list the server rendered. Everything goes through the API;
-    deleting asks for a confirmation in the row.
+    deleting asks for a confirmation in the row. The name of a workspace links to its page (the inventories it holds).
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
@@ -20,6 +20,7 @@
         x-data="workspaces"
         data-url="{{ route('api.v1.workspaces.index', absolute: false) }}"
         data-current-url="{{ route('api.v1.me.current-workspace', absolute: false) }}"
+        data-workspace-url="{{ route('app.workspace', ['workspace' => '__id__'], absolute: false) }}"
     >
         <div class="col-12 col-lg-8">
             <div class="card">
@@ -49,7 +50,7 @@
 
                                     <div x-show="!isEditing(item)">
                                         <div class="d-flex flex-wrap align-items-center gap-2">
-                                            <span class="fw-bold text-break" x-text="item.name"></span>
+                                            <a class="fw-bold text-break" :href="pageUrl(item)" x-text="item.name"></a>
                                             <span class="badge bg-primary-lt" x-show="item.current">{{ __('Current') }}</span>
                                             <span class="badge" x-text="roleLabel(item)"></span>
                                         </div>

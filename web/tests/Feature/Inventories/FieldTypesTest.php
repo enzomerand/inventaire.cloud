@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Inventories\Fields\BarcodeType;
+use App\Inventories\Fields\Currencies;
 use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Fields\UnknownFieldTypeException;
@@ -631,5 +632,43 @@ describe('the barcode check digits', function (): void {
 
             expect(BarcodeType::isValid($code, 'ean13'))->toBe($code === $valid);
         }
+    });
+});
+
+describe('the currencies a picker lists', function (): void {
+    it('are every currency an amount field accepts, and only those', function (): void {
+        $codes = array_column(Currencies::named('en'), 'code');
+
+        expect($codes)->toContain('EUR', 'USD', 'JPY')
+            ->not->toContain('XXX', 'XTS')
+            ->and(array_filter($codes, fn (string $code): bool => ! Currencies::exists($code)))->toBe([])
+            ->and(count($codes))->toBe(count(array_unique($codes)));
+    });
+
+    it('are named in the language asked for', function (): void {
+        $english = array_column(Currencies::named('en'), 'name', 'code');
+        $french = array_column(Currencies::named('fr'), 'name', 'code');
+
+        expect($english['EUR'])->toBe('Euro')
+            ->and($french['EUR'])->toBe('euro')
+            ->and($french['USD'])->toBe('dollar des États-Unis')
+            ->and($french['JPY'])->toBe('yen japonais');
+    });
+
+    it('are in the order of their names in that language', function (): void {
+        $names = array_column(Currencies::named('fr'), 'name');
+        $collator = new Collator('fr');
+        $collator->setStrength(Collator::SECONDARY);
+        $sorted = $names;
+        usort($sorted, fn (string $first, string $second): int => $collator->compare($first, $second));
+
+        expect($names)->toBe($sorted);
+    });
+
+    it('are listed under their code when ICU has no name for them in a language it does not know', function (): void {
+        $named = array_column(Currencies::named('zz'), 'name', 'code');
+
+        expect($named['EUR'])->not->toBe('')
+            ->and($named)->toHaveKey('USD');
     });
 });

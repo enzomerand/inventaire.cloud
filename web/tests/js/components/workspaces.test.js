@@ -52,7 +52,13 @@ describe('workspaces page', () => {
         store.replace([MINE, SHARED]);
         component = workspaces();
         // Alpine injects $root (the element carrying x-data and the data-* attributes), $store, $refs and $nextTick.
-        component.$root = { dataset: { url: '/api/v1/workspaces', currentUrl: '/api/v1/me/current-workspace' } };
+        component.$root = {
+            dataset: {
+                url: '/api/v1/workspaces',
+                currentUrl: '/api/v1/me/current-workspace',
+                workspaceUrl: '/app/w/__id__',
+            },
+        };
         component.$store = { workspaces: store };
         component.$refs = {};
         component.$nextTick = (callback) => callback();
@@ -62,6 +68,11 @@ describe('workspaces page', () => {
     describe('showing the workspaces', () => {
         it('reads them from the shared store', () => {
             expect(component.items).toEqual([MINE, SHARED]);
+        });
+
+        it('links each workspace to its page', () => {
+            expect(component.pageUrl(MINE)).toBe('/app/w/mine');
+            expect(component.pageUrl(SHARED)).toBe('/app/w/shared');
         });
 
         it('lets only an owner rename and delete', () => {

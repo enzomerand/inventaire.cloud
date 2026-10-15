@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use Collator;
 use NumberFormatter;
 use ResourceBundle;
 use RuntimeException;
@@ -37,6 +38,38 @@ final class Currencies
     public static function fractionDigits(string $code): int
     {
         return self::$digits[$code] ??= self::readFractionDigits($code);
+    }
+
+    /**
+     * Every currency an amount field accepts, with its name in the given language ("euro" in French, "Euro" in English),
+     * in the order of the names in that language: what a currency picker lists.
+     *
+     * A currency ICU has no name for in that language is listed under its code. The names come from the same ICU data
+     * as the codes, so no list of currencies is copied into the application.
+     *
+     * @return list<array{code: string, name: string}>
+     */
+    public static function named(string $locale): array
+    {
+        $names = ResourceBundle::create($locale, 'ICUDATA-curr')?->get('Currencies');
+        $names = $names instanceof ResourceBundle ? $names : null;
+        $list = [];
+
+        foreach (array_keys(self::codes()) as $code) {
+            if (! self::exists($code)) {
+                continue;
+            }
+
+            $entry = $names?->get($code);
+            $name = $entry instanceof ResourceBundle ? $entry->get(1) : null;
+            $list[] = ['code' => $code, 'name' => is_string($name) && $name !== '' ? $name : $code];
+        }
+
+        $collator = new Collator($locale);
+        $collator->setStrength(Collator::SECONDARY);
+        usort($list, fn (array $first, array $second): int => $collator->compare($first['name'], $second['name']) ?: strcmp($first['code'], $second['code']));
+
+        return $list;
     }
 
     /**

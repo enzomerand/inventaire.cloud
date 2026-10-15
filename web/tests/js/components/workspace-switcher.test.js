@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import workspaceSwitcher from '../../../resources/js/components/workspace-switcher.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
-import { reloadPage } from '../../../resources/js/lib/page.js';
+import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 import { createWorkspacesStore } from '../../../resources/js/stores/workspaces.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
@@ -12,7 +12,7 @@ vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     return { ...original, http: { put: vi.fn() } };
 });
 vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
-vi.mock('../../../resources/js/lib/page.js', () => ({ reloadPage: vi.fn() }));
+vi.mock('../../../resources/js/lib/page.js', () => ({ redirectTo: vi.fn(), reloadPage: vi.fn() }));
 
 const LIST = [
     { id: 'personal', name: 'Espace personnel', role: 'owner', current: false },
@@ -28,7 +28,13 @@ describe('workspace switcher', () => {
         store = createWorkspacesStore();
         component = workspaceSwitcher();
         // Alpine injects $root (the element carrying x-data and the data-* attributes) and $store.
-        component.$root = { dataset: { url: '/api/v1/me/current-workspace', workspaces: JSON.stringify(LIST) } };
+        component.$root = {
+            dataset: {
+                url: '/api/v1/me/current-workspace',
+                workspaceUrl: '/app/w/__id__',
+                workspaces: JSON.stringify(LIST),
+            },
+        };
         component.$store = { workspaces: store };
     });
 
@@ -64,20 +70,21 @@ describe('workspace switcher', () => {
     });
 
     describe('choosing a workspace', () => {
-        it('tells the API then reloads the page', async () => {
+        it('tells the API then goes to the page of the workspace', async () => {
             http.put.mockResolvedValue({ data: {} });
 
             await component.select(LIST[0]);
 
             expect(http.put).toHaveBeenCalledWith('/api/v1/me/current-workspace', { workspace: 'personal' });
-            expect(reloadPage).toHaveBeenCalledTimes(1);
+            expect(redirectTo).toHaveBeenCalledWith('/app/w/personal');
+            expect(reloadPage).not.toHaveBeenCalled();
         });
 
         it('does nothing for the workspace that is already current', async () => {
             await component.select(LIST[1]);
 
             expect(http.put).not.toHaveBeenCalled();
-            expect(reloadPage).not.toHaveBeenCalled();
+            expect(redirectTo).not.toHaveBeenCalled();
         });
 
         it('ignores clicks while a change is in flight', async () => {
@@ -86,6 +93,7 @@ describe('workspace switcher', () => {
             await Promise.all([component.select(LIST[0]), component.select(LIST[2])]);
 
             expect(http.put).toHaveBeenCalledTimes(1);
+            expect(redirectTo).toHaveBeenCalledTimes(1);
         });
 
         it('shows the translated validation message of a workspace the person no longer belongs to', async () => {
@@ -98,7 +106,7 @@ describe('workspace switcher', () => {
             await component.select(LIST[0]);
 
             expect(notify).toHaveBeenCalledWith('danger', 'Espace de travail invalide.');
-            expect(reloadPage).not.toHaveBeenCalled();
+            expect(redirectTo).not.toHaveBeenCalled();
             expect(component.busy).toBe(false);
         });
 
@@ -119,7 +127,7 @@ describe('workspace switcher', () => {
             await component.select(LIST[0]);
 
             expect(notify).not.toHaveBeenCalled();
-            expect(reloadPage).not.toHaveBeenCalled();
+            expect(redirectTo).not.toHaveBeenCalled();
             expect(component.busy).toBe(false);
         });
     });

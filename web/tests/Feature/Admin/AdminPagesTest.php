@@ -97,7 +97,7 @@ describe('the administration pages', function (): void {
 describe('the entry of the account menu', function (): void {
     it('is shown to an administrator', function (): void {
         $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
-            ->get(route('app'), ['Accept-Language' => 'en'])
+            ->get(route('app.workspaces'), ['Accept-Language' => 'en'])
             ->assertOk()
             ->assertSee('href="'.route('app.admin.users').'"', false)
             ->assertSee('Administration');
@@ -105,7 +105,7 @@ describe('the entry of the account menu', function (): void {
 
     it('is not shown to anybody else', function (): void {
         $this->actingAs(User::factory()->withPersonalWorkspace()->create())
-            ->get(route('app'), ['Accept-Language' => 'en'])
+            ->get(route('app.workspaces'), ['Accept-Language' => 'en'])
             ->assertOk()
             ->assertDontSee('/app/admin')
             ->assertDontSee('Administration');
