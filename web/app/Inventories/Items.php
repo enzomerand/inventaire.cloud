@@ -20,8 +20,9 @@ use Illuminate\Validation\ValidationException;
  * Every write that depends on the fields starts by locking the inventory, then reads the fields while it holds that lock
  * (a plain read: the fields have no locks of their own, see {@see Locks}), so that:
  *
- * - the quota (`inventories.max_items`) is counted with nobody else adding an item: two requests for the last place
- *   cannot both get it;
+ * - the quota (`inventories.max_items`) is judged with nobody else adding an item: two requests for the last place
+ *   cannot both get it. The number of items is the counter kept on the inventory row (`items_count`), which the lock
+ *   protects and which this class alone moves, in the transaction of the item it adds or deletes;
  * - the values are validated against the fields as they are *now*, and rebuilt from them: a field deleted at the same
  *   moment either took the value with it before this runs, or is not deleted until this has finished, and no value
  *   is left behind that points to a field that is gone;
@@ -63,7 +64,7 @@ final class Items
 
             $limit = config()->integer('inventories.max_items');
 
-            if (Item::query()->where('inventory_id', $locked->getKey())->count() >= $limit) {
+            if ($locked->items_count >= $limit) {
                 throw new ItemLimitReachedException($limit);
             }
 
@@ -73,6 +74,7 @@ final class Items
             $item->created_by = $author->getKey();
             $item->updated_by = $author->getKey();
             $item->save();
+            $this->moveCount($locked, $inventory, 1);
 
             return $item;
         }));
@@ -120,7 +122,32 @@ final class Items
             $locked = $this->locks->inventory($inventory->getKey());
 
             $this->lockedItem($locked, $item)->delete();
+            $this->moveCount($locked, $inventory, -1);
         }));
+    }
+
+    /**
+     * Moves the counter of items of the inventory by the number of items just added or deleted.
+     *
+     * The inventory is locked by the caller, so the counter read with it is the one to move. It is written with the query
+     * builder, which does not touch `updated_at` (adding an item is not a change of the inventory). Both copies of the
+     * inventory in memory, the locked one and the one the caller holds (the request's, which a resource may describe
+     * afterwards), get the new value; it is set from the locked row, not added to the caller's copy, which may be older.
+     *
+     * @param  Inventory  $locked  The inventory as just read under the lock.
+     * @param  Inventory  $given  The copy the caller holds.
+     * @param  int  $by  1 for an item added, -1 for one deleted.
+     */
+    private function moveCount(Inventory $locked, Inventory $given, int $by): void
+    {
+        $count = max(0, $locked->items_count + $by);
+
+        $this->db->table('inventories')->where('id', $locked->getKey())->update(['items_count' => $count]);
+
+        foreach ([$locked, $given] as $inventory) {
+            $inventory->setAttribute('items_count', $count);
+            $inventory->syncOriginalAttribute('items_count');
+        }
     }
 
     /**

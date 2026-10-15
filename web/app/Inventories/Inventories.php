@@ -50,7 +50,7 @@ final class Inventories
         $collator->setStrength(Collator::SECONDARY);
 
         return $workspace->inventories()
-            ->withCount(['fields', 'items'])
+            ->withCount('fields')
             ->get()
             ->sort(fn (Inventory $first, Inventory $second): int => $collator->compare($first->name, $second->name) ?: $first->id <=> $second->id)
             ->values();

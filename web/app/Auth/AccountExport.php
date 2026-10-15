@@ -80,11 +80,10 @@ final class AccountExport
     {
         $memberships = $this->workspaces->memberships($user);
 
-        // Two queries for all the workspaces (the inventories with the number of their items, then their fields), not
+        // Two queries for all the workspaces (the inventories, which carry the number of their items, then their fields), not
         // two per workspace.
         $inventories = Inventory::query()
             ->whereIn('workspace_id', array_map(fn (Membership $membership): int => $membership->workspace->getKey(), $memberships))
-            ->withCount('items')
             ->with('fields')
             ->orderBy('id')
             ->get()
@@ -124,7 +123,7 @@ final class AccountExport
                 'required' => $field->required,
                 'position' => $field->position,
             ])->all(),
-            'items_count' => (int) $inventory->getAttribute('items_count'),
+            'items_count' => $inventory->items_count,
         ])->all());
     }
 
