@@ -110,6 +110,17 @@ describe('writing values', function (): void {
         }
     });
 
+    it('refuses a field given twice under two cases of its ULID, rather than keeping one of them', function (): void {
+        $fields = valuesFields(valuesField('01j0000000000000000000000a', 'text'));
+
+        try {
+            app(ItemValues::class)->apply($fields, ['01j0000000000000000000000a' => 'first', '01J0000000000000000000000A' => 'second'], [], true);
+            $this->fail('A field given twice must be refused.');
+        } catch (ValidationException $exception) {
+            expect(array_keys($exception->errors()))->toBe(['values.01J0000000000000000000000A']);
+        }
+    });
+
     it('finds a field by its ULID whatever the case, as a URL does, and stores the value under the lowercase key', function (): void {
         $fields = valuesFields(valuesField('01j0000000000000000000000a', 'text'), valuesField('01j0000000000000000000000b', 'number'), valuesField('01j0000000000000000000000c', 'text', required: true));
 

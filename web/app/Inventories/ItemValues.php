@@ -61,17 +61,21 @@ final class ItemValues
             }
         }
 
-        // What was sent, by the lowercase ULID of the field it is for; the keys that are no (writable) field are named as sent.
+        // What was sent, by the lowercase ULID of the field it is for; the keys that are no (writable) field are named as sent,
+        // and so is a second key for the same field (same ULID in another case), which is refused rather than silently dropped.
         $sent = [];
         $unknown = [];
+        $repeated = [];
 
         foreach ($input as $key => $value) {
             $ulid = strtolower((string) $key);
 
-            if (isset($writable[$ulid])) {
-                $sent[$ulid] = $value;
-            } else {
+            if (! isset($writable[$ulid])) {
                 $unknown[] = (string) $key;
+            } elseif (array_key_exists($ulid, $sent)) {
+                $repeated[] = (string) $key;
+            } else {
+                $sent[$ulid] = $value;
             }
         }
 
@@ -108,9 +112,13 @@ final class ItemValues
         }
 
         $validator = Validator::make(['values' => $prepared], $rules, [], $names);
-        $validator->after(function (ValidatorInstance $validator) use ($unknown): void {
+        $validator->after(function (ValidatorInstance $validator) use ($unknown, $repeated): void {
             foreach (array_slice($unknown, 0, self::MAX_UNKNOWN_REPORTED) as $key) {
                 $validator->errors()->add("values.{$key}", __('This field does not exist in this inventory.'));
+            }
+
+            foreach (array_slice($repeated, 0, self::MAX_UNKNOWN_REPORTED) as $key) {
+                $validator->errors()->add("values.{$key}", __('This field is given more than once.'));
             }
         });
         $validator->validate();

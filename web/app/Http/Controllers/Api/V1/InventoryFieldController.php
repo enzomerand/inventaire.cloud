@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Gate;
 final class InventoryFieldController extends Controller
 {
     /**
-     * Gets the rules of fields.
+     * Receives the service that adds, changes, orders and deletes fields.
      */
     public function __construct(private readonly InventoryFields $fields) {}
 

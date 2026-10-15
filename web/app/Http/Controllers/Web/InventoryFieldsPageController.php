@@ -23,6 +23,9 @@ use Illuminate\Support\Facades\Gate;
  */
 final class InventoryFieldsPageController extends Controller
 {
+    /**
+     * Receives the registry of field types, whose keys and labels feed the type picker.
+     */
     public function __construct(private readonly FieldTypes $types) {}
 
     /**

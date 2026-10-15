@@ -603,6 +603,7 @@
     "This database holds migrations of another application. Use an empty database.": "Cette base contient les migrations d'une autre application. Utilisez une base vide.",
     "This database is not empty and was not created by inventaire.cloud (it has no migrations table). Use an empty database.": "Cette base n'est pas vide et n'a pas été créée par inventaire.cloud (elle n'a pas de table de migrations). Utilisez une base vide.",
     "This field does not exist in this inventory.": "Ce champ n'existe pas dans cet inventaire.",
+    "This field is given more than once.": "Ce champ est indiqué plusieurs fois.",
     "This inventory already has a field with this name.": "Cet inventaire a déjà un champ portant ce nom.",
     "This inventory has no field yet": "Cet inventaire n'a pas encore de champ",
     "This is only available from the web interface, not with an API token.": "Cela n'est disponible que depuis l'interface web, pas avec un jeton d'API.",
