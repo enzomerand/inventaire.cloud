@@ -45,12 +45,20 @@ final class Workspaces
      *
      * Its name is a label, not the person's name, written in the language of the account (or of the request while
      * it has none yet): a name is personal data that has no business in a title shown to the people one shares with.
+     *
+     * The account must have no workspace yet, and nobody else may be able to give it one meanwhile: it was created
+     * in the caller's transaction (sign-up, invisible to everybody else until the commit), or it is locked by the
+     * caller, who has just found it without any membership ({@see self::ensure()}, {@see self::delete()}). So,
+     * unlike {@see self::create()}, this neither locks the account nor counts its memberships against the limit:
+     * reading the memberships of an account that has none takes a gap lock that, at MySQL and MariaDB's default
+     * isolation level, makes accounts that are created at the same moment wait for each other's insert and
+     * deadlock. Nothing here locks more than the rows it inserts.
      */
     public function createPersonal(User $user): Workspace
     {
         $locale = $user->locale !== null && $this->locales->isSupported($user->locale) ? $user->locale : $this->locales->resolved();
 
-        return $this->create($user, __('Personal space', [], $locale));
+        return $this->db->transaction(fn (): Workspace => $this->place($user, __('Personal space', [], $locale)));
     }
 
     /**
@@ -64,8 +72,9 @@ final class Workspaces
      * Reading the memberships of an account that has none locks the gap where they would be (MySQL and MariaDB, at
      * their default isolation level), and two accounts that get their first workspace at the same moment each wait
      * for the other's gap when they insert: the database aborts one of them. It is retried (3 attempts) when this is
-     * the outermost transaction; inside another one (the sign-up's, which is run through {@see DeadlockRetries}), that
-     * one is retried as a whole instead, since a deadlock rolls all of it back.
+     * the outermost transaction; inside another one (the sign-in's, which is run through {@see DeadlockRetries}), that
+     * one is retried as a whole instead, since a deadlock rolls all of it back. A new account never comes here: it
+     * is given its workspace as it is created, without that read ({@see self::createPersonal()}).
      */
     public function ensure(User $user): void
     {
@@ -84,8 +93,8 @@ final class Workspaces
     /**
      * Creates a workspace owned by the user, who starts working in it.
      *
-     * Retried (3 attempts) when the database picks it as the loser of a deadlock, like {@see self::ensure()}, which
-     * calls it for an account's first workspace: when it runs inside another transaction, that one is retried instead.
+     * Retried (3 attempts) when the database picks it as the loser of a deadlock; when it runs inside another
+     * transaction, that one is retried instead.
      *
      * @param  string  $name  Already validated and trimmed.
      *
@@ -106,15 +115,24 @@ final class Workspaces
                 throw new WorkspaceLimitReachedException($limit);
             }
 
-            $workspace = new Workspace(['name' => $name]);
-            $workspace->save();
-
-            $workspace->members()->attach($user->getKey(), ['role' => WorkspaceRole::Owner->value]);
-
-            $this->makeCurrent($user, $workspace);
-
-            return $workspace;
+            return $this->place($user, $name);
         }, 3);
+    }
+
+    /**
+     * Inserts a workspace, the owner membership of the user in it, and makes it their current one. Checks and locks
+     * nothing: that is up to the caller, inside its transaction.
+     */
+    private function place(User $user, string $name): Workspace
+    {
+        $workspace = new Workspace(['name' => $name]);
+        $workspace->save();
+
+        $workspace->members()->attach($user->getKey(), ['role' => WorkspaceRole::Owner->value]);
+
+        $this->makeCurrent($user, $workspace);
+
+        return $workspace;
     }
 
     /**

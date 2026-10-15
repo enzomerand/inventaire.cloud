@@ -50,9 +50,10 @@ final class VerifyCodeController extends Controller
         $code = $request->code();
         $name = $request->name();
 
-        // Retried when the database picks it as the loser of a deadlock: people signing up at the same moment can wait
-        // for each other's place among the memberships (see Workspaces::ensure()). Nothing of the attempt that lost
-        // is kept, the code included, so the next one starts from the same state.
+        // Retried when the database picks it as the loser of a deadlock: accounts found without a workspace that sign
+        // in at the same moment can wait for each other's place among the memberships (see Workspaces::ensure()); a
+        // new account does not, it is given its workspace without that read. Nothing of the attempt that lost is
+        // kept, the code included, so the next one starts from the same state.
         $outcome = DeadlockRetries::run(fn (): JsonResponse|User => $this->db->transaction(fn (): JsonResponse|User => $this->accept($email, $code, $name, $codes, $accounts, $locales)));
 
         if ($outcome instanceof JsonResponse) {

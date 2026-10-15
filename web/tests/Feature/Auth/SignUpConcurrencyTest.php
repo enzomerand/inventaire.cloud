@@ -15,12 +15,13 @@ use Tests\Support\ConcurrentChildren;
  * Several people signing up at the same moment, each with their own address, through the real HTTP stack, in separate
  * PHP processes against the real database.
  *
- * A single process cannot reproduce this. Giving a new account its personal workspace starts by reading the
+ * A single process cannot reproduce this. Giving a new account its personal workspace used to start by reading the
  * memberships of an account that has none, and on MySQL and MariaDB (REPEATABLE READ) that locking read takes a gap
  * lock on the place where they would be; the memberships of two new accounts go to the same place, so each sign-up
- * waits for the other's gap when it inserts its own membership and the database aborts one of them (deadlock). The
- * sign-up is retried, and every one of them must succeed with exactly one personal workspace. PostgreSQL has no gap
- * locks: there the test checks the same outcome without the contention.
+ * waited for the other's gap when it inserted its own membership and the database aborted one of them (deadlock):
+ * dozens of times per run, which the retries absorbed until, once in a while, they ran out. The workspace is now
+ * inserted without that read (see WorkspacesServiceTest for the guard that does not depend on timing), and every
+ * sign-up must succeed with exactly one personal workspace, without relying on a retry.
  */
 
 uses(CommitsDatabaseChanges::class);

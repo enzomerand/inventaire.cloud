@@ -35,9 +35,11 @@ use Illuminate\Database\Eloquent\Collection;
  * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
- * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels. Code that adds members (the
- * invitations of lot 9) must follow the same order, accounts then the workspace then the memberships: it is what lets
- * the two exceptions below stay safety nets.
+ * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels: creating an account takes
+ * none of 2 to 4 for its personal workspace, since the account and the workspace are invisible to everybody until the
+ * commit and the workspace is inserted without reading any membership (see {@see Workspaces::createPersonal()}).
+ * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
+ * memberships: it is what lets the two exceptions below stay safety nets.
  *
  * Two paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
@@ -103,6 +105,10 @@ final class Locks
     /**
      * Reads memberships with a locking read: it sees what is committed now, and nobody can change them until the
      * transaction ends. Call it once the accounts and workspaces concerned are locked.
+     *
+     * Where there are none to read, MySQL and MariaDB (at their default isolation level) lock the gap where they
+     * would be, and every insert there waits: two accounts that read nothing then insert at the same moment wait
+     * for each other, and one is aborted. So never use it on the memberships of an account that is being created.
      *
      * @param  'user_id'|'workspace_id'  $column  Whether the ids are those of accounts or of workspaces.
      * @param  iterable<int|string>  $ids

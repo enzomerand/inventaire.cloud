@@ -257,6 +257,22 @@ describe('making sure an account has a workspace', function (): void {
     });
 });
 
+describe('the personal workspace of a new account', function (): void {
+    it('is created without any locking read, whose gap lock new accounts would wait on for each other', function (): void {
+        $user = User::factory()->create();
+        DB::enableQueryLog();
+
+        $workspace = app(Workspaces::class)->createPersonal($user);
+
+        $queries = collect(DB::getQueryLog())->pluck('query')->implode("\n");
+        DB::disableQueryLog();
+
+        expect(strtolower($queries))->not->toContain('for update')
+            ->and(app(Workspaces::class)->roleOf($user, $workspace))->toBe(WorkspaceRole::Owner)
+            ->and($user->fresh()->current_workspace_id)->toBe($workspace->id);
+    });
+});
+
 describe('the number of workspaces of an account', function (): void {
     it('is capped, whoever created them', function (): void {
         config(['workspaces.max_per_user' => 3]);
