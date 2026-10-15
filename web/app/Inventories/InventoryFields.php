@@ -24,7 +24,8 @@ use stdClass;
  * Creating, changing, deleting and ordering the fields of an inventory.
  *
  * Every write starts by locking the inventory (see {@see Locks}), so the fields of one inventory are changed one
- * request after the other. That is what lets this judge, on the fields as they are, what a database constraint could
+ * request after the other, and reads the fields once it holds the lock, with a plain read: the fields are protected by
+ * the lock of the inventory, not by locks of their own (which would also lock the neighbouring inventory's). That is what lets this judge, on the fields as they are, what a database constraint could
  * not: how many there are (`inventories.max_fields`), whether a name is already taken (the case is not counted, and
  * neither is the way an accented letter is written; the accents themselves are: no portable unique index does that),
  * and, when a field is deleted or its options change, that the values that no longer fit are gone from every item
@@ -65,7 +66,7 @@ final class InventoryFields
 
         return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $type, $name, $options, $required, $handler): InventoryField {
             $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $this->locks->fields($locked->getKey());
+            $fields = $locked->fields()->get();
 
             $limit = config()->integer('inventories.max_fields');
 
@@ -113,7 +114,7 @@ final class InventoryFields
     {
         return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $field, $changes): InventoryField {
             $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $this->locks->fields($locked->getKey());
+            $fields = $locked->fields()->get();
             $current = $this->find($fields, $field);
 
             if (isset($changes['name'])) {
@@ -158,7 +159,7 @@ final class InventoryFields
     {
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($inventory, $field): void {
             $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $this->locks->fields($locked->getKey());
+            $fields = $locked->fields()->get();
             $current = $this->find($fields, $field);
 
             $this->purgeValues($locked, $current->ulid);
@@ -182,7 +183,7 @@ final class InventoryFields
     {
         return DeadlockRetries::run(fn (): Collection => $this->db->transaction(function () use ($inventory, $ulids): Collection {
             $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $this->locks->fields($locked->getKey());
+            $fields = $locked->fields()->get();
 
             $wanted = array_map(strtolower(...), $ulids);
             $existing = $fields->pluck('ulid')->all();

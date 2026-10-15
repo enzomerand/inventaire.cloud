@@ -412,8 +412,10 @@ describe('the options of a type', function (): void {
         'number: a unit made of spaces is no unit' => ['number', ['unit' => '   '], ['decimals' => 0]],
         'number: equal bounds' => ['number', ['min' => '5', 'max' => '5.0'], ['decimals' => 0, 'min' => '5', 'max' => '5']],
         'number: a bound with six decimals' => ['number', ['decimals' => 6, 'min' => '0.000001'], ['decimals' => 6, 'min' => '0.000001']],
-        'money: the euro' => ['money', [], ['currency' => 'EUR']],
-        'money: another currency' => ['money', ['currency' => 'USD'], ['currency' => 'USD']],
+        'money: the euro, with its decimals' => ['money', [], ['currency' => 'EUR', 'decimals' => 2]],
+        'money: another currency' => ['money', ['currency' => 'USD'], ['currency' => 'USD', 'decimals' => 2]],
+        'money: a currency without decimals' => ['money', ['currency' => 'JPY'], ['currency' => 'JPY', 'decimals' => 0]],
+        'money: a currency with three' => ['money', ['currency' => 'KWD'], ['currency' => 'KWD', 'decimals' => 3]],
         'percentage: two decimals' => ['percentage', [], ['decimals' => 2]],
         'percentage: none' => ['percentage', ['decimals' => 0], ['decimals' => 0]],
         'rating: five' => ['rating', [], ['max' => 5]],
@@ -800,5 +802,57 @@ describe('the names of choices', function (): void {
             ->and($choices[1]['label'])->toBe('Cafe')
             ->and(optionsSentTo('select', ['choices' => [['label' => $composed], ['label' => 'Cafe']]])[0])->toBe('normalized')
             ->and(optionsSentTo('select', ['choices' => [['label' => $composed], ['label' => $decomposed]]])[0])->toBe('refused');
+    });
+});
+
+describe('the decimals of an amount field', function (): void {
+    it('are read from ICU when the field is created, and kept in its options', function (string $currency, int $decimals): void {
+        $options = app(FieldTypes::class)->get('money')->normalizeOptions(['currency' => $currency], null);
+
+        expect($options)->toBe(['currency' => $currency, 'decimals' => $decimals]);
+    })->with([['EUR', 2], ['JPY', 0], ['KWD', 3], ['USD', 2]]);
+
+    it('stay what the field has stored while its currency stays, whatever ICU says now', function (): void {
+        $money = app(FieldTypes::class)->get('money');
+
+        // A field stored with three decimals for the euro (ICU says two): it keeps them.
+        $kept = $money->normalizeOptions(['currency' => 'EUR', 'decimals' => 3], ['currency' => 'EUR', 'decimals' => 3]);
+
+        // Nobody can send them: whatever the merged options say, the ones stored are the ones kept.
+        $ignored = $money->normalizeOptions(['currency' => 'EUR', 'decimals' => 6], ['currency' => 'EUR', 'decimals' => 3]);
+
+        expect($kept)->toBe(['currency' => 'EUR', 'decimals' => 3])
+            ->and($ignored)->toBe(['currency' => 'EUR', 'decimals' => 3]);
+    });
+
+    it('are read again from ICU when the currency changes, and when the field has none stored', function (): void {
+        $money = app(FieldTypes::class)->get('money');
+
+        expect($money->normalizeOptions(['currency' => 'JPY', 'decimals' => 3], ['currency' => 'EUR', 'decimals' => 3]))->toBe(['currency' => 'JPY', 'decimals' => 0])
+            ->and($money->normalizeOptions(['currency' => 'EUR'], ['currency' => 'EUR']))->toBe(['currency' => 'EUR', 'decimals' => 2])
+            ->and($money->normalizeOptions([], ['currency' => 'KWD']))->toBe(['currency' => 'EUR', 'decimals' => 2]);
+    });
+
+    it('are the ones that judge and write the amounts, not ICU at the time', function (): void {
+        $field = new InventoryField(['name' => 'Price', 'type' => 'money', 'options' => ['currency' => 'EUR', 'decimals' => 3]]);
+        $money = app(FieldTypes::class)->get('money');
+        $written = function (mixed $value) use ($money, $field): array {
+            $validator = Validator::make(['value' => $value], ['value' => $money->valueRules($field)]);
+
+            return $validator->fails() ? ['refused'] : ['stored', $money->normalize($value, $field)];
+        };
+
+        expect($written('1.234'))->toBe(['stored', '1.234'])
+            ->and($written('1.2'))->toBe(['stored', '1.200'])
+            ->and($written('1.2345'))->toBe(['refused']);
+    });
+
+    it('come from ICU, for a field that was stored without them', function (): void {
+        $field = new InventoryField(['name' => 'Price', 'type' => 'money', 'options' => ['currency' => 'JPY']]);
+        $money = app(FieldTypes::class)->get('money');
+
+        expect($money->normalize('1500', $field))->toBe('1500')
+            ->and(Validator::make(['value' => '1500.5'], ['value' => $money->valueRules($field)])->fails())->toBeTrue()
+            ->and($money->normalize('12.5', new InventoryField(['name' => 'Price', 'type' => 'money', 'options' => null])))->toBe('12.50');
     });
 });

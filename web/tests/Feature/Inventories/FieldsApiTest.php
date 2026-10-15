@@ -55,7 +55,7 @@ describe('adding a field', function (): void {
         'text with a length' => ['text', ['max_length' => 40], ['max_length' => 40]],
         'textarea' => ['textarea', [], []],
         'number' => ['number', ['decimals' => 3, 'min' => '0.50', 'max' => 99, 'unit' => 'm'], ['decimals' => 3, 'min' => '0.5', 'max' => '99', 'unit' => 'm']],
-        'money' => ['money', ['currency' => 'USD'], ['currency' => 'USD']],
+        'money' => ['money', ['currency' => 'USD'], ['currency' => 'USD', 'decimals' => 2]],
         'percentage' => ['percentage', [], ['decimals' => 2]],
         'boolean' => ['boolean', [], []],
         'date' => ['date', [], []],
@@ -551,7 +551,7 @@ describe('changing the currency of an amount field', function (): void {
         inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'EUR']])->assertOk()->assertJsonPath('data.options.currency', 'EUR');
         inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'ADP']])->assertUnprocessable();
 
-        expect($old->fresh()->options)->toBe(['currency' => 'EUR'])->and($old->fresh()->name)->toBe('Older price');
+        expect($old->fresh()->options)->toEqual(['currency' => 'EUR', 'decimals' => 2])->and($old->fresh()->name)->toBe('Older price');
     });
 
     it('keeps writing the amounts of such a field with the decimals of its currency', function (): void {
@@ -733,5 +733,72 @@ describe('changing the options of a field that items have values for', function 
             ->and($values->filter(fn (?int $grade): bool => $grade !== null))->toHaveCount(480)
             ->and($kept->fresh()->values)->toBe([$theirs->ulid => 9])
             ->and(fieldsItemsUntouched())->toBeTrue();
+    });
+});
+
+describe('the decimals of an amount field', function (): void {
+    it('are given by the API with the currency, frozen when the field is created', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $uri = "/api/v1/inventories/{$inventory->ulid}/fields";
+
+        $euro = inventoryCall($this, $team['owner'], 'POST', $uri, ['type' => 'money', 'name' => 'Price'])->assertCreated();
+        $yen = inventoryCall($this, $team['owner'], 'POST', $uri, ['type' => 'money', 'name' => 'Yen price', 'options' => ['currency' => 'JPY']])->assertCreated();
+
+        expect($euro->json('data.options'))->toBe(['currency' => 'EUR', 'decimals' => 2])
+            ->and($yen->json('data.options'))->toBe(['currency' => 'JPY', 'decimals' => 0])
+            ->and(InventoryField::query()->where('ulid', $euro->json('data.id'))->sole()->options)->toEqual(['currency' => 'EUR', 'decimals' => 2]);
+    });
+
+    it('cannot be sent: they follow the currency', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, 'money', 'Price');
+
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/inventories/{$inventory->ulid}/fields", ['type' => 'money', 'name' => 'Other', 'options' => ['currency' => 'EUR', 'decimals' => 5]])
+            ->assertUnprocessable()->assertJsonValidationErrors('options.decimals');
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$field->ulid}", ['options' => ['decimals' => 5]])
+            ->assertUnprocessable()->assertJsonValidationErrors('options.decimals');
+
+        expect($field->fresh()->options)->toEqual(['currency' => 'EUR', 'decimals' => 2]);
+    });
+
+    it('stay what the field has while its currency stays, are read again when the currency changes', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, 'money', 'Price');
+        // ICU would say two for the euro; this field was frozen with three.
+        $field->forceFill(['options' => ['currency' => 'EUR', 'decimals' => 3]])->save();
+        $uri = "/api/v1/inventories/{$inventory->ulid}/fields/{$field->ulid}";
+
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['name' => 'Cost'])->assertOk()->assertJsonPath('data.options', ['currency' => 'EUR', 'decimals' => 3]);
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'EUR']])->assertOk()->assertJsonPath('data.options', ['currency' => 'EUR', 'decimals' => 3]);
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'JPY']])->assertOk()->assertJsonPath('data.options', ['currency' => 'JPY', 'decimals' => 0]);
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'EUR']])->assertOk()->assertJsonPath('data.options', ['currency' => 'EUR', 'decimals' => 2]);
+    });
+
+    it('judge and write the amounts of items', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, 'money', 'Price');
+        $field->forceFill(['options' => ['currency' => 'EUR', 'decimals' => 3]])->save();
+        $uri = "/api/v1/inventories/{$inventory->ulid}/items";
+
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [$field->ulid => '1.234']])->assertCreated()->assertJsonPath('data.values', [$field->ulid => '1.234']);
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [$field->ulid => '1.5']])->assertCreated()->assertJsonPath('data.values', [$field->ulid => '1.500']);
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [$field->ulid => '1.2345']])->assertUnprocessable();
+    });
+
+    it('are read from ICU for a field stored without them, and kept from the next time its options are saved', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, 'money', 'Price');
+        $field->forceFill(['options' => ['currency' => 'EUR']])->save();
+        $uri = "/api/v1/inventories/{$inventory->ulid}/fields/{$field->ulid}";
+
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/inventories/{$inventory->ulid}/items", ['values' => [$field->ulid => '1.5']])->assertCreated()->assertJsonPath('data.values', [$field->ulid => '1.50']);
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'EUR']])->assertOk()->assertJsonPath('data.options', ['currency' => 'EUR', 'decimals' => 2]);
+
+        expect($field->fresh()->options)->toEqual(['currency' => 'EUR', 'decimals' => 2]);
     });
 });

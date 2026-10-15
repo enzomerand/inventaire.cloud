@@ -17,8 +17,8 @@ use Illuminate\Validation\ValidationException;
 /**
  * Creating, changing and deleting the items of an inventory.
  *
- * Every write that depends on the fields starts by locking the inventory, then reads the fields under that lock
- * (see {@see Locks}), so that:
+ * Every write that depends on the fields starts by locking the inventory, then reads the fields while it holds that lock
+ * (a plain read: the fields have no locks of their own, see {@see Locks}), so that:
  *
  * - the quota (`inventories.max_items`) is counted with nobody else adding an item: two requests for the last place
  *   cannot both get it;
@@ -59,7 +59,7 @@ final class Items
         return DeadlockRetries::run(fn (): Item => $this->db->transaction(function () use ($inventory, $values, $author): Item {
             $this->lockAuthor($author);
             $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $this->locks->fields($locked->getKey());
+            $fields = $locked->fields()->get();
 
             $limit = config()->integer('inventories.max_items');
 
@@ -93,8 +93,9 @@ final class Items
         return DeadlockRetries::run(fn (): Item => $this->db->transaction(function () use ($inventory, $item, $values, $editor): Item {
             $this->lockAuthor($editor);
             $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $this->locks->fields($locked->getKey());
             $current = $this->lockedItem($locked, $item);
+            // Read last: the first plain read of the transaction opens its snapshot, and every lock is taken by now.
+            $fields = $locked->fields()->get();
 
             $merged = $this->values->apply($fields, $values, $current->values, false);
 

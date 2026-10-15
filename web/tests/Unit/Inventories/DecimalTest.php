@@ -76,3 +76,33 @@ describe('comparing numbers', function (): void {
         'a small fraction' => ['0.000001', '0', 1],
     ]);
 });
+
+describe('reading a float whatever the server is configured to write floats with', function (): void {
+    afterEach(fn () => ini_set('serialize_precision', '-1'));
+
+    it('gets the same digits with serialize_precision at 17 as at -1', function (float $value, string $expected): void {
+        ini_set('serialize_precision', '17');
+
+        // What PHP itself would write under that setting: the digits of the binary value, not the number that was typed.
+        expect(json_encode(0.1))->toBe('0.10000000000000001')
+            ->and(Decimal::tryFrom($value)->format())->toBe($expected);
+    })->with([
+        'a tenth' => [0.1, '0.1'],
+        'two and a half' => [2.5, '2.5'],
+        'a price' => [19.99, '19.99'],
+        'a small float with an exponent' => [1.0e-5, '0.00001'],
+        'a negative one' => [-0.3, '-0.3'],
+    ]);
+
+    it('puts the setting back as it found it, also when it was not the default', function (): void {
+        ini_set('serialize_precision', '17');
+        Decimal::tryFrom(0.1);
+
+        expect(ini_get('serialize_precision'))->toBe('17');
+
+        ini_set('serialize_precision', '-1');
+        Decimal::tryFrom(0.1);
+
+        expect(ini_get('serialize_precision'))->toBe('-1');
+    });
+});

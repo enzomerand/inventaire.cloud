@@ -57,24 +57,6 @@ describe('the locks on the content of a workspace', function (): void {
         expect(fn () => app(Locks::class)->inventory($inventory->id))->toThrow(ModelNotFoundException::class);
     });
 
-    it('lock the fields of one inventory in the order they are shown', function (): void {
-        $team = inventoryTeam();
-        $inventory = inventoryIn($team['workspace']);
-        $other = inventoryIn($team['workspace'], 'Other');
-        $second = InventoryField::factory()->for($inventory)->create(['name' => 'Second', 'position' => 1]);
-        $first = InventoryField::factory()->for($inventory)->create(['name' => 'First', 'position' => 0]);
-        InventoryField::factory()->for($other)->create(['name' => 'Elsewhere']);
-        $fields = null;
-
-        $statements = statementsOf(function () use ($inventory, &$fields): void {
-            $fields = app(Locks::class)->fields($inventory->id);
-        });
-
-        expect($fields->pluck('id')->all())->toBe([$first->id, $second->id])
-            ->and($statements)->toHaveCount(1)
-            ->and(inventoryLockStatement($statements[0]))->toBeTrue();
-    });
-
     it('lock items by id', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
@@ -92,7 +74,7 @@ describe('the locks on the content of a workspace', function (): void {
 });
 
 describe('the writes that depend on them', function (): void {
-    it('take the lock of the account that writes, if any, then the one of the inventory, before they read anything else', function (): void {
+    it('lock the account that writes, if any, then the inventory, then the item, and nothing else: the fields are only read', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
         $field = fieldIn($inventory, 'text', 'Name');
@@ -102,29 +84,48 @@ describe('the writes that depend on them', function (): void {
         $fields = app(InventoryFields::class);
         $items = app(Items::class);
 
-        // What each write reads first, with a lock, in this order. Ordering comes first among the field writes: it needs
-        // the list to be exactly the fields there are, and the writes after it add and delete some.
+        // What each write locks, in this order. Ordering comes first among the field writes: it needs the list to be
+        // exactly the fields there are, and the writes after it add and delete some.
         $writes = [
             'order the fields' => [fn () => $fields->reorder($inventory, $order), ['inventories']],
             'create a field' => [fn () => $fields->create($inventory, 'text', 'Other'), ['inventories']],
             'change a field' => [fn () => $fields->update($inventory, $field, ['name' => 'Renamed']), ['inventories']],
             'add an item' => [fn () => $items->create($inventory, [], $team['owner']), ['users', 'inventories']],
-            'change an item' => [fn () => $items->update($inventory, $item, [$field->ulid => 'x'], $team['editor']), ['users', 'inventories']],
-            'delete an item' => [fn () => $items->delete($inventory, $item), ['inventories']],
+            'change an item' => [fn () => $items->update($inventory, $item, [$field->ulid => 'x'], $team['editor']), ['users', 'inventories', 'items']],
+            'delete an item' => [fn () => $items->delete($inventory, $item), ['inventories', 'items']],
             'change the inventory' => [fn () => app(Inventories::class)->update($inventory, ['name' => 'Renamed']), ['inventories']],
             'delete a field' => [fn () => $fields->delete($inventory, $field), ['inventories']],
         ];
 
-        foreach ($writes as $what => [$write, $tables]) {
-            $statements = statementsOf($write);
-            $reads = array_values(array_filter($statements, fn (string $statement): bool => str_starts_with(strtolower($statement), 'select')));
+        foreach ($writes as $what => [$write, $locked]) {
+            $reads = array_values(array_filter(statementsOf($write), fn (string $statement): bool => str_starts_with(strtolower($statement), 'select')));
+            $locking = array_values(array_filter($reads, inventoryLockStatement(...)));
+            $tables = array_map(fn (string $statement): string => preg_match('/from\s+["`]?(\w+)["`]?/i', $statement, $found) === 1 ? $found[1] : '?', $locking);
 
-            // Nothing is read before the locks, and each of them is a locking read.
-            foreach ($tables as $position => $table) {
-                expect($reads[$position] ?? '')->toContain($table)
-                    ->and(inventoryLockStatement($reads[$position] ?? ''))->toBeTrue("{$what}: {$table}");
-            }
+            // Exactly these rows are locked, in this order: a locking read of the fields would lock the gap after the last of
+            // them on MySQL and MariaDB, where the first field of the next inventory goes.
+            expect($tables)->toBe($locked, $what);
+
+            // Nothing is read before the locks: the first plain read opens the snapshot of the transaction.
+            expect(array_slice($reads, 0, count($locking)))->toBe($locking, $what);
         }
+    });
+
+    it('read the fields of an inventory without locking them, in the order they are shown', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $second = InventoryField::factory()->for($inventory)->create(['name' => 'Second', 'position' => 1]);
+        $first = InventoryField::factory()->for($inventory)->create(['name' => 'First', 'position' => 0]);
+        InventoryField::factory()->for(inventoryIn($team['workspace'], 'Other'))->create(['name' => 'Elsewhere']);
+        $fields = null;
+
+        $statements = statementsOf(function () use ($inventory, &$fields): void {
+            $fields = $inventory->fields()->get();
+        });
+
+        expect($fields->pluck('id')->all())->toBe([$first->id, $second->id])
+            ->and($statements)->toHaveCount(1)
+            ->and(inventoryLockStatement($statements[0]))->toBeFalse();
     });
 
     it('refuse an account that was deleted meanwhile, instead of failing on a foreign key', function (): void {

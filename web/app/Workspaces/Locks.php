@@ -6,7 +6,6 @@ namespace App\Workspaces;
 
 use App\Database\DeadlockRetries;
 use App\Models\Inventory;
-use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\LoginCode;
 use App\Models\User;
@@ -39,8 +38,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * 3. the workspaces (`workspaces`), lowest id first ({@see self::workspaces()});
  * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()});
  * 5. the inventories (`inventories`), lowest id first ({@see self::inventories()});
- * 6. the fields of an inventory (`inventory_fields`), in their order, read with a locking read ({@see self::fields()});
- * 7. the items (`items`), lowest id first ({@see self::items()}).
+ * 6. the items (`items`), lowest id first ({@see self::items()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
  * personal workspace); deleting an account takes 1 to 4; so does an administrator deleting one, who first hands over
@@ -51,14 +49,25 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
  * memberships: it is what lets the exceptions below stay safety nets.
  *
- * Levels 5 to 7 are the content of a workspace. Whatever writes to an inventory (its name, its fields, its items)
+ * Levels 5 and 6 are the content of a workspace. Whatever writes to an inventory (its name, its fields, its items)
  * locks the inventory first, so the writes of one inventory happen one after the other: that is what makes a quota
  * count right, a field name unique and a field deletion leave no orphan value in an item written at the same moment.
- * Creating an inventory locks its workspace (3) to count the workspace's inventories, and nothing below; deleting a
- * workspace reaches the inventories, fields and items through the foreign keys' cascade, after its own locks, which is
- * the order above. An item write locks the account of the person who writes it (2: the item's author columns are
- * foreign keys, which lock that row when the item is saved; see `Items`), then the inventory, then the fields it
- * validates against, then, for an update, which merges into what is stored, the item.
+ * The fields of an inventory are **not** locked row by row: the lock of the inventory already keeps every other writer
+ * out, and a locking read on `inventory_fields (inventory_id, position)` would lock more than the rows it finds. On
+ * MySQL and MariaDB, at their default isolation level, it also locks the *gap* after the last row it passes, and the
+ * gap after the last field of an inventory is where the first field of the next inventory (another workspace's) is
+ * inserted: two writers of two unrelated inventories would wait for each other, and could deadlock. A writer reads
+ * the fields with a plain read, after the locks (the first plain read of the transaction opens the snapshot it reads
+ * from, so it must come after them: see {@see self::inventories()}). The same goes for counting the items of an
+ * inventory against its quota.
+ *
+ * Creating an inventory locks its workspace (3) to count the workspace's inventories, and nothing below. An item
+ * write locks the account of the person who writes it (2: the item's author columns are foreign keys, which lock that
+ * row when the item is saved; see `Items`), then the inventory, then, for an update, which merges into what is stored,
+ * the item. Deleting a workspace or an account reaches the inventories, fields and items through the foreign keys'
+ * cascade, after its own locks, which is the order above; it removes everything the workspace holds in the one
+ * transaction (an inventory at its quota of items makes it a long one: accepted, since deleting a workspace is rare and
+ * the writers it waits for are waiting for the same inventory rows).
  *
  * Three paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
@@ -73,7 +82,9 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  *   workspaces and their memberships), and then, once the memberships are read, the accounts of the members who joined
  *   those workspaces meanwhile.
  *
- * Only these three can end up waiting for each other, in a race that narrow. The database then aborts one of the
+ * Only these three can end up waiting for each other, in a race that narrow: the writers of the content of a workspace
+ * wait for one lock at a time that they take in the order above (an account, an inventory, an item), and for nothing
+ * else, since fields are not locked and the quota counts take no lock. The database then aborts one of the
  * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many requests may
  * collide, as sign-ups do), always the outermost transaction: a deadlock rolls the whole of it back, so a nested
  * transaction cannot retry by itself.
@@ -210,24 +221,6 @@ final class Locks
     public function inventory(int|string $id): Inventory
     {
         return $this->inventories([$id])->first() ?? throw (new ModelNotFoundException)->setModel(Inventory::class, [$id]);
-    }
-
-    /**
-     * Locks the fields of an inventory, in the order they are shown, and returns them.
-     *
-     * Called with the inventory locked: the lock of the inventory is what keeps other requests from changing the
-     * fields, and this locking read is what makes the fields read here the committed ones (see {@see self::inventories()}).
-     *
-     * @return Collection<int, InventoryField>
-     */
-    public function fields(int|string $inventoryId): Collection
-    {
-        return InventoryField::query()
-            ->where('inventory_id', $inventoryId)
-            ->orderBy('position')
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get();
     }
 
     /**

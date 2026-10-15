@@ -13,6 +13,12 @@ use Closure;
  *
  * A new field can only be given a currency that is in use somewhere today ({@see Currencies::exists()}). One that
  * already has a currency which went out of use keeps it: it is accepted again when the field is saved with it.
+ *
+ * The decimals are read from ICU **once**, when the field is created and whenever its currency changes, and kept in
+ * the options of the field (`decimals`; not an option a person can send). Every amount is then judged and written with
+ * the decimals the field has stored, so that an update of the ICU data of the server (a currency that changes its
+ * minor unit) cannot make the amounts already stored fail, or stored amounts disagree with each other. A field stored
+ * without them (written before they were kept) reads them from ICU until its options are next saved.
  */
 final class MoneyType extends DecimalType
 {
@@ -55,7 +61,8 @@ final class MoneyType extends DecimalType
     }
 
     /**
-     * Fills in the currency.
+     * Fills in the currency, and freezes its decimals: the ones the field already has when the currency stays the same,
+     * the ones ICU gives for the currency when the field is created or the currency changes.
      *
      * @param  array<string, mixed>  $options
      * @param  array<string, mixed>|null  $previous
@@ -63,13 +70,21 @@ final class MoneyType extends DecimalType
      */
     public function normalizeOptions(array $options, ?array $previous): array
     {
-        $currency = $options['currency'] ?? null;
+        $sent = $options['currency'] ?? null;
+        $currency = is_string($sent) && $sent !== '' ? $sent : self::DEFAULT_CURRENCY;
+        $frozen = $previous['decimals'] ?? null;
+        $decimals = ($previous['currency'] ?? null) === $currency && is_int($frozen) ? $frozen : Currencies::fractionDigits($currency);
 
-        return ['currency' => is_string($currency) && $currency !== '' ? $currency : self::DEFAULT_CURRENCY];
+        return ['currency' => $currency, 'decimals' => $decimals];
     }
 
+    /**
+     * The decimals stored with the field; ICU's for the currency only when the field has none stored.
+     */
     protected function decimals(InventoryField $field): int
     {
-        return Currencies::fractionDigits((string) $field->option('currency', self::DEFAULT_CURRENCY));
+        $stored = $field->option('decimals');
+
+        return is_int($stored) ? $stored : Currencies::fractionDigits((string) $field->option('currency', self::DEFAULT_CURRENCY));
     }
 }

@@ -102,6 +102,28 @@ final readonly class Decimal
     }
 
     /**
+     * The shortest text that reads back as the same float ("0.1", "1.0e-5"), whatever `serialize_precision` says.
+     *
+     * `json_encode()` writes floats with that setting: -1 (the default) means the shortest text, but a server whose
+     * php.ini says 17 gets "0.10000000000000001" for 0.1, and a person's 0.1 would be refused for having too many
+     * decimals. So the setting is -1 for the length of the call, and put back whatever happens.
+     */
+    private static function shortestText(float $value): ?string
+    {
+        $previous = ini_set('serialize_precision', '-1');
+
+        try {
+            $text = json_encode($value);
+        } finally {
+            if ($previous !== false) {
+                ini_set('serialize_precision', $previous);
+            }
+        }
+
+        return $text === false ? null : $text;
+    }
+
+    /**
      * A float as plain digits: the shortest text that reads back as the same float, which is what a JSON number carried
      * (0.1 is "0.1", not 0.1000000000000000055...).
      *
@@ -112,9 +134,9 @@ final readonly class Decimal
      */
     private static function floatText(float $value): ?string
     {
-        $text = json_encode($value);
+        $text = self::shortestText($value);
 
-        if ($text === false) {
+        if ($text === null) {
             return null;
         }
 
