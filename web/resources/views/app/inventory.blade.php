@@ -1,6 +1,7 @@
 {{--
     The page of an inventory: its name and description with what may be done with it, and its items in a table with one
-    column per field, plus the dialog that adds, changes, shows or deletes an item.
+    column per field (searched, filtered, sorted and totalled: partials/items-toolbar, items-filters and items-table), plus
+    the dialog that adds, changes, shows or deletes an item.
 
     Alpine runs in its CSP build: two components share the page, each referenced by name and fed by the data-* attributes
     of its root. "inventoryHeader" (resources/js/components/inventory-header.js) owns the name, the description and their
@@ -140,8 +141,10 @@
             </div>
 
             {{-- Hidden with the "hidden" attribute, not x-show: Alpine shows an element a tick late and hides it at once, so a
-                 state that goes up and down faster than that (a local server answers in a few milliseconds) would leave it on. --}}
-            <div class="card-body text-secondary" :hidden="!loading" role="status">
+                 state that goes up and down faster than that (a local server answers in a few milliseconds) would leave it on.
+                 Only the first reading shows a spinner in place of the list: a later one (a search, a sort, a page) fades the
+                 list and spins in the toolbar, so that typing in the search box never wipes the table. --}}
+            <div class="card-body text-secondary" :hidden="!initialLoading" role="status">
                 <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                 {{ __('Loading…') }}
             </div>
@@ -175,6 +178,8 @@
                 </div>
             </div>
 
+            @include('partials.items-toolbar')
+
             <div class="card-body" :hidden="!noItems">
                 <div class="empty">
                     <div class="empty-icon hero-icon text-primary">
@@ -191,36 +196,24 @@
                 </div>
             </div>
 
-            {{-- position-relative: the visually hidden label of the last header is absolutely positioned, and without a positioned
-                 ancestor it would sit outside the scrolling area, making the whole page scroll sideways on a phone. --}}
-            <div class="table-responsive position-relative" :hidden="!hasTable">
-                <table class="table table-vcenter card-table table-hover">
-                    <thead>
-                        <tr>
-                            <template x-for="field in fields" :key="field.id">
-                                <th class="text-nowrap" x-text="field.name"></th>
-                            </template>
-                            <th class="w-1"><span class="visually-hidden">{{ __('Actions') }}</span></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="row in rows" :key="row.id">
-                            <tr class="app-row-link" @click="openFromRow(row, $event)">
-                                <template x-for="cell in row.cells" :key="cell.key">
-                                    <td class="app-cell">
-                                        @include('partials.field-value')
-                                    </td>
-                                </template>
-                                <td class="w-1">
-                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="openLabel" :title="openLabel" @click.stop="open(row)">
-                                        <x-tabler-pencil aria-hidden="true" />
-                                    </button>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
+            {{-- The search or the filters match nothing in an inventory that holds items: not the same as an empty inventory. --}}
+            <div class="card-body" :hidden="!noMatch">
+                <div class="empty">
+                    <div class="empty-icon hero-icon text-primary">
+                        <x-tabler-search aria-hidden="true" />
+                    </div>
+                    <p class="empty-title">{{ __('No result') }}</p>
+                    <p class="empty-subtitle text-secondary">{{ __('No item matches your search or your filters.') }}</p>
+                    <div class="empty-action">
+                        <button type="button" class="btn btn-primary" @click="clearCriteria">
+                            <x-tabler-filter-off aria-hidden="true" />
+                            {{ __('Clear the search and the filters') }}
+                        </button>
+                    </div>
+                </div>
             </div>
+
+            @include('partials.items-table')
 
             <div class="card-footer" :hidden="!hasTable">
                 <div class="d-flex align-items-center gap-2">
@@ -232,6 +225,8 @@
                 </div>
             </div>
         </div>
+
+        @include('partials.items-filters')
 
         <div class="modal modal-blur fade" tabindex="-1" x-ref="modal" role="dialog" aria-labelledby="item-modal-title" aria-hidden="true">
             <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">

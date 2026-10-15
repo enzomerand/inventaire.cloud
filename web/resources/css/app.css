@@ -142,3 +142,9 @@
 .app-cell {
     max-width: 24rem;
 }
+
+/* The search box of a list has a clear button of its own: the one some browsers add would be a second one. */
+.app-search::-webkit-search-cancel-button {
+    display: none;
+    appearance: none;
+}

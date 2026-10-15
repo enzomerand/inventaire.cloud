@@ -6,6 +6,9 @@
  * moment, the id of a choice); a form speaks in what an `<input>` holds. Each entry converts both ways:
  *
  * - `control` says which kind of control the form shows (see {@link Control});
+ * - `queryKind` says how the server sorts and filters the type (see {@link QueryKind}), and `summable` that the totals
+ *   of a list add its values up. Both mirror the server (`queryKind()` and `summable()` of each type in
+ *   `App\Inventories\Fields`): keep them in sync, a test reads the PHP types and fails when they drift apart;
  * - `inputType` and `inputMode` shape the `<input>` of the controls that are one;
  * - `toInput(value, field)` is the value of the control for a stored value, `fromInput(input, field)` is the value to
  *   send for what the control holds (null for nothing, which clears the field);
@@ -25,6 +28,10 @@ import { t } from '../lib/i18n.js';
  * The control of a form: a one-line `<input>` (text, number, date...), a `<textarea>`, a `<select>`, a list of check
  * boxes, a box of tags, a row of stars, a color picker.
  *
+ * @typedef {'text' | 'number' | 'temporal' | 'boolean' | 'choice' | 'choices' | 'tags'} QueryKind
+ * How the server sorts and filters a type: text by collation, numbers as numbers, dates, moments and times in their stored
+ * form, a yes / no, one choice, several choices (cannot be sorted), tags (cannot be sorted).
+ *
  * @typedef {object} Choice
  * @property {string} id
  * @property {string} label
@@ -42,6 +49,8 @@ import { t } from '../lib/i18n.js';
  * @property {boolean} [full] Whether to show the whole value (the details of an item) rather than what fits a table cell.
  *
  * @typedef {object} FieldType
+ * @property {QueryKind} queryKind How the server sorts and filters the type (mirrors `QueryKind` of the server).
+ * @property {boolean} [summable] Whether the totals of a list add the values of the type up (mirrors `FieldType::summable()`).
  * @property {Control} control
  * @property {string} [inputType] The `type` of the `<input>`; `text` when not given.
  * @property {string} [inputMode] The `inputmode` of the `<input>`.
@@ -162,12 +171,14 @@ const DECIMAL_INPUT = {
 /** @type {Record<string, FieldType>} */
 export const FIELD_TYPES = {
     text: {
+        queryKind: 'text',
         control: 'input',
         ...TEXT_INPUT,
         describe: (value) => cell('text', { text: String(value) }),
     },
 
     textarea: {
+        queryKind: 'text',
         control: 'textarea',
         // Line breaks are kept: only the ends are trimmed, as the server does.
         ...TEXT_INPUT,
@@ -183,6 +194,8 @@ export const FIELD_TYPES = {
     },
 
     number: {
+        queryKind: 'number',
+        summable: true,
         ...DECIMAL_INPUT,
         describe: (value, field) => {
             const unit = field.options?.unit ? ' ' + field.options.unit : '';
@@ -192,6 +205,8 @@ export const FIELD_TYPES = {
     },
 
     money: {
+        queryKind: 'number',
+        summable: true,
         ...DECIMAL_INPUT,
         describe: (value, field) =>
             cell('text', {
@@ -200,12 +215,14 @@ export const FIELD_TYPES = {
     },
 
     percentage: {
+        queryKind: 'number',
         ...DECIMAL_INPUT,
         describe: (value, field) =>
             cell('text', { text: formatPercentage(String(value), Number(field.options?.decimals ?? 2)) }),
     },
 
     boolean: {
+        queryKind: 'boolean',
         control: 'select',
         toInput: (value) => (value === true ? 'true' : value === false ? 'false' : ''),
         fromInput: (input) => (input === 'true' ? true : input === 'false' ? false : null),
@@ -220,6 +237,7 @@ export const FIELD_TYPES = {
     },
 
     date: {
+        queryKind: 'temporal',
         control: 'input',
         inputType: 'date',
         ...TEXT_INPUT,
@@ -234,6 +252,7 @@ export const FIELD_TYPES = {
     },
 
     datetime: {
+        queryKind: 'temporal',
         control: 'input',
         inputType: 'datetime-local',
         // A moment is stored in UTC, and typed and shown in the timezone of the browser.
@@ -264,6 +283,7 @@ export const FIELD_TYPES = {
     },
 
     time: {
+        queryKind: 'temporal',
         control: 'input',
         inputType: 'time',
         toInput: (value) => value ?? '',
@@ -279,6 +299,7 @@ export const FIELD_TYPES = {
     },
 
     select: {
+        queryKind: 'choice',
         control: 'select',
         toInput: (value) => value ?? '',
         fromInput: (input) => (input === '' || input === null || input === undefined ? null : input),
@@ -292,6 +313,7 @@ export const FIELD_TYPES = {
     },
 
     multiselect: {
+        queryKind: 'choices',
         control: 'checks',
         toInput: (value) => (Array.isArray(value) ? [...value] : []),
         fromInput: (input) => (Array.isArray(input) && input.length > 0 ? input : null),
@@ -307,6 +329,7 @@ export const FIELD_TYPES = {
     },
 
     tags: {
+        queryKind: 'tags',
         control: 'tags',
         toInput: (value) => (Array.isArray(value) ? [...value] : []),
         fromInput: (input) => {
@@ -324,6 +347,7 @@ export const FIELD_TYPES = {
     },
 
     url: {
+        queryKind: 'text',
         control: 'input',
         inputType: 'url',
         ...TEXT_INPUT,
@@ -338,6 +362,7 @@ export const FIELD_TYPES = {
     },
 
     email: {
+        queryKind: 'text',
         control: 'input',
         inputType: 'email',
         ...TEXT_INPUT,
@@ -350,6 +375,7 @@ export const FIELD_TYPES = {
     },
 
     phone: {
+        queryKind: 'text',
         control: 'input',
         inputType: 'tel',
         ...TEXT_INPUT,
@@ -357,6 +383,7 @@ export const FIELD_TYPES = {
     },
 
     rating: {
+        queryKind: 'number',
         control: 'rating',
         toInput: (value) => (typeof value === 'number' ? value : null),
         fromInput: (input) => (typeof input === 'number' && input > 0 ? input : null),
@@ -372,6 +399,7 @@ export const FIELD_TYPES = {
     },
 
     color: {
+        queryKind: 'text',
         control: 'color',
         inputType: 'color',
         ...TEXT_INPUT,
@@ -382,6 +410,7 @@ export const FIELD_TYPES = {
     },
 
     barcode: {
+        queryKind: 'text',
         control: 'input',
         ...TEXT_INPUT,
         describe: (value) => cell('mono', { text: String(value) }),

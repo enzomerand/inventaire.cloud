@@ -17,6 +17,10 @@
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the input they are about, in the dialog, or as a toast.
+ *
+ * What narrows and orders the list (the search, the filters, the sort, and the address of the page that remembers them)
+ * is `../grid/criteria.js`, merged into this component: the page asked for is always read with the criteria in force, an
+ * older answer never replaces a newer one, and the totals of the numbers and amounts come with each page.
  */
 import {
     choicesOf,
@@ -36,6 +40,11 @@ import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
+import { compose } from '../lib/compose.js';
+import gridCriteria from '../grid/criteria.js';
+import { isEmptyQuery } from '../grid/query.js';
+import { momentText } from '../grid/rows.js';
+import { hasTotals, totalCells } from '../grid/totals.js';
 
 /** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
 const FIRST_COLOR = '#000000';
@@ -55,7 +64,7 @@ const VALUES_PREFIX = 'values.';
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return {
+    return compose(gridCriteria(), {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -86,8 +95,20 @@ export default function inventoryItems() {
         /** Number of the last page. */
         lastPage: 1,
 
-        /** Items in the inventory, all pages together. */
+        /** Items that match the search and the filters, all pages together (all the items of the inventory when nothing narrows the list down). */
         total: 0,
+
+        /** Items in the whole inventory: what the inventory said, kept up to date as items come and go (null while unknown). */
+        itemsCount: null,
+
+        /** The sums of the numbers and amounts of the items that match, by field id (`meta.totals`). */
+        totals: {},
+
+        /** The foot of each column of the table (see `../grid/totals.js`). */
+        totalRow: [],
+
+        /** True once a page of items has been read: from then on a new reading refreshes the list instead of replacing it by a spinner. */
+        loadedOnce: false,
 
         /** Position of the first and of the last item of the page among all of them (0 when there are none). */
         from: 0,
@@ -171,9 +192,67 @@ export default function inventoryItems() {
             return !this.loadingInventory && !this.inventoryFailed && this.fields.length === 0;
         },
 
+        /** Whether the first reading is under way, which the page shows as a spinner in place of the list. */
+        get initialLoading() {
+            return this.loadingInventory || (this.loadingItems && !this.loadedOnce);
+        },
+
+        /** Whether a page is being read again while the previous one is still shown (a search, a sort, a page). */
+        get refreshing() {
+            return this.loadedOnce && this.loadingItems;
+        },
+
+        /** The value of `aria-busy` for the list: "true" while it is being read again. */
+        get busyAttribute() {
+            return this.refreshing ? 'true' : 'false';
+        },
+
+        /** The classes the list gets while it is being read again: faded, not wiped. */
+        get tableClass() {
+            return this.refreshing ? 'opacity-75' : '';
+        },
+
         /** Whether the inventory has fields and is known to hold no item (not when the items could not be read). */
         get noItems() {
-            return !this.loading && !this.loadFailed && this.fields.length > 0 && this.items.length === 0;
+            return (
+                this.loadedOnce &&
+                !this.loadFailed &&
+                this.fields.length > 0 &&
+                this.items.length === 0 &&
+                (!this.hasCriteria || this.itemsCount === 0)
+            );
+        },
+
+        /** Whether the search or the filters leave no item of an inventory that holds some. */
+        get noMatch() {
+            return (
+                this.loadedOnce &&
+                !this.loadFailed &&
+                this.fields.length > 0 &&
+                this.items.length === 0 &&
+                this.hasCriteria &&
+                this.itemsCount !== 0
+            );
+        },
+
+        /** Whether the search, the filters and the sort are offered: once there is something to narrow down. */
+        get showToolbar() {
+            return (
+                this.loadedOnce &&
+                !this.loadFailed &&
+                this.fields.length > 0 &&
+                (this.hasCriteria || this.itemsCount !== 0)
+            );
+        },
+
+        /** Whether the foot of the table shows totals: some column adds up, and there are rows. */
+        get showTotals() {
+            return this.hasTable && hasTotals(this.totalRow);
+        },
+
+        /** The word in front of the totals: they are those of the selection when the list is narrowed down. */
+        get totalsLabel() {
+            return t(this.hasCriteria ? 'grid.totals.selection' : 'grid.totals.all');
         },
 
         /** Whether there is a table to show. */
@@ -224,15 +303,26 @@ export default function inventoryItems() {
         },
 
         /**
-         * Reads the inventory and the first page of items when the page opens, and forgets the form whenever the dialog is
-         * closed.
+         * Reads the inventory and the first page of items when the page opens (the one the address asks for, with the search,
+         * the sort and the filters it holds), and forgets the form whenever the dialog is closed.
          *
          * @returns {Promise<void>}
          */
         async init() {
             this.$nextTick(() => onModalHidden(this.$refs.modal, () => this.resetDialog()));
 
-            await Promise.all([this.loadInventory(), this.loadItems(1)]);
+            const page = this.restoreQuery();
+
+            await Promise.all([this.loadInventory(), this.loadItems(page)]);
+        },
+
+        /**
+         * Stops the pause that waits for the end of the typing, when the page is taken apart.
+         *
+         * @returns {void}
+         */
+        destroy() {
+            this.stopSearchTimer();
         },
 
         /**
@@ -245,7 +335,10 @@ export default function inventoryItems() {
             this.inventoryFailed = false;
 
             try {
-                this.fields = (await http.get(this.url)).data.fields ?? [];
+                const inventory = (await http.get(this.url)).data;
+
+                this.fields = inventory.fields ?? [];
+                this.itemsCount = inventory.items_count ?? this.itemsCount;
                 this.rebuild();
             } catch (error) {
                 this.inventoryFailed = true;
@@ -259,8 +352,13 @@ export default function inventoryItems() {
         },
 
         /**
-         * Reads a page of items from the API. A failure is remembered (`itemsFailed`) until the next reading, so that the
-         * page does not claim the inventory holds no item.
+         * Reads a page of items from the API, narrowed and ordered as the search, the filters and the sort ask, and writes
+         * them in the address of the page. A failure is remembered (`itemsFailed`) until the next reading, so that the page
+         * does not claim the inventory holds no item. The server refusing the criteria (a field that was deleted since the
+         * address was shared) starts again from everything, with a toast.
+         *
+         * Only the latest reading counts: the answer to an older one (a search typed over, a page clicked past) is dropped,
+         * whenever it comes.
          *
          * @param {number} page Number of the page to read.
          * @returns {Promise<void>}
@@ -270,9 +368,10 @@ export default function inventoryItems() {
             this.loadingItems = true;
             this.itemsFailed = false;
             this.wantedPage = page;
+            this.syncAddress(page);
 
             try {
-                const answer = await http.get(this.itemsUrl, { params: { page } });
+                const answer = await http.get(this.itemsUrl, { params: this.queryParams(page) });
 
                 if (ticket !== this.ticket) {
                     return;
@@ -292,8 +391,29 @@ export default function inventoryItems() {
                 this.total = answer.meta.total;
                 this.from = answer.meta.from ?? 0;
                 this.to = answer.meta.to ?? 0;
+                this.totals = answer.meta.totals ?? {};
+                this.loadedOnce = true;
+
+                // Nothing narrows the list down: it holds the whole inventory.
+                if (!this.hasCriteria) {
+                    this.itemsCount = answer.meta.total;
+                }
+
                 this.rebuild();
             } catch (error) {
+                if (
+                    ticket === this.ticket &&
+                    error instanceof HttpError &&
+                    error.status === 422 &&
+                    !isEmptyQuery(this.query)
+                ) {
+                    this.resetQuery();
+                    notify('warning', t('grid.notice.reset'));
+                    await this.loadItems(1);
+
+                    return;
+                }
+
                 if (ticket === this.ticket) {
                     this.itemsFailed = true;
 
@@ -321,7 +441,7 @@ export default function inventoryItems() {
         },
 
         /**
-         * Works out the cells of the table from the fields and the items.
+         * Works out the cells of the table from the fields and the items, and the foot of its columns from the totals.
          *
          * @returns {void}
          */
@@ -329,7 +449,10 @@ export default function inventoryItems() {
             this.rows = this.items.map((item) => ({
                 id: item.id,
                 cells: this.cellsOf(item),
+                created: momentText(item.created_at),
+                updated: momentText(item.updated_at),
             }));
+            this.totalRow = totalCells(this.fields, this.totals);
         },
 
         /**
@@ -822,12 +945,30 @@ export default function inventoryItems() {
 
                 hideModal(this.$refs.modal);
                 notify('success', t(creating ? 'inventories.notice.item_added' : 'inventories.notice.item_saved'));
+
+                if (creating) {
+                    this.countItems(1);
+                }
+
                 // Newest first: a new item is at the top of the first page.
                 await this.loadItems(creating ? 1 : this.page);
             } catch (error) {
                 this.failChange(error);
             } finally {
                 this.busy = false;
+            }
+        },
+
+        /**
+         * Keeps the count of the items of the inventory right as one is added or deleted, before the list is read again (it
+         * says the count of the whole inventory itself when nothing narrows it down, but not when a search or filters do).
+         *
+         * @param {number} change +1 for an item added, -1 for one deleted.
+         * @returns {void}
+         */
+        countItems(change) {
+            if (this.itemsCount !== null) {
+                this.itemsCount = Math.max(0, this.itemsCount + change);
             }
         },
 
@@ -867,6 +1008,7 @@ export default function inventoryItems() {
                 await http.delete(fillUrl(this.itemUrl, this.itemId));
                 hideModal(this.$refs.modal);
                 notify('success', t('inventories.notice.item_deleted'));
+                this.countItems(-1);
                 await this.loadItems(this.page);
             } catch (error) {
                 this.failChange(error);
@@ -952,5 +1094,5 @@ export default function inventoryItems() {
                 this.loadInventory();
             }
         },
-    };
+    });
 }

@@ -18,6 +18,7 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
     hideModal: vi.fn(),
     onModalHidden: vi.fn(),
 }));
+vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
 vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/messages.js'));
 
 const INVENTORY = '/api/v1/inventories/tools';
@@ -103,9 +104,11 @@ describe('the items of an inventory', () => {
                 canManageFields: '1',
             },
         };
-        component.$refs = { modal };
+        component.$refs = { modal, filters: document.createElement('div'), search: document.createElement('input') };
         component.$nextTick = (callback) => callback();
         document.documentElement.lang = 'en';
+        // The component keeps its search, sort and filters in the address: every test starts from a clean one.
+        window.history.replaceState(null, '', '/');
     });
 
     afterEach(() => {

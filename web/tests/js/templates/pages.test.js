@@ -16,6 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { HttpError, http, scheduleNavigation } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
+import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
 
@@ -35,6 +36,7 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
     hideModal: vi.fn(),
     onModalHidden: vi.fn(),
 }));
+vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
 
 const VIEWS = join(import.meta.dirname, '../../../resources/views');
 
@@ -153,8 +155,11 @@ function render(path) {
         .replace(/\{\{--[\s\S]*?--\}\}/g, '')
         .replace(/@php[\s\S]*?@endphp/g, '')
         .replace(/@extends\([^)]*\)/g, '')
-        // The way a value is shown is shared by the table and the details of an item.
-        .replace(/@include\('partials\.field-value'\)/g, () => render('partials/field-value.blade.php'))
+        // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
+        // table of the items are parts of the page of an inventory.
+        .replace(/@include\('partials\.(field-value|items-toolbar|items-filters|items-table)'\)/g, (_match, name) =>
+            render(`partials/${name}.blade.php`),
+        )
         // The tabs of the administration are not under test.
         .replace(/@include\([^\n]*\)\n/g, '')
         .replace(/@inject\([^\n]*\)\n/g, '')
@@ -364,6 +369,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
     beforeEach(() => {
         Alpine.store('workspaces').replace([]);
+        // The page of an inventory keeps its search, sort and filters in the address: every test starts from a clean one.
+        window.history.replaceState(null, '', '/');
         window.location.hash = '';
         PAGE.abilities = {};
     });
@@ -1236,8 +1243,11 @@ describe('the pages under the real Alpine CSP build', () => {
         };
 
         /** What `GET /api/v1/inventories/tools/items` answers. */
-        function itemsPage(items, { current = 1, last = 1, total = items.length, from = 1, to = items.length } = {}) {
-            return { data: items, meta: { current_page: current, last_page: last, total, from, to } };
+        function itemsPage(
+            items,
+            { current = 1, last = 1, total = items.length, from = 1, to = items.length, totals = {} } = {},
+        ) {
+            return { data: items, meta: { current_page: current, last_page: last, total, from, to, totals } };
         }
 
         /** Opens the page of the inventory `tools`. */
@@ -1374,6 +1384,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect([...document.querySelectorAll('thead th')].map((cell) => cell.textContent.trim())).toEqual([
                     ...FIELDS.map((field) => field.name),
+                    'Date added',
+                    'Last modified',
                     'Actions',
                 ]);
                 expect(bodyRows()).toHaveLength(2);
@@ -1494,6 +1506,415 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(empty).toHaveLength(1);
                 expect(empty[0].textContent).toContain('No item yet');
                 expect(buttons('Add item', empty[0])).toHaveLength(1);
+            });
+        });
+
+        describe('searching, filtering, sorting and totalling the items', () => {
+            const STORED = {
+                id: 'i3',
+                values: { name: 'Saw', qty: '2.50', price: '10.00' },
+                created_at: '2026-10-15T10:00:00Z',
+                updated_at: '2026-10-16T08:30:00Z',
+            };
+            const TOTALS = { qty: '4.00', price: '29.90' };
+            const searchBox = () => document.querySelector('input[type="search"]');
+            const headers = () => [...document.querySelectorAll('thead th')];
+            const headerOf = (name) => headers().find((cell) => cell.textContent.trim() === name);
+            const panel = () => document.querySelector('#item-filters-title').closest('.offcanvas');
+            const lastParams = () => http.get.mock.lastCall[1].params;
+            const filtersButton = () => document.querySelector('button[aria-haspopup="dialog"]');
+
+            it('shows a search box, the filters button and the number of items, and none of it while nothing was read', async () => {
+                http.get.mockReturnValue(new Promise(() => {}));
+                await mount('app/inventory.blade.php');
+
+                expect(visible(searchBox())).toBe(false);
+
+                await open({ items: [HAMMER, TRICKY] });
+
+                expect(visible(searchBox())).toBe(true);
+                expect(searchBox().getAttribute('aria-label')).toBe('Search');
+                expect(visible(filtersButton())).toBe(true);
+                expect(filtersButton().textContent).toContain('Filters');
+                expect(document.body.textContent).toContain('2 items');
+            });
+
+            it('hides them in an inventory that holds no item', async () => {
+                await open({ items: [] });
+
+                expect(visible(searchBox())).toBe(false);
+            });
+
+            it('searches once typing pauses, from the first page, and keeps the words in the address', async () => {
+                await open({ items: [HAMMER], meta: { current: 1, last: 3, total: 120, from: 1, to: 50 } });
+                http.get.mockClear();
+
+                await type(searchBox(), 'ham');
+                await type(searchBox(), 'hamm');
+                expect(http.get).not.toHaveBeenCalled();
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                await flush();
+
+                expect(http.get).toHaveBeenCalledTimes(1);
+                expect(lastParams()).toEqual({ page: 1, q: 'hamm' });
+                expect(window.location.search).toBe('?q=hamm');
+            });
+
+            it('searches at once on Enter, and clears the search with its button', async () => {
+                await open({ items: [HAMMER] });
+
+                await type(searchBox(), 'ham');
+                searchBox().dispatchEvent(
+                    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+                );
+                await flush();
+
+                expect(lastParams()).toEqual({ page: 1, q: 'ham' });
+
+                await press('Clear the search');
+
+                expect(searchBox().value).toBe('');
+                expect(lastParams()).toEqual({ page: 1 });
+                expect(buttons('Clear the search')).toHaveLength(0);
+            });
+
+            it('keeps the table on screen while it reads again, with a spinner in the toolbar instead of a full-page one', async () => {
+                await open({ items: [HAMMER] });
+                const slow = { resolve: null };
+                http.get.mockImplementation(
+                    () =>
+                        new Promise((resolve) => {
+                            slow.resolve = () => resolve(itemsPage([HAMMER]));
+                        }),
+                );
+
+                await type(searchBox(), 'ham');
+                searchBox().dispatchEvent(
+                    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+                );
+                await flush();
+
+                const table = document.querySelector('.table-responsive');
+
+                expect(visible(table)).toBe(true);
+                expect(bodyRows()).toHaveLength(1);
+                expect(table.getAttribute('aria-busy')).toBe('true');
+                expect(table.className).toContain('opacity-75');
+                expect(
+                    visible(document.querySelector('.card-toolbar .spinner-border, .border-bottom .spinner-border')),
+                ).toBe(true);
+                expect(visible(document.querySelector('.card-body[role="status"]'))).toBe(false);
+
+                slow.resolve();
+                await flush();
+
+                expect(table.getAttribute('aria-busy')).toBe('false');
+            });
+
+            it('shows how many items match out of how many the inventory holds', async () => {
+                window.history.replaceState(null, '', '/?q=saw');
+                await open({ items: [STORED], itemsCount: 120, meta: { total: 1 } });
+
+                expect(document.body.textContent).toContain('1 result out of 120');
+            });
+
+            it('makes the header of each field that can be sorted a button, and the others plain text', async () => {
+                await open();
+
+                expect(headerOf('Price').querySelector('button')).not.toBeNull();
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('none');
+                expect(headerOf('Date added').querySelector('button')).not.toBeNull();
+                expect(headerOf('Parts').querySelector('button')).toBeNull();
+                expect(headerOf('Parts').hasAttribute('aria-sort')).toBe(false);
+                expect(headerOf('Labels').querySelector('button')).toBeNull();
+            });
+
+            it('sorts ascending, then descending, then back to the newest first, as a header is clicked', async () => {
+                await open();
+                const price = () => headerOf('Price').querySelector('button');
+
+                price().click();
+                await flush();
+                expect(lastParams()).toEqual({ page: 1, sort: 'price' });
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('ascending');
+                expect(price().classList.contains('asc')).toBe(true);
+
+                price().click();
+                await flush();
+                expect(lastParams()).toEqual({ page: 1, sort: 'price', direction: 'desc' });
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('descending');
+                expect(price().classList.contains('desc')).toBe(true);
+
+                price().click();
+                await flush();
+                expect(lastParams()).toEqual({ page: 1 });
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('none');
+            });
+
+            it('sorts by the date an item was added or changed, from the headers or from the select', async () => {
+                await open();
+
+                headerOf('Last modified').querySelector('button').click();
+                await flush();
+
+                expect(lastParams()).toEqual({ page: 1, sort: 'updated_at' });
+
+                const select = document.querySelector('#item-sort');
+
+                expect([...select.options].map((option) => option.textContent).slice(0, 4)).toEqual([
+                    'Newest first',
+                    'Date added',
+                    'Last modified',
+                    'Name',
+                ]);
+                expect(select.value).toBe('updated_at');
+
+                await choose(select, 'price');
+                expect(lastParams()).toEqual({ page: 1, sort: 'price' });
+
+                await press('Ascending order');
+                expect(lastParams()).toEqual({ page: 1, sort: 'price', direction: 'desc' });
+                expect(buttons('Descending order')).toHaveLength(1);
+            });
+
+            it('shows the dates an item was added and last changed', async () => {
+                await open({ items: [STORED] });
+
+                const [added, changed] = [...bodyRows()[0].querySelectorAll('td.text-secondary')];
+
+                expect(added.textContent).toMatch(/Oct 15, 2026/);
+                expect(changed.textContent).toMatch(/Oct 16, 2026/);
+            });
+
+            it('shows the totals of the numbers and the amounts under their columns', async () => {
+                await open({ items: [STORED], meta: { totals: TOTALS } });
+
+                const foot = document.querySelector('tfoot');
+                const cells = [...foot.querySelectorAll('td')];
+
+                expect(visible(foot)).toBe(true);
+                expect(cells[0].textContent.replace(/\s+/g, ' ').trim()).toBe('Total');
+                expect(cells[1].textContent.trim()).toBe('4.00 kg');
+                expect(cells[2].textContent.trim()).toBe('€29.90');
+                expect(cells[3].textContent.trim()).toBe('');
+                expect(cells[0].textContent).not.toContain('kg');
+            });
+
+            it('calls them the total of the selection when the list is narrowed down, and keeps them right as items come and go', async () => {
+                window.history.replaceState(null, '', '/?q=saw');
+                await open({ items: [STORED], itemsCount: 3, meta: { totals: TOTALS } });
+
+                expect(document.querySelector('tfoot td').textContent.replace(/\s+/g, ' ').trim()).toBe(
+                    'Selection total',
+                );
+
+                http.delete.mockResolvedValue(null);
+                http.get.mockImplementation(async (url) =>
+                    url === '/api/v1/inventories/tools'
+                        ? { data: { id: 'tools', name: 'Tools', items_count: 2, fields: FIELDS } }
+                        : itemsPage([STORED], { totals: { qty: '1.00', price: '5.00' } }),
+                );
+                bodyRows()[0].querySelector('td').click();
+                await flush();
+                await press('Delete', itemDialog().querySelector('.modal-footer'));
+                await press('Delete the item');
+
+                expect([...document.querySelectorAll('tfoot td')][2].textContent.trim()).toBe('€5.00');
+            });
+
+            it('leaves the foot out when no column adds up', async () => {
+                await open({ fields: [FIELDS[0], FIELDS[3]], items: [STORED] });
+
+                expect(visible(document.querySelector('tfoot'))).toBe(false);
+            });
+
+            describe('the filters', () => {
+                beforeEach(async () => {
+                    await open({ items: [STORED], itemsCount: 3 });
+                    await openPanel();
+                });
+
+                /** Opens the panel with the button of the toolbar. */
+                async function openPanel() {
+                    filtersButton().click();
+                    await flush();
+                }
+
+                const row = (name) =>
+                    [...panel().querySelectorAll('fieldset')].find(
+                        (one) => one.querySelector('legend').textContent === name,
+                    );
+
+                it('opens a panel with a row for each field, whose controls follow its kind', () => {
+                    expect(showOffcanvas).toHaveBeenCalledWith(panel());
+                    expect([...panel().querySelectorAll('legend')].map((legend) => legend.textContent)).toEqual(
+                        FIELDS.map((field) => field.name),
+                    );
+                    // A number: a lowest and a highest value.
+                    expect(row('Price').querySelectorAll('input').length).toBe(2);
+                    expect(row('Price').querySelector('input').getAttribute('inputmode')).toBe('decimal');
+                    expect(row('Bought').querySelector('input').getAttribute('type')).toBe('date');
+                    // A yes / no: an answer. A choice: the choices to tick. Text: only whether it holds a value.
+                    expect([...row('Fragile').querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+                        'Any',
+                        'Yes',
+                        'No',
+                        'Any value',
+                        'Empty',
+                        'Not empty',
+                    ]);
+                    expect(
+                        [...row('State').querySelectorAll('.form-check-label')].map((label) => label.textContent),
+                    ).toEqual(['New', 'Used']);
+                    expect([...row('Parts').querySelectorAll('.form-check-label')]).toHaveLength(2);
+                    expect(row('Name').querySelectorAll('input')).toHaveLength(0);
+                    expect([...row('Name').querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+                        'Any value',
+                        'Empty',
+                        'Not empty',
+                    ]);
+                });
+
+                it('applies what was typed, shows each filter as a chip with a count on the button, and closes the panel', async () => {
+                    const [min, max] = row('Price').querySelectorAll('input');
+
+                    await type(min, '89,90');
+                    await type(max, '120');
+                    await tick(row('State').querySelector('input[type="checkbox"]'), true);
+                    await submit(panel().querySelector('form'));
+
+                    expect(lastParams()).toEqual({
+                        page: 1,
+                        'filter[price][min]': '89.90',
+                        'filter[price][max]': '120',
+                        'filter[state][in][0]': 'aaaaaaaa',
+                    });
+                    expect(hideOffcanvas).toHaveBeenCalledWith(panel());
+
+                    const chips = [...document.querySelectorAll('.badge .btn-close')].map((close) =>
+                        close.parentElement.textContent.trim(),
+                    );
+
+                    expect(chips).toEqual(['Price: €89.90 – €120.00', 'State: New']);
+                    expect(document.querySelector('button[aria-haspopup="dialog"] .badge').textContent).toBe('2');
+                    expect(visible(document.querySelector('button[aria-haspopup="dialog"] .badge'))).toBe(true);
+                });
+
+                it('says what is wrong with a box, under it, and applies nothing', async () => {
+                    http.get.mockClear();
+                    const [min] = row('Price').querySelectorAll('input');
+
+                    await type(min, 'cheap');
+                    await submit(panel().querySelector('form'));
+
+                    expect(http.get).not.toHaveBeenCalled();
+                    expect(hideOffcanvas).not.toHaveBeenCalled();
+                    expect(min.classList.contains('is-invalid')).toBe(true);
+                    expect(min.parentElement.querySelector('.invalid-feedback').textContent).toBe(
+                        'Enter a number with at most 6 decimals.',
+                    );
+                });
+
+                it('disables the boxes of a value for a field that is asked to hold none', async () => {
+                    const [min, max] = row('Price').querySelectorAll('input');
+
+                    await choose(row('Price').querySelector('select'), 'empty');
+
+                    expect(min.disabled).toBe(true);
+                    expect(max.disabled).toBe(true);
+
+                    await submit(panel().querySelector('form'));
+
+                    expect(lastParams()).toEqual({ page: 1, 'filter[price][empty]': 'true' });
+                });
+
+                it('removes a filter with the close button of its chip, or all of them with Reset', async () => {
+                    await choose(row('Fragile').querySelector('select'), 'true');
+                    await choose(row('Name').querySelector('select'), 'filled');
+                    await submit(panel().querySelector('form'));
+
+                    expect(lastParams()).toEqual({
+                        page: 1,
+                        'filter[name][empty]': 'false',
+                        'filter[fragile][is]': 'true',
+                    });
+
+                    await press('Remove the filter Name: not empty');
+
+                    expect(lastParams()).toEqual({ page: 1, 'filter[fragile][is]': 'true' });
+
+                    await openPanel();
+                    await press('Reset');
+
+                    expect(lastParams()).toEqual({ page: 1 });
+                    expect(document.querySelectorAll('.badge .btn-close')).toHaveLength(0);
+                });
+
+                it('brings the filters of the address back into the boxes of the panel', async () => {
+                    window.history.replaceState(null, '', '/?filter[price][min]=89.90&filter[state][in][]=bbbbbbbb');
+                    await open({ items: [STORED], itemsCount: 3 });
+                    await openPanel();
+
+                    expect(row('Price').querySelector('input').value).toBe('89.90');
+                    expect(row('State').querySelectorAll('input[type="checkbox"]')[1].checked).toBe(true);
+                    expect(row('State').querySelectorAll('input[type="checkbox"]')[0].checked).toBe(false);
+                });
+            });
+
+            describe('when nothing matches', () => {
+                beforeEach(async () => {
+                    window.history.replaceState(null, '', '/?q=zzz&filter[price][min]=5');
+                    await open({ items: [], itemsCount: 3, meta: { total: 0, from: null, to: null } });
+                });
+
+                it('says so, apart from an empty inventory, and offers to clear the search and the filters', async () => {
+                    const empty = [...document.querySelectorAll('.empty')].filter((element) => visible(element));
+
+                    expect(empty).toHaveLength(1);
+                    expect(empty[0].textContent).toContain('No result');
+                    expect(empty[0].textContent).not.toContain('No item yet');
+                    expect(visible(document.querySelector('table').parentElement)).toBe(false);
+                    expect(visible(searchBox())).toBe(true);
+                    expect(searchBox().value).toBe('zzz');
+
+                    http.get.mockImplementation(async (url) =>
+                        url === '/api/v1/inventories/tools'
+                            ? { data: { id: 'tools', name: 'Tools', items_count: 3, fields: FIELDS } }
+                            : itemsPage([STORED]),
+                    );
+                    await press('Clear the search and the filters');
+
+                    expect(lastParams()).toEqual({ page: 1 });
+                    expect(searchBox().value).toBe('');
+                    expect(bodyRows()).toHaveLength(1);
+                    expect([...document.querySelectorAll('.empty')].filter((element) => visible(element))).toHaveLength(
+                        0,
+                    );
+                    expect(window.location.search).toBe('');
+                });
+            });
+
+            it('starts again from everything when the address asks for a field that is gone', async () => {
+                window.history.replaceState(null, '', '/?sort=gone');
+                http.get.mockImplementation(async (url, options) => {
+                    if (url === '/api/v1/inventories/tools') {
+                        return { data: { id: 'tools', name: 'Tools', items_count: 1, fields: FIELDS } };
+                    }
+
+                    if (options.params.sort === 'gone') {
+                        throw new HttpError(422, 'Invalid', { errors: { sort: ['This field does not exist.'] } });
+                    }
+
+                    return itemsPage([STORED]);
+                });
+                await mount('app/inventory.blade.php');
+
+                expect(notify).toHaveBeenCalledWith(
+                    'warning',
+                    'Some of the search options no longer apply: the list was reset.',
+                );
+                expect(bodyRows()).toHaveLength(1);
+                expect(window.location.search).toBe('');
             });
         });
 

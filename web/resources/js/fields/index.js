@@ -28,6 +28,38 @@ export function typeOf(field) {
 }
 
 /**
+ * How the server sorts and filters a field (see `QueryKind` in `types.js`).
+ *
+ * @param {Field} field
+ * @returns {import('./types.js').QueryKind}
+ */
+export function queryKindOf(field) {
+    return typeOf(field).queryKind;
+}
+
+/**
+ * Whether the list can be sorted by a field: all but the ones that hold several values (several choices, tags).
+ *
+ * @param {Field} field
+ * @returns {boolean}
+ */
+export function isSortable(field) {
+    const kind = queryKindOf(field);
+
+    return kind !== 'choices' && kind !== 'tags';
+}
+
+/**
+ * Whether the totals of a list add the values of a field up (numbers and amounts).
+ *
+ * @param {Field} field
+ * @returns {boolean}
+ */
+export function isSummable(field) {
+    return typeOf(field).summable === true;
+}
+
+/**
  * Which control the form shows for a field.
  *
  * @param {Field} field
