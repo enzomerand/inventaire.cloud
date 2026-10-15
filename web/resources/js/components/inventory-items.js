@@ -70,6 +70,15 @@ export default function inventoryItems() {
         /** True while a page of items is being read (and until the first one was). */
         loadingItems: true,
 
+        /** True when the last reading of the inventory failed. */
+        inventoryFailed: false,
+
+        /** True when the last reading of a page of items failed. */
+        itemsFailed: false,
+
+        /** The page the last reading was for, which a retry asks for again. */
+        wantedPage: 1,
+
         /** Number of the page that is shown, from 1. */
         page: 1,
 
@@ -146,14 +155,19 @@ export default function inventoryItems() {
             return this.loadingInventory || this.loadingItems;
         },
 
-        /** Whether the inventory is known to have no field: there is nothing to put in a table yet. */
-        get noFields() {
-            return !this.loadingInventory && this.fields.length === 0;
+        /** Whether the last reading of the inventory or of a page of items failed: the page offers to retry. */
+        get loadFailed() {
+            return this.inventoryFailed || this.itemsFailed;
         },
 
-        /** Whether the inventory has fields and is known to hold no item. */
+        /** Whether the inventory is known to have no field: there is nothing to put in a table yet (not when it could not be read). */
+        get noFields() {
+            return !this.loadingInventory && !this.inventoryFailed && this.fields.length === 0;
+        },
+
+        /** Whether the inventory has fields and is known to hold no item (not when the items could not be read). */
         get noItems() {
-            return !this.loading && this.fields.length > 0 && this.items.length === 0;
+            return !this.loading && !this.loadFailed && this.fields.length > 0 && this.items.length === 0;
         },
 
         /** Whether there is a table to show. */
@@ -216,15 +230,19 @@ export default function inventoryItems() {
         },
 
         /**
-         * Reads the fields of the inventory from the API.
+         * Reads the fields of the inventory from the API. A failure is remembered (`inventoryFailed`) until the next reading,
+         * so that the page does not claim the inventory has no field.
          *
          * @returns {Promise<void>}
          */
         async loadInventory() {
+            this.inventoryFailed = false;
+
             try {
                 this.fields = (await http.get(this.url)).data.fields ?? [];
                 this.rebuild();
             } catch (error) {
+                this.inventoryFailed = true;
                 this.fail(error);
             } finally {
                 this.loadingInventory = false;
@@ -232,7 +250,8 @@ export default function inventoryItems() {
         },
 
         /**
-         * Reads a page of items from the API.
+         * Reads a page of items from the API. A failure is remembered (`itemsFailed`) until the next reading, so that the
+         * page does not claim the inventory holds no item.
          *
          * @param {number} page Number of the page to read.
          * @returns {Promise<void>}
@@ -240,6 +259,8 @@ export default function inventoryItems() {
         async loadItems(page) {
             const ticket = ++this.ticket;
             this.loadingItems = true;
+            this.itemsFailed = false;
+            this.wantedPage = page;
 
             try {
                 const answer = await http.get(this.itemsUrl, { params: { page } });
@@ -265,6 +286,7 @@ export default function inventoryItems() {
                 this.rebuild();
             } catch (error) {
                 if (ticket === this.ticket) {
+                    this.itemsFailed = true;
                     this.fail(error);
                 }
             } finally {
@@ -272,6 +294,18 @@ export default function inventoryItems() {
                     this.loadingItems = false;
                 }
             }
+        },
+
+        /**
+         * Reads again what could not be read: the inventory, and the page of items that was asked for.
+         *
+         * @returns {Promise<void>}
+         */
+        async retry() {
+            await Promise.all([
+                this.inventoryFailed ? this.loadInventory() : Promise.resolve(),
+                this.loadItems(this.wantedPage),
+            ]);
         },
 
         /**

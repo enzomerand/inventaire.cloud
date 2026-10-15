@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 
@@ -76,6 +77,15 @@ describe('/app', function (): void {
 
     it('sends a visitor to the login page', function (): void {
         $this->get(route('app'))->assertRedirect(route('login'));
+    });
+
+    it('sends somebody who is signed in but has no workspace to the list of workspaces, never to the login page (which would send them back here)', function (): void {
+        // The account is deleted while the request runs: there is nobody to give a personal workspace to.
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        DB::table('users')->where('id', $user->id)->delete();
+
+        $this->get(route('app'))->assertRedirect(route('app.workspaces'));
     });
 
     it('is still named app and lives at /app', function (): void {

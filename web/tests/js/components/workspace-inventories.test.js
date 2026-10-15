@@ -82,13 +82,26 @@ describe('the inventories of a workspace', () => {
             expect(component.empty).toBe(true);
         });
 
-        it('does not say the workspace is empty when the list could not be read', async () => {
-            http.get.mockRejectedValue(new HttpError(0, 'Network down', { kind: 'network' }));
+        it('does not say the workspace is empty when the list could not be read, and reads it again on request', async () => {
+            http.get.mockRejectedValueOnce(new HttpError(0, 'Network down', { kind: 'network' }));
 
             await component.init();
 
             expect(component.loading).toBe(false);
             expect(component.items).toEqual([]);
+            expect(component.loadFailed).toBe(true);
+            expect(component.empty).toBe(false);
+
+            http.get.mockResolvedValue({ data: [] });
+            const retrying = component.load();
+
+            expect(component.loadFailed).toBe(false);
+            expect(component.empty).toBe(false);
+
+            await retrying;
+
+            expect(component.loadFailed).toBe(false);
+            expect(component.empty).toBe(true);
         });
 
         it('tells why the list could not be read, unless the HTTP helper already did', async () => {

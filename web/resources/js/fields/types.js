@@ -331,7 +331,12 @@ export const FIELD_TYPES = {
         inputType: 'email',
         toInput: (value) => value ?? '',
         fromInput: textOrNull,
-        describe: (value) => cell('link', { text: String(value), href: 'mailto:' + encodeURI(String(value)) }),
+        // `#`, `?` and `&` in the local part of an address (`a&b@example.com`) must not end the address in the link; the `@` stays.
+        describe: (value) =>
+            cell('link', {
+                text: String(value),
+                href: 'mailto:' + encodeURIComponent(String(value)).replace(/%40/g, '@'),
+            }),
     },
 
     phone: {

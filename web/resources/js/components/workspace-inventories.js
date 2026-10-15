@@ -37,6 +37,9 @@ export default function workspaceInventories() {
         /** True while the list is being read (and until it was, so that the empty message does not flash). */
         loading: true,
 
+        /** True when the last reading of the list failed: the workspace is not known to be empty, the page offers to retry. */
+        loadFailed: false,
+
         /** True while the creation request is in flight; blocks double submits. */
         busy: false,
 
@@ -64,9 +67,9 @@ export default function workspaceInventories() {
             return this.$root.dataset.canCreate === '1';
         },
 
-        /** Whether the workspace is known to hold no inventory. */
+        /** Whether the workspace is known to hold no inventory (not when the list could not be read). */
         get empty() {
-            return !this.loading && this.items.length === 0;
+            return !this.loading && !this.loadFailed && this.items.length === 0;
         },
 
         /** Whether the creation form can be submitted: it has a name, and nothing else is in flight. */
@@ -86,16 +89,19 @@ export default function workspaceInventories() {
         },
 
         /**
-         * Reads the inventories of the workspace from the API.
+         * Reads the inventories of the workspace from the API. A failure is remembered (`loadFailed`) until the next
+         * reading, so that the page says it could not read the list instead of claiming the workspace is empty.
          *
          * @returns {Promise<void>}
          */
         async load() {
             this.loading = true;
+            this.loadFailed = false;
 
             try {
                 this.items = (await http.get(this.url)).data;
             } catch (error) {
+                this.loadFailed = true;
                 this.fail(error);
             } finally {
                 this.loading = false;

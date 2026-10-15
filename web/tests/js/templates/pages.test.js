@@ -1084,6 +1084,23 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(visible(document.querySelector('[role="status"]'))).toBe(true);
         });
 
+        it('does not claim the workspace is empty when the list could not be read, and reads it again on request', async () => {
+            http.get.mockRejectedValueOnce(new HttpError(500, 'Server down'));
+            await mount('app/workspace.blade.php');
+
+            const alert = document.querySelector('.alert-danger[role="alert"]');
+
+            expect(visible(alert)).toBe(true);
+            expect(alert.textContent).toContain('The inventories could not be loaded.');
+            expect(visible(document.querySelector('.empty'))).toBe(false);
+
+            http.get.mockResolvedValue({ data: [] });
+            await press('Try again', alert);
+
+            expect(visible(alert)).toBe(false);
+            expect(visible(document.querySelector('.empty'))).toBe(true);
+        });
+
         it('offers to add an inventory to the people who may', async () => {
             await open();
 
@@ -1423,6 +1440,29 @@ describe('the pages under the real Alpine CSP build', () => {
                 await press('Next');
 
                 expect(http.get).toHaveBeenLastCalledWith('/api/v1/inventories/tools/items', { params: { page: 2 } });
+            });
+
+            it('does not claim the inventory has no field or no item when it could not be read, and reads it again on request', async () => {
+                http.get.mockRejectedValue(new HttpError(500, 'Server down'));
+                await mount('app/inventory.blade.php');
+
+                const alert = document.querySelector('.card-body > .alert-danger');
+
+                expect(visible(alert)).toBe(true);
+                expect(alert.textContent).toContain('The items could not be loaded.');
+                expect([...document.querySelectorAll('.empty')].filter((element) => visible(element))).toHaveLength(0);
+                expect(buttons('Add item')).toHaveLength(0);
+
+                http.get.mockImplementation(async (url) =>
+                    url === '/api/v1/inventories/tools'
+                        ? { data: { id: 'tools', name: 'Tools', items_count: 1, fields: FIELDS } }
+                        : itemsPage([HAMMER]),
+                );
+                await press('Try again', alert);
+
+                expect(visible(alert)).toBe(false);
+                expect(bodyRows()).toHaveLength(1);
+                expect(buttons('Add item')).toHaveLength(1);
             });
 
             it('tells an inventory with no field to add some, with a link to the editor of the fields', async () => {
@@ -1774,6 +1814,23 @@ describe('the pages under the real Alpine CSP build', () => {
 
             expect(visible(document.querySelector('.empty'))).toBe(true);
             expect(entries()).toHaveLength(0);
+        });
+
+        it('does not claim the inventory has no field when the fields could not be read, and reads them again on request', async () => {
+            http.get.mockRejectedValueOnce(new HttpError(500, 'Server down'));
+            await mount('app/inventory-fields.blade.php');
+
+            const alert = document.querySelector('.card-body > .alert-danger');
+
+            expect(visible(alert)).toBe(true);
+            expect(alert.textContent).toContain('The fields could not be loaded.');
+            expect(visible(document.querySelector('.empty'))).toBe(false);
+
+            http.get.mockResolvedValue({ data: { id: 'tools', name: 'Tools', fields: FIELDS } });
+            await press('Try again', alert);
+
+            expect(visible(alert)).toBe(false);
+            expect(entries()).toHaveLength(3);
         });
 
         it('links back to the items of the inventory', async () => {

@@ -58,6 +58,9 @@ export default function inventoryFields() {
         /** True until the fields have been read. */
         loading: true,
 
+        /** True when the last reading of the fields failed: the inventory is not known to have none, the page offers to retry. */
+        loadFailed: false,
+
         /** True while a change is in flight; blocks double submits. */
         busy: false,
 
@@ -93,9 +96,9 @@ export default function inventoryFields() {
             return this.$root.dataset.fieldUrl;
         },
 
-        /** Whether the inventory is known to have no field. */
+        /** Whether the inventory is known to have no field (not when the fields could not be read). */
         get empty() {
-            return !this.loading && this.fields.length === 0;
+            return !this.loading && !this.loadFailed && this.fields.length === 0;
         },
 
         /** Whether the dialog changes a field (rather than adds one). */
@@ -157,14 +160,18 @@ export default function inventoryFields() {
         },
 
         /**
-         * Reads the fields of the inventory from the API.
+         * Reads the fields of the inventory from the API. A failure is remembered (`loadFailed`) until the next reading, so
+         * that the page says it could not read the fields instead of claiming the inventory has none.
          *
          * @returns {Promise<void>}
          */
         async load() {
+            this.loadFailed = false;
+
             try {
                 this.fields = (await http.get(this.url)).data.fields ?? [];
             } catch (error) {
+                this.loadFailed = true;
                 this.fail(error);
             } finally {
                 this.loading = false;
@@ -388,15 +395,6 @@ export default function inventoryFields() {
          */
         hasOption(name) {
             return optionNames(this.form.type).includes(name);
-        },
-
-        /**
-         * The most decimals the type picked in the dialog allows (0 to 6 for a number, 0 to 4 for a percentage).
-         *
-         * @returns {number}
-         */
-        get maxDecimals() {
-            return this.form.type === 'percentage' ? 4 : 6;
         },
 
         /**

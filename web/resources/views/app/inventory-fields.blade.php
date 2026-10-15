@@ -53,6 +53,16 @@
                 {{ __('Loading…') }}
             </div>
 
+            {{-- The fields could not be read: the inventory is not known to have none, so the page says so and offers to try again. --}}
+            <div class="card-body" :hidden="!loadFailed">
+                <div class="alert alert-danger m-0" role="alert">
+                    <div class="d-flex align-items-center gap-3">
+                        <span>{{ __('The fields could not be loaded.') }}</span>
+                        <button type="button" class="btn btn-sm ms-auto" @click="load" :disabled="loading">{{ __('Try again') }}</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card-body" :hidden="!empty">
                 <div class="empty">
                     <div class="empty-icon hero-icon text-primary">

@@ -36,6 +36,15 @@
             {{ __('Loading…') }}
         </p>
 
+        {{-- The list could not be read: the workspace is not empty for all we know, so it says so and offers to try again.
+             The alert is hidden by attribute, with the flex layout on an inner element (a display utility would win). --}}
+        <div class="alert alert-danger" role="alert" :hidden="!loadFailed">
+            <div class="d-flex align-items-center gap-3">
+                <span>{{ __('The inventories could not be loaded.') }}</span>
+                <button type="button" class="btn btn-sm ms-auto" @click="load" :disabled="loading">{{ __('Try again') }}</button>
+            </div>
+        </div>
+
         <div class="row row-cards">
             <template x-for="item in items" :key="item.id">
                 <div class="col-12 col-md-6 col-lg-4">

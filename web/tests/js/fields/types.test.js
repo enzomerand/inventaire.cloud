@@ -375,6 +375,17 @@ describe('showing a value', () => {
             });
         });
 
+        it('keeps the characters that would end the address in a link out of it, but not the @', () => {
+            expect(describeValue(field('email'), 'a&b#c?d@example.com')).toMatchObject({
+                kind: 'link',
+                text: 'a&b#c?d@example.com',
+                href: 'mailto:a%26b%23c%3Fd@example.com',
+            });
+            expect(describeValue(field('email'), 'first.last+tag@example.com').href).toBe(
+                'mailto:first.last%2Btag@example.com',
+            );
+        });
+
         it('links a phone number with tel:, without the spaces and signs people write between the digits', () => {
             expect(describeValue(field('phone'), '+33 (0)1 23-45.67.89')).toMatchObject({
                 kind: 'link',

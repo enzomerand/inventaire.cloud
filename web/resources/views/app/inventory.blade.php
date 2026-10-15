@@ -145,6 +145,17 @@
                 {{ __('Loading…') }}
             </div>
 
+            {{-- Something could not be read: the inventory is not known to have no field or no item, so the page says so and offers
+                 to try again. --}}
+            <div class="card-body" :hidden="!loadFailed">
+                <div class="alert alert-danger m-0" role="alert">
+                    <div class="d-flex align-items-center gap-3">
+                        <span>{{ __('The items could not be loaded.') }}</span>
+                        <button type="button" class="btn btn-sm ms-auto" @click="retry" :disabled="loading">{{ __('Try again') }}</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card-body" :hidden="!noFields">
                 <div class="empty">
                     <div class="empty-icon hero-icon text-primary">

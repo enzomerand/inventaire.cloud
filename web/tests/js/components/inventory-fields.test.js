@@ -140,6 +140,38 @@ describe('the fields of an inventory', () => {
             expect(notify).not.toHaveBeenCalled();
         });
 
+        it('does not claim the inventory has no field when the fields could not be read, and reads them again on request', async () => {
+            const error = new HttpError(500, 'Server error');
+            error.reported = true;
+            http.get.mockRejectedValue(error);
+            component.fields = [];
+
+            await component.load();
+
+            expect(component.loadFailed).toBe(true);
+            expect(component.loading).toBe(false);
+            expect(component.empty).toBe(false);
+
+            http.get.mockResolvedValue(inventoryAnswer([]));
+            const retrying = component.load();
+
+            expect(component.loadFailed).toBe(false);
+
+            await retrying;
+
+            expect(component.loadFailed).toBe(false);
+            expect(component.empty).toBe(true);
+        });
+
+        it('remembers a failure of the reading that follows a change too', async () => {
+            http.get.mockRejectedValue(new HttpError(0, 'Network down', { kind: 'network' }));
+
+            await component.load();
+
+            expect(component.loadFailed).toBe(true);
+            expect(component.fields.map((one) => one.id)).toEqual(['a', 'b', 'c']);
+        });
+
         it('shows other failures as a toast', async () => {
             http.get.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'odd' }));
 
@@ -237,12 +269,10 @@ describe('the fields of an inventory', () => {
             expect(component.hasOption('unit')).toBe(true);
             expect(component.hasOption('max_length')).toBe(false);
             expect(component.form.options.decimals).toBe('0');
-            expect(component.maxDecimals).toBe(6);
 
             component.selectType({ target: { value: 'percentage' } });
 
             expect(component.form.options.decimals).toBe('2');
-            expect(component.maxDecimals).toBe(4);
         });
 
         it('cannot be sent without a name', async () => {

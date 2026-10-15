@@ -234,6 +234,124 @@ describe('the items of an inventory', () => {
 
             expect(notify).toHaveBeenCalledWith('danger', 'Conflict');
         });
+
+        describe('when something could not be read', () => {
+            const down = () => {
+                const error = new HttpError(0, 'Network down', { kind: 'network' });
+                error.reported = true;
+
+                return error;
+            };
+
+            it('does not claim the inventory has no field when it could not be read', async () => {
+                http.get.mockImplementation(async (url) => {
+                    if (url === INVENTORY) {
+                        throw down();
+                    }
+
+                    return page([item('i1')]);
+                });
+
+                await component.init();
+
+                expect(component.inventoryFailed).toBe(true);
+                expect(component.loadFailed).toBe(true);
+                expect(component.noFields).toBe(false);
+                expect(component.noItems).toBe(false);
+                expect(component.loading).toBe(false);
+            });
+
+            it('does not claim the inventory holds no item when its items could not be read', async () => {
+                http.get.mockImplementation(async (url) => {
+                    if (url === ITEMS) {
+                        throw down();
+                    }
+
+                    return inventoryAnswer();
+                });
+
+                await component.init();
+
+                expect(component.itemsFailed).toBe(true);
+                expect(component.inventoryFailed).toBe(false);
+                expect(component.loadFailed).toBe(true);
+                expect(component.noItems).toBe(false);
+                expect(component.noFields).toBe(false);
+                expect(component.loadingItems).toBe(false);
+            });
+
+            it('reads again what failed, and only then claims what it finds', async () => {
+                http.get.mockRejectedValue(down());
+                await component.init();
+
+                expect(component.loadFailed).toBe(true);
+
+                answer([]);
+                const retrying = component.retry();
+
+                expect(component.inventoryFailed).toBe(false);
+                expect(component.itemsFailed).toBe(false);
+
+                await retrying;
+
+                expect(component.loadFailed).toBe(false);
+                expect(component.noItems).toBe(true);
+                expect(component.noFields).toBe(false);
+            });
+
+            it('asks again for the page that failed, not for the first one', async () => {
+                answer([item('i1')], FIELDS, { current: 1, last: 3, total: 120, from: 1, to: 50 });
+                await component.init();
+
+                http.get.mockRejectedValueOnce(down());
+                await component.loadItems(2);
+
+                expect(component.itemsFailed).toBe(true);
+                expect(component.page).toBe(1);
+
+                answer([item('i51')], FIELDS, { current: 2, last: 3, total: 120, from: 51, to: 100 });
+                await component.retry();
+
+                expect(http.get).toHaveBeenLastCalledWith(ITEMS, { params: { page: 2 } });
+                expect(component.page).toBe(2);
+                expect(component.loadFailed).toBe(false);
+            });
+
+            it('does not read the inventory again when only the items failed', async () => {
+                http.get.mockImplementation(async (url) => {
+                    if (url === ITEMS) {
+                        throw down();
+                    }
+
+                    return inventoryAnswer();
+                });
+                await component.init();
+                http.get.mockClear();
+                answer([item('i1')]);
+
+                await component.retry();
+
+                expect(http.get).toHaveBeenCalledTimes(1);
+                expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1 } });
+            });
+
+            it('forgets the failure of a page that a more recent reading made obsolete', async () => {
+                answer([item('i1')]);
+                await component.init();
+
+                let failFirst;
+                http.get.mockImplementationOnce(() => new Promise((_resolve, reject) => (failFirst = reject)));
+                const slow = component.loadItems(2);
+                http.get.mockResolvedValueOnce(
+                    page([item('i9')], { current: 3, last: 3, total: 130, from: 101, to: 130 }),
+                );
+                await component.loadItems(3);
+                failFirst(down());
+                await slow;
+
+                expect(component.itemsFailed).toBe(false);
+            });
+        });
     });
 
     describe('pages', () => {
