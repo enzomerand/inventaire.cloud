@@ -14,6 +14,7 @@ use App\Http\Requests\Account\DeleteAccountRequest;
 use App\Http\Responses\ApiError;
 use App\Mail\AccountDeletionCodeMail;
 use Illuminate\Auth\SessionGuard;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -67,7 +68,8 @@ final class AccountDeletionController extends Controller
      *
      * A code that is not right is a `422` with a `code` (`deletion_code_wrong`, `deletion_code_expired`,
      * `deletion_code_exhausted`); an account that cannot be deleted yet is a `409` (`last_administrator`,
-     * `sole_owner_of_shared_workspaces`) and keeps its code, so that nothing has to be asked again.
+     * `sole_owner_of_shared_workspaces`) and keeps its code, so that nothing has to be asked again; an account that
+     * somebody else deleted in the meantime is a `404` (`account_not_found`).
      */
     public function destroy(DeleteAccountRequest $request): JsonResponse|Response
     {
@@ -83,6 +85,10 @@ final class AccountDeletionController extends Controller
             $this->deletion->delete($user);
         } catch (AccountDeletionRefused $refusal) {
             return $this->refusal($refusal);
+        } catch (ModelNotFoundException) {
+            // Somebody else deleted the account while this was being confirmed: there is nothing left to delete, and
+            // this request must not report a deletion it did not make.
+            return ApiError::notFound(__('This account no longer exists.'), 'account_not_found');
         }
 
         /** @var SessionGuard $guard */

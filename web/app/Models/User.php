@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -110,9 +111,11 @@ class User extends Authenticatable implements HasLocalePreference
      * event releases what goes with the account (its sole-member workspaces, one by one through their own
      * `delete()`, its tokens, sessions and codes) before the row itself goes. An account that cannot be deleted yet
      * (the only owner of a shared workspace, the last administrator) raises an `AccountDeletionRefused` and
-     * nothing is changed.
+     * nothing is changed. An account that is already gone (a stale copy of it) is a `ModelNotFoundException`, not a
+     * silent success.
      *
      * @throws AccountDeletionRefused
+     * @throws ModelNotFoundException
      */
     public function delete(): ?bool
     {

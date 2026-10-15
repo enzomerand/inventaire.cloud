@@ -18,6 +18,9 @@ use Illuminate\Http\Request;
  * (or lost its fingerprint any other way) would adopt the *new* one and survive the very revocation that was meant
  * to end it. Both of the application's middleware ({@see Http\Middleware\AuthenticateSession} for the web pages and
  * {@see Http\Middleware\AuthenticateApiSession} for the API) therefore refuse such a session instead.
+ *
+ * Every sign-in leaves a fingerprint, on every route: the guard's own login does, and a "remember me" cookie that
+ * signs somebody in on a public page (where neither middleware runs) is given one by {@see StoreSessionFingerprint}.
  */
 final class SessionFingerprint
 {
@@ -26,7 +29,8 @@ final class SessionFingerprint
      *
      * Not concerned: a request that is not signed in; an account with no fingerprint (no remember token, so there is
      * nothing to compare); a request signed in by the "remember me" cookie, whose own copy of the fingerprint the
-     * guard has just checked, and which is given a session of its own (and its fingerprint) at that moment; and a
+     * guard has just checked, and which is given a session of its own (and its fingerprint, see
+     * {@see StoreSessionFingerprint}) at that moment; and a
      * guard that was set by the code, as `actingAs()` does, without the session ever signing anybody in.
      *
      * @param  string  $name  The name of the guard, as the fingerprint's key in the session spells it.

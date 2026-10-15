@@ -11,6 +11,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -402,6 +403,44 @@ describe('what stops the deletion', function (): void {
     });
 });
 
+describe('an account that is gone when the deletion is confirmed', function (): void {
+    it('is a 404, not a deletion that did not happen', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $code = deletionCodeFor($this, $user);
+        $gone = false;
+        DB::listen(function ($query) use ($user, &$gone): void {
+            // As soon as the deletion starts to lock what it needs, somebody else deletes the account.
+            if (! $gone && stripos($query->sql, 'for update') !== false && stripos($query->sql, 'login_codes') !== false) {
+                $gone = true;
+                DB::table('users')->where('id', $user->id)->delete();
+            }
+        });
+
+        confirmDeletion($this, $user, $code)
+            ->assertNotFound()
+            ->assertJsonPath('code', 'account_not_found')
+            ->assertJsonPath('message', 'This account no longer exists.');
+
+        // (The simulated deletion ran in the transaction of the request, which the refusal rolled back: the point is
+        // the answer, and that the deletion was not reported as done.)
+        expect($gone)->toBeTrue();
+    });
+
+    it('is told in the language of the request', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $code = deletionCodeFor($this, $user);
+        DB::listen(function ($query) use ($user): void {
+            if (stripos($query->sql, 'for update') !== false && stripos($query->sql, 'login_codes') !== false) {
+                DB::table('users')->where('id', $user->id)->delete();
+            }
+        });
+
+        $this->actingAs($user)->deleteJson('/api/v1/me', ['code' => $code], frontend(['Accept-Language' => 'fr']))
+            ->assertNotFound()
+            ->assertJsonPath('message', "Ce compte n'existe plus.");
+    });
+});
+
 describe('deleting the account through the model, whoever asks', function (): void {
     it('leaves no workspace behind, and deletes the ones nobody else belongs to one at a time, with their events', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
@@ -482,13 +521,33 @@ describe('deleting the account through the model, whoever asks', function (): vo
             ->and(User::query()->count())->toBe(0);
     });
 
-    it('does nothing for an account somebody else deleted first', function (): void {
+    it('says so when the account is already gone, instead of reporting a deletion that deleted nothing', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
+        $bystander = User::factory()->withPersonalWorkspace()->create();
         $stale = User::query()->findOrFail($user->id);
         $user->delete();
 
-        expect($stale->delete())->toBeTrue()
-            ->and(Workspace::query()->count())->toBe(0);
+        // The model, and the service behind it, both refuse a copy of an account somebody else deleted first.
+        expect(fn () => $stale->delete())->toThrow(ModelNotFoundException::class)
+            ->and(fn () => app(AccountDeletion::class)->delete($stale))->toThrow(ModelNotFoundException::class)
+            ->and(User::query()->pluck('id')->all())->toBe([$bystander->id])
+            ->and(Workspace::query()->count())->toBe(1);
+    });
+
+    it('takes the locks in the global order: the sign-in code of the address, then the accounts, then the workspaces, then the memberships', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.com']);
+        $locked = [];
+        DB::listen(function ($query) use (&$locked): void {
+            if (stripos($query->sql, 'for update') !== false && preg_match('/\bfrom\s+["`]?(\w+)/i', $query->sql, $table) === 1) {
+                $locked[] = $table[1];
+            }
+        });
+
+        $user->delete();
+
+        // Signing in locks the sign-in code before the account (VerifyCodeController): deleting must not go the other
+        // way round, or the two wait for each other. (Every table appears once, at its first lock.)
+        expect(array_values(array_unique($locked)))->toBe(['login_codes', 'users', 'workspaces', 'workspace_user']);
     });
 
     it('deletes nothing when one of the workspaces fails to go', function (): void {

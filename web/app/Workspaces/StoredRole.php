@@ -7,6 +7,7 @@ namespace App\Workspaces;
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 
 /**
  * Reads and writes the `role` column of a membership as a {@see WorkspaceRole}, without ever failing on what the
@@ -17,6 +18,10 @@ use Illuminate\Support\Facades\Log;
  * framework's own enum cast would throw on it and take every page that lists workspaces down with it (the header
  * switcher is on all of them). An unknown role is read as the one with the fewest rights, {@see WorkspaceRole::Viewer},
  * and reported once per value and process, since the same row is read many times.
+ *
+ * Reading is tolerant, writing is not: this version only ever stores a role it knows, so assigning anything else is
+ * a bug in the caller and is refused (`InvalidArgumentException`) instead of persisted for a later version, or a
+ * stricter reader, to trip over.
  *
  * @implements CastsAttributes<WorkspaceRole, WorkspaceRole|string>
  */
@@ -48,13 +53,25 @@ final class StoredRole implements CastsAttributes
     }
 
     /**
-     * The value to store for a role (a plain string is kept as it is, as attaching with a word does).
+     * The value to store for a role: a {@see WorkspaceRole}, or the word of one (as attaching with a word does).
      *
      * @param  array<string, mixed>  $attributes
+     *
+     * @throws InvalidArgumentException When the value is not a role this version knows.
      */
     public function set(Model $model, string $key, mixed $value, array $attributes): string
     {
-        return $value instanceof WorkspaceRole ? $value->value : (string) $value;
+        $role = $value instanceof WorkspaceRole ? $value : (is_string($value) ? WorkspaceRole::tryFrom($value) : null);
+
+        if ($role === null) {
+            throw new InvalidArgumentException(sprintf(
+                'A workspace membership cannot hold the role %s: it must be one of %s.',
+                is_scalar($value) ? var_export($value, true) : get_debug_type($value),
+                implode(', ', array_column(WorkspaceRole::cases(), 'value')),
+            ));
+        }
+
+        return $role->value;
     }
 
     /**

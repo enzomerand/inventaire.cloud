@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Auth\EmailAddress;
+use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Services\ClientNetwork;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -31,6 +34,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Every sign-in, "remember me" cookie included, leaves its session with the account's fingerprint (see the class).
+        Event::listen(Login::class, StoreSessionFingerprint::class);
+
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();
         $this->registerWorkspaceLimiters();

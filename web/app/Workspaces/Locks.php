@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Workspaces;
 
+use App\Database\DeadlockRetries;
+use App\Models\LoginCode;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMember;
@@ -23,16 +25,45 @@ use Illuminate\Database\Eloquent\Collection;
  * 3. then read the memberships it judges with a locking read ({@see self::memberships()}), and decide.
  *
  * A membership can therefore only disappear while both its account and its workspace are locked by whoever removes
- * it: reading under those locks gives a verdict that stays true until the commit. A single global order (accounts,
- * then workspaces, each by id) is what keeps two such requests from waiting for each other; what still gets caught,
- * the database aborts one of them and the caller retries (`transaction($callback, 3)`). Code that adds members
- * (invitations, in a later lot) locks the workspace first.
+ * it: reading under those locks gives a verdict that stays true until the commit.
+ *
+ * The global lock order
+ * ---------------------
+ *
+ * What keeps two requests from waiting for each other is that *every* transaction of the application that takes
+ * more than one of these locks takes them in the same order:
+ *
+ * 1. the sign-in code of an address (`login_codes`, by address: {@see self::loginCode()});
+ * 2. the accounts (`users`), lowest id first;
+ * 3. the workspaces (`workspaces`), lowest id first;
+ * 4. the memberships (`workspace_user`), by id.
+ *
+ * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
+ * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels, never go back up: after a
+ * workspace or a membership, it does not lock an account or a sign-in code. Code that adds members (the invitations
+ * of lot 9) must follow the same order: accounts, then the workspace, then the memberships. What still gets caught, the database aborts one of the
+ * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many
+ * requests may collide, as sign-ups do), always the outermost transaction: a deadlock rolls the whole of it back, so
+ * a nested transaction cannot retry by itself.
  *
  * Locking reads are also what makes the verdict right on MySQL and MariaDB, where a plain read inside a
  * transaction answers from the snapshot taken at its first read, which may predate a commit the lock waited for.
  */
 final class Locks
 {
+    /**
+     * Locks the sign-in code waiting for an address, if there is one (and the place where it would be, if not).
+     *
+     * First in the global lock order (see the class): signing in locks it before the account, so deleting the account
+     * must lock it before the account too. Nothing is returned: a caller wants the lock, not the code.
+     *
+     * @param  string  $email  Address, already normalized.
+     */
+    public function loginCode(string $email): void
+    {
+        LoginCode::query()->whereKey($email)->lockForUpdate()->first();
+    }
+
     /**
      * Locks accounts and returns the ones that exist, by id. Ids of accounts that are gone are skipped.
      *

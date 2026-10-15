@@ -8,6 +8,7 @@ use App\Auth\Accounts;
 use App\Auth\LoginCodeOutcome;
 use App\Auth\LoginCodes;
 use App\Auth\LoginCodeVerdict;
+use App\Database\DeadlockRetries;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\VerifyLoginCodeRequest;
 use App\Http\Resources\UserResource;
@@ -49,7 +50,10 @@ final class VerifyCodeController extends Controller
         $code = $request->code();
         $name = $request->name();
 
-        $outcome = $this->db->transaction(fn (): JsonResponse|User => $this->accept($email, $code, $name, $codes, $accounts, $locales));
+        // Retried when the database picks it as the loser of a deadlock: people signing up at the same moment can wait
+        // for each other's place among the memberships (see Workspaces::ensure()). Nothing of the attempt that lost
+        // is kept, the code included, so the next one starts from the same state.
+        $outcome = DeadlockRetries::run(fn (): JsonResponse|User => $this->db->transaction(fn (): JsonResponse|User => $this->accept($email, $code, $name, $codes, $accounts, $locales)));
 
         if ($outcome instanceof JsonResponse) {
             return $outcome;

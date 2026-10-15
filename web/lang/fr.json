@@ -412,6 +412,7 @@
     "There is no password: sign in with the code sent to this address.": "Il n'y a pas de mot de passe : connectez-vous avec le code envoyé à cette adresse.",
     "There is no pending code: request a new one.": "Aucun code n'est en attente : demandez-en un nouveau.",
     "These steps must be completed first: :steps.": "Ces étapes doivent d'abord être terminées : :steps.",
+    "This account no longer exists.": "Ce compte n'existe plus.",
     "This action is unauthorized.": "Cette action n'est pas autorisée.",
     "This address does not look like a Documenso instance (API not found).": "Cette adresse ne ressemble pas à une instance Documenso (API introuvable).",
     "This code has expired: request a new one.": "Ce code a expiré : demandez-en un nouveau.",

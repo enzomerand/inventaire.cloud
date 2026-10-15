@@ -107,6 +107,14 @@ function forgetFingerprintOf(Device $device): void
     });
 }
 
+/**
+ * The id of the account a device's session has signed in, without any request in between (null when it holds none).
+ */
+function signedInUserIdOf(Device $device): int|string|null
+{
+    return inSessionOf($device, fn ($session): mixed => $session->get(app('auth')->guard('web')->getName()));
+}
+
 describe('signing out everywhere', function (): void {
     it('refuses the other devices and keeps this one signed in', function (string $driver): void {
         useSessionDriver($driver);
@@ -283,6 +291,67 @@ describe('the fingerprint of a new session', function (): void {
 
         expect(fingerprintOf($device))->toMatch('/^[0-9a-f]{64}$/');
     });
+});
+
+describe('a "remember me" cookie that signs somebody in on a public page', function (): void {
+    it('gives the new session its fingerprint, so that the signed-in space keeps accepting it', function (string $driver, string $page, int $status): void {
+        useSessionDriver($driver);
+        [$user, $laptop] = accountOnTwoDevices($this);
+        // The session expired (or the browser was closed), the cookie is still there: the next visit is a public page.
+        $returning = $laptop->withoutSession();
+
+        $returning->visit($page)->assertStatus($status);
+
+        // The cookie signed the person in at that moment, and the session it opened carries the fingerprint.
+        expect(signedInUserIdOf($returning))->toBe($user->id)
+            ->and(fingerprintOf($returning))->toBe(app('auth')->guard('web')->hashPasswordForCookie($user->fresh()->getAuthPassword()));
+
+        // The click that follows is not a sign-out: the cookie lasts as long as it was promised to.
+        assertSignedIn($returning);
+        $returning->visit('/app/workspaces')->assertOk();
+    })->with(['array', 'database'])->with([
+        'the home page' => ['/', 200],
+        'the login page, which sends a signed-in visitor on' => ['/login', 302],
+    ]);
+
+    it('is still refused on every page once the account signed out everywhere', function (string $driver): void {
+        useSessionDriver($driver);
+        [$user, $laptop] = accountOnTwoDevices($this);
+        $replay = $laptop->withoutSession();
+
+        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+
+        // A copied cookie, replayed after the token was renewed, signs nobody in: not on a public page (which would
+        // hand it a session and a fingerprint of its own), not in the signed-in space, not on the API.
+        $replay->visit('/')->assertOk()->assertViewIs('home');
+        expect(signedInUserIdOf($replay))->toBeNull()->and(fingerprintOf($replay))->toBeNull();
+
+        $replay->visit('/login')->assertOk();
+        expect(signedInUserIdOf($replay))->toBeNull()->and(fingerprintOf($replay))->toBeNull();
+
+        $replay->visit('/app')->assertRedirect(route('login'));
+        $replay->request('GET', '/api/v1/me')->assertUnauthorized();
+        $replay->visit('/app/workspaces')->assertRedirect(route('login'));
+
+        // The device that renewed the token is the one that stays in.
+        assertSignedIn($laptop);
+        expect($user->fresh()->remember_token)->not->toBeNull();
+    })->with(['array', 'database']);
+
+    it('is refused on every page after a sign-out-everywhere that came once the cookie had opened a session', function (string $driver): void {
+        useSessionDriver($driver);
+        [, $laptop] = accountOnTwoDevices($this);
+        $returning = $laptop->withoutSession();
+        $returning->visit('/')->assertOk();
+        $before = $returning->copy();
+
+        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+
+        // The session opened on the home page carries the old fingerprint, and the cookie the old token.
+        assertSignedOut($returning);
+        assertSignedOut($before->withoutSession());
+        assertSignedIn($laptop);
+    })->with(['array', 'database']);
 });
 
 describe('the pages of the signed-in space and the others', function (): void {

@@ -115,3 +115,44 @@ describe('a role the database holds but this version does not know', function ()
         expect(DB::table('workspace_user')->where('workspace_id', $workspace->id)->orderBy('id')->pluck('role')->all())->toBe(['editor', 'viewer']);
     });
 });
+
+describe('a role that is written to the database', function (): void {
+    it('is refused when this version does not know it, and nothing is written', function (mixed $role): void {
+        $workspace = Workspace::query()->create(['name' => 'Shop']);
+        $user = User::factory()->create();
+
+        expect(fn () => WorkspaceMember::query()->create(['workspace_id' => $workspace->id, 'user_id' => $user->id, 'role' => $role]))
+            ->toThrow(InvalidArgumentException::class, 'cannot hold the role')
+            ->and(DB::table('workspace_user')->where('user_id', $user->id)->exists())->toBeFalse();
+    })->with([
+        'an unknown word' => ['supervisor'],
+        'a known word in another case' => ['Owner'],
+        'a known word with a space' => ['owner '],
+        'empty' => [''],
+        'nothing' => [null],
+        'a number' => [3],
+        'a list' => [['owner']],
+    ]);
+
+    it('is refused when it is assigned to a membership that already exists, which keeps its role', function (): void {
+        $workspace = Workspace::query()->create(['name' => 'Shop']);
+        $user = User::factory()->create();
+        $membership = WorkspaceMember::query()->create(['workspace_id' => $workspace->id, 'user_id' => $user->id, 'role' => WorkspaceRole::Editor]);
+
+        expect(function () use ($membership): void {
+            $membership->role = 'supervisor';
+        })->toThrow(InvalidArgumentException::class)
+            ->and($membership->fresh()?->role)->toBe(WorkspaceRole::Editor);
+    });
+
+    it('can be any role this version knows, as a case or as its word', function (WorkspaceRole $role): void {
+        $workspace = Workspace::query()->create(['name' => 'Shop']);
+        $byCase = User::factory()->create();
+        $byWord = User::factory()->create();
+
+        WorkspaceMember::query()->create(['workspace_id' => $workspace->id, 'user_id' => $byCase->id, 'role' => $role]);
+        WorkspaceMember::query()->create(['workspace_id' => $workspace->id, 'user_id' => $byWord->id, 'role' => $role->value]);
+
+        expect(DB::table('workspace_user')->where('workspace_id', $workspace->id)->orderBy('id')->pluck('role')->all())->toBe([$role->value, $role->value]);
+    })->with(WorkspaceRole::cases());
+});

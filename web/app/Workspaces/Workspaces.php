@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Workspaces;
 
+use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMember;
@@ -59,6 +60,12 @@ final class Workspaces
      * before its memberships are looked at, so that two requests for the same account (two sign-ins at once) do
      * not each create a personal workspace, and an account deleted in the meantime is left alone instead of
      * failing on a foreign key.
+     *
+     * Reading the memberships of an account that has none locks the gap where they would be (MySQL and MariaDB, at
+     * their default isolation level), and two accounts that get their first workspace at the same moment each wait
+     * for the other's gap when they insert: the database aborts one of them. It is retried (3 attempts) when this is
+     * the outermost transaction; inside another one (the sign-up's, which is run through {@see DeadlockRetries}), that
+     * one is retried as a whole instead, since a deadlock rolls all of it back.
      */
     public function ensure(User $user): void
     {
@@ -71,11 +78,14 @@ final class Workspaces
 
             $this->createPersonal($locked);
             $this->adopt($user, $locked);
-        });
+        }, 3);
     }
 
     /**
      * Creates a workspace owned by the user, who starts working in it.
+     *
+     * Retried (3 attempts) when the database picks it as the loser of a deadlock, like {@see self::ensure()}, which
+     * calls it for an account's first workspace: when it runs inside another transaction, that one is retried instead.
      *
      * @param  string  $name  Already validated and trimmed.
      *
@@ -104,7 +114,7 @@ final class Workspaces
             $this->makeCurrent($user, $workspace);
 
             return $workspace;
-        });
+        }, 3);
     }
 
     /**

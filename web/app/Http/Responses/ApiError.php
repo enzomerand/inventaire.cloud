@@ -28,6 +28,17 @@ final class ApiError
     }
 
     /**
+     * A 404: the thing the request is about is not there (any more).
+     *
+     * @param  string  $message  What happened, for a person.
+     * @param  string  $code  Why, for a program.
+     */
+    public static function notFound(string $message, string $code): JsonResponse
+    {
+        return new JsonResponse(['message' => $message, 'code' => $code], 404);
+    }
+
+    /**
      * A 422 about one field, with a machine-readable reason (the shape the framework gives validation failures, plus `code`).
      */
     public static function invalid(string $message, string $field, string $code): JsonResponse

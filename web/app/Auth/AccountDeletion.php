@@ -12,6 +12,7 @@ use App\Models\WorkspaceMember;
 use App\Workspaces\Locks;
 use App\Workspaces\WorkspaceRole;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -36,10 +37,11 @@ use Illuminate\Support\Facades\DB;
  * - being the only owner of a workspace that other people belong to (ownership has to be handed over);
  * - being the last administrator of the instance.
  *
- * The verdict is given under row locks ({@see Locks}): the administrators and the account first, lowest id first,
- * then the workspaces it belongs to, so that two accounts deleted at the same moment (two administrators, two
- * co-owners of a workspace) are judged one after the other and neither leaves the instance without an
- * administrator, nor a workspace without a member.
+ * The verdict is given under row locks ({@see Locks}), in the global order described there: the sign-in code of the
+ * account's address first (signing in locks it before the account, so deleting must too, or the two would wait for
+ * each other), then the administrators and the account, lowest id first, then the workspaces it belongs to, so that
+ * two accounts deleted at the same moment (two administrators, two co-owners of a workspace) are judged one after the
+ * other and neither leaves the instance without an administrator, nor a workspace without a member.
  *
  * Confirming the deletion with a code is the caller's job ({@see AccountDeletionCodes}).
  */
@@ -65,6 +67,7 @@ final class AccountDeletion
      * Deletes the account and what goes with it, in one transaction: if anything fails, nothing is deleted.
      *
      * @throws AccountDeletionRefused When the account cannot be deleted yet; nothing was changed.
+     * @throws ModelNotFoundException When the account is already gone (somebody else deleted it first): there was nothing to delete.
      */
     public function delete(User $user): void
     {
@@ -76,9 +79,15 @@ final class AccountDeletion
      * {@see User}, inside the transaction of {@see User::delete()}; use that, not this.
      *
      * @throws AccountDeletionRefused When the account cannot be deleted yet.
+     * @throws ModelNotFoundException When the account is already gone: a deletion that deletes nothing must not pass for one.
      */
     public function release(User $user): void
     {
+        // The sign-in code of the address first, before any account: signing in locks them in that order, and the
+        // reverse order here would make a deletion and a sign-in of the same address wait for each other. (The address
+        // of an account cannot change, so the code of the one held here is the one that goes with the account.)
+        $this->locks->loginCode($user->email);
+
         // The administrators and the account in one go, lowest id first: two administrators deleting themselves
         // at the same moment would otherwise each hold their own row and wait for the other's.
         $accounts = User::query()
@@ -90,8 +99,8 @@ final class AccountDeletion
         $locked = $accounts->first(fn (User $account): bool => $account->is($user));
 
         if ($locked === null) {
-            // Deleted by somebody else while this waited: nothing left to release.
-            return;
+            // Deleted by somebody else while this waited (or before it began, for a stale copy of the account).
+            throw (new ModelNotFoundException)->setModel(User::class, [$user->getKey()]);
         }
 
         if ($locked->is_admin && $accounts->doesntContain(fn (User $account): bool => $account->is_admin && ! $account->is($locked))) {

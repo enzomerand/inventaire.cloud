@@ -2,7 +2,9 @@
 
 // Child process of the concurrency tests: types one code through the real HTTP stack (middleware, request,
 // controller, transaction), as one of several visitors hitting the same address at the same moment.
-// Usage: php verify-code.php <email> <code> <ip address> <go file>
+// Usage: php verify-code.php <email> <code> <ip address> <go file> [<name>]
+//
+// The name is what a visitor types to create an account; without it, the address must already have one.
 //
 // The process boots, says "ready", waits for the go file to exist and only then sends its request, so that
 // all the processes start together whatever the time each one needed to boot. It prints the status and the
@@ -26,6 +28,7 @@ $base = dirname(__DIR__, 2);
 require $base.'/vendor/autoload.php';
 
 [, $email, $code, $address, $go] = $argv;
+$name = $argv[5] ?? null;
 
 $app = require $base.'/bootstrap/app.php';
 $kernel = $app->make(Kernel::class);
@@ -75,7 +78,7 @@ while (! file_exists($go)) {
 }
 
 $origin = rtrim((string) $app->make('config')->get('app.url'), '/');
-$request = Request::create('/api/v1/auth/verify', 'POST', ['email' => $email, 'code' => $code], [], [], [
+$request = Request::create('/api/v1/auth/verify', 'POST', array_filter(['email' => $email, 'code' => $code, 'name' => $name], fn (?string $value): bool => $value !== null), [], [], [
     'REMOTE_ADDR' => $address,
     'HTTP_ORIGIN' => $origin,
     'HTTP_REFERER' => $origin.'/login',
