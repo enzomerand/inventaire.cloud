@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Auth\LoginCodes;
 use App\Models\LoginCode;
 use App\Models\User;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Testing\TestResponse;
 
@@ -72,23 +74,84 @@ describe('requesting a code', function (): void {
         expect(sentMails()[0]->getSubject())->toStartWith('Votre code');
     });
 
-    it('is sent at once, even when the queue is not a synchronous one', function (): void {
+    it('is sent after the response, not through the queue: nothing readable is kept in the jobs table', function (): void {
         config(['queue.default' => 'database']);
+        $deferred = holdDeferred();
 
         askForCode($this, 'ada@example.com')->assertOk();
 
-        expect(sentMails())->toHaveCount(1);
+        // The answer has gone and the mail has not: the code is stored, and the sending waits for the end of the request.
+        expect(sentMails())->toBe([])
+            ->and(LoginCode::query()->count())->toBe(1)
+            ->and($deferred->count())->toBe(1);
+
+        $deferred->release();
+
+        expect(sentMails())->toHaveCount(1)
+            ->and(lastSentCode())->toMatch('/^\d{6}$/')
+            ->and(DB::table('jobs')->count())->toBe(0)
+            ->and(DB::table('failed_jobs')->count())->toBe(0);
     });
 
-    it('drops the code when the mail cannot be sent', function (): void {
+    it('is sent in the language of the request even though it goes out after it', function (): void {
+        $deferred = holdDeferred();
+
+        askForCode($this, 'ada@example.com', ['Accept-Language' => 'en'])->assertOk();
+        app()->setLocale('fr');
+        $deferred->release();
+
+        expect(sentMails()[0]->getSubject())->toStartWith('Your ');
+    });
+
+    it('answers the same, and keeps the code, when the mail is slow or never sent', function (): void {
+        holdDeferred();
+
+        askForCode($this, 'ada@example.com')->assertOk()->assertExactJson(['data' => ['email' => 'ada@example.com', 'expires_in' => 600]]);
+
+        expect(sentMails())->toBe([])->and(LoginCode::query()->count())->toBe(1);
+    });
+
+    it('drops the code, and logs the failure, when the mail cannot be sent: the answer does not depend on it', function (): void {
         config([
             'mail.default' => 'unreachable',
             'mail.mailers.unreachable' => ['transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1],
         ]);
+        Log::spy();
 
-        askForCode($this, 'ada@example.com')->assertServerError();
+        askForCode($this, 'ada@example.com')->assertOk()->assertJsonPath('data.expires_in', 600);
 
         expect(LoginCode::query()->count())->toBe(0);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'Could not send a sign-in code'))->once();
+    });
+
+    it('does not write the code, nor the address, in the log of a failure', function (): void {
+        config([
+            'mail.default' => 'unreachable',
+            'mail.mailers.unreachable' => ['transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1],
+        ]);
+        $logged = [];
+        Log::spy();
+
+        askForCode($this, 'ada@example.com')->assertOk();
+
+        Log::shouldHaveReceived('error')->withArgs(function (string $message) use (&$logged): bool {
+            $logged[] = $message;
+
+            return true;
+        });
+
+        expect($logged)->toHaveCount(1)->and($logged[0])->not->toMatch('/\b\d{6}\b/')->not->toContain('ada@example.com');
+    });
+
+    it('leaves a newer code alone when the mail of an older one fails late', function (): void {
+        $codes = app(LoginCodes::class);
+        $first = $codes->issue('ada@example.com');
+        $second = $codes->issue('ada@example.com');
+
+        $codes->forget('ada@example.com', $first);
+
+        expect(LoginCode::query()->count())->toBe(1)
+            ->and($codes->verify('ada@example.com', $second)->accepted())->toBeTrue();
     });
 });
 
@@ -104,7 +167,7 @@ describe('what the answer gives away', function (): void {
             ->and($known->headers->get('Content-Type'))->toBe($unknown->headers->get('Content-Type'));
     });
 
-    it('does the same work for both: a code stored and a mail sent, without ever reading the users', function (): void {
+    it('does the same work for both while registration is open: a code stored and a mail sent, without ever reading the users', function (): void {
         User::factory()->create(['email' => 'known@example.com']);
         DB::enableQueryLog();
 

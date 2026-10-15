@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use App\Auth\AccountDeletionCodes;
 use App\Models\AccountDeletionCode;
 use App\Models\LoginCode;
 use App\Models\User;
 use App\Services\OneTimeCode;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 
 uses(RefreshDatabase::class);
@@ -148,13 +151,50 @@ describe('asking for the code', function (): void {
         askForDeletionCode($this, $user)->assertTooManyRequests();
     });
 
-    it('drops the code when the mail cannot be sent', function (): void {
+    it('is sent after the response, not through the queue: nothing readable is kept in the jobs table', function (): void {
+        config(['queue.default' => 'database']);
+        $deferred = holdDeferred();
+        $user = User::factory()->create();
+
+        askForDeletionCode($this, $user)->assertOk()->assertExactJson(['data' => ['expires_in' => 600]]);
+
+        // The answer has gone and the mail has not: the code is stored, and the sending waits for the end of the request.
+        expect(sentMails())->toBe([])
+            ->and(AccountDeletionCode::query()->count())->toBe(1)
+            ->and($deferred->count())->toBe(1);
+
+        $deferred->release();
+
+        expect(sentMails())->toHaveCount(1)
+            ->and(deletionCodeMatches($user, lastSentCode()))->toBeTrue()
+            ->and(DB::table('jobs')->count())->toBe(0)
+            ->and(DB::table('failed_jobs')->count())->toBe(0);
+    });
+
+    it('drops the code, and logs the failure, when the mail cannot be sent: the answer does not depend on it', function (): void {
         config([
             'mail.default' => 'unreachable',
             'mail.mailers.unreachable' => ['transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1],
         ]);
+        Log::spy();
 
-        askForDeletionCode($this, User::factory()->create())->assertServerError();
+        askForDeletionCode($this, User::factory()->create())->assertOk()->assertJsonPath('data.expires_in', 600);
+
+        expect(AccountDeletionCode::query()->count())->toBe(0);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'Could not send an account deletion code'))->once();
+    });
+
+    it('leaves a newer code alone when the mail of an older one fails late', function (): void {
+        $user = User::factory()->create();
+        $codes = app(AccountDeletionCodes::class);
+        $first = $codes->issue($user);
+        $second = $codes->issue($user);
+
+        $codes->forget($user, $first);
+
+        expect(AccountDeletionCode::query()->count())->toBe(1)->and(deletionCodeMatches($user, $second))->toBeTrue();
+
+        $codes->forget($user, $second);
 
         expect(AccountDeletionCode::query()->count())->toBe(0);
     });

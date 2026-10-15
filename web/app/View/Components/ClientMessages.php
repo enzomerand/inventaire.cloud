@@ -65,6 +65,8 @@ class ClientMessages extends Component
             'account.notice.code_sent' => __('A code was sent to your email address.'),
             'account.error.last_administrator' => __('You are the last administrator of this instance: make somebody else an administrator first (php artisan inventaire:make-admin).'),
             'account.error.sole_owner' => __('You are the only owner of workspaces that other people belong to: hand them over or delete them first.'),
+            'admin.settings.notice.opened' => __('New addresses can create an account again.'),
+            'admin.settings.notice.closed' => __('Sign-ups are closed: only existing accounts can sign in.'),
             'admin.users.range' => __(':first–:last of :total'),
             'admin.users.workspace_count' => __('Workspaces: :count'),
             'admin.users.created_on' => __('Created on :date'),

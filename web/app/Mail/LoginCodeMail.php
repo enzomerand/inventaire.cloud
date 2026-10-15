@@ -11,9 +11,10 @@ use Illuminate\Mail\Mailables\Envelope;
 /**
  * The email carrying a sign-in code.
  *
- * It is sent at once, not queued: an instance without a queue worker must
- * still deliver it. The body is plain text plus a simple HTML version with no
- * external image, font or tracking.
+ * It is sent once the response has gone ({@see AfterResponse}), not queued: an
+ * instance without a queue worker must still deliver it, and a queued job keeps
+ * its content readable in the database. The body is plain text plus a simple
+ * HTML version with no external image, font or tracking.
  */
 final class LoginCodeMail extends Mailable
 {

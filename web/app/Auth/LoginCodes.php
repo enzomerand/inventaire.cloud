@@ -96,10 +96,14 @@ final class LoginCodes
      *
      * @param  string  $email  Address, already normalized.
      * @param  bool  $consume  Whether an accepted code is used up.
+     * @param  bool  $acceptable  Whether the right code can be accepted. False judges every code as a wrong one, the
+     *                            right code included (costing an attempt like any wrong guess): for an address that
+     *                            may not sign in, so that nothing tells it from an address that may, short of
+     *                            holding a code that works.
      */
-    public function verify(string $email, string $submitted, bool $consume = true): LoginCodeVerdict
+    public function verify(string $email, string $submitted, bool $consume = true, bool $acceptable = true): LoginCodeVerdict
     {
-        return $this->db->transaction(function () use ($email, $submitted, $consume): LoginCodeVerdict {
+        return $this->db->transaction(function () use ($email, $submitted, $consume, $acceptable): LoginCodeVerdict {
             $code = LoginCode::query()->whereKey($email)->lockForUpdate()->first();
 
             if ($code === null) {
@@ -127,7 +131,7 @@ final class LoginCodes
                 return new LoginCodeVerdict(LoginCodeOutcome::TooManyAttempts);
             }
 
-            if (OneTimeCode::matches($submitted, $code->code_hash, $this->key())) {
+            if (OneTimeCode::matches($submitted, $code->code_hash, $this->key()) && $acceptable) {
                 $this->failures->release($email);
 
                 if ($consume) {
@@ -148,10 +152,20 @@ final class LoginCodes
 
     /**
      * Drops the pending code of an address (a code that could not be sent).
+     *
+     * @param  string|null  $code  The code that could not be sent: only that one is dropped. Asking again replaces the
+     *                             pending code, so a mail that fails late must not take a newer code away. Null drops
+     *                             whatever is pending.
      */
-    public function forget(string $email): void
+    public function forget(string $email, ?string $code = null): void
     {
-        LoginCode::query()->whereKey($email)->delete();
+        $query = LoginCode::query()->whereKey($email);
+
+        if ($code !== null) {
+            $query->where('code_hash', OneTimeCode::hash($code, $this->key()));
+        }
+
+        $query->delete();
     }
 
     /**

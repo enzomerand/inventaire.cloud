@@ -159,6 +159,44 @@ describe('verifying a code', function (): void {
 
         expect(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Expired);
     });
+
+    it('forgets only the code it is told about: a newer one stays', function (): void {
+        $first = codes()->issue('ada@example.com');
+        $second = codes()->issue('ada@example.com');
+
+        codes()->forget('ada@example.com', $first);
+
+        expect(LoginCode::query()->count())->toBe(1);
+
+        codes()->forget('ada@example.com', $second);
+
+        expect(LoginCode::query()->count())->toBe(0);
+    });
+
+    it('judges the right code as a wrong one when it may not be accepted, and keeps it for later', function (): void {
+        $code = codes()->issue('ada@example.com');
+
+        $verdict = codes()->verify('ada@example.com', $code, acceptable: false);
+
+        expect($verdict->outcome)->toBe(LoginCodeOutcome::Wrong)
+            ->and($verdict->attemptsLeft)->toBe(4)
+            ->and(LoginCode::query()->sole()->attempts)->toBe(1)
+            ->and(loginFailureCount('ada@example.com'))->toBe(1);
+
+        // It was not spent: where it may be accepted, it still is (with the attempt it cost).
+        expect(codes()->verify('ada@example.com', $code)->accepted())->toBeTrue();
+    });
+
+    it('burns the code at the fifth attempt when it may not be accepted, like any wrong guesses', function (): void {
+        $code = codes()->issue('ada@example.com');
+
+        foreach (range(1, 4) as $_) {
+            expect(codes()->verify('ada@example.com', $code, acceptable: false)->outcome)->toBe(LoginCodeOutcome::Wrong);
+        }
+
+        expect(codes()->verify('ada@example.com', $code, acceptable: false)->outcome)->toBe(LoginCodeOutcome::TooManyAttempts)
+            ->and(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::TooManyAttempts);
+    });
 });
 
 describe('wrong codes over an hour', function (): void {

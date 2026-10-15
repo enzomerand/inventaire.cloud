@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\AccountDeletionController;
 use App\Http\Controllers\Api\V1\AccountExportController;
+use App\Http\Controllers\Api\V1\Admin\SettingsController as AdminSettingsController;
 use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
@@ -53,6 +54,9 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::post('/users', [AdminUserController::class, 'store'])->name('users.store');
             Route::patch('/users/{user}', [AdminUserController::class, 'update'])->where('user', '[0-9]{1,18}')->name('users.update');
             Route::delete('/users/{user}', [AdminUserController::class, 'destroy'])->where('user', '[0-9]{1,18}')->name('users.destroy');
+
+            Route::get('/settings', [AdminSettingsController::class, 'show'])->name('settings.show');
+            Route::put('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');
         });
     });
 });

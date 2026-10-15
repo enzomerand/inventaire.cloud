@@ -11,9 +11,10 @@ use Illuminate\Mail\Mailables\Envelope;
 /**
  * The email carrying the code that confirms the deletion of an account.
  *
- * Like {@see LoginCodeMail} it is sent at once, not queued (an instance without a queue worker must still deliver
- * it), as plain text plus a simple HTML version with no external image, font or tracking. It is written in the
- * language of the account.
+ * Like {@see LoginCodeMail} it is sent once the response has gone ({@see AfterResponse}), not queued (an instance
+ * without a queue worker must still deliver it, and a queued job keeps its content readable in the database), as plain
+ * text plus a simple HTML version with no external image, font or tracking. It is written in the language of the
+ * account.
  */
 final class AccountDeletionCodeMail extends Mailable
 {

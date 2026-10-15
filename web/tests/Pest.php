@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Installer\Settings\DatabaseSettings;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
@@ -172,6 +173,42 @@ function loginFailureCount(string $email, ?string $store = null): int
 function wrongCode(string $right): string
 {
     return $right === '000000' ? '111111' : '000000';
+}
+
+/**
+ * Holds back what the application defers to after the response (the mails of codes and welcomes), so that a test can
+ * look at the state between the answer and the end of the request, then let it run.
+ *
+ * Without this, the test client runs the deferred work as the request terminates, before the call returns. The
+ * collection that comes back has a `release()` method that runs what was held.
+ */
+function holdDeferred(): DeferredCallbackCollection
+{
+    $held = new class extends DeferredCallbackCollection
+    {
+        public bool $holding = true;
+
+        public function invokeWhen(?Closure $when = null): void
+        {
+            if (! $this->holding) {
+                parent::invokeWhen($when);
+            }
+        }
+
+        /**
+         * Runs what was deferred, as the end of the request does for a response below 400.
+         */
+        public function release(): void
+        {
+            $this->holding = false;
+            $this->invokeWhen(fn (): bool => true);
+            $this->holding = true;
+        }
+    };
+
+    app()->instance(DeferredCallbackCollection::class, $held);
+
+    return $held;
 }
 
 /**

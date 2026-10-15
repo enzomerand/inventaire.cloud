@@ -41,6 +41,7 @@ const ROUTES = {
     'api.v1.me.deletion-code': '/api/v1/me/deletion-code',
     'api.v1.me.destroy': '/api/v1/me',
     'api.v1.admin.users.index': '/api/v1/admin/users',
+    'api.v1.admin.settings.show': '/api/v1/admin/settings',
     home: '/',
     'app.workspaces': '/app/workspaces',
 };
@@ -72,6 +73,8 @@ const MESSAGES = {
     'login.notice.code_resent': 'New code sent',
     'account.error.last_administrator': 'Last administrator',
     'account.error.sole_owner': 'Hand your workspaces over',
+    'admin.settings.notice.opened': 'Sign-ups are open',
+    'admin.settings.notice.closed': 'Sign-ups are closed',
     'admin.users.range': ':first–:last of :total',
     'admin.users.workspace_count': 'Workspaces: :count',
     'admin.users.created_on': 'Created on :date',
@@ -108,6 +111,7 @@ function render(path) {
         .replace(/@extends\([^)]*\)/g, '')
         // The tabs of the administration are not under test.
         .replace(/@include\([^\n]*\)\n/g, '')
+        .replace(/@inject\([^\n]*\)\n/g, '')
         .replace(/@section\('(?:title|heading)'[^\n]*\)\n/g, '');
 
     // The content section is the page; the layout around it is not under test.
@@ -144,6 +148,7 @@ function render(path) {
         }
 
         const values = {
+            "$settings->registrationOpen() ? '1' : '0'": '1',
             $current: 'Shop',
             '$user?->name': 'Ada Lovelace',
             '$user?->email': 'ada@example.com',
@@ -179,6 +184,7 @@ describe('the workspaces and account pages under the real Alpine CSP build', () 
             accountDeletion: '../../../resources/js/components/account-deletion.js',
             accountProfile: '../../../resources/js/components/account-profile.js',
             accountSecurity: '../../../resources/js/components/account-security.js',
+            adminSettings: '../../../resources/js/components/admin-settings.js',
             adminUsers: '../../../resources/js/components/admin-users.js',
             workspaceSwitcher: '../../../resources/js/components/workspace-switcher.js',
             workspaces: '../../../resources/js/components/workspaces.js',
@@ -839,6 +845,48 @@ describe('the workspaces and account pages under the real Alpine CSP build', () 
             it('shows no refusal until there is one', () => {
                 expect(visible(form().querySelector('.alert'))).toBe(false);
             });
+        });
+    });
+
+    describe('the administration settings page', () => {
+        /** The switch of the registration setting. */
+        const registrationSwitch = () => document.querySelector('input[type="checkbox"]');
+
+        /** Flips the switch the way a person does. */
+        async function flip(checked) {
+            registrationSwitch().checked = checked;
+            registrationSwitch().dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+        }
+
+        beforeEach(async () => {
+            await mount('app/admin/settings.blade.php');
+        });
+
+        it('shows the switch on, as the page was rendered', () => {
+            expect(registrationSwitch().checked).toBe(true);
+            expect(registrationSwitch().disabled).toBe(false);
+            expect(document.body.textContent).toContain('Anybody can create an account');
+        });
+
+        it('closes registration when the switch is turned off, and says so', async () => {
+            http.put.mockResolvedValue({ data: { registration_open: false } });
+
+            await flip(false);
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/admin/settings', { registration_open: false });
+            expect(notify).toHaveBeenCalledWith('success', 'Sign-ups are closed');
+            expect(registrationSwitch().checked).toBe(false);
+            expect(registrationSwitch().disabled).toBe(false);
+        });
+
+        it('turns the switch back on when the change could not be saved', async () => {
+            http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+
+            await flip(false);
+
+            expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+            expect(registrationSwitch().checked).toBe(true);
         });
     });
 });
