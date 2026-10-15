@@ -43,4 +43,12 @@ final class EmailType extends AbstractFieldType
     {
         return ['string', 'max:'.self::MAX_LENGTH, 'email'];
     }
+
+    /**
+     * The address.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
+    }
 }

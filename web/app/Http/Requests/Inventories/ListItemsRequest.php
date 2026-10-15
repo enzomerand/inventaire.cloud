@@ -10,10 +10,14 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * The page of items asked for: every member of the workspace may read them (see {@see InventoryPolicy}).
+ * The page of items asked for, and the words to find them by: every member of the workspace may read them (see
+ * {@see InventoryPolicy}).
  */
 final class ListItemsRequest extends FormRequest
 {
+    /** Most characters of a search. */
+    public const SEARCH_MAX_LENGTH = 200;
+
     /**
      * Seeing an inventory is seeing its items.
      */
@@ -23,7 +27,7 @@ final class ListItemsRequest extends FormRequest
     }
 
     /**
-     * The page asked for.
+     * The page asked for, and the search (`q`, at most 200 characters; white space only is no search).
      *
      * @return array<string, list<mixed>>
      */
@@ -31,6 +35,7 @@ final class ListItemsRequest extends FormRequest
     {
         return [
             'page' => ['nullable', 'integer', 'min:1', 'max:1000000'],
+            'q' => ['nullable', 'string', 'max:'.self::SEARCH_MAX_LENGTH],
         ];
     }
 }

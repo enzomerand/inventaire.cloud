@@ -40,4 +40,12 @@ final class UrlType extends AbstractFieldType
     {
         return ['string', 'max:'.self::MAX_LENGTH, 'url:http,https'];
     }
+
+    /**
+     * The address.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
+    }
 }

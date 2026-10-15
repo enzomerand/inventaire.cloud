@@ -103,4 +103,18 @@ final class TagsType extends AbstractFieldType
             }
         }];
     }
+
+    /**
+     * The tags, one after the other.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        if (! is_array($stored)) {
+            return null;
+        }
+
+        $tags = array_filter($stored, is_string(...));
+
+        return $tags === [] ? null : implode(' ', $tags);
+    }
 }

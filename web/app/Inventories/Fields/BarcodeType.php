@@ -164,4 +164,12 @@ final class BarcodeType extends AbstractFieldType
 
         return $sum % 11 === 0;
     }
+
+    /**
+     * The code.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
+    }
 }

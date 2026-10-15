@@ -49,6 +49,17 @@ abstract class AbstractFieldType implements FieldType
     }
 
     /**
+     * Options change nothing in the search, unless the type says so.
+     *
+     * @param  array<string, mixed>  $previous
+     * @param  array<string, mixed>  $options
+     */
+    public function mayChangeSearchText(array $previous, array $options): bool
+    {
+        return false;
+    }
+
+    /**
      * A string loses the spaces, invisible characters and control characters at both ends; anything else is left alone.
      */
     public function prepare(mixed $value, InventoryField $field): mixed
@@ -78,5 +89,21 @@ abstract class AbstractFieldType implements FieldType
     public function present(mixed $stored, InventoryField $field): mixed
     {
         return $stored;
+    }
+
+    /**
+     * Not searched.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return null;
+    }
+
+    /**
+     * What a type that is stored as a plain string gives to the search: the string.
+     */
+    protected function stringSearchText(mixed $stored): ?string
+    {
+        return is_string($stored) ? $stored : null;
     }
 }

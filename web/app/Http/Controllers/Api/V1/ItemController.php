@@ -11,6 +11,7 @@ use App\Http\Resources\ItemResource;
 use App\Http\Responses\ApiError;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Inventories\Items;
+use App\Inventories\ItemSearchText;
 use App\Models\Inventory;
 use App\Models\Item;
 use App\Policies\InventoryPolicy;
@@ -20,7 +21,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * The items of an inventory: list them (50 a page, newest first), read, add, change and delete one.
+ * The items of an inventory: list them (50 a page, newest first, and searched by words), read, add, change and delete one.
  *
  * Who may is decided by {@see InventoryPolicy}: every member reads, editors and owners write. An item belongs to the
  * inventory in the path, or it is a 404. An inventory holds at most `inventories.max_items` items (`409`,
@@ -29,17 +30,23 @@ use Illuminate\Support\Facades\Gate;
 final class ItemController extends Controller
 {
     /**
-     * Receives the service that creates, changes and deletes items.
+     * Receives the service that creates, changes and deletes items, and the one that searches them.
      */
-    public function __construct(private readonly Items $items) {}
+    public function __construct(
+        private readonly Items $items,
+        private readonly ItemSearchText $search,
+    ) {}
 
     /**
-     * A page of items, newest first, in the `data` envelope with `meta` and `links`.
+     * A page of items, newest first, in the `data` envelope with `meta` and `links`. With `q`, only the items that hold
+     * every word of it, whatever the case and the accents; the links of the pages keep it.
      */
     public function index(ListItemsRequest $request, Inventory $inventory): AnonymousResourceCollection
     {
         $fields = $inventory->fields()->get();
-        $page = $inventory->items()->orderByDesc('id')->paginate(Items::PER_PAGE);
+        $items = $inventory->items()->orderByDesc('id');
+        $this->search->restrict($items, (string) $request->validated('q', ''));
+        $page = $items->paginate(Items::PER_PAGE)->withQueryString();
 
         return ItemResource::collection($page->through(fn (Item $item): ItemResource => new ItemResource($item, $fields)));
     }

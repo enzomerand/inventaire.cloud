@@ -145,6 +145,46 @@ abstract class ChoiceType extends AbstractFieldType
     }
 
     /**
+     * Whether a choice that the field had is gone or was given another label: the items that hold it are found by the
+     * label it has now. A new choice, another color and another order change nothing to the search.
+     *
+     * @param  array<string, mixed>  $previous
+     * @param  array<string, mixed>  $options
+     */
+    public function mayChangeSearchText(array $previous, array $options): bool
+    {
+        $labels = array_column(self::choicesOf($options), 'label', 'id');
+
+        foreach (self::choicesOf($previous) as $choice) {
+            if (($labels[$choice['id']] ?? null) !== $choice['label']) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The labels of some choices of the field, in the order the ids come; an id that is not a choice of the field adds
+     * nothing. Null when there is no label at all.
+     *
+     * @param  array<mixed>  $ids
+     */
+    protected function labelsText(array $ids, InventoryField $field): ?string
+    {
+        $labels = array_column(self::choicesOf($field->options), 'label', 'id');
+        $found = [];
+
+        foreach ($ids as $id) {
+            if (is_string($id) && isset($labels[$id])) {
+                $found[] = $labels[$id];
+            }
+        }
+
+        return $found === [] ? null : implode(' ', $found);
+    }
+
+    /**
      * The ids of the choices the field offers now.
      *
      * @return list<string>

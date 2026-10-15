@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\DB;
  *
  * The values are written as given, without being validated against the fields of the inventory (that is what
  * `App\Inventories\Items` does); a test that wants a realistic item gives the values in their canonical form. The item
- * is counted in the `items_count` of its inventory, as `Items` does, so that the counter stays true to the rows.
+ * is counted in the `items_count` of its inventory, as `Items` does, so that the counter stays true to the rows. The text
+ * it is searched by (`search_text`) is left empty unless the test gives it: it needs the fields, which `Items` has.
  *
  * @extends Factory<Item>
  */

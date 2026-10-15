@@ -26,7 +26,9 @@ use Illuminate\Validation\ValidationException;
  * - the values are validated against the fields as they are *now*, and rebuilt from them: a field deleted at the same
  *   moment either took the value with it before this runs, or is not deleted until this has finished, and no value
  *   is left behind that points to a field that is gone;
- * - an update merges into what the item holds now (the copy the request read may be older), one update after the other.
+ * - an update merges into what the item holds now (the copy the request read may be older), one update after the other;
+ * - the text the item is searched by ({@see ItemSearchText}) is built from the values and the fields read under that
+ *   same lock, and written with them.
  *
  * The account of the person who writes is locked first (see {@see self::lockAuthor()}). Each write is one transaction,
  * retried when the database picks it as the loser of a deadlock.
@@ -37,12 +39,13 @@ final class Items
     public const PER_PAGE = 50;
 
     /**
-     * Gets what the rules of items need: the database, the locks and the checks of values.
+     * Gets what the rules of items need: the database, the locks, the checks of values and the search text.
      */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
         private readonly ItemValues $values,
+        private readonly ItemSearchText $searchText,
     ) {}
 
     /**
@@ -70,7 +73,9 @@ final class Items
 
             $item = new Item;
             $item->inventory_id = $locked->getKey();
-            $item->values = $this->values->apply($fields, $values, [], true);
+            $stored = $this->values->apply($fields, $values, [], true);
+            $item->values = $stored;
+            $item->search_text = $this->searchText->build($fields, $stored);
             $item->created_by = $author->getKey();
             $item->updated_by = $author->getKey();
             $item->save();
@@ -103,6 +108,7 @@ final class Items
 
             if (! $this->same($merged, $current->values)) {
                 $current->values = $merged;
+                $current->search_text = $this->searchText->build($fields, $merged);
                 $current->updated_by = $editor->getKey();
                 $current->save();
             }

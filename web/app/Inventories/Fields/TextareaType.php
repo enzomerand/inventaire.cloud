@@ -51,4 +51,12 @@ final class TextareaType extends AbstractFieldType
     {
         return ['string', 'max:'.self::MAX_LENGTH, new MultiLineText];
     }
+
+    /**
+     * The text, line breaks included (they are white space to the search).
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
+    }
 }

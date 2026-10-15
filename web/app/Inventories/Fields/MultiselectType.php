@@ -84,4 +84,12 @@ final class MultiselectType extends ChoiceType
             ? array_values(array_filter($stored, fn (mixed $id): bool => is_string($id) && in_array($id, $ids, true)))
             : [];
     }
+
+    /**
+     * The labels of the choices (the value holds their ids); the ones deleted from the field add nothing.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return is_array($stored) ? $this->labelsText($stored, $field) : null;
+    }
 }

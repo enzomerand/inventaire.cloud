@@ -51,4 +51,12 @@ final class PhoneType extends AbstractFieldType
             }
         }];
     }
+
+    /**
+     * The number as it was written.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
+    }
 }

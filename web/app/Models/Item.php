@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Http\Resources\ItemResource;
+use App\Inventories\ItemSearchText;
 use App\Inventories\ItemValues;
 use App\Models\Casts\JsonObject;
 use App\Models\Concerns\HasUlidRouteKey;
@@ -22,10 +23,14 @@ use Illuminate\Support\Carbon;
  * value has no key: empty values are never stored. What is stored is validated when it is written
  * ({@see ItemValues}) and cleaned up when it is read ({@see ItemResource}).
  *
+ * `search_text` is what the item is searched by, built from its values ({@see ItemSearchText}) in a form that ignores
+ * the case and the accents. It is a derivative of `values`, only for the database to look into: it is never given out.
+ *
  * @property int $id
  * @property string $ulid
  * @property int $inventory_id
  * @property array<string, mixed> $values
+ * @property string|null $search_text
  * @property int|null $created_by
  * @property int|null $updated_by
  * @property Carbon|null $created_at
@@ -35,6 +40,13 @@ final class Item extends Model
 {
     /** @use HasFactory<ItemFactory> */
     use HasFactory, HasUlidRouteKey;
+
+    /**
+     * Left out of every array and JSON form of the model.
+     *
+     * @var list<string>
+     */
+    protected $hidden = ['search_text'];
 
     /**
      * Get the attributes that should be cast.

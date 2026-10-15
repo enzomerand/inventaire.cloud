@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories\Fields;
 
 use App\Inventories\ItemValues;
+use App\Inventories\SearchText;
 use App\Models\InventoryField;
 use Illuminate\Validation\ValidationException;
 
@@ -25,7 +26,8 @@ use Illuminate\Validation\ValidationException;
  * 4. {@see self::normalize()} gives the canonical form that is stored.
  *
  * And what is read back goes through {@see self::present()}, which drops what no longer makes sense (a choice that
- * was deleted from the field since the value was written).
+ * was deleted from the field since the value was written). What a value adds to the text a person can search an item by
+ * is told by {@see self::searchText()}.
  *
  * Options follow the same split: {@see self::optionRules()} checks each option one by one as it is sent, and
  * {@see self::normalizeOptions()} fills in the defaults, puts them in canonical form and judges the options together.
@@ -80,6 +82,18 @@ interface FieldType
     public function mayInvalidateValues(array $previous, array $options): bool;
 
     /**
+     * Whether changing the options of a field from `$previous` to `$options` can change the text its stored values add to
+     * the search ({@see self::searchText()}): a choice that was renamed, or deleted, is no longer found by its old label.
+     * When it can, the search text of the items that hold a value of the field is rebuilt in the same transaction.
+     *
+     * Most types take nothing from their options: they answer `false`. A new choice, a color, an order change nothing.
+     *
+     * @param  array<string, mixed>  $previous  The options the field had.
+     * @param  array<string, mixed>  $options  The options it has now, in canonical form.
+     */
+    public function mayChangeSearchText(array $previous, array $options): bool;
+
+    /**
      * Cleans up a value before it is judged. Leaves alone what it does not understand: the rules refuse that.
      */
     public function prepare(mixed $value, InventoryField $field): mixed;
@@ -108,4 +122,15 @@ interface FieldType
      * A stored value as it is given back. Returns an empty value (null or an empty list) for what must not be shown.
      */
     public function present(mixed $stored, InventoryField $field): mixed;
+
+    /**
+     * The text a stored value adds to what a person can search its item by, or null when the type is not searched (a
+     * number, a date, a rating, a color, a yes or no: nobody looks for an item by typing "12.5" or "2026-03-01").
+     *
+     * It is the text as a person reads it: a text, an address, a list of tags, and for a choice its *label* (the value
+     * holds the id of the choice). It is not yet in the form that is searched, which is
+     * {@see SearchText::normalize()}'s to give: the caller does it, for every type alike. A value the
+     * field does not understand (a choice that is gone) adds nothing.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string;
 }

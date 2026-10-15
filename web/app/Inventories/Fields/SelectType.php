@@ -45,4 +45,12 @@ final class SelectType extends ChoiceType
     {
         return is_string($stored) && in_array($stored, $this->ids($field), true) ? $stored : null;
     }
+
+    /**
+     * The label of the choice (the value holds its id), or nothing when the choice was deleted from the field.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return is_string($stored) ? $this->labelsText([$stored], $field) : null;
+    }
 }

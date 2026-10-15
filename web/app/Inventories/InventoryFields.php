@@ -40,12 +40,13 @@ final class InventoryFields
     private const PURGE_CHUNK = 500;
 
     /**
-     * Gets what the rules of fields need: the database, the locks and the registry of types.
+     * Gets what the rules of fields need: the database, the locks, the registry of types and the search text of items.
      */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
         private readonly FieldTypes $types,
+        private readonly ItemSearchText $searchText,
     ) {}
 
     /**
@@ -103,7 +104,9 @@ final class InventoryFields
      *   judged again until somebody changes them.
      *
      * The values are removed in the same transaction as the options, with the query builder, so the items keep their
-     * `updated_at`.
+     * `updated_at`. The same goes for the text the items are searched by ({@see ItemSearchText}): when a choice is
+     * renamed or deleted ({@see FieldType::mayChangeSearchText()}), the items that hold it are found by its new label,
+     * and no longer by the old one.
      *
      * @param  array{name?: string, required?: bool, options?: array<string, mixed>}  $changes  Already validated.
      *
@@ -127,20 +130,21 @@ final class InventoryFields
                 $current->required = $changes['required'];
             }
 
-            $invalidated = false;
+            $rewrite = false;
 
             if (isset($changes['options'])) {
                 $type = $this->types->get($current->type);
                 $before = $current->options ?? [];
                 $normalized = $type->normalizeOptions(array_replace($before, $changes['options']), $current->options);
-                $invalidated = $type->mayInvalidateValues($before, $normalized);
+                $rewrite = $type->mayInvalidateValues($before, $normalized) || $type->mayChangeSearchText($before, $normalized);
                 $current->options = $normalized === [] ? null : $normalized;
             }
 
             $current->save();
 
-            if ($invalidated) {
-                $this->dropValuesThatNoLongerFit($locked, $current);
+            if ($rewrite) {
+                // $current is the instance in $fields: the fields the search text is built from have the new options.
+                $this->dropValuesThatNoLongerFit($locked, $current, $fields);
             }
 
             return $current;
@@ -151,7 +155,8 @@ final class InventoryFields
      * Deletes a field, and its values from every item of the inventory, in the same transaction.
      *
      * The values are removed with the query builder, so the items keep their `updated_at`: the items did not change,
-     * the field they had a value for is gone. The positions of the fields left are closed up.
+     * the field they had a value for is gone. The text the items are searched by loses what the field said in the same
+     * pass. The positions of the fields left are closed up.
      *
      * @throws ModelNotFoundException When the inventory or the field was deleted in the meantime.
      */
@@ -162,10 +167,12 @@ final class InventoryFields
             $fields = $locked->fields()->get();
             $current = $this->find($fields, $field);
 
-            $this->rewriteValues($locked, $current->ulid, fn (array $values): array => array_diff_key($values, [$current->ulid => true]));
+            $remaining = $fields->reject(fn (InventoryField $other): bool => $other->is($current))->values();
+
+            $this->rewriteValues($locked, $current->ulid, fn (array $values): array => array_diff_key($values, [$current->ulid => true]), $remaining);
             $current->delete();
 
-            $this->renumber($fields->reject(fn (InventoryField $other): bool => $other->is($current))->values());
+            $this->renumber($remaining);
         }));
     }
 
@@ -254,11 +261,14 @@ final class InventoryFields
      * Cleans the values of a field in every item of the inventory, after its options changed: what the type no longer
      * accepts (see {@see FieldType::mayInvalidateValues()}) is removed, through the same {@see FieldType::present()} that
      * hides it when it is read, so that what is stored and what is shown cannot disagree. A value the type still shows
-     * is left exactly as it is.
+     * is left exactly as it is. The text the items are searched by is rebuilt in the same pass, for the items that hold a
+     * value of the field: that is what makes a renamed choice found by its new label.
+     *
+     * @param  Collection<int, InventoryField>  $fields  The fields of the inventory as they are now (the options of `$field` changed).
      *
      * @throws JsonException
      */
-    private function dropValuesThatNoLongerFit(Inventory $inventory, InventoryField $field): void
+    private function dropValuesThatNoLongerFit(Inventory $inventory, InventoryField $field, Collection $fields): void
     {
         $type = $this->types->get($field->type);
 
@@ -276,7 +286,7 @@ final class InventoryFields
             }
 
             return $values;
-        });
+        }, $fields);
     }
 
     /**
@@ -285,19 +295,22 @@ final class InventoryFields
      * Through the query builder and by chunks of the primary key: the items are not loaded as models (their
      * `updated_at` and their events are not the business of a change to a field), and nothing is held in memory but a
      * chunk. The JSON is read in PHP, since reading and writing a key of a JSON object is not portable SQL. Only the rows
-     * that hold the key are decoded, and only the ones the change alters are written.
+     * that hold the key are decoded, and a row is written only when the change alters its values or the text it is
+     * searched by (see {@see ItemSearchText}), which is rebuilt from what the values become.
      *
      * @param  string  $ulid  The key of the field: items that do not hold it are skipped.
      * @param  Closure(array<string, mixed>): array<string, mixed>  $change  Takes the values of an item that holds the key
      *                                                                       and returns what they become.
+     * @param  Collection<int, InventoryField>  $fields  The fields the search text is built from: those the inventory has
+     *                                                   once the change is done.
      *
      * @throws JsonException
      */
-    private function rewriteValues(Inventory $inventory, string $ulid, Closure $change): void
+    private function rewriteValues(Inventory $inventory, string $ulid, Closure $change, Collection $fields): void
     {
         $this->db->table('items')
             ->where('inventory_id', $inventory->getKey())
-            ->chunkById(self::PURGE_CHUNK, function (Collection $rows) use ($ulid, $change): void {
+            ->chunkById(self::PURGE_CHUNK, function (Collection $rows) use ($ulid, $change, $fields): void {
                 foreach ($rows as $row) {
                     $json = (string) $row->values;
 
@@ -313,11 +326,20 @@ final class InventoryFields
                     }
 
                     $changed = $change($values);
+                    $update = [];
 
                     if ($changed !== $values) {
-                        $this->db->table('items')->where('id', $row->id)->update([
-                            'values' => json_encode($changed === [] ? new stdClass : $changed, JSON_THROW_ON_ERROR),
-                        ]);
+                        $update['values'] = json_encode($changed === [] ? new stdClass : $changed, JSON_THROW_ON_ERROR);
+                    }
+
+                    $text = $this->searchText->build($fields, $changed);
+
+                    if ($text !== $row->search_text) {
+                        $update['search_text'] = $text;
+                    }
+
+                    if ($update !== []) {
+                        $this->db->table('items')->where('id', $row->id)->update($update);
                     }
                 }
             }, 'id');

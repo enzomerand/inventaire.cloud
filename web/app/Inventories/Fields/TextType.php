@@ -68,4 +68,12 @@ final class TextType extends AbstractFieldType
     {
         return ['string', 'max:'.(int) $field->option('max_length', self::DEFAULT_MAX_LENGTH), new SingleLineText];
     }
+
+    /**
+     * The text.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
+    }
 }
