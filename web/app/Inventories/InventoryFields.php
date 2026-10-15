@@ -6,11 +6,13 @@ namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
 use App\Inventories\Exceptions\FieldLimitReachedException;
+use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
 use App\Workspaces\Locks;
+use Closure;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
@@ -23,16 +25,22 @@ use stdClass;
  *
  * Every write starts by locking the inventory (see {@see Locks}), so the fields of one inventory are changed one
  * request after the other. That is what lets this judge, on the fields as they are, what a database constraint could
- * not: how many there are (`inventories.max_fields`), whether a name is already taken (case and accents not counted:
- * no portable unique index does that), and, when a field is deleted, that its values are gone from every item before
- * any other write to the inventory can see the field missing. Each write is one transaction, retried when the database
- * picks it as the loser of a deadlock.
+ * not: how many there are (`inventories.max_fields`), whether a name is already taken (the case is not counted, and
+ * neither is the way an accented letter is written; the accents themselves are: no portable unique index does that),
+ * and, when a field is deleted or its options change, that the values that no longer fit are gone from every item
+ * before any other write to the inventory can see the field changed. Each write is one transaction, retried when the
+ * database picks it as the loser of a deadlock.
+ *
+ * Names are kept in Unicode normalization form C ({@see SingleLineText::normalize()}), whatever the caller sends.
  */
 final class InventoryFields
 {
     /** Items read at a time when a field's values are removed from them. */
     private const PURGE_CHUNK = 500;
 
+    /**
+     * Gets what the rules of fields need: the database, the locks and the registry of types.
+     */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
@@ -53,6 +61,7 @@ final class InventoryFields
     public function create(Inventory $inventory, string $type, string $name, array $options = [], bool $required = false): InventoryField
     {
         $handler = $this->types->get($type);
+        $name = SingleLineText::normalize($name);
 
         return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $type, $name, $options, $required, $handler): InventoryField {
             $locked = $this->locks->inventory($inventory->getKey());
@@ -82,6 +91,19 @@ final class InventoryFields
      * The options sent are merged over the ones the field has (an option sent as null goes back to its default), then
      * judged together by the type.
      *
+     * What the new options do to the values the items already hold depends on the type
+     * ({@see FieldType::mayInvalidateValues()}):
+     *
+     * - choices removed from a select or a multiple choice: their ids are removed from every item;
+     * - a lower maximum of a rating: the grades above it are removed from every item;
+     * - any other change (the decimals of a number or a percentage, the minimum, the maximum or the unit of a number, the
+     *   currency of an amount, the length of a text, the format of a barcode, the color or the label of a choice, a new
+     *   choice...): the stored values are left exactly as they are. They were valid when they were written and are not
+     *   judged again until somebody changes them.
+     *
+     * The values are removed in the same transaction as the options, with the query builder, so the items keep their
+     * `updated_at`.
+     *
      * @param  array{name?: string, required?: bool, options?: array<string, mixed>}  $changes  Already validated.
      *
      * @throws ValidationException When the name is taken or the options do not fit together.
@@ -95,21 +117,30 @@ final class InventoryFields
             $current = $this->find($fields, $field);
 
             if (isset($changes['name'])) {
-                $this->assertNameFree($fields, $changes['name'], $current);
-                $current->name = $changes['name'];
+                $name = SingleLineText::normalize($changes['name']);
+                $this->assertNameFree($fields, $name, $current);
+                $current->name = $name;
             }
 
             if (isset($changes['required'])) {
                 $current->required = $changes['required'];
             }
 
+            $invalidated = false;
+
             if (isset($changes['options'])) {
-                $merged = array_replace($current->options ?? [], $changes['options']);
-                $normalized = $this->types->get($current->type)->normalizeOptions($merged, $current->options);
+                $type = $this->types->get($current->type);
+                $before = $current->options ?? [];
+                $normalized = $type->normalizeOptions(array_replace($before, $changes['options']), $current->options);
+                $invalidated = $type->mayInvalidateValues($before, $normalized);
                 $current->options = $normalized === [] ? null : $normalized;
             }
 
             $current->save();
+
+            if ($invalidated) {
+                $this->dropValuesThatNoLongerFit($locked, $current);
+            }
 
             return $current;
         }));
@@ -180,7 +211,9 @@ final class InventoryFields
     }
 
     /**
-     * Refuses a name another field of the inventory already has, capitals and accents not counted.
+     * Refuses a name another field of the inventory already has: the case is not counted ("Straße" is "STRASSE"), nor
+     * is the way an accented letter is written (one character or a letter and a combining accent), but the accents are
+     * ("Prénom" is not "Prenom").
      *
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory.
      * @param  InventoryField|null  $except  The field being renamed, which may keep its own name.
@@ -219,17 +252,65 @@ final class InventoryFields
     /**
      * Removes the key of a field from the values of every item of the inventory.
      *
-     * Through the query builder and by chunks of the primary key: the items are not loaded as models (their
-     * `updated_at` and their events are not the business of a field's deletion), and nothing is held in memory but a
-     * chunk. The JSON is read in PHP, since reading and writing a key of a JSON object is not portable SQL.
-     *
      * @throws JsonException
      */
     private function purgeValues(Inventory $inventory, string $ulid): void
     {
+        $this->rewriteValues($inventory, $ulid, function (array $values) use ($ulid): array {
+            unset($values[$ulid]);
+
+            return $values;
+        });
+    }
+
+    /**
+     * Cleans the values of a field in every item of the inventory, after its options changed: what the type no longer
+     * accepts (see {@see FieldType::mayInvalidateValues()}) is removed, through the same {@see FieldType::present()} that
+     * hides it when it is read, so that what is stored and what is shown cannot disagree. A value the type still shows
+     * is left exactly as it is.
+     *
+     * @throws JsonException
+     */
+    private function dropValuesThatNoLongerFit(Inventory $inventory, InventoryField $field): void
+    {
+        $type = $this->types->get($field->type);
+
+        $this->rewriteValues($inventory, $field->ulid, function (array $values) use ($type, $field): array {
+            $fitting = $type->present($values[$field->ulid], $field);
+
+            if ($fitting === $values[$field->ulid]) {
+                return $values;
+            }
+
+            if ($type->isEmpty($fitting)) {
+                unset($values[$field->ulid]);
+            } else {
+                $values[$field->ulid] = $fitting;
+            }
+
+            return $values;
+        });
+    }
+
+    /**
+     * Rewrites the values of the items of the inventory that hold a key, one chunk at a time.
+     *
+     * Through the query builder and by chunks of the primary key: the items are not loaded as models (their
+     * `updated_at` and their events are not the business of a change to a field), and nothing is held in memory but a
+     * chunk. The JSON is read in PHP, since reading and writing a key of a JSON object is not portable SQL. Only the rows
+     * that hold the key are decoded, and only the ones the change alters are written.
+     *
+     * @param  string  $ulid  The key of the field: items that do not hold it are skipped.
+     * @param  Closure(array<string, mixed>): array<string, mixed>  $change  Takes the values of an item that holds the key
+     *                                                                       and returns what they become.
+     *
+     * @throws JsonException
+     */
+    private function rewriteValues(Inventory $inventory, string $ulid, Closure $change): void
+    {
         $this->db->table('items')
             ->where('inventory_id', $inventory->getKey())
-            ->chunkById(self::PURGE_CHUNK, function (Collection $rows) use ($ulid): void {
+            ->chunkById(self::PURGE_CHUNK, function (Collection $rows) use ($ulid, $change): void {
                 foreach ($rows as $row) {
                     $json = (string) $row->values;
 
@@ -244,11 +325,13 @@ final class InventoryFields
                         continue;
                     }
 
-                    unset($values[$ulid]);
+                    $changed = $change($values);
 
-                    $this->db->table('items')->where('id', $row->id)->update([
-                        'values' => json_encode($values === [] ? new stdClass : $values, JSON_THROW_ON_ERROR),
-                    ]);
+                    if ($changed !== $values) {
+                        $this->db->table('items')->where('id', $row->id)->update([
+                            'values' => json_encode($changed === [] ? new stdClass : $changed, JSON_THROW_ON_ERROR),
+                        ]);
+                    }
                 }
             }, 'id');
     }

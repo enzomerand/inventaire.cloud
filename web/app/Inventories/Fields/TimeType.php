@@ -12,17 +12,25 @@ use Closure;
  */
 final class TimeType extends AbstractFieldType
 {
+    /**
+     * The word that identifies the type in the API and in the database: `time`.
+     */
     public function key(): string
     {
         return 'time';
     }
 
+    /**
+     * What the type is called for a person ("Time"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Time');
     }
 
     /**
+     * A time of day written HH:MM on 24 hours.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

@@ -30,6 +30,9 @@ use Illuminate\Support\Facades\Gate;
  */
 final class InventoryController extends Controller
 {
+    /**
+     * Gets the rules of inventories and of workspaces.
+     */
     public function __construct(
         private readonly Inventories $inventories,
         private readonly Workspaces $workspaces,

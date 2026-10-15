@@ -327,6 +327,24 @@ describe('the field editor of an inventory', function (): void {
         'French' => ['fr', 'euro'],
     ]);
 
+    it('lists, besides the currencies in use, the ones the amount fields of the inventory already have', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $other = inventoryIn($team['workspace'], 'Other');
+        fieldIn($inventory, 'money', 'Old price', ['currency' => 'ADP']);
+        fieldIn($inventory, 'money', 'Price');
+        fieldIn($other, 'money', 'Older price', ['currency' => 'FRF']);
+
+        $named = fn ($page): array => array_column(json_decode((string) pageAttribute($page, 'data-currencies'), true, flags: JSON_THROW_ON_ERROR), 'name', 'code');
+        $here = $named($this->actingAs($team['owner'])->get(fieldsPage($team['workspace'], $inventory), ['Accept-Language' => 'en'])->assertOk());
+        $there = $named($this->actingAs($team['owner'])->get(fieldsPage($team['workspace'], inventoryIn($team['workspace'], 'Empty')), ['Accept-Language' => 'en'])->assertOk());
+
+        expect($here)->toHaveKey('ADP')->and($here['ADP'])->toBe('Andorran Peseta')
+            ->and($here)->not->toHaveKey('FRF')
+            ->and($there)->not->toHaveKey('ADP')->not->toHaveKey('FRF')
+            ->and($there)->toHaveKeys(['EUR', 'USD', 'JPY']);
+    });
+
     it('is translated', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);

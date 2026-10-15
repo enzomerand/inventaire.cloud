@@ -28,6 +28,8 @@ final class ListItemsRequest extends FormRequest
     }
 
     /**
+     * The page asked for.
+     *
      * @return array<string, list<mixed>>
      */
     public function rules(): array

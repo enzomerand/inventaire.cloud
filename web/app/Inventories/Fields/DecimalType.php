@@ -38,6 +38,8 @@ abstract class DecimalType extends AbstractFieldType
     }
 
     /**
+     * A decimal number with at most the decimals of the field, within its bounds if it has any.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

@@ -11,17 +11,25 @@ use App\Models\InventoryField;
  */
 final class ColorType extends AbstractFieldType
 {
+    /**
+     * The word that identifies the type in the API and in the database: `color`.
+     */
     public function key(): string
     {
         return 'color';
     }
 
+    /**
+     * What the type is called for a person ("Color"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Color');
     }
 
     /**
+     * A color written `#rrggbb`.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

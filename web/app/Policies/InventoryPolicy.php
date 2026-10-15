@@ -24,6 +24,9 @@ use Illuminate\Auth\Access\Response;
  */
 final class InventoryPolicy
 {
+    /**
+     * Gets the service that knows the role of a person in a workspace.
+     */
     public function __construct(private readonly Workspaces $workspaces) {}
 
     /**

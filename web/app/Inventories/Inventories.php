@@ -8,6 +8,7 @@ use App\Database\DeadlockRetries;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
 use App\Models\Inventory;
 use App\Models\Workspace;
+use App\Rules\SingleLineText;
 use App\Workspaces\Locks;
 use Collator;
 use Illuminate\Database\DatabaseManager;
@@ -26,15 +27,19 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  */
 final class Inventories
 {
+    /**
+     * Gets what the rules of inventories need: the database and the locks.
+     */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
     ) {}
 
     /**
-     * The inventories of the workspace, in the order a person expects to read them: by name, capitals and accents not
-     * counted, and numbers as numbers ("Box 2" before "Box 10"), in the language of the request. Each comes with
-     * the number of its fields and of its items.
+     * The inventories of the workspace, in the order a person expects to read them: by name in the language of the
+     * request, the case not counted, the accents counted (as the second difference: "Elan" comes before "Élan", and both
+     * before "Elbe") and numbers as numbers ("Box 2" before "Box 10"). Each comes with the number of its fields and of
+     * its items.
      *
      * @return Collection<int, Inventory>
      */
@@ -73,7 +78,7 @@ final class Inventories
                 throw new InventoryLimitReachedException($limit);
             }
 
-            $inventory = new Inventory(['name' => $name, 'description' => $description]);
+            $inventory = new Inventory(['name' => SingleLineText::normalize($name), 'description' => $description]);
             $inventory->workspace_id = $workspace->getKey();
             $inventory->save();
 
@@ -92,6 +97,11 @@ final class Inventories
     {
         return DeadlockRetries::run(fn (): Inventory => $this->db->transaction(function () use ($inventory, $changes): Inventory {
             $locked = $this->locks->inventory($inventory->getKey());
+
+            if (isset($changes['name'])) {
+                $changes['name'] = SingleLineText::normalize($changes['name']);
+            }
+
             $locked->fill($changes)->save();
 
             return $locked;

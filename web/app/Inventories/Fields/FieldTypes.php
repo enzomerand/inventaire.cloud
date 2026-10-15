@@ -18,6 +18,8 @@ final class FieldTypes
     private array $types = [];
 
     /**
+     * Builds the registry from the types, in the order they are offered.
+     *
      * @param  iterable<FieldType>  $types  In the order they are offered. A key listed twice keeps its first place and its last class.
      */
     public function __construct(iterable $types)

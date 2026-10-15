@@ -113,16 +113,17 @@ describe('listing the inventories of a workspace', function (): void {
         inventoryCall($this, $team['viewer'], 'GET', "/api/v1/workspaces/{$team['workspace']->ulid}/inventories")->assertOk()->assertExactJson(['data' => []]);
     });
 
-    it('sorts the names the way a person reads them: capitals and accents ignored, numbers as numbers', function (): void {
+    it('sorts the names the way a person reads them: capitals ignored, accents counted last, numbers as numbers', function (): void {
         $team = inventoryTeam();
 
-        foreach (['box 10', 'Box 2', 'zebra', 'Élan', 'alpha', 'Box 1', 'Alpha'] as $name) {
+        foreach (['box 10', 'Box 2', 'zebra', 'Élan', 'alpha', 'Box 1', 'Alpha', 'Elbe', 'Elan'] as $name) {
             inventoryIn($team['workspace'], $name);
         }
 
         $names = inventoryCall($this, $team['owner'], 'GET', "/api/v1/workspaces/{$team['workspace']->ulid}/inventories")->json('data.*.name');
 
-        expect($names)->toBe(['alpha', 'Alpha', 'Box 1', 'Box 2', 'box 10', 'Élan', 'zebra']);
+        // The accent only decides between names that are otherwise the same: "Elan" and "Élan" both come before "Elbe".
+        expect($names)->toBe(['alpha', 'Alpha', 'Box 1', 'Box 2', 'box 10', 'Elan', 'Élan', 'Elbe', 'zebra']);
     });
 
     it('accepts the ULID of the workspace in capitals', function (): void {
@@ -184,6 +185,18 @@ describe('creating an inventory', function (): void {
         'a description with a control character' => [['name' => 'Tools', 'description' => "a\x07b"], 'description'],
         'a description that is a list' => [['name' => 'Tools', 'description' => ['a']], 'description'],
     ]);
+
+    it('keeps the name in one Unicode form, however the accent was typed', function (): void {
+        $team = inventoryTeam();
+        $uri = "/api/v1/workspaces/{$team['workspace']->ulid}/inventories";
+
+        $created = inventoryCall($this, $team['owner'], 'POST', $uri, ['name' => "Caf\u{0065}\u{0301}"])->assertCreated();
+        $renamed = inventoryCall($this, $team['owner'], 'PATCH', '/api/v1/inventories/'.$created->json('data.id'), ['name' => "Pre\u{0301}nom"])->assertOk();
+
+        expect($created->json('data.name'))->toBe("Caf\u{00E9}")
+            ->and($renamed->json('data.name'))->toBe("Pr\u{00E9}nom")
+            ->and(Inventory::query()->sole()->name)->toBe("Pr\u{00E9}nom");
+    });
 
     it('accepts a name of 120 characters and a description of 2000', function (): void {
         $team = inventoryTeam();

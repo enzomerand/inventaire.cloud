@@ -17,9 +17,10 @@ abstract class AbstractFieldType implements FieldType
     /**
      * No options.
      *
+     * @param  array<string, mixed>|null  $previous
      * @return array<string, list<mixed>>
      */
-    public function optionRules(): array
+    public function optionRules(?array $previous = null): array
     {
         return [];
     }
@@ -34,6 +35,17 @@ abstract class AbstractFieldType implements FieldType
     public function normalizeOptions(array $options, ?array $previous): array
     {
         return [];
+    }
+
+    /**
+     * Options never take a stored value away, unless the type says so.
+     *
+     * @param  array<string, mixed>  $previous
+     * @param  array<string, mixed>  $options
+     */
+    public function mayInvalidateValues(array $previous, array $options): bool
+    {
+        return false;
     }
 
     /**

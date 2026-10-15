@@ -23,20 +23,29 @@ final class BarcodeType extends AbstractFieldType
     /** Longest code of the format `any`, in characters. */
     public const ANY_MAX_LENGTH = 64;
 
+    /**
+     * The word that identifies the type in the API and in the database: `barcode`.
+     */
     public function key(): string
     {
         return 'barcode';
     }
 
+    /**
+     * What the type is called for a person ("Barcode"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Barcode');
     }
 
     /**
+     * The format the codes are limited to.
+     *
+     * @param  array<string, mixed>|null  $previous
      * @return array<string, list<mixed>>
      */
-    public function optionRules(): array
+    public function optionRules(?array $previous = null): array
     {
         return [
             'format' => ['nullable', 'string', Rule::in(self::FORMATS)],
@@ -44,6 +53,8 @@ final class BarcodeType extends AbstractFieldType
     }
 
     /**
+     * Fills in the format.
+     *
      * @param  array<string, mixed>  $options
      * @param  array<string, mixed>|null  $previous
      * @return array<string, mixed>
@@ -68,6 +79,8 @@ final class BarcodeType extends AbstractFieldType
     }
 
     /**
+     * A code that is valid in the format of the field, check digit included.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

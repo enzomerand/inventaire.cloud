@@ -16,6 +16,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 final class FieldTypeResource extends JsonResource
 {
     /**
+     * The key and the label of the type.
+     *
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array

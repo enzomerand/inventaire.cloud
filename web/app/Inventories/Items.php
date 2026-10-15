@@ -35,6 +35,9 @@ final class Items
     /** Items per page of the list. */
     public const PER_PAGE = 50;
 
+    /**
+     * Gets what the rules of items need: the database, the locks and the checks of values.
+     */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,

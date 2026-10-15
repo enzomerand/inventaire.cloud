@@ -20,17 +20,25 @@ final class PhoneType extends AbstractFieldType
     /** Fewest digits a number has. */
     public const MIN_DIGITS = 3;
 
+    /**
+     * The word that identifies the type in the API and in the database: `phone`.
+     */
     public function key(): string
     {
         return 'phone';
     }
 
+    /**
+     * What the type is called for a person ("Phone number"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Phone number');
     }
 
     /**
+     * A text of at most 32 characters that is a phone number, with at least 3 digits.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

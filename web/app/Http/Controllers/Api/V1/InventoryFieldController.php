@@ -27,6 +27,9 @@ use Illuminate\Support\Facades\Gate;
  */
 final class InventoryFieldController extends Controller
 {
+    /**
+     * Gets the rules of fields.
+     */
     public function __construct(private readonly InventoryFields $fields) {}
 
     /**

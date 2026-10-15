@@ -18,6 +18,8 @@ use Illuminate\Translation\PotentiallyTranslatedString;
 final class DecimalRule implements ValidationRule
 {
     /**
+     * Sets the limits the number must stay within.
+     *
      * @param  int  $decimals  Most decimals the number may have.
      * @param  Decimal|null  $min  Smallest value allowed, if any.
      * @param  Decimal|null  $max  Largest value allowed, if any.
@@ -38,7 +40,10 @@ final class DecimalRule implements ValidationRule
         $number = Decimal::tryFrom($value);
 
         if ($number === null) {
-            $fail(__('The :attribute must be a number, written with a dot.'));
+            // A float that cannot be read back exactly (its exponent is out of any range): rounding it is not an option.
+            $fail(is_float($value) && is_finite($value)
+                ? __('The :attribute is a number that cannot be read exactly: send it as text, written with a dot.')
+                : __('The :attribute must be a number, written with a dot.'));
         } elseif (! $number->fits()) {
             $fail(__('The :attribute is too large.'));
         } elseif ($number->scale() > $this->decimals) {

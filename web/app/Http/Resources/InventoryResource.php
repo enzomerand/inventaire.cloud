@@ -22,6 +22,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 final class InventoryResource extends JsonResource
 {
     /**
+     * Describes an inventory to a member who holds this role in its workspace.
+     *
      * @param  Inventory  $resource
      * @param  WorkspaceRole  $role  The role of the person who asks in the workspace of the inventory.
      * @param  string|null  $workspaceUlid  The ULID of the workspace, when the caller has it at hand.
@@ -32,6 +34,8 @@ final class InventoryResource extends JsonResource
     }
 
     /**
+     * The inventory, as the API gives it.
+     *
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array

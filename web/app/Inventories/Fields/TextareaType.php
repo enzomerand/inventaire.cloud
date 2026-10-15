@@ -18,11 +18,17 @@ final class TextareaType extends AbstractFieldType
     /** Longest text, in characters. */
     public const MAX_LENGTH = 10000;
 
+    /**
+     * The word that identifies the type in the API and in the database: `textarea`.
+     */
     public function key(): string
     {
         return 'textarea';
     }
 
+    /**
+     * What the type is called for a person ("Long text"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Long text');
@@ -37,6 +43,8 @@ final class TextareaType extends AbstractFieldType
     }
 
     /**
+     * A text of at most 10000 characters, line breaks allowed.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

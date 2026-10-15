@@ -31,6 +31,8 @@ final class ReorderFieldsRequest extends FormRequest
     }
 
     /**
+     * A list of ULIDs, each a short text.
+     *
      * @return array<string, list<mixed>>
      */
     public function rules(): array

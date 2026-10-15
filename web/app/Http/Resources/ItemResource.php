@@ -25,6 +25,8 @@ use stdClass;
 final class ItemResource extends JsonResource
 {
     /**
+     * Describes an item against the fields of its inventory.
+     *
      * @param  Item  $resource
      * @param  Collection<int, InventoryField>  $fields  The fields of the item's inventory, in order.
      */
@@ -34,6 +36,8 @@ final class ItemResource extends JsonResource
     }
 
     /**
+     * The item, as the API gives it.
+     *
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array

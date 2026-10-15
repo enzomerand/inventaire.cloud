@@ -18,17 +18,25 @@ final class EmailType extends AbstractFieldType
     /** Longest address, in characters. */
     public const MAX_LENGTH = 254;
 
+    /**
+     * The word that identifies the type in the API and in the database: `email`.
+     */
     public function key(): string
     {
         return 'email';
     }
 
+    /**
+     * What the type is called for a person ("Email address"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Email address');
     }
 
     /**
+     * A text of at most 254 characters that is an email address.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

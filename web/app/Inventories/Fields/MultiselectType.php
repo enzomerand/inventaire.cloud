@@ -13,11 +13,17 @@ use Closure;
  */
 final class MultiselectType extends ChoiceType
 {
+    /**
+     * The word that identifies the type in the API and in the database: `multiselect`.
+     */
     public function key(): string
     {
         return 'multiselect';
     }
 
+    /**
+     * What the type is called for a person ("Multiple choice"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Multiple choice');
@@ -42,6 +48,8 @@ final class MultiselectType extends ChoiceType
     }
 
     /**
+     * A list in which every item is the id of a choice the field offers.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

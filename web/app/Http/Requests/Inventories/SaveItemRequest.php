@@ -33,6 +33,8 @@ final class SaveItemRequest extends FormRequest
     }
 
     /**
+     * The values: an object.
+     *
      * @return array<string, list<mixed>>
      */
     public function rules(): array

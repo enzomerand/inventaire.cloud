@@ -28,6 +28,9 @@ use Illuminate\Support\Facades\Gate;
  */
 final class ItemController extends Controller
 {
+    /**
+     * Gets the rules of items.
+     */
     public function __construct(private readonly Items $items) {}
 
     /**

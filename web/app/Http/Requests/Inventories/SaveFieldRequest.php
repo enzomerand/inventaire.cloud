@@ -43,6 +43,8 @@ final class SaveFieldRequest extends FormRequest
     }
 
     /**
+     * The rules of the field, and those of the options of its type.
+     *
      * @return array<string, list<mixed>>
      */
     public function rules(): array
@@ -66,7 +68,7 @@ final class SaveFieldRequest extends FormRequest
         ];
 
         if ($type !== null) {
-            foreach ($type->optionRules() as $option => $optionRules) {
+            foreach ($type->optionRules($field instanceof InventoryField ? $field->options : null) as $option => $optionRules) {
                 $rules["options.{$option}"] = $optionRules;
             }
         }
@@ -146,14 +148,15 @@ final class SaveFieldRequest extends FormRequest
     }
 
     /**
-     * Trims the name before it is validated, so that a name made of spaces counts as missing.
+     * Trims and normalizes the name before it is validated (see {@see SingleLineText::normalize()}), so that a name made of
+     * spaces counts as missing and the length counted is the length stored.
      */
     protected function prepareForValidation(): void
     {
         $name = $this->input('name');
 
         if (is_string($name)) {
-            $this->merge(['name' => SingleLineText::trim($name)]);
+            $this->merge(['name' => SingleLineText::normalize($name)]);
         }
     }
 

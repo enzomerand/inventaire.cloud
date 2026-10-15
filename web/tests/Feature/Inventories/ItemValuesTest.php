@@ -99,14 +99,32 @@ describe('writing values', function (): void {
             ->and(app(ItemValues::class)->apply(valuesFields(valuesField('f1', 'relation', required: true)), [], [], true))->toBe([]);
     });
 
-    it('keeps numeric-looking and unusual keys as the names they are', function (): void {
+    it('names the unknown keys as they were sent, numeric-looking and unusual ones included', function (): void {
         $fields = valuesFields(valuesField('f1', 'text'));
 
         try {
-            app(ItemValues::class)->apply($fields, ['f1' => 'a', 0 => 'x', 'a.b' => 'y', 'F1' => 'z'], [], true);
+            app(ItemValues::class)->apply($fields, ['f1' => 'a', 0 => 'x', 'a.b' => 'y', 'G1' => 'z'], [], true);
             $this->fail('Unknown keys must be refused.');
         } catch (ValidationException $exception) {
-            expect(array_keys($exception->errors()))->toBe(['values.0', 'values.a.b', 'values.F1']);
+            expect(array_keys($exception->errors()))->toBe(['values.0', 'values.a.b', 'values.G1']);
+        }
+    });
+
+    it('finds a field by its ULID whatever the case, as a URL does, and stores the value under the lowercase key', function (): void {
+        $fields = valuesFields(valuesField('01j0000000000000000000000a', 'text'), valuesField('01j0000000000000000000000b', 'number'), valuesField('01j0000000000000000000000c', 'text', required: true));
+
+        $created = app(ItemValues::class)->apply($fields, ['01J0000000000000000000000C' => 'x', '01J0000000000000000000000A' => ' y ', '01j0000000000000000000000b' => '3'], [], true);
+        $changed = app(ItemValues::class)->apply($fields, ['01J0000000000000000000000A' => null], $created, false);
+
+        expect($created)->toBe(['01j0000000000000000000000a' => 'y', '01j0000000000000000000000b' => '3', '01j0000000000000000000000c' => 'x'])
+            ->and($changed)->toBe(['01j0000000000000000000000b' => '3', '01j0000000000000000000000c' => 'x']);
+
+        // The required field is satisfied by its key in capitals, and cleared by it too.
+        try {
+            app(ItemValues::class)->apply($fields, ['01J0000000000000000000000C' => ''], $created, false);
+            $this->fail('A required field cannot be cleared.');
+        } catch (ValidationException $exception) {
+            expect(array_keys($exception->errors()))->toBe(['values.01j0000000000000000000000c']);
         }
     });
 

@@ -22,11 +22,17 @@ final class TagsType extends AbstractFieldType
     /** Longest tag, in characters. */
     public const TAG_MAX_LENGTH = 50;
 
+    /**
+     * The word that identifies the type in the API and in the database: `tags`.
+     */
     public function key(): string
     {
         return 'tags';
     }
 
+    /**
+     * What the type is called for a person ("Tags"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Tags');
@@ -63,6 +69,8 @@ final class TagsType extends AbstractFieldType
     }
 
     /**
+     * A list of at most 30 tags, each a line of at most 50 characters.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

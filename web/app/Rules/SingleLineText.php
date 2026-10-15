@@ -7,6 +7,7 @@ namespace App\Rules;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Translation\PotentiallyTranslatedString;
+use Normalizer;
 
 /**
  * What a piece of text must be to sit on one line wherever it is shown: a person's name, the name of an inventory or
@@ -37,12 +38,30 @@ final class SingleLineText implements ValidationRule
     }
 
     /**
-     * The text as it is compared to find duplicates: trimmed, with the case and the form of the letters folded away
-     * ("Straße" and "STRASSE" are the same name).
+     * The text as a name is kept: trimmed (see {@see self::trim()}) and in Unicode normalization form C, so that an
+     * accented letter written as one character ("é") and written as a letter plus a combining accent ("e" and U+0301,
+     * what some keyboards and systems produce) are the same text, stored once in one form.
+     *
+     * Text that is not valid UTF-8 can neither be trimmed nor normalized and is returned as it is: the rules refuse it.
+     */
+    public static function normalize(string $text): string
+    {
+        $trimmed = self::trim($text);
+        $composed = Normalizer::normalize($trimmed, Normalizer::FORM_C);
+
+        return $composed === false ? $trimmed : $composed;
+    }
+
+    /**
+     * The text as it is compared to find duplicates: normalized (see {@see self::normalize()}), with the case folded
+     * away ("Straße" and "STRASSE" are the same name).
+     *
+     * Accents **do** count: "Prénom" and "Prenom" are two names. Only the two ways of writing the same accented letter are
+     * one, because the text is normalized first.
      */
     public static function fold(string $text): string
     {
-        return mb_convert_case(self::trim($text), MB_CASE_FOLD);
+        return self::normalize(mb_convert_case(self::normalize($text), MB_CASE_FOLD));
     }
 
     /**

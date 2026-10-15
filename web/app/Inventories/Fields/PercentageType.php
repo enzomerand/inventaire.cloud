@@ -18,20 +18,29 @@ final class PercentageType extends DecimalType
     /** The decimals of a field that does not say. */
     public const DEFAULT_DECIMALS = 2;
 
+    /**
+     * The word that identifies the type in the API and in the database: `percentage`.
+     */
     public function key(): string
     {
         return 'percentage';
     }
 
+    /**
+     * What the type is called for a person ("Percentage"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Percentage');
     }
 
     /**
+     * The decimals.
+     *
+     * @param  array<string, mixed>|null  $previous
      * @return array<string, list<mixed>>
      */
-    public function optionRules(): array
+    public function optionRules(?array $previous = null): array
     {
         return [
             'decimals' => ['nullable', 'integer', 'between:0,'.self::MAX_DECIMALS],
@@ -39,6 +48,8 @@ final class PercentageType extends DecimalType
     }
 
     /**
+     * Fills in the decimals.
+     *
      * @param  array<string, mixed>  $options
      * @param  array<string, mixed>|null  $previous
      * @return array<string, mixed>

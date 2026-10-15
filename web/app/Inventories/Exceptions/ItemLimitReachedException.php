@@ -16,6 +16,8 @@ final class ItemLimitReachedException extends RuntimeException
     public const CODE = 'item_limit_reached';
 
     /**
+     * Remembers the quota that was reached.
+     *
      * @param  int  $limit  The number of items an inventory can hold.
      */
     public function __construct(public readonly int $limit)

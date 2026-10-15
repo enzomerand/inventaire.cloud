@@ -21,6 +21,10 @@ describe('reading a number', function (): void {
         'negative float zero' => [-0.0, '0', '0.000'],
         'a float written with an exponent' => [1.5e-7, '0.00000015', '0.00000015'],
         'a float that is not exact in binary' => [0.1, '0.1', '0.100'],
+        'a float PHP writes with an exponent' => [1.0e-5, '0.00001', '0.00001'],
+        'a negative one' => [-2.5e-6, '-0.0000025', '-0.0000025'],
+        'several digits, shifted exactly and not rounded' => [1.2345678901e-9, '0.0000000012345678901', '0.0000000012345678901'],
+        'a large float, shifted exactly' => [2.5e20, '250000000000000000000', '250000000000000000000.000'],
     ]);
 
     it('refuses what is not a plain decimal number', function (mixed $value): void {
@@ -37,6 +41,8 @@ describe('reading a number', function (): void {
         'a boolean' => true,
         'null' => null,
         'a list' => [[1]],
+        'a float too far from zero to be read exactly' => 1.0e-100,
+        'a float too large to be read exactly' => 1.0e100,
         'infinity' => INF,
         'not a number' => NAN,
         'a trailing newline' => "5\n",

@@ -12,17 +12,25 @@ use Closure;
  */
 final class DateType extends AbstractFieldType
 {
+    /**
+     * The word that identifies the type in the API and in the database: `date`.
+     */
     public function key(): string
     {
         return 'date';
     }
 
+    /**
+     * What the type is called for a person ("Date"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Date');
     }
 
     /**
+     * A calendar day written YYYY-MM-DD.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

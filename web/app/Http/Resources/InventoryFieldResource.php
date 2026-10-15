@@ -19,6 +19,8 @@ use stdClass;
 final class InventoryFieldResource extends JsonResource
 {
     /**
+     * The field, as the API gives it.
+     *
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array

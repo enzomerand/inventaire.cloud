@@ -16,6 +16,8 @@ final class FieldLimitReachedException extends RuntimeException
     public const CODE = 'field_limit_reached';
 
     /**
+     * Remembers the quota that was reached.
+     *
      * @param  int  $limit  The number of fields an inventory can hold.
      */
     public function __construct(public readonly int $limit)

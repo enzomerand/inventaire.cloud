@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Inventories\Fields\FieldTypes;
+use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -146,6 +147,34 @@ describe('adding a field', function (): void {
         expect(InventoryField::query()->count())->toBe(1);
     })->with(['straße', 'STRASSE', ' Straße ', 'STRAßE']);
 
+    it('counts the accents in a name, but not the way they are typed: one Unicode form', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $uri = "/api/v1/inventories/{$inventory->ulid}/fields";
+        $composed = "Pr\u{00E9}nom";
+        $decomposed = "Pre\u{0301}nom";
+
+        $first = inventoryCall($this, $team['owner'], 'POST', $uri, ['type' => 'text', 'name' => $decomposed])->assertCreated();
+
+        // Kept in one form...
+        expect($first->json('data.name'))->toBe($composed)
+            ->and(InventoryField::query()->sole()->name)->toBe($composed);
+
+        // ...so the same name typed either way is taken, in capitals too...
+        foreach ([$composed, $decomposed, "PR\u{00C9}NOM", "PRE\u{0301}NOM"] as $name) {
+            inventoryCall($this, $team['owner'], 'POST', $uri, ['type' => 'number', 'name' => $name])->assertUnprocessable()->assertJsonValidationErrors('name');
+        }
+
+        // ...but "Prenom" is another name.
+        $second = inventoryCall($this, $team['owner'], 'POST', $uri, ['type' => 'number', 'name' => 'Prenom'])->assertCreated();
+
+        // And renaming works the same way.
+        inventoryCall($this, $team['owner'], 'PATCH', "{$uri}/".$second->json('data.id'), ['name' => $decomposed])->assertUnprocessable()->assertJsonValidationErrors('name');
+        inventoryCall($this, $team['owner'], 'PATCH', "{$uri}/".$first->json('data.id'), ['name' => "PRE\u{0301}NOM"])->assertOk()->assertJsonPath('data.name', "PR\u{00C9}NOM");
+
+        expect(InventoryField::query()->count())->toBe(2);
+    });
+
     it('accepts the name of a field of another inventory', function (): void {
         $team = inventoryTeam();
         fieldIn(inventoryIn($team['workspace'], 'One'), 'text', 'Name');
@@ -171,6 +200,27 @@ describe('adding a field', function (): void {
         inventoryCall($this, $team['owner'], 'DELETE', "/api/v1/inventories/{$inventory->ulid}/fields/".$inventory->fields()->first()->ulid)->assertNoContent();
         inventoryCall($this, $team['owner'], 'POST', $uri, ['type' => 'text', 'name' => 'Three'])->assertCreated();
     });
+
+    it('gives an amount a currency in use today, not one that went out of use', function (string $code, bool $accepted): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+
+        $response = inventoryCall($this, $team['owner'], 'POST', "/api/v1/inventories/{$inventory->ulid}/fields", ['type' => 'money', 'name' => 'Price', 'options' => ['currency' => $code]]);
+
+        if ($accepted) {
+            $response->assertCreated()->assertJsonPath('data.options.currency', $code);
+        } else {
+            $response->assertUnprocessable()->assertJsonValidationErrors('options.currency');
+        }
+    })->with([
+        'the euro' => ['EUR', true],
+        'the dollar' => ['USD', true],
+        'the yen' => ['JPY', true],
+        'the Andorran peseta' => ['ADP', false],
+        'the French franc' => ['FRF', false],
+        'the old Afghani' => ['AFA', false],
+        'gold' => ['XAU', false],
+    ]);
 
     it('is a 404 in an inventory that does not exist', function (): void {
         inventoryCall($this, inventoryPerson(), 'POST', '/api/v1/inventories/01j0000000000000000000000x/fields', ['type' => 'text', 'name' => 'Name'])->assertNotFound();
@@ -480,5 +530,208 @@ describe('ordering the fields', function (): void {
 
         inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/order", ['name' => 'x'])->assertNotFound();
         inventoryCall($this, $team['owner'], 'DELETE', "/api/v1/inventories/{$inventory->ulid}/fields/order")->assertNotFound();
+    });
+});
+
+describe('changing the currency of an amount field', function (): void {
+    it('lets a field that has a currency which went out of use keep it, and refuses to give it to another', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $old = fieldIn($inventory, 'money', 'Old price', ['currency' => 'ADP']);
+        $other = fieldIn($inventory, 'money', 'Price');
+        $uri = "/api/v1/inventories/{$inventory->ulid}/fields/{$old->ulid}";
+
+        // The whole form is sent back as it was: the currency it has is accepted.
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['name' => 'Older price', 'options' => ['currency' => 'ADP']])->assertOk()->assertJsonPath('data.options.currency', 'ADP');
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['required' => true])->assertOk()->assertJsonPath('data.options.currency', 'ADP');
+        // Another currency out of use is not, for this field or for another one.
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'FRF']])->assertUnprocessable()->assertJsonValidationErrors('options.currency');
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$other->ulid}", ['options' => ['currency' => 'ADP']])->assertUnprocessable()->assertJsonValidationErrors('options.currency');
+        // Moving to a currency in use is fine, and there is no way back.
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'EUR']])->assertOk()->assertJsonPath('data.options.currency', 'EUR');
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['currency' => 'ADP']])->assertUnprocessable();
+
+        expect($old->fresh()->options)->toBe(['currency' => 'EUR'])->and($old->fresh()->name)->toBe('Older price');
+    });
+
+    it('keeps writing the amounts of such a field with the decimals of its currency', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $old = fieldIn($inventory, 'money', 'Old price', ['currency' => 'ADP']);
+
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/inventories/{$inventory->ulid}/items", ['values' => [$old->ulid => '1500']])->assertCreated()->assertJsonPath('data.values', [$old->ulid => '1500']);
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/inventories/{$inventory->ulid}/items", ['values' => [$old->ulid => '1500.5']])->assertUnprocessable();
+    });
+});
+
+describe('changing the options of a field that items have values for', function (): void {
+    /**
+     * An inventory whose items all hold a value for the fields given, with their dates set far back to show they are not touched.
+     *
+     * @param  list<array<string, mixed>>  $items  The values of each item, by ULID of field.
+     * @return list<Item>
+     */
+    function fieldsItemsWith(Inventory $inventory, array $items): array
+    {
+        $made = array_map(fn (array $values): Item => Item::factory()->for($inventory)->create(['values' => $values]), $items);
+        DB::table('items')->update(['updated_at' => '2020-01-01 00:00:00']);
+
+        return $made;
+    }
+
+    /**
+     * What the items hold now, by position in the list given, and how many of them were rewritten (their date moved).
+     */
+    function fieldsItemsUntouched(): bool
+    {
+        return DB::table('items')->where('updated_at', '!=', '2020-01-01 00:00:00')->count() === 0;
+    }
+
+    it('removes the ids of the choices deleted from a select from every item, and nothing else', function (string $role): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $name = fieldIn($inventory, 'text', 'Name');
+        $condition = fieldIn($inventory, 'select', 'Condition', ['choices' => [['label' => 'New'], ['label' => 'Used'], ['label' => 'Broken']]]);
+        [$new, $used, $broken] = array_column($condition->options['choices'], 'id');
+        [$a, $b, $c, $d] = fieldsItemsWith($inventory, [
+            [$name->ulid => 'Hammer', $condition->ulid => $used],
+            [$condition->ulid => $broken],
+            [$name->ulid => 'Saw', $condition->ulid => $new],
+            [$name->ulid => 'Plane'],
+        ]);
+
+        inventoryCall($this, $team[$role], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$condition->ulid}", ['options' => ['choices' => [['id' => $new, 'label' => 'New']]]])->assertOk();
+
+        expect($a->fresh()->values)->toEqual([$name->ulid => 'Hammer'])
+            ->and($b->fresh()->values)->toBe([])
+            ->and($c->fresh()->values)->toEqual([$name->ulid => 'Saw', $condition->ulid => $new])
+            ->and($d->fresh()->values)->toEqual([$name->ulid => 'Plane'])
+            ->and(fieldsItemsUntouched())->toBeTrue()
+            ->and(json_decode((string) DB::table('items')->where('id', $b->id)->value('values')))->toBeObject();
+    })->with(['an owner' => 'owner', 'an editor' => 'editor']);
+
+    it('removes the deleted ids from a multiple choice and keeps the others, in their order', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $colors = fieldIn($inventory, 'multiselect', 'Colors', ['choices' => [['label' => 'Red'], ['label' => 'Green'], ['label' => 'Blue']]]);
+        [$red, $green, $blue] = array_column($colors->options['choices'], 'id');
+        [$a, $b, $c] = fieldsItemsWith($inventory, [
+            [$colors->ulid => [$blue, $green, $red]],
+            [$colors->ulid => [$green]],
+            [$colors->ulid => [$red, $blue]],
+        ]);
+
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$colors->ulid}", ['options' => ['choices' => [['id' => $red, 'label' => 'Red'], ['id' => $blue, 'label' => 'Blue']]]])->assertOk();
+
+        expect($a->fresh()->values)->toBe([$colors->ulid => [$blue, $red]])
+            ->and($b->fresh()->values)->toBe([])
+            ->and($c->fresh()->values)->toBe([$colors->ulid => [$red, $blue]])
+            ->and(fieldsItemsUntouched())->toBeTrue();
+    });
+
+    it('does not bring a deleted choice back when a choice of the same name is added', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $condition = fieldIn($inventory, 'select', 'Condition', ['choices' => [['label' => 'New'], ['label' => 'Used']]]);
+        [$new, $used] = array_column($condition->options['choices'], 'id');
+        [$item] = fieldsItemsWith($inventory, [[$condition->ulid => $used]]);
+        $uri = "/api/v1/inventories/{$inventory->ulid}/fields/{$condition->ulid}";
+
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['choices' => [['id' => $new, 'label' => 'New']]]])->assertOk();
+        inventoryCall($this, $team['owner'], 'PATCH', $uri, ['options' => ['choices' => [['id' => $new, 'label' => 'New'], ['id' => $used, 'label' => 'Used']]]])->assertOk();
+
+        expect($item->fresh()->values)->toBe([])
+            ->and(inventoryCall($this, $team['owner'], 'GET', "/api/v1/inventories/{$inventory->ulid}/items/{$item->ulid}")->getContent())->toContain('"values":{}');
+    });
+
+    it('removes the grades above a lower maximum of a rating, and keeps the others', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $quality = fieldIn($inventory, 'rating', 'Quality', ['max' => 10]);
+        [$a, $b, $c, $d] = fieldsItemsWith($inventory, [[$quality->ulid => 10], [$quality->ulid => 6], [$quality->ulid => 5], [$quality->ulid => 1]]);
+
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$quality->ulid}", ['options' => ['max' => 5]])->assertOk()->assertJsonPath('data.options.max', 5);
+
+        expect($a->fresh()->values)->toBe([])
+            ->and($b->fresh()->values)->toBe([])
+            ->and($c->fresh()->values)->toBe([$quality->ulid => 5])
+            ->and($d->fresh()->values)->toBe([$quality->ulid => 1])
+            ->and(fieldsItemsUntouched())->toBeTrue();
+    });
+
+    it('keeps every stored value when the change cannot make one wrong', function (string $type, array $before, array $after, mixed $value): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, $type, 'Field', $before);
+        [$item] = fieldsItemsWith($inventory, [[$field->ulid => $value]]);
+
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$field->ulid}", ['options' => $after])->assertOk();
+
+        expect($item->fresh()->values)->toBe([$field->ulid => $value])
+            ->and(fieldsItemsUntouched())->toBeTrue();
+    })->with([
+        'a higher maximum of a rating' => ['rating', ['max' => 5], ['max' => 10], 5],
+        'the same maximum of a rating' => ['rating', ['max' => 5], ['max' => 5], 5],
+        'fewer decimals of a number' => ['number', ['decimals' => 3], ['decimals' => 0], '12.500'],
+        'tighter bounds of a number' => ['number', ['min' => '0', 'max' => '100'], ['min' => '10', 'max' => '20'], '50'],
+        'another unit of a number' => ['number', ['unit' => 'kg'], ['unit' => 'lb'], '5'],
+        'another currency of an amount' => ['money', ['currency' => 'EUR'], ['currency' => 'JPY'], '12.50'],
+        'fewer decimals of a percentage' => ['percentage', ['decimals' => 4], ['decimals' => 0], '12.5000'],
+        'a shorter text' => ['text', ['max_length' => 500], ['max_length' => 5], 'a long enough text'],
+        'another format of a barcode' => ['barcode', ['format' => 'any'], ['format' => 'ean13'], 'ABC-123'],
+    ]);
+
+    it('keeps every value when choices are renamed, recolored, added or reordered', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $colors = fieldIn($inventory, 'multiselect', 'Colors', ['choices' => [['label' => 'Red'], ['label' => 'Green']]]);
+        [$red, $green] = array_column($colors->options['choices'], 'id');
+        [$item] = fieldsItemsWith($inventory, [[$colors->ulid => [$green, $red]]]);
+
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$colors->ulid}", ['options' => ['choices' => [
+            ['id' => $green, 'label' => 'Lime', 'color' => 'green'], ['label' => 'Blue'], ['id' => $red, 'label' => 'Crimson', 'color' => 'red'],
+        ]]])->assertOk();
+
+        expect($item->fresh()->values)->toBe([$colors->ulid => [$green, $red]])
+            ->and(fieldsItemsUntouched())->toBeTrue();
+    });
+
+    it('leaves the values alone when the change is refused', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $quality = fieldIn($inventory, 'rating', 'Quality', ['max' => 10]);
+        [$item] = fieldsItemsWith($inventory, [[$quality->ulid => 9]]);
+
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$quality->ulid}", ['options' => ['max' => 2]])->assertUnprocessable();
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$quality->ulid}", ['name' => 'Quality', 'options' => ['max' => 3, 'decimals' => 1]])->assertUnprocessable();
+
+        expect($item->fresh()->values)->toBe([$quality->ulid => 9])
+            ->and($quality->fresh()->options)->toBe(['max' => 10]);
+    });
+
+    it('cleans more items than one chunk holds, and the items of that inventory only', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $other = inventoryIn($team['workspace'], 'Other');
+        $quality = fieldIn($inventory, 'rating', 'Quality', ['max' => 10]);
+        $theirs = fieldIn($other, 'rating', 'Quality', ['max' => 10]);
+        $rows = [];
+
+        foreach (range(1, 1200) as $number) {
+            $rows[] = ['ulid' => (string) Str::ulid(), 'inventory_id' => $inventory->id, 'values' => json_encode([$quality->ulid => $number % 10 + 1]), 'created_at' => now(), 'updated_at' => '2020-01-01 00:00:00'];
+        }
+
+        DB::table('items')->insert($rows);
+        $kept = fieldsItemsWith($other, [[$theirs->ulid => 9]])[0];
+
+        inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/inventories/{$inventory->ulid}/fields/{$quality->ulid}", ['options' => ['max' => 4]])->assertOk();
+
+        $values = Item::query()->where('inventory_id', $inventory->id)->get()->map(fn (Item $item): ?int => $item->values[$quality->ulid] ?? null);
+
+        expect($values)->toHaveCount(1200)
+            ->and($values->filter(fn (?int $grade): bool => $grade !== null && $grade > 4))->toHaveCount(0)
+            ->and($values->filter(fn (?int $grade): bool => $grade !== null))->toHaveCount(480)
+            ->and($kept->fresh()->values)->toBe([$theirs->ulid => 9])
+            ->and(fieldsItemsUntouched())->toBeTrue();
     });
 });

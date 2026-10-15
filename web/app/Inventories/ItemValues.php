@@ -17,7 +17,8 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  *
  * The values are an object keyed by the ULID of the field. Writing follows the rules of the lot:
  *
- * - a key that is not a field of the inventory is refused (`values.<key>`), never ignored;
+ * - a key that is not a field of the inventory is refused (`values.<key>`), never ignored; the ULID of a field is found
+ *   whatever its case, as it is in a URL (ULIDs are case-insensitive and stored in lowercase);
  * - an empty value (null, an empty text, an empty list) clears the field: the key is removed, nothing empty is stored;
  * - a field that is required must have a value when the item is created, and cannot be cleared when the key is sent
  *   (an update that does not mention it leaves it alone, whatever the item held);
@@ -34,6 +35,9 @@ final class ItemValues
     /** Most unknown keys named in an error, so that a huge body does not make a huge answer. */
     private const MAX_UNKNOWN_REPORTED = 20;
 
+    /**
+     * Gets the registry of types, which knows how each one is judged.
+     */
     public function __construct(private readonly FieldTypes $types) {}
 
     /**
@@ -57,10 +61,16 @@ final class ItemValues
             }
         }
 
+        // What was sent, by the lowercase ULID of the field it is for; the keys that are no (writable) field are named as sent.
+        $sent = [];
         $unknown = [];
 
-        foreach (array_keys($input) as $key) {
-            if (! isset($writable[(string) $key])) {
+        foreach ($input as $key => $value) {
+            $ulid = strtolower((string) $key);
+
+            if (isset($writable[$ulid])) {
+                $sent[$ulid] = $value;
+            } else {
                 $unknown[] = (string) $key;
             }
         }
@@ -71,14 +81,14 @@ final class ItemValues
         $cleared = [];
 
         foreach ($writable as $ulid => $field) {
-            $sent = array_key_exists($ulid, $input);
+            $given = array_key_exists($ulid, $sent);
 
-            if (! $sent && ! $creating) {
+            if (! $given && ! $creating) {
                 continue;
             }
 
             $type = $this->types->get($field->type);
-            $value = $sent ? $type->prepare($input[$ulid], $field) : null;
+            $value = $given ? $type->prepare($sent[$ulid], $field) : null;
 
             if ($type->isEmpty($value)) {
                 if ($field->required) {

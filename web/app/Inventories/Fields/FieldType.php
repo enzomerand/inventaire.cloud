@@ -47,9 +47,12 @@ interface FieldType
      * `choices.*.label`). Every option is optional here: what is missing is the business of {@see self::normalizeOptions()},
      * which also fills in the defaults. An option that is not listed is refused.
      *
+     * @param  array<string, mixed>|null  $previous  The options the field has now, or null while it is being created: a
+     *                                               value the field already holds stays acceptable even if the rules
+     *                                               would no longer let it be chosen (a currency that went out of use).
      * @return array<string, list<mixed>>
      */
-    public function optionRules(): array;
+    public function optionRules(?array $previous = null): array;
 
     /**
      * The options in canonical form, complete with their defaults, from the options that passed {@see self::optionRules()}.
@@ -62,6 +65,19 @@ interface FieldType
      *                             no choice at all). The keys are those of the request (`options.max`).
      */
     public function normalizeOptions(array $options, ?array $previous): array;
+
+    /**
+     * Whether changing the options of a field from `$previous` to `$options` can leave stored values that no longer fit
+     * (a choice that was deleted, a rating above the new maximum). When it can, the values of the field are cleaned up in
+     * the same transaction, each one through {@see self::present()}, which drops what no longer makes sense.
+     *
+     * The other changes (the decimals of a number, the currency of an amount, the length of a text, the format of a
+     * barcode...) never touch what is stored: a value written under older options stays as it is.
+     *
+     * @param  array<string, mixed>  $previous  The options the field had.
+     * @param  array<string, mixed>  $options  The options it has now, in canonical form.
+     */
+    public function mayInvalidateValues(array $previous, array $options): bool;
 
     /**
      * Cleans up a value before it is judged. Leaves alone what it does not understand: the rules refuse that.

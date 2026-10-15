@@ -32,12 +32,24 @@ final class InventoryFieldsPageController extends Controller
     {
         Gate::authorize('manageFields', $inventory);
 
+        // The currencies the fields already have are listed too, even one that went out of use since: the picker must be
+        // able to show the currency a field is in.
+        $inUse = [];
+
+        foreach ($inventory->fields()->where('type', 'money')->get() as $field) {
+            $currency = $field->option('currency');
+
+            if (is_string($currency)) {
+                $inUse[] = $currency;
+            }
+        }
+
         return view('app.inventory-fields', [
             'workspace' => $workspace,
             'inventory' => $inventory,
             'activeWorkspace' => $workspace->ulid,
             'types' => array_map(fn (FieldType $type): array => ['type' => $type->key(), 'label' => $type->label()], $this->types->all()),
-            'currencies' => Currencies::named(app()->getLocale()),
+            'currencies' => Currencies::named(app()->getLocale(), $inUse),
         ]);
     }
 }

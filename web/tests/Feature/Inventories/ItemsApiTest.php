@@ -126,6 +126,26 @@ describe('adding an item', function (): void {
         expect(inventoryCall($this, $team['owner'], 'GET', $uri)->getContent())->toContain('"values":{}');
     });
 
+    it('finds the field of a key whatever its case, and stores the value under the lowercase key', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $name = fieldIn($inventory, 'text', 'Name', required: true);
+        $weight = fieldIn($inventory, 'number', 'Weight');
+        $uri = "/api/v1/inventories/{$inventory->ulid}/items";
+
+        $created = inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [strtoupper($name->ulid) => 'Hammer', strtoupper($weight->ulid) => '2']])->assertCreated();
+
+        expect($created->json('data.values'))->toBe([$name->ulid => 'Hammer', $weight->ulid => '2']);
+
+        $updated = inventoryCall($this, $team['owner'], 'PATCH', "{$uri}/".$created->json('data.id'), ['values' => [strtoupper($weight->ulid) => null, strtoupper($name->ulid) => 'Saw']])->assertOk();
+
+        expect($updated->json('data.values'))->toBe([$name->ulid => 'Saw'])
+            ->and(Item::query()->sole()->values)->toBe([$name->ulid => 'Saw']);
+
+        // The key is the field's, not a lookalike: a required field is still required in capitals.
+        inventoryCall($this, $team['owner'], 'PATCH', "{$uri}/".$created->json('data.id'), ['values' => [strtoupper($name->ulid) => null]])->assertUnprocessable()->assertJsonValidationErrors("values.{$name->ulid}");
+    });
+
     it('refuses a key that is no field of the inventory, and writes nothing', function (string $key): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
@@ -389,8 +409,24 @@ describe('reading items', function (): void {
         expect($back->json('data.options.choices.1.id'))->not->toBe($used)
             ->and(inventoryCall($this, $team['owner'], 'GET', $itemUri)->json('data.values'))->toBe([$colors->ulid => [$red, $blue]]);
 
-        // What was stored is untouched: reading cleans up, nothing rewrites the items.
-        expect($item->fresh()->values)->toEqual([$condition->ulid => $used, $colors->ulid => [$red, $green, $blue]]);
+        // The ids of the deleted choices were removed from the item when the choices were deleted, not just hidden: the
+        // choice that came back under its old name has a new id and nothing in the item points to it.
+        expect($item->fresh()->values)->toEqual([$colors->ulid => [$red, $blue]]);
+    });
+
+    it('still hides a value of a choice that is gone and a grade that is too high, if a row holds one however it got there', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $condition = fieldIn($inventory, 'select', 'Condition', ['choices' => [['label' => 'New']]]);
+        $colors = fieldIn($inventory, 'multiselect', 'Colors', ['choices' => [['label' => 'Red']]]);
+        $quality = fieldIn($inventory, 'rating', 'Quality', ['max' => 3]);
+        [$red] = array_column($colors->options['choices'], 'id');
+        $item = itemIn($inventory);
+        DB::table('items')->where('id', $item->id)->update(['values' => json_encode([$condition->ulid => 'gone0000', $colors->ulid => ['gone0000', $red], $quality->ulid => 5])]);
+
+        $read = inventoryCall($this, $team['owner'], 'GET', "/api/v1/inventories/{$inventory->ulid}/items/{$item->ulid}")->assertOk();
+
+        expect($read->json('data.values'))->toBe([$colors->ulid => [$red]]);
     });
 
     it('omits a select whose only value is a deleted choice, and a multiple choice left empty', function (): void {

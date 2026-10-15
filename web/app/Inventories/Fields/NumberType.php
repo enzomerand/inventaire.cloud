@@ -20,20 +20,29 @@ final class NumberType extends DecimalType
     /** Longest unit, in characters. */
     public const UNIT_MAX_LENGTH = 16;
 
+    /**
+     * The word that identifies the type in the API and in the database: `number`.
+     */
     public function key(): string
     {
         return 'number';
     }
 
+    /**
+     * What the type is called for a person ("Number"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Number');
     }
 
     /**
+     * The decimals, the bounds and the unit.
+     *
+     * @param  array<string, mixed>|null  $previous
      * @return array<string, list<mixed>>
      */
-    public function optionRules(): array
+    public function optionRules(?array $previous = null): array
     {
         return [
             'decimals' => ['nullable', 'integer', 'between:0,'.self::MAX_DECIMALS],

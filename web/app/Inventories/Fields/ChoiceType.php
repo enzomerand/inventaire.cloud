@@ -14,11 +14,14 @@ use Illuminate\Validation\ValidationException;
  * What the choice and multiple choice fields share: a list of choices, each with an id that does not change, a label and
  * an optional color.
  *
- * The values hold the *ids*, never the labels, so a choice can be renamed without touching a single item. The id of a
+ * The values hold the *ids*, never the labels, so a choice can be renamed without touching a single item. Labels are
+ * kept normalized (see {@see SingleLineText::normalize()}) and compared with {@see SingleLineText::fold()}: two choices whose
+ * labels differ only by the case, or by how an accented letter is written, are one label. The id of a
  * choice is made by the server (8 random characters) when a choice is sent without one, and kept when the choice
  * already exists. An id that the field never had is not taken from the client: the choice gets a new one, so a choice
  * that was deleted cannot come back with its old id and bring old values back with it. A value whose choice was deleted
- * is dropped when read ({@see self::present()}), not hunted down in the items.
+ * is dropped when read ({@see self::present()}); and since a deleted choice is a change of the field's options, it is
+ * also removed from the items in the same transaction ({@see FieldType::mayInvalidateValues()}).
  */
 abstract class ChoiceType extends AbstractFieldType
 {
@@ -38,9 +41,12 @@ abstract class ChoiceType extends AbstractFieldType
     private const ID_LENGTH = 8;
 
     /**
+     * The list of choices, and what each one must be: an id, a label, a color.
+     *
+     * @param  array<string, mixed>|null  $previous
      * @return array<string, list<mixed>>
      */
-    public function optionRules(): array
+    public function optionRules(?array $previous = null): array
     {
         return [
             'choices' => ['nullable', 'array', 'max:'.self::MAX_CHOICES, function (string $attribute, mixed $value, Closure $fail): void {
@@ -114,7 +120,7 @@ abstract class ChoiceType extends AbstractFieldType
             }
 
             $taken[$id] = true;
-            $entry = ['id' => $id, 'label' => SingleLineText::trim((string) ($choice['label'] ?? ''))];
+            $entry = ['id' => $id, 'label' => SingleLineText::normalize((string) ($choice['label'] ?? ''))];
 
             if (is_string($choice['color'] ?? null)) {
                 $entry['color'] = $choice['color'];
@@ -124,6 +130,18 @@ abstract class ChoiceType extends AbstractFieldType
         }
 
         return ['choices' => $choices];
+    }
+
+    /**
+     * Whether a choice that the field had is gone from its options: the values that hold its id no longer mean anything.
+     * Renaming, recoloring, adding and reordering choices leave every value as it is.
+     *
+     * @param  array<string, mixed>  $previous
+     * @param  array<string, mixed>  $options
+     */
+    public function mayInvalidateValues(array $previous, array $options): bool
+    {
+        return array_diff(array_column(self::choicesOf($previous), 'id'), array_column(self::choicesOf($options), 'id')) !== [];
     }
 
     /**

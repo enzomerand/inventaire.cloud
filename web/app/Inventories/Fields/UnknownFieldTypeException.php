@@ -13,6 +13,8 @@ use InvalidArgumentException;
 final class UnknownFieldTypeException extends InvalidArgumentException
 {
     /**
+     * Remembers the key that was asked for.
+     *
      * @param  string  $key  The word that was asked for.
      */
     public function __construct(public readonly string $key)

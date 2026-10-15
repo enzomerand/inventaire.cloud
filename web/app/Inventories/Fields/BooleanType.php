@@ -14,17 +14,25 @@ use App\Models\InventoryField;
  */
 final class BooleanType extends AbstractFieldType
 {
+    /**
+     * The word that identifies the type in the API and in the database: `boolean`.
+     */
     public function key(): string
     {
         return 'boolean';
     }
 
+    /**
+     * What the type is called for a person ("Yes / no"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Yes / no');
     }
 
     /**
+     * A boolean, or 1 or 0.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

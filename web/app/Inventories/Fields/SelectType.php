@@ -12,17 +12,25 @@ use Illuminate\Validation\Rule;
  */
 final class SelectType extends ChoiceType
 {
+    /**
+     * The word that identifies the type in the API and in the database: `select`.
+     */
     public function key(): string
     {
         return 'select';
     }
 
+    /**
+     * What the type is called for a person ("Choice"), in the language of the request.
+     */
     public function label(): string
     {
         return __('Choice');
     }
 
     /**
+     * A text that is the id of one of the choices the field offers.
+     *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array

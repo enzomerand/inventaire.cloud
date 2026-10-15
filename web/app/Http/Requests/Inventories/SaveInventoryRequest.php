@@ -44,6 +44,8 @@ final class SaveInventoryRequest extends FormRequest
     }
 
     /**
+     * The name (needed to create one) and the description.
+     *
      * @return array<string, list<mixed>>
      */
     public function rules(): array
@@ -79,8 +81,9 @@ final class SaveInventoryRequest extends FormRequest
     }
 
     /**
-     * Trims the texts before they are validated, so that a name made of spaces counts as missing and a description
-     * made of spaces as none, whatever the framework's own trimming does.
+     * Trims the texts before they are validated, and writes the name in one Unicode form (see
+     * {@see SingleLineText::normalize()}), so that a name made of spaces counts as missing and a description made of
+     * spaces as none, whatever the framework's own trimming does.
      */
     protected function prepareForValidation(): void
     {
@@ -88,7 +91,7 @@ final class SaveInventoryRequest extends FormRequest
         $description = $this->input('description');
 
         $this->merge([
-            ...is_string($name) ? ['name' => SingleLineText::trim($name)] : [],
+            ...is_string($name) ? ['name' => SingleLineText::normalize($name)] : [],
             ...is_string($description) ? ['description' => MultiLineText::normalize($description)] : [],
         ]);
     }

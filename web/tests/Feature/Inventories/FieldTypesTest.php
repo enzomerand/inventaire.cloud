@@ -140,6 +140,9 @@ describe('a value that is accepted', function (): void {
         'number: extra zeros are no decimals' => ['number', ['decimals' => 2], '12.500', '12.50'],
         'number: six decimals' => ['number', ['decimals' => 6], '0.000001', '0.000001'],
         'number: float noise that fits' => ['number', ['decimals' => 1], 0.1, '0.1'],
+        'number: a float that PHP writes with an exponent, shifted back exactly' => ['number', ['decimals' => 6], 1.0e-5, '0.000010'],
+        'number: a negative one' => ['number', ['decimals' => 6], -2.0e-6, '-0.000002'],
+        'number: a float with an exponent and two digits' => ['number', ['decimals' => 6], 1.2e-5, '0.000012'],
         'number: at its bounds' => ['number', ['decimals' => 1, 'min' => '0', 'max' => 10], '10', '10.0'],
         'number: a negative minimum' => ['number', ['min' => '-5'], '-5', '-5'],
         'money: the euro has two decimals' => ['money', [], '12.5', '12.50'],
@@ -165,7 +168,7 @@ describe('a value that is accepted', function (): void {
         'date: a leap day' => ['date', [], '2028-02-29', '2028-02-29'],
         'datetime: an offset becomes UTC' => ['datetime', [], '2026-10-15T14:30:00+02:00', '2026-10-15T12:30:00Z'],
         'datetime: UTC stays' => ['datetime', [], '2026-10-15T12:30:00Z', '2026-10-15T12:30:00Z'],
-        'datetime: a browser date with milliseconds' => ['datetime', [], '2026-10-15T12:30:45.123Z', '2026-10-15T12:30:45Z'],
+        'datetime: seconds' => ['datetime', [], '2026-10-15T12:30:45Z', '2026-10-15T12:30:45Z'],
         'datetime: no seconds' => ['datetime', [], '2026-10-15T12:30Z', '2026-10-15T12:30:00Z'],
         'datetime: an offset without a colon' => ['datetime', [], '2026-10-15T23:30:00-0500', '2026-10-16T04:30:00Z'],
         'datetime: the day changes with the offset' => ['datetime', [], '2026-12-31T23:59:59-14:00', '2027-01-01T13:59:59Z'],
@@ -259,6 +262,10 @@ describe('a value that is refused', function (): void {
         'number: a list' => ['number', [], [1]],
         'number: 1e15' => ['number', [], '1000000000000000'],
         'number: a float of 1e15' => ['number', [], 1e15],
+        'number: a float written with an exponent that has more decimals than allowed' => ['number', ['decimals' => 6], 1.5e-7],
+        'number: a float written with an exponent that is too large' => ['number', [], 2.5e20],
+        'number: a float too far from zero to be read exactly' => ['number', [], 1.0e-100],
+        'number: a float too far from zero, large' => ['number', [], 1.0e100],
         'number: below its minimum' => ['number', ['min' => '0'], '-1'],
         'number: above its maximum' => ['number', ['max' => '10'], '10.5'],
         'money: more decimals than the currency' => ['money', [], '12.345'],
@@ -289,6 +296,9 @@ describe('a value that is refused', function (): void {
         'datetime: before the year 1000 once in UTC' => ['datetime', [], '1000-01-01T00:00:00+05:00'],
         'datetime: after the year 9999 once in UTC' => ['datetime', [], '9999-12-31T23:59:59-01:00'],
         'datetime: a timestamp' => ['datetime', [], 1760531400],
+        'datetime: a fraction of a second, as a browser writes it' => ['datetime', [], '2026-10-15T12:30:45.123Z'],
+        'datetime: a fraction of a second with an offset' => ['datetime', [], '2026-10-15T12:30:45.5+02:00'],
+        'datetime: a fraction of zeros' => ['datetime', [], '2026-10-15T12:30:45.000Z'],
         'time: 24:00' => ['time', [], '24:00'],
         'time: minute 60' => ['time', [], '12:60'],
         'time: one digit for the hour' => ['time', [], '9:05'],
@@ -345,6 +355,10 @@ describe('a value that is refused', function (): void {
             ->and(writtenToField('number', 'abc'))->toBe(['refused', ['The Price must be a number, written with a dot.']])
             ->and(writtenToField('number', '-1', ['min' => '0']))->toBe(['refused', ['The Price must be at least 0.']])
             ->and(writtenToField('number', '11', ['max' => '10.5']))->toBe(['refused', ['The Price must be at most 10.5.']])
+            ->and(writtenToField('datetime', '2026-10-15T12:30:45.123Z'))->toBe(['refused', ['The Price must be a date and time to the second with its offset from UTC, such as 2026-10-15T14:30:00+02:00.']])
+            ->and(writtenToField('number', 1.0e-100))->toBe(['refused', ['The Price is a number that cannot be read exactly: send it as text, written with a dot.']])
+            ->and(writtenToField('number', 1.0e100))->toBe(['refused', ['The Price is a number that cannot be read exactly: send it as text, written with a dot.']])
+            ->and(writtenToField('number', 2.5e20))->toBe(['refused', ['The Price is too large.']])
             ->and(writtenToField('barcode', '4006381333932', ['format' => 'ean13']))->toBe(['refused', ['The Price must be a valid EAN-13 code: 13 digits, the last one a check digit.']]);
 
         $this->useLanguage('fr');
@@ -533,7 +547,8 @@ describe('the choices of a select', function (): void {
         'a label that is too long' => [['choices' => [['label' => str_repeat('a', 101)]]]],
         'a label on two lines' => [['choices' => [['label' => "a\nb"]]]],
         'two labels that only differ by their case' => [['choices' => [['label' => 'Red'], ['label' => ' red ']]]],
-        'two labels that only differ by accents folded in case' => [['choices' => [['label' => 'STRASSE'], ['label' => 'straße']]]],
+        'two labels that only differ by case folding' => [['choices' => [['label' => 'STRASSE'], ['label' => 'straße']]]],
+        'two labels that are one accented letter written two ways' => [['choices' => [['label' => "Caf\u{00E9}"], ['label' => "Cafe\u{0301}"]]]],
         'a color that is not in the palette' => [['choices' => [['label' => 'Red', 'color' => 'chartreuse']]]],
         'an id of the wrong shape' => [['choices' => [['id' => 'ABC', 'label' => 'Red']]]],
         'an object instead of a list' => [['choices' => ['a' => ['label' => 'Red']]]],
@@ -635,14 +650,45 @@ describe('the barcode check digits', function (): void {
     });
 });
 
-describe('the currencies a picker lists', function (): void {
-    it('are every currency an amount field accepts, and only those', function (): void {
+describe('the currencies a field can be given', function (): void {
+    it('are the ones in use somewhere today, not the ones ICU only remembers', function (string $code, bool $inUse): void {
+        expect(Currencies::exists($code))->toBe($inUse);
+    })->with([
+        'the euro' => ['EUR', true],
+        'the dollar' => ['USD', true],
+        'the yen' => ['JPY', true],
+        'the Kuwaiti dinar' => ['KWD', true],
+        'the Swiss franc' => ['CHF', true],
+        'the CFA franc' => ['XOF', true],
+        'the Andorran peseta' => ['ADP', false],
+        'the French franc' => ['FRF', false],
+        'the old Afghani' => ['AFA', false],
+        'the Spanish peseta' => ['ESP', false],
+        'the no-currency code' => ['XXX', false],
+        'the test code' => ['XTS', false],
+        'gold' => ['XAU', false],
+        'special drawing rights' => ['XDR', false],
+        'a funds code' => ['USN', false],
+        'a unit of account' => ['CLF', false],
+        'a code that does not exist' => ['ZZZ', false],
+        'a code in lowercase' => ['eur', false],
+        'nothing' => ['', false],
+    ]);
+
+    it('still have their decimals when they are no longer in use, so that an old amount is written as it always was', function (): void {
+        expect(Currencies::fractionDigits('ADP'))->toBe(0)
+            ->and(Currencies::fractionDigits('EUR'))->toBe(2)
+            ->and(Currencies::fractionDigits('KWD'))->toBe(3);
+    });
+
+    it('are every currency in use and only those, once each, in a picker', function (): void {
         $codes = array_column(Currencies::named('en'), 'code');
 
         expect($codes)->toContain('EUR', 'USD', 'JPY')
-            ->not->toContain('XXX', 'XTS')
+            ->not->toContain('XXX', 'XTS', 'ADP', 'FRF', 'AFA', 'XAU')
             ->and(array_filter($codes, fn (string $code): bool => ! Currencies::exists($code)))->toBe([])
-            ->and(count($codes))->toBe(count(array_unique($codes)));
+            ->and(count($codes))->toBe(count(array_unique($codes)))
+            ->and(count($codes))->toBeGreaterThan(100)->toBeLessThan(200);
     });
 
     it('are named in the language asked for', function (): void {
@@ -670,5 +716,89 @@ describe('the currencies a picker lists', function (): void {
 
         expect($named['EUR'])->not->toBe('')
             ->and($named)->toHaveKey('USD');
+    });
+
+    it('can be listed with the ones a field already has, if ICU knows them', function (): void {
+        $codes = array_column(Currencies::named('en', ['ADP', 'EUR', 'ZZZ']), 'code');
+
+        expect($codes)->toContain('ADP', 'EUR')
+            ->not->toContain('ZZZ')
+            ->and(count($codes))->toBe(count(array_unique($codes)))
+            ->and(array_column(Currencies::named('en', ['ADP']), 'name', 'code')['ADP'])->toBe('Andorran Peseta');
+    });
+
+    it('are refused for a new amount field when they are out of use, and accepted for the field that already has one', function (): void {
+        $rule = fn (?array $previous, string $code): bool => Validator::make(
+            ['currency' => $code],
+            ['currency' => app(FieldTypes::class)->get('money')->optionRules($previous)['currency']],
+        )->passes();
+
+        expect($rule(null, 'EUR'))->toBeTrue()
+            ->and($rule(null, 'USD'))->toBeTrue()
+            ->and($rule(null, 'ADP'))->toBeFalse()
+            ->and($rule(null, 'FRF'))->toBeFalse()
+            ->and($rule(['currency' => 'EUR'], 'ADP'))->toBeFalse()
+            ->and($rule(['currency' => 'ADP'], 'ADP'))->toBeTrue()
+            ->and($rule(['currency' => 'ADP'], 'FRF'))->toBeFalse()
+            ->and($rule(['currency' => 'ADP'], 'JPY'))->toBeTrue();
+    });
+});
+
+describe('the options that take values away', function (): void {
+    it('are the removal of a choice and a lower maximum of a rating, and nothing else', function (string $type, array $before, array $after, bool $expected): void {
+        $handler = app(FieldTypes::class)->get($type);
+
+        expect($handler->mayInvalidateValues($handler->normalizeOptions($before, null), $handler->normalizeOptions($after, null)))->toBe($expected);
+    })->with([
+        'rating: a lower maximum' => ['rating', ['max' => 10], ['max' => 5], true],
+        'rating: a lower maximum than the default' => ['rating', [], ['max' => 3], true],
+        'rating: the same maximum' => ['rating', ['max' => 5], ['max' => 5], false],
+        'rating: a higher maximum' => ['rating', ['max' => 5], ['max' => 10], false],
+        'number: fewer decimals' => ['number', ['decimals' => 3], ['decimals' => 0], false],
+        'number: tighter bounds' => ['number', ['min' => '0', 'max' => '100'], ['min' => '10', 'max' => '20'], false],
+        'money: another currency' => ['money', ['currency' => 'EUR'], ['currency' => 'JPY'], false],
+        'percentage: fewer decimals' => ['percentage', ['decimals' => 4], ['decimals' => 0], false],
+        'text: a shorter length' => ['text', ['max_length' => 500], ['max_length' => 5], false],
+        'barcode: another format' => ['barcode', ['format' => 'any'], ['format' => 'ean13'], false],
+        'date: nothing to change' => ['date', [], [], false],
+    ]);
+
+    it('are, for the choices, any choice that is gone, whatever else changes', function (string $type): void {
+        $handler = app(FieldTypes::class)->get($type);
+        $before = $handler->normalizeOptions(['choices' => [['label' => 'A', 'color' => 'red'], ['label' => 'B'], ['label' => 'C']]], null);
+        [$a, $b, $c] = $before['choices'];
+        $options = fn (array $choices): array => $handler->normalizeOptions(['choices' => $choices], $before);
+
+        expect($handler->mayInvalidateValues($before, $options([$a, $b])))->toBeTrue()
+            ->and($handler->mayInvalidateValues($before, $options([$a, $b, $c, ['label' => 'D']])))->toBeFalse()
+            ->and($handler->mayInvalidateValues($before, $options([$c, $a, $b])))->toBeFalse()
+            ->and($handler->mayInvalidateValues($before, $options([['id' => $a['id'], 'label' => 'Renamed', 'color' => 'blue'], $b, $c])))->toBeFalse()
+            // The same label with no id is a new choice: the old one is gone.
+            ->and($handler->mayInvalidateValues($before, $options([['label' => 'A'], $b, $c])))->toBeTrue();
+    })->with(['select' => 'select', 'multiselect' => 'multiselect']);
+
+    it('make a rating drop the grades above its maximum when it is read', function (): void {
+        $rating = typedFieldOf('rating', ['max' => 3]);
+        $present = fn (mixed $stored): mixed => app(FieldTypes::class)->get('rating')->present($stored, $rating);
+
+        expect($present(1))->toBe(1)
+            ->and($present(3))->toBe(3)
+            ->and($present(4))->toBeNull()
+            ->and($present(0))->toBeNull()
+            ->and($present('3'))->toBeNull()
+            ->and($present(null))->toBeNull();
+    });
+});
+
+describe('the names of choices', function (): void {
+    it('are kept in one Unicode form, and compared without the case and the way an accent is written, but with the accents', function (): void {
+        $composed = "Caf\u{00E9}";
+        $decomposed = "Cafe\u{0301}";
+        $choices = typedFieldOf('select', ['choices' => [['label' => $decomposed], ['label' => 'Cafe']]])->options['choices'];
+
+        expect($choices[0]['label'])->toBe($composed)
+            ->and($choices[1]['label'])->toBe('Cafe')
+            ->and(optionsSentTo('select', ['choices' => [['label' => $composed], ['label' => 'Cafe']]])[0])->toBe('normalized')
+            ->and(optionsSentTo('select', ['choices' => [['label' => $composed], ['label' => $decomposed]]])[0])->toBe('refused');
     });
 });
