@@ -64,18 +64,26 @@ final class UserController extends Controller
     /**
      * Makes the account an administrator, or not any more (`is_admin`). The last administrator cannot be demoted
      * (`409`, `last_administrator`).
+     *
+     * @param  string  $user  The id of the account, which the route has limited to digits.
      */
-    public function update(UpdateUserRequest $request, User $user): JsonResponse
+    public function update(UpdateUserRequest $request, string $user): JsonResponse
     {
+        $account = $this->find($user);
+
+        if ($account === null) {
+            return $this->gone();
+        }
+
         try {
-            $user = $this->users->setAdministrator($user, $request->administrator());
+            $account = $this->users->setAdministrator($account, $request->administrator());
         } catch (UserAdministrationRefused $refusal) {
             return $this->refusal($refusal);
         } catch (ModelNotFoundException $exception) {
-            return $this->gone($exception);
+            return $this->goneIfAccount($exception);
         }
 
-        return $this->respond($user);
+        return $this->respond($account);
     }
 
     /**
@@ -83,20 +91,38 @@ final class UserController extends Controller
      * workspace it alone owned and that others belong to is handed over to its longest-standing member first. Not
      * the administrator's own account (`409`, `self_deletion`: they do that from their account page), and not the
      * last administrator (`409`, `last_administrator`).
+     *
+     * @param  string  $user  The id of the account, which the route has limited to digits.
      */
-    public function destroy(Request $request, User $user): JsonResponse|Response
+    public function destroy(Request $request, string $user): JsonResponse|Response
     {
+        $account = $this->find($user);
+
+        if ($account === null) {
+            return $this->gone();
+        }
+
         try {
-            $this->users->delete($this->user($request), $user);
+            $this->users->delete($this->user($request), $account);
         } catch (UserAdministrationRefused $refusal) {
             return $this->refusal($refusal);
         } catch (AccountDeletionRefused $refusal) {
             return $this->deletionRefusal($refusal);
         } catch (ModelNotFoundException $exception) {
-            return $this->gone($exception);
+            return $this->goneIfAccount($exception);
         }
 
         return response()->noContent();
+    }
+
+    /**
+     * The account with that id, or null. Looked up here and not by the router (implicit binding): the router binds
+     * before the "admin" gate runs, so somebody who is not an administrator would be told "403" for an id that exists
+     * and "404" for one that does not, and could count the accounts of the instance.
+     */
+    private function find(string $id): ?User
+    {
+        return User::query()->whereKey((int) $id)->first();
     }
 
     /**
@@ -149,16 +175,24 @@ final class UserController extends Controller
     }
 
     /**
+     * The 404 for an account that is not there (any more).
+     */
+    private function gone(): JsonResponse
+    {
+        return ApiError::notFound(__('This account no longer exists.'), 'account_not_found');
+    }
+
+    /**
      * The 404 for an account that somebody deleted in the meantime. Any other model not found is a failure.
      *
      * @param  ModelNotFoundException<Model>  $exception
      */
-    private function gone(ModelNotFoundException $exception): JsonResponse
+    private function goneIfAccount(ModelNotFoundException $exception): JsonResponse
     {
         if ($exception->getModel() !== User::class) {
             throw $exception;
         }
 
-        return ApiError::notFound(__('This account no longer exists.'), 'account_not_found');
+        return $this->gone();
     }
 }

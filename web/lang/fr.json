@@ -454,6 +454,7 @@
     "This database engine is not supported.": "Ce moteur de base de données n'est pas pris en charge.",
     "This database holds migrations of another application. Use an empty database.": "Cette base contient les migrations d'une autre application. Utilisez une base vide.",
     "This database is not empty and was not created by inventaire.cloud (it has no migrations table). Use an empty database.": "Cette base n'est pas vide et n'a pas été créée par inventaire.cloud (elle n'a pas de table de migrations). Utilisez une base vide.",
+    "This is only available from the web interface, not with an API token.": "Cela n'est disponible que depuis l'interface web, pas avec un jeton d'API.",
     "This is the last administrator of the instance: make somebody else an administrator first.": "C'est le dernier administrateur de l'instance : nommez d'abord quelqu'un d'autre administrateur.",
     "This item no longer exists.": "Cet élément n'existe plus.",
     "This password reset link will expire in :count minutes.": "Ce lien de réinitialisation du mot de passe expirera dans :count minutes.",

@@ -36,6 +36,16 @@ describe('who may call it', function (): void {
     })->with('settings calls');
 });
 
+it('refuses an API token even when the call looks like the front', function (string $method, array $data): void {
+    $admin = User::factory()->admin()->create();
+
+    $this->withToken($admin->createToken('script', ['*'])->plainTextToken)->json($method, '/api/v1/admin/settings', $data, frontend())
+        ->assertForbidden()
+        ->assertJsonPath('code', 'session_required');
+
+    expect(DB::table('settings')->count())->toBe(0);
+})->with('settings calls');
+
 describe('the settings', function (): void {
     it('are open to sign-ups until an administrator says otherwise', function (): void {
         $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())

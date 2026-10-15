@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Settings\InstanceSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 
 uses(RefreshDatabase::class);
@@ -151,15 +152,43 @@ describe('asking for a code while registration is closed', function (): void {
         expect(sentMails())->toHaveCount(1)->and(sentMails()[0]->getTo()[0]->getAddress())->toBe('bob@example.com');
     });
 
-    it('still sends the mail of an address that has an account when it fails late, and drops nothing else', function (): void {
+    it('keeps the code of an address whose mail failed, so that nothing tells it from an address that has no account', function (): void {
         User::factory()->create(['email' => 'ada@example.com']);
+        config([
+            'mail.default' => 'unreachable',
+            'mail.mailers.unreachable' => ['transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1],
+        ]);
+        Log::spy();
+
+        askForCode($this, 'ada@example.com')->assertOk();
+        $this->flushSession();
         askForCode($this, 'bob@example.com')->assertOk();
         $this->flushSession();
-        $deferred = holdDeferred();
-        askForCode($this, 'ada@example.com')->assertOk();
-        $deferred->release();
 
-        expect(LoginCode::query()->count())->toBe(2)->and(sentMails())->toHaveCount(1);
+        // Both hold a pending code, as they would had the mail server answered: typing one back is judged the same.
+        $known = whatTheClientSees(typeCode($this, 'ada@example.com', '000000'), 'ada@example.com');
+        $this->flushSession();
+        $unknown = whatTheClientSees(typeCode($this, 'bob@example.com', '000000'), 'bob@example.com');
+
+        expect(LoginCode::query()->count())->toBe(2)
+            ->and($unknown)->toBe($known)
+            ->and(json_decode($known['body'], true)['code'])->toBe('login_code_wrong');
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'Could not send a sign-in code'))->once();
+    });
+
+    it('drops the code of an address whose mail failed while registration is open, for everybody alike', function (): void {
+        registration(true);
+        User::factory()->create(['email' => 'ada@example.com']);
+        config([
+            'mail.default' => 'unreachable',
+            'mail.mailers.unreachable' => ['transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1],
+        ]);
+
+        askForCode($this, 'ada@example.com')->assertOk();
+        $this->flushSession();
+        askForCode($this, 'bob@example.com')->assertOk();
+
+        expect(LoginCode::query()->count())->toBe(0);
     });
 });
 

@@ -97,6 +97,39 @@ describe('who may call it', function (): void {
         expect(User::query()->count())->toBe(2);
     });
 
+    it('refuses an API token even when the call looks like the front: the Origin of the application is not a secret', function (string $method, string $uri, array $data): void {
+        $admin = adminAccount();
+        $victim = User::factory()->create();
+        $token = $admin->createToken('script', ['*'])->plainTextToken;
+
+        // The session has nobody in it, so Sanctum falls back to the token: a token must not do what a person does.
+        $this->withToken($token)->json($method, str_replace('{id}', (string) $victim->id, $uri), $data, frontend())
+            ->assertForbidden()
+            ->assertJsonPath('code', 'session_required');
+
+        expect(User::query()->count())->toBe(2)->and($victim->fresh()?->is_admin)->toBeFalse()->and(sentMails())->toBe([]);
+    })->with('administration calls');
+
+    it('still answers an unknown token with 401, as every other endpoint does', function (): void {
+        $this->withToken('1|not-a-real-token')->getJson('/api/v1/admin/users', frontend())->assertUnauthorized();
+    });
+
+    it('tells a non-administrator the same about an account that exists and one that does not: the ids are not for counting', function (string $method, array $data): void {
+        $member = User::factory()->withPersonalWorkspace()->create();
+        $existing = User::factory()->create();
+
+        $known = adminCall($this, $member, $method, "/api/v1/admin/users/{$existing->id}", $data);
+        $this->flushSession();
+        $unknown = adminCall($this, $member, $method, '/api/v1/admin/users/424242', $data);
+
+        expect($known->getStatusCode())->toBe(403)
+            ->and($unknown->getStatusCode())->toBe(403)
+            ->and($unknown->getContent())->toBe($known->getContent());
+    })->with([
+        'promoting' => ['PATCH', ['is_admin' => true]],
+        'deleting' => ['DELETE', []],
+    ]);
+
     it('judges the administrator on the account as stored: one demoted a moment ago is refused', function (): void {
         $admin = adminAccount();
         $other = adminAccount('other@example.com');
@@ -378,7 +411,7 @@ describe('promoting and demoting', function (): void {
     ]);
 
     it('answers 404 for an account that is not there', function (): void {
-        adminCall($this, adminAccount(), 'PATCH', '/api/v1/admin/users/424242', ['is_admin' => true])->assertNotFound();
+        adminCall($this, adminAccount(), 'PATCH', '/api/v1/admin/users/424242', ['is_admin' => true])->assertNotFound()->assertJsonPath('code', 'account_not_found');
     });
 });
 
@@ -452,7 +485,7 @@ describe('deleting an account', function (): void {
     });
 
     it('answers 404 for an account that is not there', function (): void {
-        adminCall($this, adminAccount(), 'DELETE', '/api/v1/admin/users/424242')->assertNotFound();
+        adminCall($this, adminAccount(), 'DELETE', '/api/v1/admin/users/424242')->assertNotFound()->assertJsonPath('code', 'account_not_found');
     });
 
     it('answers 404 when the account was deleted while the request was handled', function (): void {

@@ -32,8 +32,8 @@ final class RequestCodeController extends Controller
 {
     /**
      * Issues a code for the address (replacing the previous one) and mails it once the answer has gone, in the
-     * language of the request. If the mail cannot be sent, the code is dropped and the failure is logged: the person
-     * asks for another one.
+     * language of the request. If the mail cannot be sent, the code is dropped (while registration is open) and the
+     * failure is logged: the person asks for another one.
      */
     public function __invoke(RequestLoginCodeRequest $request, LoginCodes $codes, InstanceSettings $settings): JsonResponse
     {
@@ -53,7 +53,15 @@ final class RequestCodeController extends Controller
 
                 Mail::to($email)->locale($locale)->send(new LoginCodeMail($code, $minutes));
             },
-            fn () => $codes->forget($email, $code),
+            function () use ($codes, $settings, $email, $code): void {
+                // Closed, the code stays: it is deleted for an address whose mail failed, and an address that has no
+                // account has nothing to fail, so deleting would tell them apart (typing a code back would answer
+                // "expired" to the one and "incorrect" to the other) for whoever probes while the mail server is down.
+                // An undelivered code does no harm: nobody knows it, and it lapses.
+                if ($settings->registrationOpen()) {
+                    $codes->forget($email, $code);
+                }
+            },
         );
 
         return new JsonResponse(['data' => ['email' => $email, 'expires_in' => $minutes * 60]]);
