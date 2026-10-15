@@ -165,7 +165,7 @@ enum InstallStep: string
             self::Application => [
                 new Field('url', 'APP_URL', __('Public URL'), 'url', default: 'http://localhost', help: __('The address people use to reach this instance, without a trailing slash.')),
                 new Field('locale', 'APP_LOCALE', __('Default language'), 'select', default: 'fr', options: $this->localeOptions()),
-                new Field('timezone', 'APP_TIMEZONE', __('Timezone'), 'select', default: 'UTC', options: $this->timezoneOptions()),
+                new Field('timezone', 'APP_TIMEZONE', __('Display timezone'), 'select', default: 'UTC', help: __('Dates are stored in UTC and shown in this timezone.'), options: $this->timezoneOptions()),
             ],
             self::Mail => [
                 new Field('host', 'MAIL_HOST', __('SMTP host'), urlKey: 'MAIL_URL'),

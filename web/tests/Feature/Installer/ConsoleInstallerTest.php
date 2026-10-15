@@ -317,7 +317,7 @@ describe('interactive installation', function (): void {
             ->expectsQuestion('Password', $db->password)
             ->expectsQuestion('Public URL', 'https://inventory.example.test')
             ->expectsChoice('Default language', 'en', ['fr' => 'Français', 'en' => 'English'])
-            ->expectsChoice('Timezone', 'Europe/Paris', array_combine(DateTimeZone::listIdentifiers(), DateTimeZone::listIdentifiers()))
+            ->expectsChoice('Display timezone', 'Europe/Paris', array_combine(DateTimeZone::listIdentifiers(), DateTimeZone::listIdentifiers()))
             ->expectsQuestion('SMTP host', 'smtp.example.test')
             ->expectsQuestion('SMTP port', '587')
             ->expectsChoice('Connection security', '__none__', [

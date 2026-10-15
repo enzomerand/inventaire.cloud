@@ -125,6 +125,29 @@ function frontend(array $extra = []): array
 }
 
 /**
+ * The timezone of the current database session, as the engine reports it (an offset for MySQL and MariaDB, a name for
+ * PostgreSQL).
+ */
+function sqlSessionTimezone(): string
+{
+    if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+        return (string) DB::selectOne('select @@session.time_zone as zone')->zone;
+    }
+
+    return (string) DB::selectOne('show time zone')->TimeZone;
+}
+
+/**
+ * A date as the database holds it (the first row of the table), without any conversion by the models.
+ */
+function storedDate(string $table, string $column): ?string
+{
+    $value = DB::table($table)->value($column);
+
+    return $value === null ? null : (string) $value;
+}
+
+/**
  * Asks for a sign-in code the way the web front does.
  *
  * @param  array<string, string>  $headers

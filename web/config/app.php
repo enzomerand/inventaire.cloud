@@ -62,13 +62,30 @@ return [
     | Application Timezone
     |--------------------------------------------------------------------------
     |
-    | Here you may specify the default timezone for your application, which
-    | will be used by the PHP date and date-time functions. The timezone
-    | is set to "UTC" by default as it is suitable for most use cases.
+    | The timezone of PHP and of the database connections, which is where every
+    | date is stored and computed. It is fixed to UTC and not configurable: a
+    | stored date must not change meaning when the instance changes timezone.
+    | The zone people see is `display_timezone`, below.
     |
     */
 
-    'timezone' => env('APP_TIMEZONE', 'UTC'),
+    'timezone' => 'UTC',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Display Timezone
+    |--------------------------------------------------------------------------
+    |
+    | The timezone of this instance, chosen in the installation wizard
+    | (APP_TIMEZONE). It is for display only: dates are always stored and
+    | exchanged in UTC (see `timezone`, above) and are converted to this zone
+    | when the server writes one for people, such as the date in the name of
+    | a download (see App\Support\DisplayTime). Pages show dates in the
+    | timezone of the browser.
+    |
+    */
+
+    'display_timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
     |--------------------------------------------------------------------------

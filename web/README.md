@@ -103,7 +103,7 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 
 1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` or `imagick`, `zip`, `curl`) and write access to `storage/`, `bootstrap/cache/` and `.env`.
 2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables (the check creates, then drops, a table named `installer_probe_check`: it is refused if one already exists, and never touches it). An interrupted installation can be resumed on the same database.
-3. **Application**: public URL, default language and timezone.
+3. **Application**: public URL, default language and display timezone. Dates are always stored in UTC; the display timezone (`APP_TIMEZONE`) is only the zone the server uses when it writes a date itself, such as in the name of a download. Pages show dates in the timezone of the browser.
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
@@ -294,6 +294,8 @@ An instance installed before sign-in existed has no administrator and the upgrad
 
 The upgrade that brings workspaces gives every existing account a personal workspace and a remember token (idempotent migrations). It also leaves the sessions opened before without a fingerprint, which are refused, and a "remember me" cookie issued before is refused as well: **everybody signs in again once**, with a code (see [Signing out everywhere](#signing-out-everywhere)).
 
+The upgrade that follows brings dates stored in UTC. Until then they were stored in the timezone of the instance (`APP_TIMEZONE`); the migration converts them from that timezone to UTC, so keep `APP_TIMEZONE` as it was until the upgrade has run. It also deletes the sign-in and account deletion codes that are pending: whoever was waiting for one asks for another. `APP_TIMEZONE` is from then on the display timezone only (rolling the migration back converts the dates back).
+
 `inventaire:upgrade` reloads the configuration (so an edited `.env` is used), applies the pending migrations under a file lock (a second upgrade running at the same time waits for it, up to 10 minutes) and clears the route, view and event caches. With `--optimize` it rebuilds them afterwards; it can be run as often as you like, and with Docker the update is automatic (see below).
 
 ## Self-hosting with Docker
@@ -311,7 +313,7 @@ The application listens on <http://localhost:8080> (`APP_PORT` in `.env` changes
 ### Two ways to configure it
 
 - **Wizard.** Set `DB_PASSWORD` only. Open the application: it redirects to the install wizard, which asks for the rest. Its one-time setup token is printed by `docker compose exec app php artisan inventaire:install-token`. The database settings come from the compose file, so the wizard shows them read-only.
-- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, timezone, SMTP, file storage, the first administrator `ADMIN_NAME` and `ADMIN_EMAIL`...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
+- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, display timezone, SMTP, file storage, the first administrator `ADMIN_NAME` and `ADMIN_EMAIL`...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
 
 ### What is kept where
 
@@ -415,6 +417,7 @@ app/
   Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: the rate limiters (sign-in, account, workspace creation) and the "admin" gate
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   Settings/         InstanceSettings: the settings of the instance, kept in the settings table
+  Support/          DisplayTime: the timezone of the instance, for the dates the server writes for people (everything is stored in UTC)
   View/Components/  Blade component classes (ClientMessages, WorkspaceSwitcher)
   Workspaces/       Workspaces (the rules: create, delete, current workspace), Locks (the row locks every removal follows), WorkspaceRole, StoredRole (reads a stored role safely), Membership
 config/             Laravel configuration (app.php lists the supported locales)
