@@ -125,6 +125,8 @@ final class Device
             $this->flushSession();
             $this->flushHeaders();
             $this->app['auth']->forgetGuards();
+            // The guard the session handler reads the user of a session from (its `user_id` column) is kept as well.
+            $this->app->forgetInstance('auth.driver');
             // An API call makes "sanctum" the default guard for the rest of the process; a request of its own starts with "web".
             $this->app['auth']->shouldUse('web');
             // Cookies queued by a previous call would otherwise be sent with the answer to this one.

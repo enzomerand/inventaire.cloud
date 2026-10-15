@@ -32,6 +32,46 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->registerSignInLimiters();
+        $this->registerAccountLimiters();
+    }
+
+    /**
+     * The rate limiters of the account endpoints that send a mail, confirm a deletion or hand out all of the
+     * account's data (limits in config/auth.php, `account_deletion` and `account_export`).
+     *
+     * They key on the signed-in user: these endpoints are never reached by anybody else.
+     */
+    private function registerAccountLimiters(): void
+    {
+        RateLimiter::for('account-deletion-code', function (Request $request): array {
+            $short = config()->array('auth.account_deletion.send_per_user');
+            $long = config()->array('auth.account_deletion.send_per_user_hourly');
+            $who = $this->signedInKey($request);
+
+            return [
+                Limit::perMinutes((int) $short['minutes'], (int) $short['attempts'])->by('deletion-code:'.$who),
+                Limit::perMinutes((int) $long['minutes'], (int) $long['attempts'])->by('deletion-code-hourly:'.$who),
+            ];
+        });
+
+        RateLimiter::for('account-deletion', fn (Request $request): Limit => Limit::perMinute(config()->integer('auth.account_deletion.verify_per_minute'))
+            ->by('deletion:'.$this->signedInKey($request)));
+
+        RateLimiter::for('account-export', function (Request $request): Limit {
+            $export = config()->array('auth.account_export');
+
+            return Limit::perMinutes((int) $export['minutes'], (int) $export['attempts'])->by('export:'.$this->signedInKey($request));
+        });
+    }
+
+    /**
+     * Who a request is from, for a limiter that runs after authentication: the user, or the network as a fallback.
+     */
+    private function signedInKey(Request $request): string
+    {
+        $user = $request->user();
+
+        return $user === null ? 'ip:'.ClientNetwork::key($request->ip()) : 'user:'.$user->getAuthIdentifier();
     }
 
     /**

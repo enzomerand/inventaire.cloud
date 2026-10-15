@@ -22,7 +22,7 @@ describe('JSON errors', function (): void {
     });
 
     it('answers a wrong method in JSON', function (): void {
-        $this->call('DELETE', '/api/v1/me')->assertStatus(405)->assertHeader('Content-Type', 'application/json');
+        $this->call('PUT', '/api/v1/me')->assertStatus(405)->assertHeader('Content-Type', 'application/json');
     });
 
     it('still answers web URLs with HTML', function (): void {

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\AccountDeletionController;
+use App\Http\Controllers\Api\V1\AccountExportController;
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
@@ -27,9 +29,15 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     });
 
     Route::middleware('auth:sanctum')->group(function (): void {
-        Route::get('/me', MeController::class)->name('me');
-        // A session action (it signs this device in again): the web front only.
-        Route::post('/me/sign-out-everywhere', SignOutEverywhereController::class)->middleware(RequireStatefulRequest::class)->name('me.sign-out-everywhere');
+        Route::get('/me', [MeController::class, 'show'])->name('me');
+        Route::patch('/me', [MeController::class, 'update'])->name('me.update');
+        Route::get('/me/export', AccountExportController::class)->middleware('throttle:account-export')->name('me.export');
+        // Session actions (this device is signed in again, or out): the web front only.
+        Route::middleware(RequireStatefulRequest::class)->group(function (): void {
+            Route::post('/me/sign-out-everywhere', SignOutEverywhereController::class)->name('me.sign-out-everywhere');
+            Route::post('/me/deletion-code', [AccountDeletionController::class, 'code'])->middleware('throttle:account-deletion-code')->name('me.deletion-code');
+            Route::delete('/me', [AccountDeletionController::class, 'destroy'])->middleware('throttle:account-deletion')->name('me.destroy');
+        });
         Route::put('/me/current-workspace', CurrentWorkspaceController::class)->name('me.current-workspace');
 
         Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');

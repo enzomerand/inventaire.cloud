@@ -31,6 +31,7 @@ final class ApplicationTables
         'login_codes',
         'workspaces',
         'workspace_user',
+        'account_deletion_codes',
     ];
 
     /**
