@@ -79,6 +79,7 @@ export class HttpError extends Error {
  * @property {number} [timeout] Milliseconds before giving up; defaults to DEFAULT_TIMEOUT_MS, 0 disables it.
  * @property {'json' | 'blob' | 'text'} [responseType] How to read a successful body; defaults to "json".
  * @property {boolean} [silent] Skip the central feedback (toast, redirect, reload) and handle the error yourself.
+ * @property {unknown} [data] Body of a request whose verb takes none by convention (`delete`, when the API wants a confirmation); `post`, `put` and `patch` take it as an argument instead.
  */
 
 /**
@@ -577,7 +578,7 @@ export const http = {
 
     /**
      * @param {string} url
-     * @param {RequestOptions} [options]
+     * @param {RequestOptions} [options] `data` sends a JSON body, for the few deletions that need a confirmation.
      * @returns {Promise<any>}
      */
     delete: (url, options) => request('DELETE', url, options),

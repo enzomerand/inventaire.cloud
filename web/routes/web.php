@@ -15,9 +15,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home')->name('home');
 
-// Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space.
+// Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space, where
+// the pages drive the /api/v1 endpoints of their workspaces and their account.
 Route::view('/login', 'auth.login')->middleware('guest')->name('login');
-Route::view('/app', 'app.dashboard')->middleware('auth')->name('app');
+Route::middleware('auth')->group(function (): void {
+    Route::view('/app', 'app.dashboard')->name('app');
+    Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
+    Route::view('/app/account', 'app.account')->name('app.account');
+});
 
 Route::get('/csrf-token', RefreshCsrfTokenController::class)->name('csrf.refresh');
 

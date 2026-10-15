@@ -69,3 +69,8 @@
 .app-toasts .toast {
     --tblr-toast-max-width: var(--app-toast-width);
 }
+
+/* The current workspace in the header: long names are cut instead of pushing the account menu away. */
+.app-workspace-name {
+    max-width: 12rem;
+}

@@ -29,6 +29,7 @@
                     {{-- The install wizard runs before there are any accounts, or even a database to look them up in. --}}
                     @unless (request()->routeIs('install.*'))
                         @auth
+                            <x-workspace-switcher />
                             <x-account-menu />
                         @else
                             @unless (request()->routeIs('login'))

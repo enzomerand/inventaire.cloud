@@ -16,23 +16,37 @@
 import '@tabler/core';
 import Alpine from '@alpinejs/csp';
 
+import accountData from './components/account-data.js';
+import accountDeletion from './components/account-deletion.js';
 import accountMenu from './components/account-menu.js';
+import accountProfile from './components/account-profile.js';
+import accountSecurity from './components/account-security.js';
 import installer from './components/installer.js';
 import installerToken from './components/installer-token.js';
 import localeSwitcher from './components/locale-switcher.js';
 import login from './components/login.js';
 import toasts from './components/toasts.js';
+import workspaceSwitcher from './components/workspace-switcher.js';
+import workspaces from './components/workspaces.js';
 import { createToastsStore } from './stores/toasts.js';
+import { createWorkspacesStore } from './stores/workspaces.js';
 
 window.Alpine = Alpine;
 
 Alpine.store('toasts', createToastsStore());
+Alpine.store('workspaces', createWorkspacesStore());
 
+Alpine.data('accountData', accountData);
+Alpine.data('accountDeletion', accountDeletion);
 Alpine.data('accountMenu', accountMenu);
+Alpine.data('accountProfile', accountProfile);
+Alpine.data('accountSecurity', accountSecurity);
 Alpine.data('installer', installer);
 Alpine.data('installerToken', installerToken);
 Alpine.data('localeSwitcher', localeSwitcher);
 Alpine.data('login', login);
 Alpine.data('toasts', toasts);
+Alpine.data('workspaceSwitcher', workspaceSwitcher);
+Alpine.data('workspaces', workspaces);
 
 Alpine.start();

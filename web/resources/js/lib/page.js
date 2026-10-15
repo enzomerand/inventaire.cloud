@@ -24,3 +24,24 @@ export function reloadPage() {
 export function redirectTo(url) {
     window.location.assign(url);
 }
+
+/**
+ * Hands a file to the browser to save, as a download.
+ *
+ * @param {Blob} blob The content of the file.
+ * @param {string} filename Name the browser proposes.
+ * @returns {void}
+ */
+export function saveFile(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+
+    // Once the browser has taken the file.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+}

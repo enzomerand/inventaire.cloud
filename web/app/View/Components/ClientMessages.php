@@ -50,6 +50,22 @@ class ClientMessages extends Component
             'login.error.throttled' => __('Too many attempts. Try again in :seconds seconds.'),
             'login.error.throttled_minutes' => __('Too many attempts. Try again in :minutes minutes.'),
             'login.notice.code_resent' => __('A new code was sent.'),
+            'workspaces.role.owner' => __('Owner'),
+            'workspaces.role.editor' => __('Editor'),
+            'workspaces.role.viewer' => __('Viewer'),
+            'workspaces.rename_named' => __('Rename :name'),
+            'workspaces.delete_named' => __('Delete :name'),
+            'workspaces.confirm_delete' => __('Delete :name and everything in it? This cannot be undone.'),
+            'workspaces.notice.created' => __('Workspace created.'),
+            'workspaces.notice.renamed' => __('Workspace renamed.'),
+            'workspaces.notice.deleted' => __('Workspace deleted.'),
+            'workspaces.error.last' => __('You cannot delete your last workspace: create another one first.'),
+            'account.notice.saved' => __('Your account was updated. The page is about to reload.'),
+            'account.notice.signed_out_everywhere' => __('You are signed out of all your other devices.'),
+            'account.notice.code_sent' => __('A code was sent to your email address.'),
+            'account.notice.code_resent' => __('A new code was sent.'),
+            'account.error.last_administrator' => __('You are the last administrator of this instance: make somebody else an administrator first (php artisan inventaire:make-admin).'),
+            'account.error.sole_owner' => __('You are the only owner of workspaces that other people belong to: hand them over or delete them first.'),
         ];
     }
 
