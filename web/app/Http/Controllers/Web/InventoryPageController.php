@@ -35,7 +35,7 @@ final class InventoryPageController extends Controller
     {
         Gate::authorize('view', $inventory);
 
-        $role = $this->enter($this->workspaces, $this->user($request), $workspace);
+        $role = $this->enter($this->user($request), $workspace);
 
         return view('app.inventory', [
             'workspace' => $workspace,

@@ -9,7 +9,6 @@ use App\Inventories\ItemValues;
 use App\Models\Casts\JsonObject;
 use App\Models\Concerns\HasUlidRouteKey;
 use Database\Factories\ItemFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -32,7 +31,6 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['values'])]
 final class Item extends Model
 {
     /** @use HasFactory<ItemFactory> */

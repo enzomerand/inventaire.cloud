@@ -145,20 +145,32 @@ function localInput(date) {
     );
 }
 
+/** What the types typed in as plain text share: the box holds the stored text, and what it holds is sent trimmed. */
+const TEXT_INPUT = {
+    toInput: (value) => value ?? '',
+    fromInput: textOrNull,
+};
+
+/** What the numbers, amounts and percentages share: a box for a decimal number, typed in the language of the page. */
+const DECIMAL_INPUT = {
+    control: 'input',
+    inputMode: 'decimal',
+    toInput: (value) => toDecimalInput(value, pageLocale()),
+    fromInput: (input) => parseDecimal(input),
+};
+
 /** @type {Record<string, FieldType>} */
 export const FIELD_TYPES = {
     text: {
         control: 'input',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         describe: (value) => cell('text', { text: String(value) }),
     },
 
     textarea: {
         control: 'textarea',
-        toInput: (value) => value ?? '',
         // Line breaks are kept: only the ends are trimmed, as the server does.
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         describe: (value, _field, options) => {
             if (options?.full) {
                 return cell('text', { text: String(value), multiline: true });
@@ -171,10 +183,7 @@ export const FIELD_TYPES = {
     },
 
     number: {
-        control: 'input',
-        inputMode: 'decimal',
-        toInput: (value) => toDecimalInput(value, pageLocale()),
-        fromInput: (input) => parseDecimal(input, pageLocale()),
+        ...DECIMAL_INPUT,
         describe: (value, field) => {
             const unit = field.options?.unit ? ' ' + field.options.unit : '';
 
@@ -183,10 +192,7 @@ export const FIELD_TYPES = {
     },
 
     money: {
-        control: 'input',
-        inputMode: 'decimal',
-        toInput: (value) => toDecimalInput(value, pageLocale()),
-        fromInput: (input) => parseDecimal(input, pageLocale()),
+        ...DECIMAL_INPUT,
         describe: (value, field) =>
             cell('text', {
                 text: formatMoney(String(value), field.options?.currency ?? 'EUR', field.options?.decimals ?? null),
@@ -194,10 +200,7 @@ export const FIELD_TYPES = {
     },
 
     percentage: {
-        control: 'input',
-        inputMode: 'decimal',
-        toInput: (value) => toDecimalInput(value, pageLocale()),
-        fromInput: (input) => parseDecimal(input, pageLocale()),
+        ...DECIMAL_INPUT,
         describe: (value, field) =>
             cell('text', { text: formatPercentage(String(value), Number(field.options?.decimals ?? 2)) }),
     },
@@ -219,8 +222,7 @@ export const FIELD_TYPES = {
     date: {
         control: 'input',
         inputType: 'date',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         // A day has no timezone: it is read and shown as UTC, or it would slip to the day before for the readers west of Greenwich.
         describe: (value) => {
             const date = new Date(value + 'T00:00:00Z');
@@ -324,8 +326,7 @@ export const FIELD_TYPES = {
     url: {
         control: 'input',
         inputType: 'url',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         describe: (value) => {
             const href = webAddress(String(value));
 
@@ -339,8 +340,7 @@ export const FIELD_TYPES = {
     email: {
         control: 'input',
         inputType: 'email',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         // `#`, `?` and `&` in the local part of an address (`a&b@example.com`) must not end the address in the link; the `@` stays.
         describe: (value) =>
             cell('link', {
@@ -352,8 +352,7 @@ export const FIELD_TYPES = {
     phone: {
         control: 'input',
         inputType: 'tel',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         describe: (value) => cell('link', { text: String(value), href: 'tel:' + String(value).replace(/[^\d+]/g, '') }),
     },
 
@@ -375,8 +374,7 @@ export const FIELD_TYPES = {
     color: {
         control: 'color',
         inputType: 'color',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         describe: (value) =>
             HEX_COLOR.test(String(value))
                 ? cell('swatch', { text: String(value), style: { backgroundColor: String(value) } })
@@ -385,8 +383,7 @@ export const FIELD_TYPES = {
 
     barcode: {
         control: 'input',
-        toInput: (value) => value ?? '',
-        fromInput: textOrNull,
+        ...TEXT_INPUT,
         describe: (value) => cell('mono', { text: String(value) }),
     },
 };

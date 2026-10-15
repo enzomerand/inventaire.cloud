@@ -115,7 +115,7 @@ final class AccountExport
             'description' => $inventory->description,
             'created_at' => $inventory->created_at?->toIso8601String(),
             'updated_at' => $inventory->updated_at?->toIso8601String(),
-            'fields' => array_values($inventory->fields->map(fn (InventoryField $field): array => [
+            'fields' => $inventory->fields->map(fn (InventoryField $field): array => [
                 'id' => $field->ulid,
                 'name' => $field->name,
                 'type' => $field->type,
@@ -123,7 +123,7 @@ final class AccountExport
                 'options' => $field->options === null || $field->options === [] ? new stdClass : $field->options,
                 'required' => $field->required,
                 'position' => $field->position,
-            ])->all()),
+            ])->all(),
             'items_count' => (int) $inventory->getAttribute('items_count'),
         ])->all());
     }

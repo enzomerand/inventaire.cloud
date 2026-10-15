@@ -83,14 +83,6 @@ final class FieldTypes
     }
 
     /**
-     * Whether there is a type with this key.
-     */
-    public function has(string $key): bool
-    {
-        return isset($this->types[$key]);
-    }
-
-    /**
      * The keys of every type, in the order they are offered.
      *
      * @return list<string>

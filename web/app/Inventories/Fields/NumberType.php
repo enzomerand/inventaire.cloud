@@ -83,14 +83,4 @@ final class NumberType extends DecimalType
     {
         return (int) $field->option('decimals', 0);
     }
-
-    protected function min(InventoryField $field): ?Decimal
-    {
-        return $this->bound($field, 'min');
-    }
-
-    protected function max(InventoryField $field): ?Decimal
-    {
-        return $this->bound($field, 'max');
-    }
 }

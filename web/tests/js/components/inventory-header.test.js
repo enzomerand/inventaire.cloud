@@ -52,14 +52,13 @@ describe('the header of an inventory', () => {
         it('starts with the name and the description the page rendered', () => {
             expect(component.name).toBe('Tools');
             expect(component.description).toBe('Hand tools');
-            expect(component.hasDescription).toBe(true);
         });
 
         it('has no description to show when there is none', () => {
             component.$root.dataset.description = '';
             component.init();
 
-            expect(component.hasDescription).toBe(false);
+            expect(component.description).toBe('');
         });
 
         it('offers what the person may do, and nothing else', () => {
@@ -118,7 +117,6 @@ describe('the header of an inventory', () => {
             expect(http.patch).toHaveBeenCalledWith(URL, { name: 'Workshop', description: null });
             expect(component.name).toBe('Workshop');
             expect(component.description).toBe('');
-            expect(component.hasDescription).toBe(false);
             expect(hideModal).toHaveBeenCalledWith(editModal);
             expect(notify).toHaveBeenCalledWith('success', 'Inventory updated.');
             expect(component.busy).toBe(false);

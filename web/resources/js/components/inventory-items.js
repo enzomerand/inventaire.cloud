@@ -451,45 +451,13 @@ export default function inventoryItems() {
             this.confirming = false;
         },
 
-        /**
-         * Which control the form shows for a field.
-         *
-         * @param {Field} field
-         * @returns {string}
-         */
-        control(field) {
-            return controlOf(field);
-        },
-
-        /**
-         * The `type` of the `<input>` of a field.
-         *
-         * @param {Field} field
-         * @returns {string}
-         */
-        inputType(field) {
-            return inputTypeOf(field);
-        },
-
-        /**
-         * The `inputmode` of the `<input>` of a field (null for the default one: the attribute is left out).
-         *
-         * @param {Field} field
-         * @returns {string | null}
-         */
-        inputMode(field) {
-            return inputModeOf(field);
-        },
-
-        /**
-         * The longest text the `<input>` of a field takes (null for no limit: the attribute is left out).
-         *
-         * @param {Field} field
-         * @returns {number | null}
-         */
-        maxLength(field) {
-            return maxLengthOf(field);
-        },
+        // The field types know how a field is entered and which choices it has (see `../fields`): the template asks
+        // them through the component, with the field as the only argument.
+        control: controlOf,
+        inputType: inputTypeOf,
+        inputMode: inputModeOf,
+        maxLength: maxLengthOf,
+        choices: choicesOf,
 
         /**
          * The `id` of the control of a field, which its label points to.
@@ -566,16 +534,6 @@ export default function inventoryItems() {
         },
 
         /**
-         * Whether a value of a field was refused.
-         *
-         * @param {Field} field
-         * @returns {boolean}
-         */
-        hasError(field) {
-            return this.errors[field.id] !== undefined;
-        },
-
-        /**
          * The options of the `<select>` of a field: a blank one, then the answers or the choices.
          *
          * @param {Field} field
@@ -598,16 +556,6 @@ export default function inventoryItems() {
          */
         isSelected(field, value) {
             return this.values[field.id] === value;
-        },
-
-        /**
-         * The choices of a multiple choice.
-         *
-         * @param {Field} field
-         * @returns {import('../fields/types.js').Choice[]}
-         */
-        choices(field) {
-            return choicesOf(field);
         },
 
         /**
@@ -816,40 +764,24 @@ export default function inventoryItems() {
         },
 
         /**
-         * The values to send to add an item: every field that holds something.
+         * Converts what the controls hold into what the API takes. Adding an item: every field that holds something, the
+         * others are left out. Changing one: only the fields whose control holds something else than when the dialog
+         * opened, and null clears a field.
          *
          * @returns {Record<string, any>}
          */
-        createValues() {
-            return this.valuesToSend(() => true);
-        },
-
-        /**
-         * The values to send to change an item: only the fields whose control holds something else than when the dialog
-         * opened (null clears a field).
-         *
-         * @returns {Record<string, any>}
-         */
-        changedValues() {
-            return this.valuesToSend(
-                (field) => JSON.stringify(this.values[field.id]) !== JSON.stringify(this.original[field.id]),
-            );
-        },
-
-        /**
-         * Converts what the controls hold into what the API takes, for the fields that pass the test.
-         *
-         * @param {(field: Field) => boolean} include
-         * @returns {Record<string, any>}
-         */
-        valuesToSend(include) {
+        valuesToSend() {
+            const editing = this.mode === 'edit';
             const values = {};
 
-            for (const field of this.fields.filter(include)) {
+            for (const field of this.fields) {
+                if (editing && JSON.stringify(this.values[field.id]) === JSON.stringify(this.original[field.id])) {
+                    continue;
+                }
+
                 const value = fromInput(field, this.values[field.id]);
 
-                // Adding an item: a field with nothing in it is simply left out. Changing one: null clears it.
-                if (value !== null || this.mode === 'edit') {
+                if (value !== null || editing) {
                     values[field.id] = value;
                 }
             }
@@ -868,7 +800,7 @@ export default function inventoryItems() {
             }
 
             const creating = this.mode === 'create';
-            const values = creating ? this.createValues() : this.changedValues();
+            const values = this.valuesToSend();
 
             // Nothing was changed: there is nothing to send.
             if (!creating && Object.keys(values).length === 0) {

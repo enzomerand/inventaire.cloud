@@ -36,7 +36,7 @@
         <div class="d-flex flex-wrap align-items-start gap-3 mb-3">
             <div class="me-auto">
                 <h1 class="page-title text-break" x-text="name">{{ $inventory->name }}</h1>
-                <p class="text-secondary text-break app-multiline mb-0 mt-1" :hidden="!hasDescription" x-text="description">{{ $inventory->description }}</p>
+                <p class="text-secondary text-break app-multiline mb-0 mt-1" :hidden="!description" x-text="description">{{ $inventory->description }}</p>
             </div>
             <div class="btn-list">
                 <a class="btn" x-show="canManageFields" href="{{ route('app.inventory.fields', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
@@ -357,7 +357,7 @@
                                             </div>
                                         </template>
 
-                                        <div class="text-danger small mt-1" x-show="hasError(field)" x-text="errorOf(field)"></div>
+                                        <div class="text-danger small mt-1" x-show="errorOf(field)" x-text="errorOf(field)"></div>
                                     </div>
                                 </template>
                             </div>

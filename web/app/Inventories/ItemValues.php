@@ -94,20 +94,17 @@ final class ItemValues
             $type = $this->types->get($field->type);
             $value = $given ? $type->prepare($sent[$ulid], $field) : null;
 
-            if ($type->isEmpty($value)) {
-                if ($field->required) {
-                    $prepared[$ulid] = null;
-                    $rules["values.{$ulid}"] = ['required'];
-                    $names["values.{$ulid}"] = $field->name;
-                } else {
-                    $cleared[$ulid] = true;
-                }
+            $empty = $type->isEmpty($value);
+
+            // An empty value clears an optional field; a required one has to have a value, which `required` refuses here.
+            if ($empty && ! $field->required) {
+                $cleared[$ulid] = true;
 
                 continue;
             }
 
-            $prepared[$ulid] = $value;
-            $rules["values.{$ulid}"] = ['bail', ...$type->valueRules($field)];
+            $prepared[$ulid] = $empty ? null : $value;
+            $rules["values.{$ulid}"] = $empty ? ['required'] : ['bail', ...$type->valueRules($field)];
             $names["values.{$ulid}"] = $field->name;
         }
 
@@ -136,10 +133,9 @@ final class ItemValues
             unset($stored[$ulid]);
         }
 
+        // Every value left was validated: the empty ones of required fields are refused above, so none is null.
         foreach ($prepared as $ulid => $value) {
-            if ($value !== null) {
-                $stored[$ulid] = $this->types->get($writable[$ulid]->type)->normalize($value, $writable[$ulid]);
-            }
+            $stored[$ulid] = $this->types->get($writable[$ulid]->type)->normalize($value, $writable[$ulid]);
         }
 
         return $stored;

@@ -120,7 +120,6 @@ const MESSAGES = {
     'account.error.sole_owner': 'Hand your workspaces over',
     'admin.settings.notice.opened': 'Sign-ups are open',
     'admin.settings.notice.closed': 'Sign-ups are closed',
-    'admin.users.range': ':first–:last of :total',
     'admin.users.workspace_count': 'Workspaces: :count',
     'admin.users.created_on': 'Created on :date',
     'admin.users.promote': 'Make administrator',

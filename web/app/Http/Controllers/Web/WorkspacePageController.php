@@ -34,7 +34,7 @@ final class WorkspacePageController extends Controller
     {
         Gate::authorize('view', $workspace);
 
-        $role = $this->enter($this->workspaces, $this->user($request), $workspace);
+        $role = $this->enter($this->user($request), $workspace);
 
         return view('app.workspace', [
             'workspace' => $workspace,

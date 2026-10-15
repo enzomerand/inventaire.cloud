@@ -250,10 +250,10 @@ describe('the fields of an inventory', () => {
         });
 
         it('names the buttons after the field', () => {
-            expect(component.upLabel(FIELDS[0])).toBe('Move Name up');
-            expect(component.downLabel(FIELDS[0])).toBe('Move Name down');
-            expect(component.editLabel(FIELDS[0])).toBe('Edit Name');
-            expect(component.deleteLabel(FIELDS[0])).toBe('Delete Name');
+            expect(component.named('fields.move_up_named', FIELDS[0])).toBe('Move Name up');
+            expect(component.named('fields.move_down_named', FIELDS[0])).toBe('Move Name down');
+            expect(component.named('fields.edit_named', FIELDS[0])).toBe('Edit Name');
+            expect(component.named('fields.delete_named', FIELDS[0])).toBe('Delete Name');
         });
     });
 
@@ -278,7 +278,7 @@ describe('the fields of an inventory', () => {
 
             component.selectType({ target: { value: 'number' } });
 
-            expect(component.isType('number')).toBe(true);
+            expect(component.form.type).toBe('number');
             expect(component.hasOption('decimals')).toBe(true);
             expect(component.hasOption('unit')).toBe(true);
             expect(component.hasOption('max_length')).toBe(false);
@@ -325,10 +325,10 @@ describe('the fields of an inventory', () => {
 
             for (const [type, set, expected] of [
                 ['money', (options) => (options.currency = 'USD'), { currency: 'USD' }],
-                ['rating', (options) => component.selectMax({ target: { value: '8' } }) ?? options, { max: 8 }],
+                ['rating', (options) => component.pick(options, 'max', { target: { value: '8' } }), { max: 8 }],
                 [
                     'barcode',
-                    (options) => component.selectFormat({ target: { value: 'isbn13' } }) ?? options,
+                    (options) => component.pick(options, 'format', { target: { value: 'isbn13' } }),
                     { format: 'isbn13' },
                 ],
             ]) {
@@ -348,7 +348,7 @@ describe('the fields of an inventory', () => {
             component.startCreate();
             component.selectType({ target: { value: 'money' } });
 
-            component.selectCurrency({ target: { value: 'USD' } });
+            component.pick(component.form.options, 'currency', { target: { value: 'USD' } });
 
             expect(component.form.options.currency).toBe('USD');
             expect(component.ratingMaxima).toEqual(['3', '4', '5', '6', '7', '8', '9', '10']);
@@ -374,7 +374,7 @@ describe('the fields of an inventory', () => {
             component.selectType({ target: { value: 'select' } });
             component.form.name = 'State';
             component.form.options.choices[0].label = 'New';
-            component.selectColor(component.form.options.choices[0], { target: { value: 'green' } });
+            component.pick(component.form.options.choices[0], 'color', { target: { value: 'green' } });
             component.addChoice();
             component.addChoice();
             component.form.options.choices[2].label = 'Used';
@@ -548,7 +548,7 @@ describe('the fields of an inventory', () => {
             http.patch.mockResolvedValue({ data: FIELDS[2] });
             await component.startEdit(FIELDS[2]);
             component.form.options.choices[0].label = 'Brand new';
-            component.selectColor(component.form.options.choices[0], { target: { value: 'blue' } });
+            component.pick(component.form.options.choices[0], 'color', { target: { value: 'blue' } });
             component.removeChoice(1);
             component.addChoice();
             component.form.options.choices[1].label = 'Refurbished';

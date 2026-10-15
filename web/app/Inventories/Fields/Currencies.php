@@ -42,7 +42,9 @@ final class Currencies
      */
     public static function fractionDigits(string $code): int
     {
-        return self::$digits[$code] ??= self::readFractionDigits($code);
+        // ICU is asked: a currency formatter for a locale that carries the currency knows its decimals.
+        return self::$digits[$code] ??= (new NumberFormatter('en@currency='.$code, NumberFormatter::CURRENCY))
+            ->getAttribute(NumberFormatter::FRACTION_DIGITS);
     }
 
     /**
@@ -139,15 +141,5 @@ final class Currencies
         $currencies = ResourceBundle::create('en', 'ICUDATA-curr')?->get('Currencies');
 
         return $currencies instanceof ResourceBundle && $currencies->get($code) instanceof ResourceBundle;
-    }
-
-    /**
-     * Asks ICU for the decimals of a currency: a currency formatter for a locale that carries the currency knows them.
-     */
-    private static function readFractionDigits(string $code): int
-    {
-        $formatter = new NumberFormatter('en@currency='.$code, NumberFormatter::CURRENCY);
-
-        return $formatter->getAttribute(NumberFormatter::FRACTION_DIGITS);
     }
 }

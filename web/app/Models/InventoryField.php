@@ -32,7 +32,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'type', 'options', 'required', 'position'])]
+#[Fillable(['name', 'type', 'options', 'required'])]
 final class InventoryField extends Model
 {
     /** @use HasFactory<InventoryFieldFactory> */

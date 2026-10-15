@@ -13,7 +13,7 @@ vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
 vi.mock('../../../resources/js/lib/i18n.js', () => ({
     t: (key, replacements = {}) => {
         const messages = {
-            'admin.users.range': ':first–:last of :total',
+            'pagination.range': ':first–:last of :total',
             'admin.users.workspace_count': 'Workspaces: :count',
             'admin.users.created_on': 'Created on :date',
             'admin.users.promote': 'Make administrator',

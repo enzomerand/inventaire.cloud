@@ -41,7 +41,7 @@ final class InventoryFieldsPageController extends Controller
     {
         Gate::authorize('manageFields', $inventory);
 
-        $this->enter($this->workspaces, $this->user($request), $workspace);
+        $this->enter($this->user($request), $workspace);
 
         // The currencies the fields already have are listed too, even one that went out of use since: the picker must be
         // able to show the currency a field is in.

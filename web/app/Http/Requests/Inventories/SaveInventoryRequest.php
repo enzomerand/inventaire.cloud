@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Requests\Inventories;
 
 use App\Models\Inventory;
-use App\Models\Workspace;
 use App\Policies\InventoryPolicy;
 use App\Rules\MultiLineText;
 use App\Rules\SingleLineText;
@@ -34,13 +33,10 @@ final class SaveInventoryRequest extends FormRequest
     public function authorize(): Response
     {
         $inventory = $this->route('inventory');
-        $workspace = $this->route('workspace');
 
-        return match (true) {
-            $inventory instanceof Inventory => Gate::inspect('update', $inventory),
-            $workspace instanceof Workspace => Gate::inspect('create', [Inventory::class, $workspace]),
-            default => Response::denyAsNotFound(),
-        };
+        return $inventory instanceof Inventory
+            ? Gate::inspect('update', $inventory)
+            : Gate::inspect('create', [Inventory::class, $this->route('workspace')]);
     }
 
     /**

@@ -9,8 +9,7 @@
 import { cell, emptyCell } from './cell.js';
 import { FALLBACK_TYPE, FIELD_TYPES, choicesOf, isBlank } from './types.js';
 
-export { badgeClass, swatchClass, COLORS } from './palette.js';
-export { choicesOf, isBlank, webAddress } from './types.js';
+export { choicesOf, webAddress } from './types.js';
 
 /**
  * @typedef {import('./types.js').Field} Field

@@ -614,7 +614,6 @@ describe('the items of an inventory', () => {
                 component.onInput(name, { target: { value: 'Saw' } });
 
                 expect(component.inputValue(name)).toBe('Saw');
-                expect(component.hasError(name)).toBe(false);
                 expect(component.errorOf(name)).toBe('');
             });
 
@@ -622,7 +621,6 @@ describe('the items of an inventory', () => {
                 const [name] = FIELDS;
                 component.errors = { name: 'Required.' };
 
-                expect(component.hasError(name)).toBe(true);
                 expect(component.errorOf(name)).toBe('Required.');
                 expect(component.controlClass(name)).toBe('form-control is-invalid');
                 expect(component.selectClass(name)).toBe('form-select is-invalid');
@@ -750,7 +748,7 @@ describe('the items of an inventory', () => {
 
                 expect(component.inputValue(tint)).toBe('');
                 expect(component.hasText(tint)).toBe(false);
-                expect(component.createValues()).toEqual({});
+                expect(component.valuesToSend()).toEqual({});
             });
         });
     });

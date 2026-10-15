@@ -162,7 +162,7 @@ final class InventoryFields
             $fields = $locked->fields()->get();
             $current = $this->find($fields, $field);
 
-            $this->purgeValues($locked, $current->ulid);
+            $this->rewriteValues($locked, $current->ulid, fn (array $values): array => array_diff_key($values, [$current->ulid => true]));
             $current->delete();
 
             $this->renumber($fields->reject(fn (InventoryField $other): bool => $other->is($current))->values());
@@ -248,20 +248,6 @@ final class InventoryFields
         }
 
         return $ordered;
-    }
-
-    /**
-     * Removes the key of a field from the values of every item of the inventory.
-     *
-     * @throws JsonException
-     */
-    private function purgeValues(Inventory $inventory, string $ulid): void
-    {
-        $this->rewriteValues($inventory, $ulid, function (array $values) use ($ulid): array {
-            unset($values[$ulid]);
-
-            return $values;
-        });
     }
 
     /**

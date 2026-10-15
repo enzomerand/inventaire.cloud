@@ -96,16 +96,16 @@
                             </div>
                             <div class="col-12 col-md-auto">
                                 <div class="d-flex flex-wrap gap-2">
-                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="upLabel(field)" :title="upLabel(field)" @click="moveUp(field)" :disabled="busy || isFirst(field)">
+                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="named('fields.move_up_named', field)" :title="named('fields.move_up_named', field)" @click="moveUp(field)" :disabled="busy || isFirst(field)">
                                         <x-tabler-arrow-up aria-hidden="true" />
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="downLabel(field)" :title="downLabel(field)" @click="moveDown(field)" :disabled="busy || isLast(field)">
+                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="named('fields.move_down_named', field)" :title="named('fields.move_down_named', field)" @click="moveDown(field)" :disabled="busy || isLast(field)">
                                         <x-tabler-arrow-down aria-hidden="true" />
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="editLabel(field)" :title="editLabel(field)" @click="startEdit(field)" :disabled="busy">
+                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="named('fields.edit_named', field)" :title="named('fields.edit_named', field)" @click="startEdit(field)" :disabled="busy">
                                         <x-tabler-pencil aria-hidden="true" />
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-icon btn-outline-danger" :aria-label="deleteLabel(field)" :title="deleteLabel(field)" @click="askDelete(field)" :disabled="busy">
+                                    <button type="button" class="btn btn-sm btn-icon btn-outline-danger" :aria-label="named('fields.delete_named', field)" :title="named('fields.delete_named', field)" @click="askDelete(field)" :disabled="busy">
                                         <x-tabler-trash aria-hidden="true" />
                                     </button>
                                 </div>
@@ -145,7 +145,7 @@
                             <label class="form-label" for="field-type">{{ __('Type') }}</label>
                             <select id="field-type" :class="selectClass('type')" :disabled="editing" @change="selectType($event)">
                                 <template x-for="type in types" :key="type.type">
-                                    <option :value="type.type" :selected="isPicked(form.type, type.type)" x-text="type.label"></option>
+                                    <option :value="type.type" :selected="form.type === type.type" x-text="type.label"></option>
                                 </template>
                             </select>
                             <div class="form-hint" x-show="editing">{{ __('The type of a field cannot be changed once it is created.') }}</div>
@@ -178,7 +178,7 @@
                             </div>
                         </template>
 
-                        <template x-if="isType('number')">
+                        <template x-if="form.type === 'number'">
                             <div class="row">
                                 <div class="col-12 col-sm-6 mb-3">
                                     <label class="form-label" for="field-min">{{ __('Minimum') }}</label>
@@ -205,21 +205,21 @@
                         <template x-if="hasOption('currency')">
                             <div class="mb-3">
                                 <label class="form-label" for="field-currency">{{ __('Currency') }}</label>
-                                <select id="field-currency" :class="selectClass('options.currency')" @change="selectCurrency($event)">
+                                <select id="field-currency" :class="selectClass('options.currency')" @change="pick(form.options, 'currency', $event)">
                                     <template x-for="currency in currencies" :key="currency.code">
-                                        <option :value="currency.code" :selected="isPicked(form.options.currency, currency.code)" x-text="currencyName(currency.code)"></option>
+                                        <option :value="currency.code" :selected="form.options.currency === currency.code" x-text="currencyName(currency.code)"></option>
                                     </template>
                                 </select>
                                 <div class="text-danger small mt-1" x-show="errorOf('options.currency')" x-text="errorOf('options.currency')"></div>
                             </div>
                         </template>
 
-                        <template x-if="isType('rating')">
+                        <template x-if="form.type === 'rating'">
                             <div class="mb-3">
                                 <label class="form-label" for="field-rating-max">{{ __('Highest grade') }}</label>
-                                <select id="field-rating-max" :class="selectClass('options.max')" @change="selectMax($event)">
+                                <select id="field-rating-max" :class="selectClass('options.max')" @change="pick(form.options, 'max', $event)">
                                     <template x-for="grade in ratingMaxima" :key="grade">
-                                        <option :value="grade" :selected="isPicked(form.options.max, grade)" x-text="grade"></option>
+                                        <option :value="grade" :selected="form.options.max === grade" x-text="grade"></option>
                                     </template>
                                 </select>
                                 <div class="text-danger small mt-1" x-show="errorOf('options.max')" x-text="errorOf('options.max')"></div>
@@ -229,9 +229,9 @@
                         <template x-if="hasOption('format')">
                             <div class="mb-3">
                                 <label class="form-label" for="field-format">{{ __('Format') }}</label>
-                                <select id="field-format" :class="selectClass('options.format')" @change="selectFormat($event)">
+                                <select id="field-format" :class="selectClass('options.format')" @change="pick(form.options, 'format', $event)">
                                     <template x-for="format in formats" :key="format.value">
-                                        <option :value="format.value" :selected="isPicked(form.options.format, format.value)" x-text="format.label"></option>
+                                        <option :value="format.value" :selected="form.options.format === format.value" x-text="format.label"></option>
                                     </template>
                                 </select>
                                 <div class="form-hint">{{ __('A format other than "Any code" checks the digits and the check digit of every code.') }}</div>
@@ -247,9 +247,9 @@
                                         <div class="input-group">
                                             <span class="input-group-text"><span :class="swatch(choice)" aria-hidden="true"></span></span>
                                             <input type="text" class="form-control" x-model="choice.label" maxlength="100" autocomplete="off" aria-label="{{ __('Choice') }}">
-                                            <select class="form-select flex-grow-0 w-auto" aria-label="{{ __('Color of the choice') }}" @change="selectColor(choice, $event)">
+                                            <select class="form-select flex-grow-0 w-auto" aria-label="{{ __('Color of the choice') }}" @change="pick(choice, 'color', $event)">
                                                 <template x-for="color in colors" :key="color.value">
-                                                    <option :value="color.value" :selected="isPicked(choice.color, color.value)" x-text="color.label"></option>
+                                                    <option :value="color.value" :selected="choice.color === color.value" x-text="color.label"></option>
                                                 </template>
                                             </select>
                                             <button type="button" class="btn btn-icon btn-outline-danger" :aria-label="removeChoiceLabel(choice)" :title="removeChoiceLabel(choice)" @click="removeChoice(index)">

@@ -85,8 +85,7 @@ describe('the registry', function (): void {
     it('answers for a key it does not know', function (): void {
         $types = app(FieldTypes::class);
 
-        expect($types->has('text'))->toBeTrue()
-            ->and($types->has('relation'))->toBeFalse()
+        expect($types->find('text'))->toBeInstanceOf(FieldType::class)
             ->and($types->find('relation'))->toBeNull()
             ->and($types->of(new InventoryField(['type' => 'relation'])))->toBeNull()
             ->and($types->of(new InventoryField(['type' => 'text'])))->toBeInstanceOf(FieldType::class);

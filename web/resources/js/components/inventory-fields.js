@@ -252,43 +252,14 @@ export default function inventoryFields() {
         },
 
         /**
-         * The accessible name of the button that moves a field up.
+         * The accessible name of a button that acts on a field: the message with the name of the field in it.
          *
+         * @param {string} key The key of the message (`fields.move_up_named`, `fields.edit_named`...).
          * @param {Field} field
          * @returns {string}
          */
-        upLabel(field) {
-            return t('fields.move_up_named', { name: field.name });
-        },
-
-        /**
-         * The accessible name of the button that moves a field down.
-         *
-         * @param {Field} field
-         * @returns {string}
-         */
-        downLabel(field) {
-            return t('fields.move_down_named', { name: field.name });
-        },
-
-        /**
-         * The accessible name of the button that changes a field.
-         *
-         * @param {Field} field
-         * @returns {string}
-         */
-        editLabel(field) {
-            return t('fields.edit_named', { name: field.name });
-        },
-
-        /**
-         * The accessible name of the button that deletes a field.
-         *
-         * @param {Field} field
-         * @returns {string}
-         */
-        deleteLabel(field) {
-            return t('fields.delete_named', { name: field.name });
+        named(key, field) {
+            return t(key, { name: field.name });
         },
 
         /**
@@ -422,16 +393,6 @@ export default function inventoryFields() {
         },
 
         /**
-         * Whether a type is the one picked in the dialog.
-         *
-         * @param {string} type
-         * @returns {boolean}
-         */
-        isType(type) {
-            return this.form.type === type;
-        },
-
-        /**
          * Whether the type picked in the dialog has an option.
          *
          * @param {string} name
@@ -442,55 +403,15 @@ export default function inventoryFields() {
         },
 
         /**
-         * Whether an option of a list (a type, a currency, a format, a color) is the one picked.
+         * Takes the option picked in a list of the dialog (a currency, a format, the highest grade, the color of a choice).
          *
-         * @param {string} picked
-         * @param {string} value
-         * @returns {boolean}
-         */
-        isPicked(picked, value) {
-            return picked === value;
-        },
-
-        /**
-         * Takes the currency picked in the dialog.
-         *
+         * @param {Record<string, any>} target The object that holds the option: the options of the form, or a choice.
+         * @param {string} key The name of the option.
          * @param {Event} event
          * @returns {void}
          */
-        selectCurrency(event) {
-            this.form.options.currency = /** @type {HTMLSelectElement} */ (event.target).value;
-        },
-
-        /**
-         * Takes the format picked in the dialog.
-         *
-         * @param {Event} event
-         * @returns {void}
-         */
-        selectFormat(event) {
-            this.form.options.format = /** @type {HTMLSelectElement} */ (event.target).value;
-        },
-
-        /**
-         * Takes the highest grade picked in the dialog.
-         *
-         * @param {Event} event
-         * @returns {void}
-         */
-        selectMax(event) {
-            this.form.options.max = /** @type {HTMLSelectElement} */ (event.target).value;
-        },
-
-        /**
-         * Takes the color picked for a choice.
-         *
-         * @param {{ color: string }} choice
-         * @param {Event} event
-         * @returns {void}
-         */
-        selectColor(choice, event) {
-            choice.color = /** @type {HTMLSelectElement} */ (event.target).value;
+        pick(target, key, event) {
+            target[key] = /** @type {HTMLSelectElement} */ (event.target).value;
         },
 
         /**
@@ -595,8 +516,7 @@ export default function inventoryFields() {
             }
 
             this.busy = true;
-            this.errors = {};
-            this.formError = '';
+            this.resetDialog();
 
             const body = {
                 name: this.form.name.trim(),

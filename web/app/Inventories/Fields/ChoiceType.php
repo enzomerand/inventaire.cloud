@@ -115,7 +115,7 @@ abstract class ChoiceType extends AbstractFieldType
             $choice = is_array($choice) ? $choice : [];
             $id = $choice['id'] ?? null;
 
-            if (! is_string($id) || ! isset($known[$id]) || $this->usedIn($choices, $id)) {
+            if (! is_string($id) || ! isset($known[$id]) || in_array($id, array_column($choices, 'id'), true)) {
                 $id = $this->freshId($taken);
             }
 
@@ -171,16 +171,6 @@ abstract class ChoiceType extends AbstractFieldType
         }
 
         return $found;
-    }
-
-    /**
-     * Whether a choice with this id is already in the list being built.
-     *
-     * @param  list<array{id: string, label: string, color?: string}>  $choices
-     */
-    private function usedIn(array $choices, string $id): bool
-    {
-        return in_array($id, array_column($choices, 'id'), true);
     }
 
     /**

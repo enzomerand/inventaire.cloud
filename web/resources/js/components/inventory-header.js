@@ -72,11 +72,6 @@ export default function inventoryHeader() {
             return this.$root.dataset.canManageFields === '1';
         },
 
-        /** Whether the inventory has a description to show. */
-        get hasDescription() {
-            return this.description !== '';
-        },
-
         /** Whether the form can be submitted: it has a name, and nothing else is in flight. */
         get canSubmit() {
             return !this.busy && this.form.name.trim() !== '';
@@ -113,8 +108,7 @@ export default function inventoryHeader() {
          */
         startEdit() {
             this.form = { name: this.name, description: this.description };
-            this.errors = {};
-            this.formError = '';
+            this.resetForm();
             showModal(this.$refs.editModal);
         },
 
@@ -139,8 +133,7 @@ export default function inventoryHeader() {
             }
 
             this.busy = true;
-            this.errors = {};
-            this.formError = '';
+            this.resetForm();
 
             try {
                 const description = this.form.description.trim();

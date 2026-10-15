@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Inventories;
 
-use App\Models\Inventory;
 use App\Models\Item;
 use App\Policies\InventoryPolicy;
 use Illuminate\Auth\Access\Response;
@@ -25,11 +24,7 @@ final class SaveItemRequest extends FormRequest
      */
     public function authorize(): Response
     {
-        $inventory = $this->route('inventory');
-
-        return $inventory instanceof Inventory
-            ? Gate::inspect('editItems', $inventory)
-            : Response::denyAsNotFound();
+        return Gate::inspect('editItems', $this->route('inventory'));
     }
 
     /**

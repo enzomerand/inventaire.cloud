@@ -6,7 +6,6 @@ namespace App\Http\Requests\Inventories;
 
 use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
-use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Policies\InventoryPolicy;
 use App\Rules\SingleLineText;
@@ -35,11 +34,7 @@ final class SaveFieldRequest extends FormRequest
      */
     public function authorize(): Response
     {
-        $inventory = $this->route('inventory');
-
-        return $inventory instanceof Inventory
-            ? Gate::inspect('manageFields', $inventory)
-            : Response::denyAsNotFound();
+        return Gate::inspect('manageFields', $this->route('inventory'));
     }
 
     /**
@@ -52,7 +47,7 @@ final class SaveFieldRequest extends FormRequest
         $field = $this->route('field');
         $creating = ! $field instanceof InventoryField;
         $types = app(FieldTypes::class);
-        $type = $creating ? $types->find($this->sentType()) : $types->of($field);
+        $type = $this->typeOfField();
 
         $rules = [
             'type' => $creating
