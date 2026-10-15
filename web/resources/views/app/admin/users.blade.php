@@ -44,7 +44,9 @@
                     </form>
                 </div>
                 <div class="list-group list-group-flush">
-                    <div class="list-group-item text-secondary" x-show="loading" role="status">
+                    {{-- Hidden with the "hidden" attribute, not x-show: Alpine shows an element a tick late and hides it at once, so a
+                         state that goes up and down faster than that (a local server answers in a few milliseconds) would leave it on. --}}
+                    <div class="list-group-item text-secondary" :hidden="!loading" role="status">
                         <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
                         {{ __('Loading…') }}
                     </div>
@@ -103,7 +105,7 @@
                         </div>
                     </template>
 
-                    <div class="list-group-item text-secondary" x-show="empty">{{ __('No account found.') }}</div>
+                    <div class="list-group-item text-secondary" :hidden="!empty">{{ __('No account found.') }}</div>
                 </div>
                 <div class="card-footer d-flex align-items-center gap-2">
                     <p class="m-0 text-secondary" x-text="rangeLabel"></p>

@@ -60,6 +60,8 @@ describe('the administration pages', function (): void {
             ->assertOk()
             ->assertSee('x-data="adminUsers"', false)
             ->assertSee('data-url="/api/v1/admin/users"', false)
+            // The rows that go up and down at once are hidden by attribute: x-show would show them a tick late and could leave them on.
+            ->assertSee(':hidden="!loading"', false)
             ->assertSee('Search by name or email address')
             ->assertSee('New account')
             ->assertSee('Create the account')

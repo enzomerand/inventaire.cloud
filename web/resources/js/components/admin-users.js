@@ -53,8 +53,8 @@ export default function adminUsers() {
         from: 0,
         to: 0,
 
-        /** True while a page is being read. */
-        loading: false,
+        /** True while a page is being read (and until the first one is, so that the empty message does not flash). */
+        loading: true,
 
         /** True while a change is in flight; blocks double submits. */
         busy: false,

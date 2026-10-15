@@ -223,10 +223,10 @@ describe('the workspaces and account pages under the real Alpine CSP build', () 
         await flush();
     }
 
-    /** Whether nothing between an element and the page hides it. */
+    /** Whether nothing between an element and the page hides it (`x-show` sets a style, `:hidden` the attribute). */
     function visible(element) {
         for (let node = element; node && node !== document.body; node = node.parentElement) {
-            if (node.style.display === 'none') {
+            if (node.style.display === 'none' || node.hidden) {
                 return false;
             }
         }
