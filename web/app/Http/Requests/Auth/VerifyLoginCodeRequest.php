@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Auth;
 
 use App\Auth\EmailAddress;
+use App\Rules\PersonName;
 use App\Services\OneTimeCode;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -22,7 +23,7 @@ final class VerifyLoginCodeRequest extends FormRequest
         return [
             'email' => EmailAddress::rules(),
             'code' => ['required', 'string', 'digits:'.OneTimeCode::LENGTH],
-            'name' => ['nullable', 'string', 'max:255'],
+            'name' => ['nullable', 'string', 'max:'.PersonName::MAX_LENGTH, new PersonName],
         ];
     }
 
@@ -48,13 +49,14 @@ final class VerifyLoginCodeRequest extends FormRequest
      */
     public function name(): ?string
     {
-        $name = $this->string('name')->trim()->toString();
+        $name = $this->string('name')->toString();
 
         return $name === '' ? null : $name;
     }
 
     /**
-     * Cleans the input before it is validated: canonical address, no spaces in the code.
+     * Cleans the input before it is validated: canonical address, no spaces in the code, a trimmed name (so that a
+     * name made of spaces counts as missing).
      */
     protected function prepareForValidation(): void
     {
@@ -66,6 +68,10 @@ final class VerifyLoginCodeRequest extends FormRequest
 
         if (is_string($this->input('code'))) {
             $clean['code'] = preg_replace('/\s+/', '', $this->input('code'));
+        }
+
+        if (is_string($this->input('name'))) {
+            $clean['name'] = PersonName::trim($this->input('name'));
         }
 
         $this->merge($clean);

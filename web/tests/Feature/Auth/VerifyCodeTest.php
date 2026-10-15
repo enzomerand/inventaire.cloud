@@ -131,6 +131,15 @@ describe('a new account', function (): void {
         expect(User::query()->count())->toBe(1);
     });
 
+    it('refuses a name with a control character, and keeps the code', function (string $name): void {
+        $code = receiveCode($this, 'new@example.com');
+
+        typeCode($this, 'new@example.com', $code, ['name' => $name])->assertUnprocessable()->assertJsonValidationErrors('name');
+
+        expect(User::query()->count())->toBe(0)
+            ->and(LoginCode::query()->findOrFail('new@example.com')->attempts)->toBe(0);
+    })->with('names with a control character');
+
     it('does not create an account on a wrong code, whatever the name', function (): void {
         $code = receiveCode($this, 'new@example.com');
 
