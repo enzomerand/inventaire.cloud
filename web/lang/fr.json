@@ -113,7 +113,7 @@
     "Delete my account for good": "Supprimer définitivement mon compte",
     "Delete my account…": "Supprimer mon compte…",
     "Delete the account of :name": "Supprimer le compte de :name",
-    "Delete the account of :name, and the workspaces only this person belongs to? Workspaces shared with other people are handed over to their longest-standing member. This cannot be undone.": "Supprimer le compte de :name, ainsi que les espaces de travail auxquels seule cette personne appartient ? Les espaces partagés avec d'autres personnes sont confiés à leur membre le plus ancien. Cette action est irréversible.",
+    "Delete the account of :name, and the workspaces only this person belongs to? Workspaces shared with other people are handed over to their longest-standing editor, or else to their longest-standing member. This cannot be undone.": "Supprimer le compte de :name, ainsi que les espaces de travail auxquels seule cette personne appartient ? Les espaces partagés avec d'autres personnes sont confiés à leur éditeur le plus ancien, ou à défaut à leur membre le plus ancien. Cette action est irréversible.",
     "Deleting your account erases your profile and the workspaces that only you belong to, with everything in them. You simply leave the workspaces you share with other people. This cannot be undone.": "Supprimer votre compte efface votre profil et les espaces de travail auxquels vous seul appartenez, avec tout ce qu'ils contiennent. Vous quittez simplement les espaces de travail que vous partagez avec d'autres personnes. Cette action est irréversible.",
     "Detach": "Détacher",
     "Details": "Détails",

@@ -75,7 +75,7 @@ class ClientMessages extends Component
             'admin.users.promote_named' => __('Make :name an administrator'),
             'admin.users.demote_named' => __('Remove :name from the administrators'),
             'admin.users.delete_named' => __('Delete the account of :name'),
-            'admin.users.confirm_delete' => __('Delete the account of :name, and the workspaces only this person belongs to? Workspaces shared with other people are handed over to their longest-standing member. This cannot be undone.'),
+            'admin.users.confirm_delete' => __('Delete the account of :name, and the workspaces only this person belongs to? Workspaces shared with other people are handed over to their longest-standing editor, or else to their longest-standing member. This cannot be undone.'),
             'admin.users.notice.created' => __('Account created. The person is emailed how to sign in.'),
             'admin.users.notice.promoted' => __('Administrator rights granted.'),
             'admin.users.notice.demoted' => __('Administrator rights removed.'),
