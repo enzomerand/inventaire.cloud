@@ -29,6 +29,8 @@ final class ApplicationTables
         'failed_jobs',
         'personal_access_tokens',
         'login_codes',
+        'workspaces',
+        'workspace_user',
     ];
 
     /**

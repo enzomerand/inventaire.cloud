@@ -16,6 +16,8 @@ use App\Installer\Mail\SetupCodeMail;
 use App\Installer\Probes\MailProbe;
 use App\Installer\SetupToken;
 use App\Models\User;
+use App\Models\Workspace;
+use App\Workspaces\WorkspaceRole;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -250,7 +252,11 @@ describe('the hook', function (): void {
         expect($user->name)->toBe('Jane Doe')
             ->and($user->email)->toBe('jane@example.test')
             ->and($user->is_admin)->toBeTrue()
-            ->and($user->email_verified_at)->toBeNull();
+            ->and($user->email_verified_at)->toBeNull()
+            // Like every account, the administrator starts with a personal workspace that they own.
+            ->and($user->workspaces)->toHaveCount(1)
+            ->and($user->workspaces->sole()->pivot->role)->toBe(WorkspaceRole::Owner)
+            ->and($user->current_workspace_id)->toBe($user->workspaces->sole()->id);
     });
 
     it('is idempotent: running it again changes nothing', function (): void {
@@ -261,7 +267,8 @@ describe('the hook', function (): void {
         app(CreateAdministrator::class)->run();
 
         expect(User::query()->count())->toBe(1)
-            ->and(User::query()->sole()->updated_at->equalTo($first->updated_at))->toBeTrue();
+            ->and(User::query()->sole()->updated_at->equalTo($first->updated_at))->toBeTrue()
+            ->and(Workspace::query()->count())->toBe(1);
     });
 
     it('promotes the account that already has the address, and keeps its name', function (): void {
@@ -272,7 +279,9 @@ describe('the hook', function (): void {
 
         expect(User::query()->count())->toBe(1)
             ->and($existing->fresh()->is_admin)->toBeTrue()
-            ->and($existing->fresh()->name)->toBe('Already Here');
+            ->and($existing->fresh()->name)->toBe('Already Here')
+            // An account that predates workspaces is given its personal one on the way.
+            ->and($existing->fresh()->workspaces)->toHaveCount(1);
     });
 
     it('aborts the installation when the step has no usable values', function (): void {

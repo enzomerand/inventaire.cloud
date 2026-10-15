@@ -39,6 +39,11 @@ pest()->in('Feature/Installer')
 
         $connection = DB::connection($name);
 
+        // Workspaces first: deleting a user takes its memberships along but not the workspaces they leave behind.
+        if ($connection->getSchemaBuilder()->hasTable('workspaces')) {
+            $connection->table('workspaces')->delete();
+        }
+
         if ($connection->getSchemaBuilder()->hasTable('users')) {
             $connection->table('users')->delete();
         }

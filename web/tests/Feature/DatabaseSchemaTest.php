@@ -26,6 +26,8 @@ it('creates the core tables', function (string $table): void {
     'failed_jobs',
     'personal_access_tokens',
     'login_codes',
+    'workspaces',
+    'workspace_user',
 ]);
 
 it('no longer has the password reset tokens table', function (): void {

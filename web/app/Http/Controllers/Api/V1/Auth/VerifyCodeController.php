@@ -13,6 +13,7 @@ use App\Http\Requests\Auth\VerifyLoginCodeRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\LocaleResolver;
+use App\Workspaces\Workspaces;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -28,13 +29,16 @@ use Illuminate\Support\Str;
  * somebody who holds a valid code for it.
  *
  * Spending the code and everything that is saved because of it (the account,
- * its verified address, its language) is one transaction: if any of it fails,
+ * its verified address, its language, its workspace) is one transaction: if any of it fails,
  * the code is still there for the next try. The session is opened once the
  * transaction has committed.
  */
 final class VerifyCodeController extends Controller
 {
-    public function __construct(private readonly DatabaseManager $db) {}
+    public function __construct(
+        private readonly DatabaseManager $db,
+        private readonly Workspaces $workspaces,
+    ) {}
 
     /**
      * Checks the code and signs the person in, creating the account if needed.
@@ -93,8 +97,11 @@ final class VerifyCodeController extends Controller
     }
 
     /**
-     * Makes sure the account carries a verified address, a language and a
-     * "remember me" token, so that opening the session afterwards saves nothing.
+     * Makes sure the account carries a verified address, a language, a
+     * "remember me" token and a workspace, so that opening the session
+     * afterwards saves nothing and the person's space always has somewhere to
+     * work (an account that predates workspaces, or lost its last one, gets
+     * its personal workspace here).
      */
     private function prepareSession(User $user, LocaleResolver $locales): void
     {
@@ -113,6 +120,8 @@ final class VerifyCodeController extends Controller
         }
 
         $user->save();
+
+        $this->workspaces->ensure($user);
     }
 
     /**

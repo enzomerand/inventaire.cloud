@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Auth\EmailAddress;
+use App\Workspaces\Workspaces;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -32,6 +34,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string $email
  * @property string|null $locale
  * @property bool $is_admin
+ * @property int|null $current_workspace_id The workspace the person is working in (null until they pick one: see {@see Workspaces::current()}).
  * @property Carbon|null $email_verified_at
  */
 #[Fillable(['name', 'email', 'locale'])]
@@ -60,6 +63,7 @@ class User extends Authenticatable implements HasLocalePreference
         return [
             'email_verified_at' => 'datetime',
             'is_admin' => 'boolean',
+            'current_workspace_id' => 'integer',
         ];
     }
 
@@ -86,6 +90,19 @@ class User extends Authenticatable implements HasLocalePreference
     public function getAuthPassword(): string
     {
         return '';
+    }
+
+    /**
+     * The workspaces the user belongs to, each with a `pivot` carrying their role in it.
+     *
+     * @return BelongsToMany<Workspace, $this, WorkspaceMember>
+     */
+    public function workspaces(): BelongsToMany
+    {
+        return $this->belongsToMany(Workspace::class, 'workspace_user')
+            ->using(WorkspaceMember::class)
+            ->withPivot(['id', 'role'])
+            ->withTimestamps();
     }
 
     /**

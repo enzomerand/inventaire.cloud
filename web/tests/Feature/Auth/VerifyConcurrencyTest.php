@@ -30,6 +30,7 @@ afterEach(fn () => removeCommittedRows());
 function removeCommittedRows(): void
 {
     DB::table('login_codes')->delete();
+    DB::table('workspaces')->delete();
     DB::table('users')->delete();
     DB::table((string) config('cache.stores.database.table'))->delete();
 }
