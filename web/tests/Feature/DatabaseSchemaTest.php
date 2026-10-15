@@ -30,6 +30,9 @@ it('creates the core tables', function (string $table): void {
     'workspace_user',
     'account_deletion_codes',
     'settings',
+    'inventories',
+    'inventory_fields',
+    'items',
 ]);
 
 it('no longer has the password reset tokens table', function (): void {

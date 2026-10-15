@@ -8,6 +8,7 @@ use App\Auth\EmailAddress;
 use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
+use App\Inventories\Fields\FieldTypes;
 use App\Models\User;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
@@ -33,6 +34,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Read once per request and no longer (see the class), so a worker that serves many requests starts afresh.
         $this->app->scoped(InstanceSettings::class);
+
+        // The field types are stateless objects: one registry for the whole process.
+        $this->app->singleton(FieldTypes::class, fn (): FieldTypes => FieldTypes::standard());
     }
 
     /**

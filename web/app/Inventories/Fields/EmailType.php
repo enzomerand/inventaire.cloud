@@ -1,0 +1,38 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Inventories\Fields;
+
+use App\Models\InventoryField;
+
+/**
+ * An email address of a contact or a supplier, kept as it was written (trimmed). At most 254 characters, the longest
+ * an address can be.
+ *
+ * Unlike the address of an account (`App\Auth\EmailAddress`), it is not turned into a canonical form: it is data
+ * about somebody else, shown back to the person who typed it, not a key to sign in with.
+ */
+final class EmailType extends AbstractFieldType
+{
+    /** Longest address, in characters. */
+    public const MAX_LENGTH = 254;
+
+    public function key(): string
+    {
+        return 'email';
+    }
+
+    public function label(): string
+    {
+        return __('Email address');
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    public function valueRules(InventoryField $field): array
+    {
+        return ['string', 'max:'.self::MAX_LENGTH, 'email'];
+    }
+}
