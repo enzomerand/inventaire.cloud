@@ -130,6 +130,38 @@ describe('making an administrator', function (): void {
         personalWorkspaceOf($user);
     });
 
+    it('is run again when the database picks the creation of the account as the loser of a deadlock', function (): void {
+        $tries = 0;
+        User::creating(function () use (&$tries): void {
+            if (++$tries === 1) {
+                throw lostDeadlock();
+            }
+        });
+
+        [$user, $change] = app(Accounts::class)->administrator('jane@example.test', 'Jane');
+
+        expect($change)->toBe(AdministratorChange::Created)
+            ->and($tries)->toBe(2)
+            ->and(User::query()->count())->toBe(1);
+        personalWorkspaceOf($user);
+    });
+
+    it('is run again when the database picks the promotion of the account as the loser of a deadlock', function (): void {
+        $user = User::factory()->create(['email' => 'jane@example.test']);
+        $tries = 0;
+        User::updating(function () use (&$tries): void {
+            if (++$tries === 1) {
+                throw lostDeadlock();
+            }
+        });
+
+        [, $change] = app(Accounts::class)->administrator('jane@example.test', 'Jane');
+
+        expect($change)->toBe(AdministratorChange::Promoted)
+            ->and($user->refresh()->is_admin)->toBeTrue();
+        personalWorkspaceOf($user);
+    });
+
     it('creates no second workspace when it is run again', function (): void {
         app(Accounts::class)->administrator('jane@example.test', 'Jane');
         app(Accounts::class)->administrator('jane@example.test', 'Jane');

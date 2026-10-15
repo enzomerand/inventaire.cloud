@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Installer\Settings\DatabaseSettings;
 use Illuminate\Cache\RateLimiter;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
@@ -197,4 +198,23 @@ function lastSentCode(): string
     preg_match('/\b(\d{6})\b/', (string) end($mails)->getTextBody(), $matches);
 
     return $matches[1] ?? '';
+}
+
+/**
+ * A query failure as the PDO drivers report it: the SQLSTATE, the error code of the driver and its message.
+ */
+function queryFailure(string $state, int|string $code, string $message): QueryException
+{
+    $driver = new PDOException($message);
+    $driver->errorInfo = [$state, $code, $message];
+
+    return new QueryException('testing', 'select 1', [], $driver);
+}
+
+/**
+ * The failure of a transaction that the database picked as the loser of a deadlock, the way MySQL and MariaDB report it.
+ */
+function lostDeadlock(): QueryException
+{
+    return queryFailure('40001', 1213, 'Deadlock found when trying to get lock; try restarting transaction');
 }

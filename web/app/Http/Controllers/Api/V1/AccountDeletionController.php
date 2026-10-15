@@ -13,6 +13,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Account\DeleteAccountRequest;
 use App\Http\Responses\ApiError;
 use App\Mail\AccountDeletionCodeMail;
+use App\Models\User;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
@@ -69,7 +70,7 @@ final class AccountDeletionController extends Controller
      * A code that is not right is a `422` with a `code` (`deletion_code_wrong`, `deletion_code_expired`,
      * `deletion_code_exhausted`); an account that cannot be deleted yet is a `409` (`last_administrator`,
      * `sole_owner_of_shared_workspaces`) and keeps its code, so that nothing has to be asked again; an account that
-     * somebody else deleted in the meantime is a `404` (`account_not_found`).
+     * somebody else deleted in the meantime is a `404` (`account_not_found`), after which this device is signed out too.
      */
     public function destroy(DeleteAccountRequest $request): JsonResponse|Response
     {
@@ -85,12 +86,30 @@ final class AccountDeletionController extends Controller
             $user->delete();
         } catch (AccountDeletionRefused $refusal) {
             return $this->refusal($refusal);
-        } catch (ModelNotFoundException) {
+        } catch (ModelNotFoundException $exception) {
+            // Only the account itself being gone means "nothing to delete": any other model not found is a failure.
+            if ($exception->getModel() !== User::class) {
+                throw $exception;
+            }
+
             // Somebody else deleted the account while this was being confirmed: there is nothing left to delete, and
-            // this request must not report a deletion it did not make.
+            // this request must not report a deletion it did not make. The account is gone all the same, so this
+            // device is signed out of it like after a deletion.
+            $this->endSession($request);
+
             return ApiError::notFound(__('This account no longer exists.'), 'account_not_found');
         }
 
+        $this->endSession($request);
+
+        return response()->noContent();
+    }
+
+    /**
+     * Signs this device out of an account that no longer exists, and ends its session.
+     */
+    private function endSession(Request $request): void
+    {
         /** @var SessionGuard $guard */
         $guard = Auth::guard('web');
         $guard->logoutCurrentDevice();
@@ -102,8 +121,6 @@ final class AccountDeletionController extends Controller
         // answer leaves would otherwise be stamped with its id, by the guard that authenticated the request.
         Auth::forgetGuards();
         app()->forgetInstance('auth.driver');
-
-        return response()->noContent();
     }
 
     /**

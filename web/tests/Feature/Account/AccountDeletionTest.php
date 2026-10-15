@@ -438,6 +438,40 @@ describe('an account that is gone when the deletion is confirmed', function (): 
             ->assertNotFound()
             ->assertJsonPath('message', "Ce compte n'existe plus.");
     });
+
+    it('signs this device out all the same: the account it was signed in to is gone', function (): void {
+        User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.com']);
+        $laptop = new Device($this);
+        $laptop->signIn('ada@example.com')->assertOk();
+        $laptop->request('POST', '/api/v1/me/deletion-code')->assertOk();
+        $code = lastSentCode();
+        $user = User::query()->where('email', 'ada@example.com')->sole();
+        $gone = false;
+        DB::listen(function ($query) use ($user, &$gone): void {
+            if (! $gone && stripos($query->sql, 'for update') !== false && stripos($query->sql, 'login_codes') !== false) {
+                $gone = true;
+                DB::table('users')->where('id', $user->id)->delete();
+            }
+        });
+
+        $laptop->request('DELETE', '/api/v1/me', ['code' => $code])->assertNotFound()->assertJsonPath('code', 'account_not_found');
+
+        // (The simulated deletion was rolled back with the request, so the account is still there for the session to
+        // find: what ends it is the answer itself.)
+        expect($gone)->toBeTrue()
+            ->and($laptop->rememberCookieName())->toBeNull();
+        $laptop->request('GET', '/api/v1/me')->assertUnauthorized();
+    });
+
+    it('is not what another record that was not found means: that is a failure, not an account that is gone', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $code = deletionCodeFor($this, $user);
+        Workspace::deleting(fn () => throw (new ModelNotFoundException)->setModel(Workspace::class, [1]));
+        $this->withoutExceptionHandling();
+
+        expect(fn () => confirmDeletion($this, $user, $code))->toThrow(ModelNotFoundException::class)
+            ->and(User::query()->whereKey($user->id)->exists())->toBeTrue();
+    });
 });
 
 describe('deleting the account through the model, whoever asks', function (): void {
@@ -519,6 +553,23 @@ describe('deleting the account through the model, whoever asks', function (): vo
         expect(fn () => $stale->delete())->toThrow(ModelNotFoundException::class)
             ->and(User::query()->pluck('id')->all())->toBe([$bystander->id])
             ->and(Workspace::query()->count())->toBe(1);
+    });
+
+    it('locks the sign-in code of the stored address, not the one a stale copy of the account spells', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.com']);
+        $stale = User::query()->findOrFail($user->id);
+        $stale->setRawAttributes([...$stale->getAttributes(), 'email' => 'Ada@Example.COM']);
+        $locked = [];
+        DB::listen(function ($query) use (&$locked): void {
+            if (stripos($query->sql, 'for update') !== false && stripos($query->sql, 'login_codes') !== false) {
+                $locked[] = $query->bindings[0];
+            }
+        });
+
+        $stale->delete();
+
+        expect($locked)->toBe(['ada@example.com'])
+            ->and(User::query()->whereKey($user->id)->exists())->toBeFalse();
     });
 
     it('takes the locks in the global order: the sign-in code of the address, then the accounts, then the workspaces, then the memberships', function (): void {

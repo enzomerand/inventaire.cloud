@@ -163,7 +163,8 @@ final class Workspaces
     {
         $this->db->transaction(function () use ($user, $workspace): void {
             // The accounts first: the user and the members as far as they can be told before any lock; the ones
-            // who joined while this waited are locked below.
+            // who joined while this waited are locked below, after the workspace (one of the two exceptions to the
+            // order of Locks).
             $candidates = WorkspaceMember::query()->where('workspace_id', $workspace->getKey())->pluck('user_id')->push($user->getKey());
             $accounts = $this->locks->users($candidates);
 

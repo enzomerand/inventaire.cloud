@@ -73,9 +73,17 @@ final class AccountDeletion
     public function release(User $user): void
     {
         // The sign-in code of the address first, before any account: signing in locks them in that order, and the
-        // reverse order here would make a deletion and a sign-in of the same address wait for each other. (The address
-        // of an account cannot change, so the code of the one held here is the one that goes with the account.)
-        $this->locks->loginCode($user->email);
+        // reverse order here would make a deletion and a sign-in of the same address wait for each other. The address
+        // is the one stored, not the one this copy of the account remembers (a stale or hand-made copy may spell it
+        // differently); no account is locked yet, and none can change its address (nothing in the application edits
+        // one), so it is the address of the account locked below.
+        $email = User::query()->whereKey($user->getKey())->value('email');
+
+        if (! is_string($email)) {
+            throw (new ModelNotFoundException)->setModel(User::class, [$user->getKey()]);
+        }
+
+        $this->locks->loginCode($email);
 
         // The administrators and the account in one go, lowest id first: two administrators deleting themselves
         // at the same moment would otherwise each hold their own row and wait for the other's.
@@ -130,7 +138,8 @@ final class AccountDeletion
     private function soleWorkspaces(User $user, bool $lock): Collection
     {
         // Which workspaces to lock is read first, without a lock: the account's row is locked, so nobody else can
-        // remove a membership of it, and the locking read below catches whatever was added in the meantime.
+        // remove a membership of it, and the locking read below catches whatever was added in the meantime (locking
+        // those workspaces then comes after the memberships: one of the two exceptions to the order of Locks).
         $ids = WorkspaceMember::query()->where('user_id', $user->getKey())->pluck('workspace_id');
 
         if ($lock) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Auth;
 
+use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Workspaces\Workspaces;
 use Illuminate\Database\DatabaseManager;
@@ -67,6 +68,11 @@ final class Accounts
      * An existing account keeps its name: the name only matters for a new one. An existing account that has no
      * workspace (it predates them) is given its personal one.
      *
+     * It is retried as a whole when the database picks it as the loser of a deadlock, as two accounts getting their
+     * first workspace at the same moment can: the transactions it opens enclose those of {@see Workspaces}, whose own
+     * retries do not apply inside another transaction (a deadlock rolls the whole of it back). Call it outside any
+     * transaction, as the installer and the command line do: inside one, that transaction is the one to retry.
+     *
      * @param  string  $email  Address, in any case.
      * @param  string  $name  Name of the account, used when it has to be created.
      * @return array{0: User, 1: AdministratorChange}
@@ -74,6 +80,18 @@ final class Accounts
     public function administrator(string $email, string $name): array
     {
         $email = EmailAddress::normalize($email);
+
+        return DeadlockRetries::run(fn (): array => $this->makeAdministrator($email, $name));
+    }
+
+    /**
+     * One attempt at {@see self::administrator()}.
+     *
+     * @param  string  $email  Address, in canonical form.
+     * @return array{0: User, 1: AdministratorChange}
+     */
+    private function makeAdministrator(string $email, string $name): array
+    {
         $user = User::query()->where('email', $email)->first();
 
         if ($user === null) {

@@ -27,7 +27,7 @@ use Illuminate\Database\Eloquent\Collection;
  * ---------------------
  *
  * What keeps two requests from waiting for each other is that *every* transaction of the application that takes
- * more than one of these locks takes them in the same order:
+ * more than one of these locks takes them in the same order (but for the two paths named below):
  *
  * 1. the sign-in code of an address (`login_codes`, by address: {@see self::loginCode()});
  * 2. the accounts (`users`), lowest id first ({@see self::users()});
@@ -35,13 +35,23 @@ use Illuminate\Database\Eloquent\Collection;
  * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
- * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels, never go back up: after a
- * workspace or a membership, it does not lock an account or a sign-in code. Code that adds members (the invitations
- * of lot 9) must follow the same order: accounts, then the workspace, then the memberships.
+ * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels. Code that adds members (the
+ * invitations of lot 9) must follow the same order, accounts then the workspace then the memberships: it is what lets
+ * the two exceptions below stay safety nets.
  *
- * What still gets caught, the database aborts one of the requests and the caller retries (`transaction($callback, 3)`,
- * or {@see DeadlockRetries} when many requests may collide, as sign-ups do), always the outermost transaction: a
- * deadlock rolls the whole of it back, so a nested transaction cannot retry by itself.
+ * Two paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
+ * and the locks themselves:
+ *
+ * - `Workspaces::delete()` locks, after the workspace and its memberships, the accounts of the members who joined that
+ *   workspace meanwhile (a request that committed in that gap);
+ * - `AccountDeletion` locks, after the memberships of the account, the workspaces the account joined meanwhile (the
+ *   account is locked by then, and adding it to a workspace locks it first, so this is for a membership added without
+ *   that lock).
+ *
+ * Only these two can end up waiting for each other, in a race that narrow. The database then aborts one of the
+ * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many requests may
+ * collide, as sign-ups do), always the outermost transaction: a deadlock rolls the whole of it back, so a nested
+ * transaction cannot retry by itself.
  */
 final class Locks
 {
