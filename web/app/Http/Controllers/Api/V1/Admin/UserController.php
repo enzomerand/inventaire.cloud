@@ -28,8 +28,6 @@ use Illuminate\Support\Facades\Mail;
  * The accounts of the instance, for its administrators: list and search them, create one, make one an administrator
  * (or not any more) and delete one. The rules are those of {@see UserAdministration}; the routes ask for the
  * "admin" gate and for the web front (a session), so none of this is reachable otherwise.
- *
- * Accounts are identified by their numeric id here: it is shown to administrators only.
  */
 final class UserController extends Controller
 {

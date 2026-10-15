@@ -295,16 +295,6 @@ export default function adminUsers() {
         },
 
         /**
-         * Whether an account is the administrator who is looking: its row has no actions.
-         *
-         * @param {AdminUser} item
-         * @returns {boolean}
-         */
-        isSelf(item) {
-            return item.is_self === true;
-        },
-
-        /**
          * Whether an account is waiting for the confirmation of its deletion.
          *
          * @param {AdminUser} item

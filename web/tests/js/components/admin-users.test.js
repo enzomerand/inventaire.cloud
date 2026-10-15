@@ -206,11 +206,6 @@ describe('administration users page', () => {
             expect(component.createdLabel(account(1, { created_at: null }))).toBe('');
             expect(component.createdLabel(account(1, { created_at: 'yesterday' }))).toBe('');
         });
-
-        it('knows the administrator who is looking: their row has no actions', () => {
-            expect(component.isSelf(account(1, { is_self: true }))).toBe(true);
-            expect(component.isSelf(account(2))).toBe(false);
-        });
     });
 
     describe('creating an account', () => {

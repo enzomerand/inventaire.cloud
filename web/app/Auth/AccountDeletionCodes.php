@@ -97,19 +97,15 @@ final class AccountDeletionCodes
     /**
      * Drops the pending code of a user (a code that could not be sent).
      *
-     * @param  string|null  $code  The code that could not be sent: only that one is dropped (asking again replaces the
-     *                             pending code, and a mail that fails late must not take a newer one away). Null drops
-     *                             whatever is pending.
+     * @param  string  $code  The code that could not be sent: only that one is dropped (asking again replaces the
+     *                        pending code, and a mail that fails late must not take a newer one away).
      */
-    public function forget(User $user, ?string $code = null): void
+    public function forget(User $user, string $code): void
     {
-        $query = AccountDeletionCode::query()->whereKey($user->getKey());
-
-        if ($code !== null) {
-            $query->where('code_hash', OneTimeCode::hash($code, $this->key($user)));
-        }
-
-        $query->delete();
+        AccountDeletionCode::query()
+            ->whereKey($user->getKey())
+            ->where('code_hash', OneTimeCode::hash($code, $this->key($user)))
+            ->delete();
     }
 
     /**

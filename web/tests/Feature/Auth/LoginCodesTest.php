@@ -152,14 +152,6 @@ describe('verifying a code', function (): void {
         expect(codes()->verify('ada@example.com', $ada)->accepted())->toBeTrue();
     });
 
-    it('forgets the code of an address', function (): void {
-        $code = codes()->issue('ada@example.com');
-
-        codes()->forget('ada@example.com');
-
-        expect(codes()->verify('ada@example.com', $code)->outcome)->toBe(LoginCodeOutcome::Expired);
-    });
-
     it('forgets only the code it is told about: a newer one stays', function (): void {
         $first = codes()->issue('ada@example.com');
         $second = codes()->issue('ada@example.com');

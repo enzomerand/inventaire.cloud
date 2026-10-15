@@ -6,7 +6,6 @@ use App\Models\LoginCode;
 use App\Models\User;
 use App\Settings\InstanceSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 
@@ -17,25 +16,7 @@ uses(RefreshDatabase::class);
  */
 function registration(bool $open): void
 {
-    app(InstanceSettings::class)->setRegistrationOpen($open);
-}
-
-/**
- * The SQL statements run against the database while a callback runs, in order and without their values.
- *
- * @return list<string>
- */
-function statementsOf(Closure $callback): array
-{
-    DB::enableQueryLog();
-    DB::flushQueryLog();
-
-    $callback();
-
-    $statements = array_column(DB::getQueryLog(), 'query');
-    DB::disableQueryLog();
-
-    return $statements;
+    app(InstanceSettings::class)->update([InstanceSettings::REGISTRATION_OPEN => $open]);
 }
 
 /**

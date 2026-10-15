@@ -153,19 +153,15 @@ final class LoginCodes
     /**
      * Drops the pending code of an address (a code that could not be sent).
      *
-     * @param  string|null  $code  The code that could not be sent: only that one is dropped. Asking again replaces the
-     *                             pending code, so a mail that fails late must not take a newer code away. Null drops
-     *                             whatever is pending.
+     * @param  string  $code  The code that could not be sent: only that one is dropped. Asking again replaces the
+     *                        pending code, so a mail that fails late must not take a newer code away.
      */
-    public function forget(string $email, ?string $code = null): void
+    public function forget(string $email, string $code): void
     {
-        $query = LoginCode::query()->whereKey($email);
-
-        if ($code !== null) {
-            $query->where('code_hash', OneTimeCode::hash($code, $this->key()));
-        }
-
-        $query->delete();
+        LoginCode::query()
+            ->whereKey($email)
+            ->where('code_hash', OneTimeCode::hash($code, $this->key()))
+            ->delete();
     }
 
     /**

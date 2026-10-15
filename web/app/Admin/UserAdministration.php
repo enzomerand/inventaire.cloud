@@ -55,13 +55,14 @@ final class UserAdministration
      * A page of accounts, newest first, with the number of workspaces each one belongs to, optionally only those whose
      * name or address contains a word (case ignored).
      *
+     * @param  string  $term  The word, already trimmed; empty for the whole list.
      * @return LengthAwarePaginator<int, User>
      */
     public function search(string $term): LengthAwarePaginator
     {
         $query = User::query()->withCount('workspaces');
 
-        if (trim($term) !== '') {
+        if ($term !== '') {
             CaseInsensitiveSearch::apply($query, ['name', 'email'], $term);
         }
 
@@ -81,8 +82,7 @@ final class UserAdministration
     public function create(User $actor, string $email, string $name): User
     {
         // Judged on the account as stored, not on the copy the request carries: an administrator demoted since the
-        // request was authorized must not finish as one. A plain read is enough here, nothing is locked: creating an
-        // account depends on no other account, so there is no verdict to keep true until the commit.
+        // request was authorized must not finish as one.
         if (! User::query()->whereKey($actor->getKey())->where('is_admin', true)->exists()) {
             throw new UserAdministrationRefused(UserAdministrationRefused::NOT_ADMINISTRATOR);
         }
@@ -131,8 +131,6 @@ final class UserAdministration
      */
     public function setAdministrator(User $actor, User $user, bool $administrator): User
     {
-        // Retried as a whole, like the other changes: a deadlock rolls the transaction back and the accounts are read
-        // again for each attempt.
         [$locked, $changed] = DeadlockRetries::run(fn (): array => $this->db->transaction(function () use ($actor, $user, $administrator): array {
             // The administrators, the actor and the account in one go, lowest id first, like AccountDeletion: two
             // administrators demoting each other at the same moment would otherwise each hold their own row and wait
@@ -192,8 +190,6 @@ final class UserAdministration
 
         $id = $target->getKey();
 
-        // Retried as a whole: a deadlock rolls back the transaction that the hand-over and the deletion share, and
-        // the account is read again for each attempt.
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($actor, $id): void {
             $user = User::query()->whereKey($id)->firstOrFail();
 
@@ -239,13 +235,13 @@ final class UserAdministration
             ? collect()
             : WorkspaceMember::query()->whereIn('workspace_id', $owned)->where('user_id', '!=', $user->getKey())->pluck('user_id');
 
-        $accounts = $this->locks->administratorsAnd(array_values([$actor->getKey(), $user->getKey(), ...$others->all()]));
+        $accounts = $this->locks->administratorsAnd([$actor->getKey(), $user->getKey(), ...$others->all()]);
 
         $this->ensureAdministrator($actor, $accounts);
 
         $workspaces = $this->locks->workspaces($owned);
         $members = $this->locks->memberships('workspace_id', $workspaces->keys());
-        $this->locks->users($members->pluck('user_id')->map(fn ($id): int => (int) $id)->diff($accounts->keys()));
+        $this->locks->users($members->pluck('user_id')->diff($accounts->keys()));
 
         $byWorkspace = $members->groupBy('workspace_id');
 

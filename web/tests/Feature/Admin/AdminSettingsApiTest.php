@@ -69,7 +69,7 @@ describe('the settings', function (): void {
 
     it('open registration again', function (): void {
         $admin = User::factory()->admin()->create();
-        app(InstanceSettings::class)->setRegistrationOpen(false);
+        app(InstanceSettings::class)->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['registration_open' => true], frontend())
             ->assertOk()
@@ -111,7 +111,7 @@ describe('the settings', function (): void {
 
     it('are changed only for the ones that are sent: a request must send at least one', function (array $data): void {
         $admin = User::factory()->admin()->create();
-        app(InstanceSettings::class)->setRegistrationOpen(false);
+        app(InstanceSettings::class)->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', $data, frontend())
             ->assertUnprocessable()
@@ -141,7 +141,7 @@ describe('the settings', function (): void {
 
 describe('the settings page', function (): void {
     it('shows the switch as it is, with its endpoint', function (bool $open): void {
-        app(InstanceSettings::class)->setRegistrationOpen($open);
+        app(InstanceSettings::class)->update([InstanceSettings::REGISTRATION_OPEN => $open]);
 
         $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
             ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])

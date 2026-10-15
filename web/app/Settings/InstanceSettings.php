@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Log;
  * setting. The class is registered as a scoped service, so a worker that serves many requests starts afresh each time.
  * Writing a setting forgets what was read, and the next read loads it again.
  *
- * Each setting has a typed getter and setter, and a name here: nothing else knows how it is stored. The statements
+ * Each setting has a typed getter and a name here: nothing else knows how it is stored. The statements
  * are plain SQL builder calls that PostgreSQL, MySQL and MariaDB all run.
  */
 final class InstanceSettings
@@ -45,8 +45,7 @@ final class InstanceSettings
      *
      * A row that is there but unusable (JSON that does not decode, or a value that is not a boolean, such as `"false"`
      * or `0`) counts as *closed*: somebody tried to close registration, or something broke the row, and opening the
-     * instance to everybody on the strength of a value nobody understands is the wrong way to fail. The log says so
-     * (once per request, with the name of the setting and not its value).
+     * instance to everybody on the strength of a value nobody understands is the wrong way to fail.
      */
     public function registrationOpen(): bool
     {
@@ -65,14 +64,6 @@ final class InstanceSettings
         $this->reportUnusable(self::REGISTRATION_OPEN);
 
         return false;
-    }
-
-    /**
-     * Opens or closes the creation of accounts by new addresses.
-     */
-    public function setRegistrationOpen(bool $open): void
-    {
-        $this->update([self::REGISTRATION_OPEN => $open]);
     }
 
     /**

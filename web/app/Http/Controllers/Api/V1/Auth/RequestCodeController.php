@@ -22,11 +22,11 @@ use Illuminate\Support\Facades\Mail;
  * account, nor, when an administrator has closed registration, to tell the
  * addresses that may sign in from those that may not.
  *
- * Whatever the address, a code is stored (replacing the previous one) and the answer is the same. What differs comes
- * after the answer, where nobody can see it: the mail is sent then ({@see AfterResponse}), and it is there that the
- * accounts are looked up when registration is closed. An address without an account that cannot create one is given
- * a code nobody receives, which is judged like any other when it is typed back: were it not stored, "expired" would
- * tell it from an address that has an account and a code, and the sign-in step would reveal who has an account.
+ * What differs between addresses comes after the answer, where nobody can see it: the mail is sent then
+ * ({@see AfterResponse}), and it is there that the accounts are looked up when registration is closed. An address
+ * without an account that cannot create one is given a code nobody receives, which is judged like any other when it is
+ * typed back: were it not stored, "expired" would tell it from an address that has an account and a code, and the
+ * sign-in step would reveal who has an account.
  */
 final class RequestCodeController extends Controller
 {

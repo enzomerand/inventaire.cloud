@@ -18,22 +18,6 @@ function freshSettings(): InstanceSettings
     return new InstanceSettings(app('db'));
 }
 
-/**
- * How many statements the callback ran against the settings table.
- */
-function settingsQueries(Closure $callback): int
-{
-    DB::enableQueryLog();
-    DB::flushQueryLog();
-
-    $callback();
-
-    $count = collect(DB::getQueryLog())->filter(fn (array $query): bool => str_contains($query['query'], 'settings'))->count();
-    DB::disableQueryLog();
-
-    return $count;
-}
-
 describe('the registration setting', function (): void {
     it('is open when nothing was ever stored', function (): void {
         expect(DB::table('settings')->count())->toBe(0)
@@ -41,21 +25,21 @@ describe('the registration setting', function (): void {
     });
 
     it('can be closed, and opened again, for the next request as well', function (): void {
-        freshSettings()->setRegistrationOpen(false);
+        freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         expect(freshSettings()->registrationOpen())->toBeFalse();
 
-        freshSettings()->setRegistrationOpen(true);
+        freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => true]);
 
         expect(freshSettings()->registrationOpen())->toBeTrue();
     });
 
     it('keeps one row per setting, as JSON', function (): void {
         $settings = freshSettings();
-        $settings->setRegistrationOpen(false);
-        $settings->setRegistrationOpen(false);
-        $settings->setRegistrationOpen(true);
-        $settings->setRegistrationOpen(false);
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => false]);
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => false]);
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => true]);
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         $rows = DB::table('settings')->get();
 
@@ -126,11 +110,11 @@ describe('the registration setting', function (): void {
 
         expect(freshSettings()->registrationOpen())->toBeTrue();
 
-        freshSettings()->setRegistrationOpen(false);
+        freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         expect(freshSettings()->registrationOpen())->toBeFalse();
 
-        freshSettings()->setRegistrationOpen(true);
+        freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => true]);
 
         expect(freshSettings()->registrationOpen())->toBeTrue();
 
@@ -139,7 +123,7 @@ describe('the registration setting', function (): void {
 
     it('changes only the settings it is given', function (): void {
         $settings = freshSettings();
-        $settings->setRegistrationOpen(false);
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         $settings->update([]);
 
@@ -153,7 +137,7 @@ describe('the registration setting', function (): void {
 
     it('reads every setting at once, and the rows of other settings do not disturb it', function (): void {
         DB::table('settings')->insert(['key' => 'something_else', 'value' => '{"a":1}', 'created_at' => now(), 'updated_at' => now()]);
-        freshSettings()->setRegistrationOpen(false);
+        freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         expect(freshSettings()->all())->toBe(['registration_open' => false]);
     });
@@ -163,13 +147,13 @@ describe('the reading of the settings', function (): void {
     it('costs one query a request, however many times a setting is asked', function (): void {
         $settings = freshSettings();
 
-        $queries = settingsQueries(function () use ($settings): void {
+        $statements = statementsOf(function () use ($settings): void {
             $settings->registrationOpen();
             $settings->registrationOpen();
             $settings->all();
         });
 
-        expect($queries)->toBe(1);
+        expect(array_filter($statements, fn (string $statement): bool => str_contains($statement, 'settings')))->toHaveCount(1);
     });
 
     it('is kept for the request only: another request sees a change at once', function (): void {
@@ -177,7 +161,7 @@ describe('the reading of the settings', function (): void {
         expect($first->registrationOpen())->toBeTrue();
 
         // Another process closes registration while the first request is still served: its copy is its own.
-        freshSettings()->setRegistrationOpen(false);
+        freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         expect($first->registrationOpen())->toBeTrue()
             ->and(freshSettings()->registrationOpen())->toBeFalse();
@@ -187,7 +171,7 @@ describe('the reading of the settings', function (): void {
         $settings = freshSettings();
         expect($settings->registrationOpen())->toBeTrue();
 
-        $settings->setRegistrationOpen(false);
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
         expect($settings->registrationOpen())->toBeFalse();
     });

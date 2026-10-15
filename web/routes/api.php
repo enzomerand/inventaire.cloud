@@ -49,8 +49,8 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::delete('/workspaces/{workspace}', [WorkspaceController::class, 'destroy'])->name('workspaces.destroy');
 
         // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a
-        // session, never an API token). Accounts are identified by their numeric id (digits only, and few
-        // enough for any database to read), which the controller looks up itself: see UserController::find().
+        // session, never an API token). The id of an account is digits only, and few enough for any database to
+        // read; the controller looks it up itself: see UserController::find().
         Route::prefix('admin')->name('admin.')->middleware([RequireStatefulRequest::class, RefuseApiTokens::class, 'can:admin'])->group(function (): void {
             Route::get('/users', [AdminUserController::class, 'index'])->name('users.index');
             Route::post('/users', [AdminUserController::class, 'store'])->middleware('throttle:admin-user-creation')->name('users.store');

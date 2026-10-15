@@ -58,7 +58,7 @@
                                     <div class="d-flex flex-wrap align-items-center gap-2">
                                         <span class="fw-bold text-break" x-text="item.name"></span>
                                         <span class="badge bg-primary-lt" x-show="item.is_admin">{{ __('Administrator') }}</span>
-                                        <span class="badge" x-show="isSelf(item)">{{ __('You') }}</span>
+                                        <span class="badge" x-show="item.is_self">{{ __('You') }}</span>
                                     </div>
                                     <div class="text-secondary text-break" x-text="item.email"></div>
                                     <div class="text-secondary small">
@@ -68,7 +68,7 @@
                                     </div>
                                 </div>
 
-                                <div class="col-12 col-md-auto" x-show="!isSelf(item)">
+                                <div class="col-12 col-md-auto" x-show="!item.is_self">
                                     <div x-show="isConfirming(item)">
                                         <div class="d-flex flex-wrap align-items-center gap-2">
                                             <span class="text-danger" x-text="confirmText(item)"></span>

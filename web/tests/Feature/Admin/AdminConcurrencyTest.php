@@ -7,7 +7,6 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
-use Illuminate\Support\Facades\DB;
 use Tests\Support\CommitsDatabaseChanges;
 use Tests\Support\ConcurrentChildren;
 
@@ -21,33 +20,8 @@ use Tests\Support\ConcurrentChildren;
 
 uses(CommitsDatabaseChanges::class);
 
-beforeEach(fn () => removeAdminRows());
-afterEach(fn () => removeAdminRows());
-
-/**
- * Empties what these tests commit (they run on the test database only: see TestDatabaseGuard).
- */
-function removeAdminRows(): void
-{
-    DB::table('workspaces')->delete();
-    DB::table('users')->delete();
-}
-
-/**
- * Runs actions in separate PHP processes that all start together, and returns what they reported as sorted words
- * ("deleted", "demoted", "refused:last_administrator"...).
- *
- * @param  list<list<int|string>>  $commands  The arguments of each process after the go file: the action, then its ids.
- * @return list<string>
- */
-function adminActTogether(string $directory, array $commands): array
-{
-    $answers = ConcurrentChildren::run($directory, base_path('tests/Support/concurrent-action.php'), $commands);
-    $words = array_map(fn (array $answer): string => $answer['result'].(isset($answer['reason']) ? ':'.$answer['reason'] : ''), $answers);
-    sort($words);
-
-    return $words;
-}
+beforeEach(fn () => removeConcurrencyRows());
+afterEach(fn () => removeConcurrencyRows());
 
 describe('administrators acting at the same moment', function (): void {
     it('keep one administrator when two step down at the same moment', function (): void {
@@ -55,12 +29,12 @@ describe('administrators acting at the same moment', function (): void {
             $first = User::factory()->admin()->withPersonalWorkspace()->create();
             $second = User::factory()->admin()->withPersonalWorkspace()->create();
 
-            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $first->id, $first->id], ['admin-demote', $second->id, $second->id]]);
+            $outcomes = actTogether($this->sandbox->root, [['admin-demote', $first->id, $first->id], ['admin-demote', $second->id, $second->id]]);
 
             expect($outcomes)->toBe(['demoted', 'refused:last_administrator'])
                 ->and(User::query()->where('is_admin', true)->count())->toBe(1);
 
-            removeAdminRows();
+            removeConcurrencyRows();
         }
     });
 
@@ -69,12 +43,12 @@ describe('administrators acting at the same moment', function (): void {
             $first = User::factory()->admin()->withPersonalWorkspace()->create();
             $second = User::factory()->admin()->withPersonalWorkspace()->create();
 
-            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $first->id, $second->id], ['admin-demote', $second->id, $first->id]]);
+            $outcomes = actTogether($this->sandbox->root, [['admin-demote', $first->id, $second->id], ['admin-demote', $second->id, $first->id]]);
 
             expect($outcomes)->toBe(['demoted', 'refused:not_administrator'])
                 ->and(User::query()->where('is_admin', true)->count())->toBe(1);
 
-            removeAdminRows();
+            removeConcurrencyRows();
         }
     });
 
@@ -83,13 +57,13 @@ describe('administrators acting at the same moment', function (): void {
             $first = User::factory()->admin()->withPersonalWorkspace()->create();
             $second = User::factory()->admin()->withPersonalWorkspace()->create();
 
-            $outcomes = adminActTogether($this->sandbox->root, [['admin-delete', $first->id, $second->id], ['admin-delete', $second->id, $first->id]]);
+            $outcomes = actTogether($this->sandbox->root, [['admin-delete', $first->id, $second->id], ['admin-delete', $second->id, $first->id]]);
 
             // The one who comes second was deleted by the first: it is judged again under the locks, and is refused.
             expect($outcomes)->toBe(['deleted', 'refused:not_administrator'])
                 ->and(User::query()->where('is_admin', true)->count())->toBe(1);
 
-            removeAdminRows();
+            removeConcurrencyRows();
         }
     });
 
@@ -99,14 +73,14 @@ describe('administrators acting at the same moment', function (): void {
             $demoted = User::factory()->admin()->withPersonalWorkspace()->create();
             $victim = User::factory()->withPersonalWorkspace()->create();
 
-            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $demoter->id, $demoted->id], ['admin-delete', $demoted->id, $victim->id]]);
+            $outcomes = actTogether($this->sandbox->root, [['admin-demote', $demoter->id, $demoted->id], ['admin-delete', $demoted->id, $victim->id]]);
 
             // Either the deletion came first, while its author still was an administrator, or it was refused.
             expect($outcomes)->toBeIn([['deleted', 'demoted'], ['demoted', 'refused:not_administrator']])
                 ->and(User::query()->whereKey($victim->id)->exists())->toBe($outcomes === ['demoted', 'refused:not_administrator'])
                 ->and(User::query()->whereKey($demoted->id)->value('is_admin'))->toBeFalse();
 
-            removeAdminRows();
+            removeConcurrencyRows();
         }
     });
 
@@ -141,7 +115,7 @@ describe('administrators acting at the same moment', function (): void {
             $shared->members()->attach($next->id, ['role' => WorkspaceRole::Viewer->value]);
             $shared->members()->attach($last->id, ['role' => WorkspaceRole::Viewer->value]);
 
-            $outcomes = adminActTogether($this->sandbox->root, [['admin-delete', $admin->id, $owner->id], ['delete-account', $next->id]]);
+            $outcomes = actTogether($this->sandbox->root, [['admin-delete', $admin->id, $owner->id], ['delete-account', $next->id]]);
 
             // Either the member left first (and the next in line took over), or the owner went first and the member,
             // now the only owner of a workspace shared with somebody, was told to hand it over.
@@ -151,7 +125,7 @@ describe('administrators acting at the same moment', function (): void {
                 ->and(WorkspaceMember::query()->where('workspace_id', $shared->id)->where('role', WorkspaceRole::Owner->value)->count())->toBe(1)
                 ->and(User::query()->whereDoesntHave('workspaces')->count())->toBe(0);
 
-            removeAdminRows();
+            removeConcurrencyRows();
         }
     });
 });

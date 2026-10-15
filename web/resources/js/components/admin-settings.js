@@ -64,23 +64,13 @@ export default function adminSettings() {
                     t(this.registrationOpen ? 'admin.settings.notice.opened' : 'admin.settings.notice.closed'),
                 );
             } catch (error) {
-                this.fail(error);
+                // Anything else than an HttpError is a cancelled request: nothing to tell.
+                if (error instanceof HttpError && !error.reported) {
+                    notify('danger', error.message);
+                }
             } finally {
                 box.checked = this.registrationOpen;
                 this.busy = false;
-            }
-        },
-
-        /**
-         * Tells why a request failed, unless the HTTP helper already did.
-         *
-         * @param {unknown} error
-         * @returns {void}
-         */
-        fail(error) {
-            // Anything else than an HttpError is a cancelled request: nothing to tell.
-            if (error instanceof HttpError && !error.reported) {
-                notify('danger', error.message);
             }
         },
     };

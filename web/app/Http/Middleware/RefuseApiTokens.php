@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Http\Responses\ApiError;
 use Closure;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -29,10 +29,7 @@ final class RefuseApiTokens
     public function handle(Request $request, Closure $next): Response
     {
         if ($request->bearerToken() !== null) {
-            return new JsonResponse([
-                'message' => __('This is only available from the web interface, not with an API token.'),
-                'code' => 'session_required',
-            ], 403);
+            return ApiError::forbidden(__('This is only available from the web interface, not with an API token.'), 'session_required');
         }
 
         return $next($request);

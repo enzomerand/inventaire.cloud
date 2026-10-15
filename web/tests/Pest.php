@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\Mime\Email;
+use Tests\Support\ConcurrentChildren;
 use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
@@ -254,4 +255,47 @@ function queryFailure(string $state, int|string $code, string $message): QueryEx
 function lostDeadlock(): QueryException
 {
     return queryFailure('40001', 1213, 'Deadlock found when trying to get lock; try restarting transaction');
+}
+
+/**
+ * The SQL statements run against the database while a callback runs, in order and without their values.
+ *
+ * @return list<string>
+ */
+function statementsOf(Closure $callback): array
+{
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $callback();
+
+    $statements = array_column(DB::getQueryLog(), 'query');
+    DB::disableQueryLog();
+
+    return $statements;
+}
+
+/**
+ * Empties what the concurrency tests commit (they run on the test database only: see TestDatabaseGuard).
+ */
+function removeConcurrencyRows(): void
+{
+    DB::table('workspaces')->delete();
+    DB::table('users')->delete();
+}
+
+/**
+ * Runs actions in separate PHP processes that all start together, and returns what they reported as sorted words
+ * ("deleted", "demoted", "refused:last_administrator"...).
+ *
+ * @param  list<list<int|string>>  $commands  The arguments of each process after the go file: the action, then its ids.
+ * @return list<string>
+ */
+function actTogether(string $directory, array $commands): array
+{
+    $answers = ConcurrentChildren::run($directory, base_path('tests/Support/concurrent-action.php'), $commands);
+    $words = array_map(fn (array $answer): string => $answer['result'].(isset($answer['reason']) ? ':'.$answer['reason'] : ''), $answers);
+    sort($words);
+
+    return $words;
 }

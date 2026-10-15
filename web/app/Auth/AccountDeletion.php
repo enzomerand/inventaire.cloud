@@ -87,11 +87,9 @@ final class AccountDeletion
 
         // The administrators and the account in one go, lowest id first, by primary key (see Locks::administratorsAnd()
         // for why not with a filter on is_admin): two administrators deleting themselves at the same moment would
-        // otherwise each hold their own row and wait for the other's. When an administrator deletes the account
-        // (UserAdministration::delete()), most of these rows are held already and cost nothing; an account promoted
-        // since the administrators were read there is not, and is locked here, after the workspaces and memberships
-        // that transaction holds: a step back up the order that can deadlock, and that the caller retries
-        // (DeadlockRetries). Deleting one's own account retries the same way, see User::delete().
+        // otherwise each hold their own row and wait for the other's. When an administrator deletes the account, most
+        // of these rows are held already and cost nothing (the exception is explained at
+        // UserAdministration::handOverWorkspaces()).
         $accounts = $this->locks->administratorsAnd([$user->getKey()]);
         $locked = $accounts->get((int) $user->getKey());
 
