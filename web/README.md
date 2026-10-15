@@ -155,6 +155,9 @@ Accounts have **no password**: an email address is all it takes. The `/login` pa
 | `POST /api/v1/auth/verify`    | `email`, `code`, and `name` for a new account: signs in. `201` when the account was created.        |
 | `POST /api/v1/auth/logout`    | Ends the session (`204`).                                                                           |
 | `GET /api/v1/me`              | The signed-in user (`401` in JSON when nobody is).                                                  |
+| `PATCH /api/v1/me`            | `name` and/or `locale`: changes them. A new `locale` also comes back in the `locale` cookie, like the language switcher's. |
+
+The account's other endpoints are in [Workspaces](#workspaces) and [Your account: sessions, data and deletion](#your-account-sessions-data-and-deletion).
 
 Every answer under `/api` is JSON, even for a client that sends no `Accept` header. Refusals of a code are `422` with `errors` and a machine-readable `code`: `login_code_wrong`, `login_code_expired`, `login_code_exhausted`, or `name_required` (right code, unknown address: send it again with `name`, the code is still valid).
 
@@ -163,7 +166,7 @@ Every answer under `/api` is JSON, even for a client that sends no `Accept` head
 - **Wrong codes over time.** Each code tolerates 5 wrong guesses, but asking for a new code does not give back the wrong codes an address already collected: after 10 of them within one period (`failures_per_email`: a fixed hour that opens with the first wrong code, then starts over), **code verification is locked for that address until the period is over**. No code is judged any more for it, **the right one included**, and the answer is `429` with `Retry-After` and `"code": "login_code_locked"`. Anybody who knows an address can lock it that way (that is the price of not letting a 6-digit code be guessed), so an administrator who finds their own address locked can wait for the end of the period or recover as described under "Administrators" below: `php artisan inventaire:make-admin` promotes another address, which signs in as usual. Only a guess that is judged and found wrong counts: the right code, a code that was already burnt or spent, and codes typed for an address that has no pending code cost nothing. The count is kept in the cache (`CACHE_STORE`, `database` by default) and updated with atomic increments, so parallel guesses cannot get around it; a cache store that cannot count (`null`) makes verification fail with a server error instead of silently switching the limit off, and emptying the cache gives the guesses back once.
 - **No user enumeration.** Asking for a code does the same work and gives the same answer whether the address has an account or not, and wrong codes are answered the same too. Whether an address has an account is only revealed to somebody who holds a valid code for it.
 - **Addresses** are stored and looked up in one canonical form: trimmed, lowercase, and the domain in ASCII (punycode: `gmäil.com` becomes `xn--gmil-moa.com`). An accent or a non-Latin letter before the `@` is refused. MySQL's and MariaDB's default collations ignore accents, so without this `john@gmäil.com` would be `john@gmail.com` for them and the owner of a lookalike domain could receive the code of somebody else's account; the migration therefore also gives `users.email` and `login_codes.email` a binary collation (`utf8mb4_bin`) on those engines, so that the database itself compares addresses exactly (PostgreSQL always does). The migration that makes users passwordless brings the addresses already stored to that form, and stops, before changing anything, if two accounts would end up with the same address: merge or delete one of them, then run it again. Rolling it back restores an empty `password` column (the hashes are gone).
-- **Staying signed in.** Signing in is remembered for 30 days by the "remember me" cookie (`remember` of the `web` guard in `config/auth.php`). The session itself keeps `SESSION_LIFETIME`, since visitors who are not signed in have sessions too. Signing out ends the session and forgets the cookie of *this* device only: the other devices of the account stay signed in (they share the account's remember token, which is not renewed). A cookie that was copied before cannot be revoked on its own until a "sign out everywhere" action, which renews the token, exists.
+- **Staying signed in.** Signing in is remembered for 30 days by the "remember me" cookie (`remember` of the `web` guard in `config/auth.php`). The session itself keeps `SESSION_LIFETIME`, since visitors who are not signed in have sessions too. Signing out ends the session and forgets the cookie of *this* device only: the other devices of the account stay signed in (they share the account's remember token, which signing out leaves alone). To end the other devices' sessions at once, see [Signing out everywhere](#signing-out-everywhere).
 - **Language.** `users.locale` is the language of the account. The language of a request is decided before the session starts (see [Translations](#translations)), so the account's language travels in the `locale` cookie: signing in sets the cookie from `users.locale` (an account without one takes the language in use), and the language switcher updates the cookie and `users.locale` together.
 - **Stateful requests (Sanctum).** The web front calls the API with its session cookie and CSRF token. Laravel Sanctum treats a request as coming from the front when its `Referer` or `Origin` host is listed in `SANCTUM_STATEFUL_DOMAINS`; by default that is the usual development hosts and the host (with the port) of `APP_URL`, so an instance works when it is reached on its public address. If it is also reached on another host (a second domain, a LAN address, another port), signing in from there answers `403` with `"code": "not_stateful"`: list every such host, with its port when it is not the default one, in `.env`:
 
@@ -173,6 +176,62 @@ Every answer under `/api` is JSON, even for a client that sends no `Accept` head
 
   The variable replaces the default list, so repeat the host of `APP_URL` in it. The sign-in endpoints refuse any other caller on purpose: the session and the CSRF check are what keep a forged form on another site from signing a visitor into somebody else's account.
 - **Administrators.** `users.is_admin` marks the people who administer the instance. The installer creates the first one; to add one later, or to recover when nobody can sign in as one (an address locked by too many wrong codes included: see above), run `php artisan inventaire:make-admin jane@example.com --name="Jane Doe"` (with Docker: `docker compose exec app php artisan inventaire:make-admin ...`). It creates the account or promotes the existing one (keeping its name), and can be run again safely.
+
+## Workspaces
+
+Inventories live in workspaces. Every account belongs to at least one, in which it holds a role, and works in one at a time (its *current* workspace).
+
+- **Tables.** `workspaces` (`id` for the database, a unique `ulid` for the outside world: URLs, API, never the numeric key), `workspace_user` (the membership: `role`, one row per user and workspace, deleted with either side) and `users.current_workspace_id` (forgotten if that workspace is deleted).
+- **Roles** (`App\Workspaces\WorkspaceRole`): `owner`, `editor`, `viewer`. The abilities are asked through `canView()`, `canEdit()` (content, from lot 4 on) and `canManage()` (the workspace itself: rename, delete, members), never by comparing roles. `App\Policies\WorkspacePolicy` maps them to actions: any member can see a workspace, only owners change, delete or manage it. Somebody who does not belong to a workspace is answered `404`, as if it did not exist; a member without the right gets `403`.
+- **A personal workspace for everyone.** An account always has one: it is created, named "Personal space" in the language of the account, in the transaction that creates the account (`Accounts::register()`: sign-up, the installer's administrator, `inventaire:make-admin`), when an existing account without any is promoted to administrator, and at sign-in for an account that lost its last one. The migration `give_every_user_a_workspace` gives one to every account that existed before workspaces did; it can be run again safely.
+- **The current workspace** is `users.current_workspace_id`; when it is empty, or no longer a workspace the user belongs to, it is the first one they joined. Creating a workspace makes it current. Deleting the current one moves the user to another.
+- **The last workspace** of an account cannot be deleted (`409`, `"code": "last_workspace"`). Deleting a workspace that other people belong to gives a personal workspace to those who had no other one.
+
+| Endpoint                            | What it does                                                                                  |
+|-------------------------------------|-----------------------------------------------------------------------------------------------|
+| `GET /api/v1/workspaces`            | Your workspaces, oldest membership first: `id` (the ULID), `name`, `role`, `is_current`, `created_at`. |
+| `POST /api/v1/workspaces`           | `name` (required, trimmed, at most 100 characters): creates a workspace you own and work in (`201`). |
+| `PATCH /api/v1/workspaces/{id}`     | `name`: renames it (owners only).                                                              |
+| `DELETE /api/v1/workspaces/{id}`    | Deletes it, and everything in it (owners only; `204`).                                         |
+| `PUT /api/v1/me/current-workspace`  | `workspace` (a ULID): the workspace to work in. One you do not belong to is refused like one that does not exist (`422`). |
+
+Answers are in the `data` envelope. Errors have a `message` in the language of the request and, for conflicts, a machine-readable `code`.
+
+In the interface, the header has a switcher (before the account menu) and `/app/workspaces` lists the workspaces to create, rename in place, delete (with a confirmation in the row) and choose between. The switcher and the page share one Alpine store, so a change shows in the header without a reload.
+
+## Your account: sessions, data and deletion
+
+`/app/account` ("My account") holds the profile (name, language), the security of the sessions, the download of the data, and the deletion of the account.
+
+### Signing out everywhere
+
+`POST /api/v1/me/sign-out-everywhere` (the web front only) ends the sessions of every device but the current one. It renews the account's remember token and signs the current device in again with a fresh session and a cookie for the new token.
+
+How it works: the framework ties a session and a "remember me" cookie to a "password hash" of the account. Accounts have no password, so `User::getAuthPassword()` derives that fingerprint from the remember token (an HMAC with `APP_KEY`, empty for an account without a token). The cookie carries the token itself, so a copied cookie with an old token no longer finds the account; a session stores the fingerprint when it is opened, and `AuthenticateSession` signs it out as soon as it differs: on the web pages with `App\Http\Middleware\AuthenticateSession` (the framework's, which waits for the installation to be over so that the install wizard never looks anybody up), and on the API with Sanctum's own middleware for the requests of the web front. Signing out of one device keeps the token, so the others stay signed in. Every account gets a token when it is created, and the migration `give_every_user_a_remember_token` gives one to those that have none.
+
+When updating an instance that did not have this: a session that is still alive has no fingerprint in it yet and is given one at its next request, so those people stay signed in. A "remember me" cookie issued before carries the previous constant, empty fingerprint and is refused once: whoever relied on it (their session had expired) signs in with a code again.
+
+### Your data (GDPR)
+
+`GET /api/v1/me/export` (throttled: `account_export` in `config/auth.php`) downloads `inventaire-export-YYYY-MM-DD.json`: the profile and the workspaces with the role in each. The document is versioned (`format`, `version`) and each workspace already carries an empty `inventories` list, which the inventories of lot 4 will fill without changing the structure. Nothing secret is in it, and nothing about other people.
+
+### Deleting the account
+
+Deleting cannot be undone, so it takes a code mailed to the address of the account, in two steps (both session actions, for the web front only):
+
+1. `POST /api/v1/me/deletion-code` mails a 6-digit code, in the language of the account (plain text and simple HTML, like the sign-in code's mail). It is a code of its own: it lives in the `account_deletion_codes` table (one row per user, a keyed hash derived from `APP_KEY`, the purpose and the user, valid 10 minutes for 5 wrong guesses), never replaces or spends a sign-in code, and cannot be used for one. Sending is throttled per user (3 per 10 minutes, 6 per hour).
+2. `DELETE /api/v1/me` with `{ "code": "123456" }`, throttled to 5 per minute. A code that is not accepted is a `422` with `"code"` set to `deletion_code_wrong`, `deletion_code_expired` (never asked, replaced or expired) or `deletion_code_exhausted`.
+
+The limits are in `account_deletion` in `config/auth.php`. Deleting happens in one transaction (if anything fails, nothing is deleted) and removes:
+
+- the workspaces that nobody else belongs to, with everything in them;
+- the account's place in the workspaces shared with other people (it just leaves them);
+- its rows in the `sessions` table (when sessions are kept in the database), the sign-in code waiting for its address, its deletion code and its API tokens, then the user.
+
+The device is signed out at the end. Two things stop a deletion, with a `409` and a `code` that the card on the account page explains (it asks as soon as the code is requested, and again when it is confirmed; the code is kept, so nothing has to be asked again once the obstacle is gone):
+
+- `sole_owner_of_shared_workspaces`: the account is the only owner of workspaces that other people belong to. The body lists them (`workspaces`: `id` and `name`). Ownership has to be handed over first; the screens to do it come with member management (lot 9).
+- `last_administrator`: the account is the last administrator of the instance. Make somebody else one first with `php artisan inventaire:make-admin`.
 
 ## Upgrading an instance
 
@@ -186,6 +245,8 @@ php artisan inventaire:upgrade --optimize
 ```
 
 An instance installed before sign-in existed has no administrator and the upgrade does not create one (the installer's hooks only run during the installation): create one with `php artisan inventaire:make-admin you@example.com --name="Your Name"`. The same upgrade removes the `password` column and the `password_reset_tokens` table, which accounts no longer use.
+
+The upgrade that brings workspaces gives every existing account a personal workspace and a remember token (idempotent migrations). Sessions that are still alive keep working; a "remember me" cookie issued before is refused once, so people whose session had expired sign in with a code again (see [Signing out everywhere](#signing-out-everywhere)).
 
 `inventaire:upgrade` reloads the configuration (so an edited `.env` is used), applies the pending migrations under a file lock (a second upgrade running at the same time waits for it, up to 10 minutes) and clears the route, view and event caches. With `--optimize` it rebuilds them afterwards; it can be run as often as you like, and with Docker the update is automatic (see below).
 
@@ -280,27 +341,33 @@ composer test:mariadb # MariaDB only
 
 The tests never touch the real `.env`, installer state, cached configuration or storage: `phpunit.xml` points `INSTALLER_STATE_PATH`, `INSTALLER_ENV_FILE`, `APP_CONFIG_CACHE`, `APP_ROUTES_CACHE`, `APP_EVENTS_CACHE`, `VIEW_COMPILED_PATH` and `CACHE_FILE_PATH` at a throw-away folder below `storage/framework/testing/`, emptied around every test (`tests/Support/InstallerSandbox.php`). Every test boots in the "installed" state, so tests that predate the installer are unaffected; a test that needs a fresh instance calls `$this->bootInstaller(installed: false)`. Run the suite sequentially: the sandbox folder is shared. (`composer test` itself starts with `php artisan config:clear`, which does clear the real cached configuration.)
 
+Several devices in one test: the test client keeps one session store and no cookies between calls, so two "browsers" would share what the first one stored. `tests/Support/Device.php` plays one browser (it keeps its own cookies, empties the process's session store before each call and forgets the guards), which is how the sign-out-everywhere and account-deletion tests prove that another session or a copied cookie is refused, on the array driver and with `session.driver=database`. Switching `actingAs()` from one user to another inside a test needs `$this->flushSession()` in between, for the same reason (the session fingerprint of the first user is still in the store).
+
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
 ## Project structure
 
 ```text
 app/
-  Auth/             Sign-in codes (LoginCodes), account creation (Accounts)
+  Auth/             Sign-in codes (LoginCodes), account creation (Accounts), account deletion (AccountDeletion, AccountDeletionCodes) and export (AccountExport)
   Console/Commands/ inventaire:install (console wizard), inventaire:install-token, inventaire:install-status, inventaire:upgrade, inventaire:make-admin
   Http/
     Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints, Api/V1/ the JSON API)
     Middleware/     SetLocale (global): applies the language chosen by LocaleResolver;
                     RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate;
-                    RequireStatefulRequest: sign-in endpoints are for the web front only
+                    RequireStatefulRequest: session endpoints are for the web front only;
+                    AuthenticateSession: signs out the sessions of an account that signed out everywhere
     Requests/       Form requests (validation)
-    Resources/      JSON resources of the API (UserResource)
+    Resources/      JSON resources of the API (UserResource, WorkspaceResource)
+    Responses/      ApiError: the conflicts (409) and coded validation failures of the API
   Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator, post-migration hooks (see "Installing an instance")
-  Mail/             LoginCodeMail
-  Models/           User, LoginCode
+  Mail/             LoginCodeMail, AccountDeletionCodeMail
+  Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember
+  Policies/         WorkspacePolicy: who may do what with a workspace
   Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: sign-in rate limiters
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
-  View/Components/  Blade component classes (ClientMessages)
+  View/Components/  Blade component classes (ClientMessages, WorkspaceSwitcher)
+  Workspaces/       Workspaces (the rules: create, delete, current workspace), WorkspaceRole, Membership
 config/             Laravel configuration (app.php lists the supported locales)
 lang/               fr.json (UI strings) and fr/ (framework messages)
 resources/
@@ -308,12 +375,12 @@ resources/
   js/
     app.js          Entry point: Tabler, Alpine, stores, components
     lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js
-    stores/         Alpine stores (toasts)
-    components/     Alpine components (toasts, locale switcher, install wizard, sign-in page, account menu)
+    stores/         Alpine stores (toasts, workspaces)
+    components/     Alpine components (toasts, locale switcher, install wizard, sign-in page, account menu, workspace switcher, workspaces page, the cards of the account page)
   views/
     layouts/        app.blade.php, the Tabler page layout
-    components/     Anonymous Blade components (<x-toasts />, <x-locale-switcher />, <x-account-menu />)
-    auth/, app/     The sign-in page and the signed-in user's space
+    components/     Blade components (<x-toasts />, <x-locale-switcher />, <x-account-menu />, <x-workspace-switcher />)
+    auth/, app/     The sign-in page and the signed-in user's pages (space, workspaces, account)
 routes/web.php      Web routes
 routes/api.php      JSON API, versioned in the path (/api/v1)
 tests/
@@ -333,7 +400,7 @@ docker/             Image entrypoint, Caddyfile and php.ini; compose.yaml and .e
   - every component is registered in `resources/js/app.js` with `Alpine.data('name', factory)` and referenced by name in the markup (`x-data="toasts"`), never with an inline object;
   - expressions in templates stay simple: property access, method calls with arguments, comparisons, `!`, `&&`/`||`, ternaries and string `+`. Arrow functions, template literals, `;` statements and Blade values interpolated inside an expression are not allowed: put that logic in a component method;
   - a component gets its values from `data-*` attributes (`data-url` on the root, `data-locale` on an item), read through `$root` or `event.currentTarget`, and translated texts are rendered by Blade as plain attributes;
-  - `tests/js/templates/alpine-csp.test.js` scans every Blade template for forbidden syntax and mounts the toast markup with the real CSP build.
+  - `tests/js/templates/alpine-csp.test.js` scans every Blade template for forbidden syntax and mounts the toast markup with the real CSP build; `tests/js/templates/pages.test.js` does the same for the workspace switcher, the workspaces page and the account page, and drives them like a person would. Alpine applies what a click changed within a frame or two: wait with `requestAnimationFrame`, not only with `nextTick`.
 - **Icons.** Use `<x-tabler-*>` components and do not pass a `class` attribute: the SVG files already have one, which would render the attribute twice. Size and space icons from a parent element.
 - **Documentation.** Every class and public method carries a PHPDoc/JSDoc block that explains the why, not only the what.
 - **Language.** Code, identifiers, comments and commit messages are in English.
@@ -357,7 +424,7 @@ Failures throw an `HttpError` (`status`, `message`, `errors`, `code` from `body.
 
 A page that is open to visitors (the sign-in page, the user menu's sign-out) must pass `{ silent: true }` and show the failures itself: the central handling would answer a `401` or a `403` by redirecting to the very page the visitor is on.
 
-A request cancelled through the caller's `signal` rejects with the raw `AbortError` and no toast. `t('key', { name: value })` fills the `:name` placeholders of a message.
+A request cancelled through the caller's `signal` rejects with the raw `AbortError` and no toast. `delete` takes no body by convention; the few deletions that ask for a confirmation pass it as `http.delete(url, { data: { code } })`. `t('key', { name: value })` fills the `:name` placeholders of a message.
 
 ## Translations
 
