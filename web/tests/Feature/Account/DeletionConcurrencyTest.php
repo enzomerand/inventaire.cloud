@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Support\CommitsDatabaseChanges;
 use Tests\Support\ConcurrentChildren;
@@ -89,6 +91,45 @@ describe('accounts deleted at the same moment', function (): void {
             DB::table('workspaces')->delete();
             DB::table('users')->delete();
         }
+    });
+});
+
+describe('an account deleted by its owner', function (): void {
+    it('is deleted again when the database picks the deletion as the loser of a deadlock', function (): void {
+        // Committed rows and no transaction around the test: the deletion opens the outermost transaction, which is
+        // the one that is retried (the other tests of the suite run inside a transaction of their own).
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $bystander = User::factory()->withPersonalWorkspace()->create();
+        $tries = 0;
+
+        // Registered after the listener that releases what goes with the account: its work is rolled back with the rest.
+        User::deleting(function () use (&$tries): void {
+            if (++$tries === 1) {
+                throw lostDeadlock();
+            }
+        });
+
+        expect(DB::transactionLevel())->toBe(0)
+            ->and($user->delete())->toBeTrue()
+            ->and($tries)->toBe(2)
+            ->and(User::query()->pluck('id')->all())->toBe([$bystander->id])
+            ->and(Workspace::query()->count())->toBe(1);
+    });
+
+    it('gives up on the deadlock that does not go away, and leaves everything as it was', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $tries = 0;
+
+        User::deleting(function () use (&$tries): void {
+            $tries++;
+
+            throw lostDeadlock();
+        });
+
+        expect(fn () => $user->delete())->toThrow(QueryException::class)
+            ->and($tries)->toBe(DeadlockRetries::ATTEMPTS)
+            ->and(User::query()->whereKey($user->id)->exists())->toBeTrue()
+            ->and(Workspace::query()->count())->toBe(1);
     });
 });
 

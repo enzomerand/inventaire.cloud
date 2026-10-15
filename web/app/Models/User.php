@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Auth\AccountDeletion;
 use App\Auth\EmailAddress;
 use App\Auth\Exceptions\AccountDeletionRefused;
+use App\Database\DeadlockRetries;
 use App\Workspaces\Workspaces;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
@@ -107,19 +108,25 @@ class User extends Authenticatable implements HasLocalePreference
     /**
      * Deletes the account, and with it everything that belongs to it alone (see {@see AccountDeletion}).
      *
-     * It runs in one transaction, retried when the database picks it as the loser of a deadlock, and the `deleting`
-     * event releases what goes with the account (its sole-member workspaces, one by one through their own
-     * `delete()`, its tokens, sessions and codes) before the row itself goes. An account that cannot be deleted yet
-     * (the only owner of a shared workspace, the last administrator) raises an `AccountDeletionRefused` and
-     * nothing is changed. An account that is already gone (a stale copy of it) is a `ModelNotFoundException`, not a
-     * silent success.
+     * It runs in one transaction, and the `deleting` event releases what goes with the account (its sole-member
+     * workspaces, one by one through their own `delete()`, its tokens, sessions and codes) before the row itself goes.
+     * When the database picks that transaction as the loser of a deadlock, it is run again ({@see DeadlockRetries},
+     * with a pause that differs from one request to the next) if this is the outermost transaction, which is the case
+     * of the owner deleting their own account. Inside another one (an administrator's deletion of an account, which is
+     * run through {@see DeadlockRetries} itself), the whole of that one is retried instead, since a deadlock rolls all
+     * of it back. An account that cannot be deleted yet (the only owner of a shared workspace, the last administrator)
+     * raises an `AccountDeletionRefused` and nothing is changed. An account that is already gone (a stale copy of it)
+     * is a `ModelNotFoundException`, not a silent success.
      *
      * @throws AccountDeletionRefused
      * @throws ModelNotFoundException
      */
     public function delete(): ?bool
     {
-        return $this->getConnection()->transaction(fn (): ?bool => parent::delete(), 3);
+        $connection = $this->getConnection();
+        $delete = fn (): ?bool => $connection->transaction(fn (): ?bool => parent::delete());
+
+        return $connection->transactionLevel() === 0 ? DeadlockRetries::run($delete) : $delete();
     }
 
     /**

@@ -272,6 +272,26 @@ describe('listing the accounts', function (): void {
 });
 
 describe('creating an account', function (): void {
+    it('is refused to an account that is not an administrator any more, whatever the address', function (): void {
+        // An administrator who has just been demoted elsewhere, but whose session still says otherwise: a race the
+        // gate cannot see, which the check against the stored account must.
+        $actor = User::factory()->withPersonalWorkspace()->create();
+        $actor->is_admin = true;
+        User::factory()->create(['email' => 'taken@example.com']);
+
+        adminCall($this, $actor, 'POST', '/api/v1/admin/users', ['email' => 'ada@example.com', 'name' => 'Ada Lovelace'])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'not_administrator');
+
+        // The address is not given away either: an account that already exists is refused the same way.
+        adminCall($this, $actor, 'POST', '/api/v1/admin/users', ['email' => 'taken@example.com', 'name' => 'Ada Lovelace'])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'not_administrator');
+
+        expect(User::query()->where('email', 'ada@example.com')->exists())->toBeFalse()
+            ->and(User::query()->count())->toBe(2);
+    });
+
     it('creates it with its personal workspace, as signing up would', function (): void {
         $admin = adminAccount();
 

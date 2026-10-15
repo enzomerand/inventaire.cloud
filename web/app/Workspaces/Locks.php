@@ -102,8 +102,13 @@ final class Locks
      * default isolation level, lock every row *and every gap* it passes, the one after the last account included: sign-ups
      * and sign-ins would wait for as long as a deletion lasts. An index on the column would not change that, since the
      * lock on its first entry still covers the gap where the accounts that are not administrators are inserted. Locking
-     * by primary key takes record locks only, on rows that exist (an id that is gone costs a gap lock, but between ids
-     * that were taken, not at the end of the table where accounts are inserted).
+     * by primary key takes record locks on the rows that exist, which is all that is needed in the usual case. An id
+     * that is gone (an account deleted since the caller read it) costs a gap lock on MySQL and MariaDB, on the gap
+     * where it would be; when it is greater than every id left, that is the gap at the end of the table, where
+     * accounts are inserted, and sign-ups wait for it until this transaction ends. That needs an account deleted at
+     * the very moment, and lasts as long as this one transaction: rare and short, which is why it is accepted rather
+     * than checked for (a check that reads the ids first, without a lock, would only narrow the race, not close it).
+     * PostgreSQL has no gap locks.
      *
      * What the caller learns is a lower bound: an account is an administrator for the whole transaction when it is one
      * in the returned collection (the row is locked and was read as it is now, not as it was at the first read). One

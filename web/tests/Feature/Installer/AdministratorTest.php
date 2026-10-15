@@ -127,6 +127,32 @@ describe('the administrator step', function (): void {
         expect(app(InstallationState::class)->status(InstallStep::Administrator))->toBe('pending');
     });
 
+    it('refuses a name with a control character or a text direction control, like the account forms', function (string $name): void {
+        $this->postJson('/install/administrator', ['name' => $name, 'email' => 'jane@example.test'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('name');
+
+        expect(app(InstallationState::class)->status(InstallStep::Administrator))->toBe('pending');
+    })->with('names with a control character');
+
+    it('accepts the unusual names the account forms accept', function (string $name): void {
+        $this->postJson('/install/administrator', ['name' => $name, 'email' => 'jane@example.test'])
+            ->assertOk()
+            ->assertJsonPath('statuses.administrator', 'done');
+
+        expect((new EnvironmentFile($this->sandbox->envPath(), $this->sandbox->envPath()))->all())->toMatchArray(['ADMIN_NAME' => $name]);
+    })->with('unusual names that are fine');
+
+    it('trims the name, invisible characters included, and counts one made of them as missing', function (): void {
+        $this->postJson('/install/administrator', ['name' => "\u{200B} Jane Doe \u{200B}", 'email' => 'jane@example.test'])->assertOk();
+
+        expect((new EnvironmentFile($this->sandbox->envPath(), $this->sandbox->envPath()))->all())->toMatchArray(['ADMIN_NAME' => 'Jane Doe']);
+
+        $this->postJson('/install/administrator', ['name' => "\u{200B}\u{200B}", 'email' => 'jane@example.test'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('name');
+    });
+
     it('stores the address in canonical form: lowercase, its domain in ASCII', function (): void {
         $this->postJson('/install/administrator', ['name' => 'Jane Doe', 'email' => ' Jane@Gmäil.COM '])
             ->assertOk()
@@ -282,6 +308,34 @@ describe('the hook', function (): void {
             ->and($existing->fresh()->name)->toBe('Already Here')
             // An account that predates workspaces is given its personal one on the way.
             ->and($existing->fresh()->workspaces)->toHaveCount(1);
+    });
+
+    it('trims the name like the account forms do, invisible characters included', function (): void {
+        app(InstallerSettings::class)->persist(InstallStep::Administrator, ['name' => "\u{200B}\u{A0}Jane Doe\u{200B}", 'email' => 'jane@example.test']);
+
+        app(CreateAdministrator::class)->run();
+
+        expect(User::query()->sole()->name)->toBe('Jane Doe');
+    });
+
+    it('aborts the installation when the name holds a control character or a text direction control', function (string $name): void {
+        app(InstallerSettings::class)->persist(InstallStep::Administrator, ['name' => $name, 'email' => 'jane@example.test']);
+
+        expect(fn () => app(CreateAdministrator::class)->run())->toThrow(InstallationException::class, 'administrator cannot be created');
+        expect(User::query()->count())->toBe(0);
+        // Not the null byte of the shared list: .env cannot hold one, it never gets as far as the hook.
+    })->with([
+        'a line feed' => ["Jane\nDoe"],
+        'a line separator' => ["Jane\u{2028}Doe"],
+        'a right-to-left override' => ["Jane \u{202E}eoD"],
+        'a left-to-right isolate' => ["Jane \u{2066}Doe"],
+    ]);
+
+    it('aborts the installation when the name is made of invisible characters only', function (): void {
+        app(InstallerSettings::class)->persist(InstallStep::Administrator, ['name' => "\u{200B}\u{200B}", 'email' => 'jane@example.test']);
+
+        expect(fn () => app(CreateAdministrator::class)->run())->toThrow(InstallationException::class, 'administrator cannot be created');
+        expect(User::query()->count())->toBe(0);
     });
 
     it('aborts the installation when the step has no usable values', function (): void {

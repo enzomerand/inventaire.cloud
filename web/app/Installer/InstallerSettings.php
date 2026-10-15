@@ -6,6 +6,7 @@ namespace App\Installer;
 
 use App\Auth\EmailAddress;
 use App\Installer\Exceptions\InstallationException;
+use App\Rules\PersonName;
 
 /**
  * Reads and stores the values of the wizard steps.
@@ -174,7 +175,8 @@ final class InstallerSettings
     /**
      * Completes a submitted form with what is already configured.
      *
-     * The administrator's address comes out in canonical form ({@see EmailAddress::normalize()}).
+     * The administrator's address comes out in canonical form ({@see EmailAddress::normalize()}) and the name trimmed
+     * ({@see PersonName::trim()}), like the account forms do, so that what is validated is what is stored.
      *
      * Imposed values replace whatever was submitted, a missing field keeps its
      * configured value, and an empty secret keeps the stored secret (secrets
@@ -213,9 +215,16 @@ final class InstallerSettings
             $resolved[$name] = $keep ? $current[$name] : $input[$name];
         }
 
-        // The address of the administrator is stored, validated and compared in its canonical form, in both installers.
-        if ($step === InstallStep::Administrator && is_string($resolved['email'] ?? null)) {
-            $resolved['email'] = EmailAddress::normalize($resolved['email']);
+        // The address of the administrator is stored, validated and compared in its canonical form, in both installers,
+        // and the name is trimmed before it is validated: a name made of spaces counts as missing.
+        if ($step === InstallStep::Administrator) {
+            if (is_string($resolved['email'] ?? null)) {
+                $resolved['email'] = EmailAddress::normalize($resolved['email']);
+            }
+
+            if (is_string($resolved['name'] ?? null)) {
+                $resolved['name'] = PersonName::trim($resolved['name']);
+            }
         }
 
         return $resolved;

@@ -43,6 +43,21 @@ describe('the rules of a person\'s name', function (): void {
         expect($errors)->toHaveCount(1)->and($errors[0])->toContain('saut de ligne');
     });
 
+    it('say that a text direction control is what is wrong, in the language of the request', function (): void {
+        $this->useLanguage('fr');
+
+        $errors = Validator::make(['name' => "Ada \u{202E}ecnerwoL"], ['name' => PersonName::rules()])->errors()->get('name');
+
+        expect($errors)->toHaveCount(1)->and($errors[0])->toContain('sens de lecture');
+    });
+
+    it('keep the formatting characters that names need: joiners and direction marks', function (): void {
+        // Only the embeddings, overrides and isolates are refused, not every character of the "format" category.
+        expect(nameIsValid("\u{1F469}\u{200D}\u{1F4BB}"))->toBeTrue()
+            ->and(nameIsValid("می\u{200C}خواهم"))->toBeTrue()
+            ->and(nameIsValid("Ada \u{200E}\u{200F}\u{061C}Lovelace"))->toBeTrue();
+    });
+
     it('trim the spaces, invisible characters and control characters at both ends only', function (): void {
         expect(PersonName::trim("\u{A0} Ada Lovelace \u{200B}\n"))->toBe('Ada Lovelace')
             ->and(PersonName::trim("Ada\nLovelace"))->toBe("Ada\nLovelace");

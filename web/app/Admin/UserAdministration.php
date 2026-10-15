@@ -29,11 +29,12 @@ use Illuminate\Support\Facades\Log;
  * not delete their own account from here (that takes the code mailed to its owner, from the account page), and no
  * workspace is left without an owner by the deletion of an account.
  *
- * Everything that changes accounts judges under row locks taken in the global order of {@see Locks}, in one transaction
+ * Everything that changes existing accounts judges under row locks taken in the global order of {@see Locks}, in one transaction
  * that is retried when the database picks it as the loser of a deadlock ({@see DeadlockRetries}): two administrators
  * demoting each other at the same moment, or deleting each other, are judged one after the other and the last one is
  * refused. The administrator who asks is judged again under those locks: one who was demoted while the request was
- * on its way no longer does what only administrators do ({@see UserAdministrationRefused::NOT_ADMINISTRATOR}).
+ * on its way no longer does what only administrators do ({@see UserAdministrationRefused::NOT_ADMINISTRATOR}); creating
+ * an account depends on no other account, so it is judged on a fresh read of the administrator, without a lock.
  *
  * Every change an administrator makes (an account created, made an administrator or not any more, deleted) leaves one
  * line in the log, with the id of the administrator and the id of the account, and nothing else: no address, no name.
@@ -75,10 +76,17 @@ final class UserAdministration
      * @param  string  $email  Address, in any case: it is stored in canonical form.
      * @param  string  $name  Already validated and trimmed.
      *
-     * @throws UserAdministrationRefused When the address already has an account.
+     * @throws UserAdministrationRefused When the actor is no longer an administrator, or when the address already has an account.
      */
     public function create(User $actor, string $email, string $name): User
     {
+        // Judged on the account as stored, not on the copy the request carries: an administrator demoted since the
+        // request was authorized must not finish as one. A plain read is enough here, nothing is locked: creating an
+        // account depends on no other account, so there is no verdict to keep true until the commit.
+        if (! User::query()->whereKey($actor->getKey())->where('is_admin', true)->exists()) {
+            throw new UserAdministrationRefused(UserAdministrationRefused::NOT_ADMINISTRATOR);
+        }
+
         $email = EmailAddress::normalize($email);
 
         if (User::query()->where('email', $email)->exists()) {
@@ -200,12 +208,18 @@ final class UserAdministration
      * Gives every workspace the account is the only owner of, and that other people belong to, a new owner: the editor
      * of the longest standing, or the member of the longest standing when it has no editor.
      *
-     * Locks are taken in the order of {@see Locks}, and it is the same order as the deletion that follows takes them
-     * (which then finds them held): the sign-in code of the address, then the administrators, the actor, the account
-     * and the people who could take over, in one statement, lowest id first, then the workspaces, then their
-     * memberships. Whom to lock is read before any lock; the memberships are read again under the locks, and the
-     * accounts of members who joined in the meantime are locked last, once the workspace is (the path that goes back
-     * up the order that `Workspaces::delete()` takes too, see Locks).
+     * Locks are taken in the order of {@see Locks}, and it is the same order as the deletion that follows takes them:
+     * the sign-in code of the address, then the administrators, the actor, the account and the people who could take
+     * over, in one statement, lowest id first, then the workspaces, then their memberships. Whom to lock is read before
+     * any lock; the memberships are read again under the locks, and the accounts of members who joined in the meantime
+     * are locked last, once the workspace is (the path that goes back up the order that `Workspaces::delete()` takes
+     * too, see Locks).
+     *
+     * The deletion that follows asks for the same locks again, and a lock the transaction holds already costs nothing.
+     * Not all of them are held, though: it reads the administrators again, and an account promoted since the first
+     * read is locked only then, after the workspaces and their memberships. That is a step back up the order, so it can
+     * deadlock with a request that holds that account and waits for one of the rows held here. The database then
+     * aborts one of the two, and {@see self::delete()} runs the whole transaction again ({@see DeadlockRetries}).
      *
      * @param  User  $actor  The administrator who asks, judged again once the accounts are locked.
      *
