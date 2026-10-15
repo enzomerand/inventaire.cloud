@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\AccountDeletionController;
 use App\Http\Controllers\Api\V1\AccountExportController;
+use App\Http\Controllers\Api\V1\Admin\SettingsController as AdminSettingsController;
+use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
@@ -11,6 +13,7 @@ use App\Http\Controllers\Api\V1\CurrentWorkspaceController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
+use App\Http\Middleware\RefuseApiTokens;
 use App\Http\Middleware\RequireStatefulRequest;
 use Illuminate\Support\Facades\Route;
 
@@ -44,5 +47,18 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::post('/workspaces', [WorkspaceController::class, 'store'])->middleware('throttle:workspace-creation')->name('workspaces.store');
         Route::patch('/workspaces/{workspace}', [WorkspaceController::class, 'update'])->name('workspaces.update');
         Route::delete('/workspaces/{workspace}', [WorkspaceController::class, 'destroy'])->name('workspaces.destroy');
+
+        // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a
+        // session, never an API token). The id of an account is digits only, and few enough for any database to
+        // read; the controller looks it up itself: see UserController::find().
+        Route::prefix('admin')->name('admin.')->middleware([RequireStatefulRequest::class, RefuseApiTokens::class, 'can:admin'])->group(function (): void {
+            Route::get('/users', [AdminUserController::class, 'index'])->name('users.index');
+            Route::post('/users', [AdminUserController::class, 'store'])->middleware('throttle:admin-user-creation')->name('users.store');
+            Route::patch('/users/{user}', [AdminUserController::class, 'update'])->where('user', '[0-9]{1,18}')->name('users.update');
+            Route::delete('/users/{user}', [AdminUserController::class, 'destroy'])->where('user', '[0-9]{1,18}')->name('users.destroy');
+
+            Route::get('/settings', [AdminSettingsController::class, 'show'])->name('settings.show');
+            Route::put('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');
+        });
     });
 });

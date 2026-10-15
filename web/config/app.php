@@ -97,6 +97,15 @@ return [
 
     'locale' => env('APP_LOCALE', 'fr'),
 
+    /*
+    | The language of the instance itself (APP_LOCALE), for what is written outside of any visitor's request: the mail
+    | an administrator's new account receives, the language of that account. `locale` above is not that: the SetLocale
+    | middleware replaces it with the language of every request (Application::setLocale() writes it back), so by the
+    | time a controller runs it holds the visitor's language. This key is never written to.
+    */
+
+    'default_locale' => env('APP_LOCALE', 'fr'),
+
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 
     'faker_locale' => env('APP_FAKER_LOCALE', 'fr_FR'),

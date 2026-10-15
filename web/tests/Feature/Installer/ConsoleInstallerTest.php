@@ -153,6 +153,25 @@ describe('non-interactive installation', function (): void {
             ->and(app(InstallationState::class)->status(InstallStep::Application))->toBe('pending');
     });
 
+    it('refuses a name for the administrator that holds a control character or a text direction control, like the web form', function (string $name): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+
+        $this->artisan('inventaire:install', installOptions(['--skip-mail-test' => true, '--admin-name' => $name]))
+            ->expectsOutputToContain('The name must not contain')
+            ->assertFailed();
+
+        expect(app(InstallationState::class)->isInstalled())->toBeFalse()
+            ->and(app(InstallationState::class)->status(InstallStep::Administrator))->toBe('pending');
+    })->with(['a line break' => ["Jane\nBcc: victim@example.test"], 'a right-to-left override' => ["Jane \u{202E}eoD"]]);
+
+    it('trims the name of the administrator, invisible characters included', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+
+        $this->artisan('inventaire:install', installOptions(['--skip-mail-test' => true, '--admin-name' => "\u{200B} Jane Doe \u{200B}"]))->assertSuccessful();
+
+        expect(consoleEnv($this)['ADMIN_NAME'])->toBe('Jane Doe');
+    });
+
     it('does not need a test address, which only exists to receive a code', function (): void {
         Artisan::call('db:wipe', ['--force' => true]);
 

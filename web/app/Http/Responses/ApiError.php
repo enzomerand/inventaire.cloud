@@ -28,6 +28,17 @@ final class ApiError
     }
 
     /**
+     * A 403: the caller is known but is not allowed to do this (any more).
+     *
+     * @param  string  $message  What happened, for a person.
+     * @param  string  $code  Why, for a program.
+     */
+    public static function forbidden(string $message, string $code): JsonResponse
+    {
+        return new JsonResponse(['message' => $message, 'code' => $code], 403);
+    }
+
+    /**
      * A 404: the thing the request is about is not there (any more).
      *
      * @param  string  $message  What happened, for a person.

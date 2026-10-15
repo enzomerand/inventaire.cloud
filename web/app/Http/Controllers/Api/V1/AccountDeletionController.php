@@ -13,6 +13,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Account\DeleteAccountRequest;
 use App\Http\Responses\ApiError;
 use App\Mail\AccountDeletionCodeMail;
+use App\Mail\AfterResponse;
 use App\Models\User;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -21,7 +22,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
-use Throwable;
 
 /**
  * Deleting one's own account: a code is mailed to the address of the account, then typed back to confirm.
@@ -38,9 +38,9 @@ final class AccountDeletionController extends Controller
     ) {}
 
     /**
-     * Mails a confirmation code to the address of the account, in its language, replacing the previous one.
-     *
-     * @throws Throwable When the mail cannot be sent; the code is dropped then.
+     * Mails a confirmation code to the address of the account, in its language, replacing the previous one. The mail
+     * is sent once the answer has gone ({@see AfterResponse}); if it cannot be sent, the code is dropped and the
+     * failure is logged: the person asks for another one.
      */
     public function code(Request $request): JsonResponse
     {
@@ -53,15 +53,19 @@ final class AccountDeletionController extends Controller
         }
 
         $code = $this->codes->issue($user);
+        $minutes = $this->codes->lifetimeMinutes();
+        $email = $user->email;
+        $locale = $user->locale ?? app()->getLocale();
 
-        try {
-            Mail::to($user->email)->locale($user->locale ?? app()->getLocale())->send(new AccountDeletionCodeMail($code, $this->codes->lifetimeMinutes()));
-        } catch (Throwable $exception) {
-            $this->codes->forget($user);
-            throw $exception;
-        }
+        AfterResponse::run(
+            'an account deletion code',
+            function () use ($email, $locale, $code, $minutes): void {
+                Mail::to($email)->locale($locale)->send(new AccountDeletionCodeMail($code, $minutes));
+            },
+            fn () => $this->codes->forget($user, $code),
+        );
 
-        return new JsonResponse(['data' => ['expires_in' => $this->codes->lifetimeMinutes() * 60]]);
+        return new JsonResponse(['data' => ['expires_in' => $minutes * 60]]);
     }
 
     /**

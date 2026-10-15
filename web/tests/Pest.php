@@ -5,10 +5,12 @@ declare(strict_types=1);
 use App\Installer\Settings\DatabaseSettings;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\Mime\Email;
+use Tests\Support\ConcurrentChildren;
 use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
@@ -175,6 +177,42 @@ function wrongCode(string $right): string
 }
 
 /**
+ * Holds back what the application defers to after the response (the mails of codes and welcomes), so that a test can
+ * look at the state between the answer and the end of the request, then let it run.
+ *
+ * Without this, the test client runs the deferred work as the request terminates, before the call returns. The
+ * collection that comes back has a `release()` method that runs what was held.
+ */
+function holdDeferred(): DeferredCallbackCollection
+{
+    $held = new class extends DeferredCallbackCollection
+    {
+        public bool $holding = true;
+
+        public function invokeWhen(?Closure $when = null): void
+        {
+            if (! $this->holding) {
+                parent::invokeWhen($when);
+            }
+        }
+
+        /**
+         * Runs what was deferred, as the end of the request does for a response below 400.
+         */
+        public function release(): void
+        {
+            $this->holding = false;
+            $this->invokeWhen(fn (): bool => true);
+            $this->holding = true;
+        }
+    };
+
+    app()->instance(DeferredCallbackCollection::class, $held);
+
+    return $held;
+}
+
+/**
  * The emails the application sent so far in this test (the "array" mailer keeps them).
  *
  * @return list<Email>
@@ -217,4 +255,47 @@ function queryFailure(string $state, int|string $code, string $message): QueryEx
 function lostDeadlock(): QueryException
 {
     return queryFailure('40001', 1213, 'Deadlock found when trying to get lock; try restarting transaction');
+}
+
+/**
+ * The SQL statements run against the database while a callback runs, in order and without their values.
+ *
+ * @return list<string>
+ */
+function statementsOf(Closure $callback): array
+{
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $callback();
+
+    $statements = array_column(DB::getQueryLog(), 'query');
+    DB::disableQueryLog();
+
+    return $statements;
+}
+
+/**
+ * Empties what the concurrency tests commit (they run on the test database only: see TestDatabaseGuard).
+ */
+function removeConcurrencyRows(): void
+{
+    DB::table('workspaces')->delete();
+    DB::table('users')->delete();
+}
+
+/**
+ * Runs actions in separate PHP processes that all start together, and returns what they reported as sorted words
+ * ("deleted", "demoted", "refused:last_administrator"...).
+ *
+ * @param  list<list<int|string>>  $commands  The arguments of each process after the go file: the action, then its ids.
+ * @return list<string>
+ */
+function actTogether(string $directory, array $commands): array
+{
+    $answers = ConcurrentChildren::run($directory, base_path('tests/Support/concurrent-action.php'), $commands);
+    $words = array_map(fn (array $answer): string => $answer['result'].(isset($answer['reason']) ? ':'.$answer['reason'] : ''), $answers);
+    sort($words);
+
+    return $words;
 }

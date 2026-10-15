@@ -10,6 +10,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -589,6 +590,22 @@ describe('deleting the account through the model, whoever asks', function (): vo
         expect(fn () => $stale->delete())->toThrow(ModelNotFoundException::class)
             ->and(User::query()->pluck('id')->all())->toBe([$bystander->id])
             ->and(Workspace::query()->count())->toBe(1);
+    });
+
+    it('is not run again by itself inside another transaction: that one is, as a whole', function (): void {
+        // A deadlock rolls the outermost transaction back whole; running the deletion again alone would run it outside
+        // of what was rolled back (see DeadlockRetries). So it surfaces, for whoever opened the transaction to retry.
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $tries = 0;
+
+        User::deleting(function () use (&$tries): void {
+            $tries++;
+
+            throw lostDeadlock();
+        });
+
+        expect(fn () => DB::transaction(fn () => $user->delete()))->toThrow(DeadlockException::class)
+            ->and($tries)->toBe(1);
     });
 
     it('locks the sign-in code of the stored address, not the one a stale copy of the account spells', function (): void {

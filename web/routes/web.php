@@ -17,13 +17,20 @@ use Illuminate\Support\Facades\Route;
 Route::view('/', 'home')->name('home');
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space, where
-// the pages drive the /api/v1 endpoints of their workspaces and their account. Only these pages check that the session
+// the pages drive the /api/v1 endpoints of their workspaces, their account and (for administrators) the instance.
+// Only these pages check that the session
 // was not revoked ("sign out everywhere"): the public ones never look the visitor up for that.
 Route::view('/login', 'auth.login')->middleware('guest')->name('login');
 Route::middleware(['auth', AuthenticateSession::class])->group(function (): void {
     Route::view('/app', 'app.dashboard')->name('app');
     Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
     Route::view('/app/account', 'app.account')->name('app.account');
+
+    // The administration of the instance: its administrators only (the "admin" gate), a 403 for everybody else.
+    Route::middleware('can:admin')->prefix('app/admin')->name('app.admin.')->group(function (): void {
+        Route::view('/users', 'app.admin.users')->name('users');
+        Route::view('/settings', 'app.admin.settings')->name('settings');
+    });
 });
 
 Route::get('/csrf-token', RefreshCsrfTokenController::class)->name('csrf.refresh');

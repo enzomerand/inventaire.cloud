@@ -9,6 +9,7 @@ use App\Auth\AdministratorChange;
 use App\Auth\EmailAddress;
 use App\Installer\InstallationState;
 use App\Models\User;
+use App\Rules\PersonName;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
 
@@ -58,6 +59,17 @@ final class MakeAdminCommand extends Command
             return self::INVALID;
         }
 
+        // The name of an existing account is not used (and `nameFor()` answers with an empty one).
+        if ($name !== '') {
+            $validator = Validator::make(['name' => $name], ['name' => PersonName::rules()], [], ['name' => mb_strtolower(__('Name'))]);
+
+            if ($validator->fails()) {
+                $this->components->error($validator->errors()->first());
+
+                return self::INVALID;
+            }
+        }
+
         [$user, $change] = $accounts->administrator($email, $name);
 
         $this->components->info(match ($change) {
@@ -74,8 +86,9 @@ final class MakeAdminCommand extends Command
     }
 
     /**
-     * The name for an account that has to be created, or an empty placeholder when the account exists (its own name is kept).
-     * Null when a name is needed and cannot be had.
+     * The name for an account that has to be created, trimmed like the account forms do ({@see PersonName::trim()}), or
+     * an empty placeholder when the account exists (its own name is kept). Null when a name is needed and cannot be had.
+     * It is judged by {@see PersonName} afterwards.
      */
     private function nameFor(string $email): ?string
     {
@@ -84,10 +97,10 @@ final class MakeAdminCommand extends Command
         }
 
         $option = $this->option('name');
-        $name = is_string($option) ? trim($option) : '';
+        $name = is_string($option) ? PersonName::trim($option) : '';
 
         if ($name === '' && $this->input->isInteractive()) {
-            $name = trim(text(label: __('Name'), required: true));
+            $name = PersonName::trim(text(label: __('Name'), required: true));
         }
 
         return $name === '' ? null : $name;

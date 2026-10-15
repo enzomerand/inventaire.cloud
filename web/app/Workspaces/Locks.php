@@ -30,27 +30,34 @@ use Illuminate\Database\Eloquent\Collection;
  * more than one of these locks takes them in the same order (but for the two paths named below):
  *
  * 1. the sign-in code of an address (`login_codes`, by address: {@see self::loginCode()});
- * 2. the accounts (`users`), lowest id first ({@see self::users()});
+ * 2. the accounts (`users`), lowest id first ({@see self::users()}, or {@see self::administratorsAnd()} when the verdict
+ *    depends on the administrators too);
  * 3. the workspaces (`workspaces`), lowest id first ({@see self::workspaces()});
  * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
- * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels: creating an account takes
+ * personal workspace); deleting an account takes 1 to 4; so does an administrator deleting one, who first hands over
+ * the workspaces it alone owns (and who, like the administrators changing who is one, locks all the administrators
+ * with the account: see {@see self::administratorsAnd()}). A transaction may skip levels: creating an account takes
  * none of 2 to 4 for its personal workspace, since the account and the workspace are invisible to everybody until the
  * commit and the workspace is inserted without reading any membership (see {@see Workspaces::createPersonal()}).
  * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
- * memberships: it is what lets the two exceptions below stay safety nets.
+ * memberships: it is what lets the exceptions below stay safety nets.
  *
- * Two paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
+ * Three paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
  *
  * - `Workspaces::delete()` locks, after the workspace and its memberships, the accounts of the members who joined that
  *   workspace meanwhile (a request that committed in that gap);
  * - `AccountDeletion` locks, after the memberships of the account, the workspaces the account joined meanwhile (the
  *   account is locked by then, and adding it to a workspace locks it first, so this is for a membership added without
- *   that lock).
+ *   that lock);
+ * - `UserAdministration`, when an administrator deletes an account, locks first the administrators, the account and
+ *   the people who can take over the workspaces it alone owns (all in one statement, lowest id first, then the
+ *   workspaces and their memberships), and then, once the memberships are read, the accounts of the members who joined
+ *   those workspaces meanwhile.
  *
- * Only these two can end up waiting for each other, in a race that narrow. The database then aborts one of the
+ * Only these three can end up waiting for each other, in a race that narrow. The database then aborts one of the
  * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many requests may
  * collide, as sign-ups do), always the outermost transaction: a deadlock rolls the whole of it back, so a nested
  * transaction cannot retry by itself.
@@ -84,6 +91,39 @@ final class Locks
         $users = $ids === [] ? new Collection : User::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
         return $users;
+    }
+
+    /**
+     * Locks every administrator and the given accounts, lowest id first, and returns the ones that exist, by id.
+     *
+     * For the verdicts that depend on who administers the instance ("an administrator remains"). The administrators are
+     * read first, without a lock, and then everything is locked by primary key in one statement. A locking read that
+     * filtered on `is_admin` would scan the whole table (the column has no index) and, on MySQL and MariaDB at their
+     * default isolation level, lock every row *and every gap* it passes, the one after the last account included: sign-ups
+     * and sign-ins would wait for as long as a deletion lasts. An index on the column would not change that, since the
+     * lock on its first entry still covers the gap where the accounts that are not administrators are inserted. Locking
+     * by primary key takes record locks on the rows that exist, which is all that is needed in the usual case. An id
+     * that is gone (an account deleted since the caller read it) costs a gap lock on MySQL and MariaDB, on the gap
+     * where it would be; when it is greater than every id left, that is the gap at the end of the table, where
+     * accounts are inserted, and sign-ups wait for it until this transaction ends. That needs an account deleted at
+     * the very moment, and lasts as long as this one transaction: rare and short, which is why it is accepted rather
+     * than checked for (a check that reads the ids first, without a lock, would only narrow the race, not close it).
+     * PostgreSQL has no gap locks.
+     *
+     * What the caller learns is a lower bound: an account is an administrator for the whole transaction when it is one
+     * in the returned collection (the row is locked and was read as it is now, not as it was at the first read). One
+     * made an administrator between the first read and the locks is not locked, so it is not counted; that can only make
+     * a caller refuse something it could have allowed ("this is the last administrator"), never allow what leaves
+     * the instance without one.
+     *
+     * @param  iterable<int|string>  $ids  Accounts to lock besides the administrators.
+     * @return Collection<int, User>
+     */
+    public function administratorsAnd(iterable $ids): Collection
+    {
+        $administrators = User::query()->where('is_admin', true)->pluck('id')->all();
+
+        return $this->users([...$administrators, ...$ids]);
     }
 
     /**

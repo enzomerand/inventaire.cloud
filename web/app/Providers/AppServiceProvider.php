@@ -8,11 +8,14 @@ use App\Auth\EmailAddress;
 use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
+use App\Models\User;
 use App\Services\ClientNetwork;
+use App\Settings\InstanceSettings;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -27,6 +30,9 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(ArtisanRunner::class, ProcessArtisanRunner::class);
+
+        // Read once per request and no longer (see the class), so a worker that serves many requests starts afresh.
+        $this->app->scoped(InstanceSettings::class);
     }
 
     /**
@@ -37,9 +43,25 @@ class AppServiceProvider extends ServiceProvider
         // Every sign-in, "remember me" cookie included, leaves its session with the account's fingerprint (see the class).
         Event::listen(Login::class, StoreSessionFingerprint::class);
 
+        // The administration pages and endpoints are for the administrators of the instance, and nobody else: the
+        // routes ask for `can:admin`. Judged on the account as stored, at every request, so promoting or demoting
+        // someone takes effect at once.
+        Gate::define('admin', fn (User $user): bool => $user->is_admin);
+
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();
         $this->registerWorkspaceLimiters();
+        $this->registerAdminLimiters();
+    }
+
+    /**
+     * The rate limiter of the administration endpoint that sends a mail to an address the administrator chooses
+     * (limit in config/admin.php, `user_creation_per_hour`), keyed on the administrator.
+     */
+    private function registerAdminLimiters(): void
+    {
+        RateLimiter::for('admin-user-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('admin.user_creation_per_hour'))
+            ->by('admin-user-creation:'.$this->signedInKey($request)));
     }
 
     /**

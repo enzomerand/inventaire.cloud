@@ -14,6 +14,7 @@ use App\Http\Requests\Auth\VerifyLoginCodeRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\LocaleResolver;
+use App\Settings\InstanceSettings;
 use App\Workspaces\Workspaces;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Http\JsonResponse;
@@ -29,6 +30,10 @@ use Illuminate\Support\Str;
  * in are one flow. Whether an address has an account is only ever revealed to
  * somebody who holds a valid code for it.
  *
+ * When an administrator has closed registration, an address that has no account cannot create one: it is judged like
+ * any other address (wrong codes are counted, attempts run out), but whatever it types is refused as a wrong code,
+ * even the right one, so a code issued before registration closed opens nothing and nothing tells the two apart.
+ *
  * Spending the code and everything that is saved because of it (the account,
  * its verified address, its language, its workspace) is one transaction: if any of it fails,
  * the code is still there for the next try. The session is opened once the
@@ -39,6 +44,7 @@ final class VerifyCodeController extends Controller
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Workspaces $workspaces,
+        private readonly InstanceSettings $settings,
     ) {}
 
     /**
@@ -79,10 +85,14 @@ final class VerifyCodeController extends Controller
         // Locked before anything is read (see LoginCodes::lock() for why).
         $codes->lock($email);
 
+        // Read for every address, so that the work is the same whether it has an account or not.
+        $registrationOpen = $this->settings->registrationOpen();
+
         $user = User::query()->where('email', $email)->first();
 
-        // A name is needed to create an account: until it is known, a right code is checked but kept.
-        $verdict = $codes->verify($email, $code, consume: $user !== null || $name !== null);
+        // A name is needed to create an account: until it is known, a right code is checked but kept. And when no
+        // account can be created, the code of an address without one is never the right one.
+        $verdict = $codes->verify($email, $code, consume: $user !== null || $name !== null, acceptable: $user !== null || $registrationOpen);
 
         if (! $verdict->accepted()) {
             return $this->refusal($verdict);

@@ -74,6 +74,47 @@ describe('inventaire:make-admin', function (): void {
         expect(User::query()->sole()->name)->toBe('Jane Doe');
     });
 
+    it('refuses a name with a control character or a text direction control, with the reason, and creates nothing', function (string $name): void {
+        $this->artisan('inventaire:make-admin', ['email' => 'jane@example.test', '--name' => $name, '--no-interaction' => true])
+            ->expectsOutputToContain('The name must not contain')
+            ->assertExitCode(2);
+
+        expect(User::query()->count())->toBe(0);
+    })->with('names with a control character');
+
+    it('accepts the unusual names the account forms accept', function (string $name): void {
+        $this->artisan('inventaire:make-admin', ['email' => 'jane@example.test', '--name' => $name, '--no-interaction' => true])->assertSuccessful();
+
+        expect(User::query()->sole()->name)->toBe($name);
+    })->with('unusual names that are fine');
+
+    it('trims the name, invisible characters included, and counts one made of them as missing', function (): void {
+        $this->artisan('inventaire:make-admin', ['email' => 'jane@example.test', '--name' => "\u{200B} Jane Doe \u{200B}", '--no-interaction' => true])->assertSuccessful();
+
+        expect(User::query()->sole()->name)->toBe('Jane Doe');
+
+        $this->artisan('inventaire:make-admin', ['email' => 'john@example.test', '--name' => "\u{200B}\u{200B}", '--no-interaction' => true])
+            ->expectsOutputToContain('give its name with --name')
+            ->assertExitCode(2);
+    });
+
+    it('judges the name it is asked for as well', function (): void {
+        $this->artisan('inventaire:make-admin', ['email' => 'jane@example.test'])
+            ->expectsQuestion('Name', "Jane \u{202E}eoD")
+            ->expectsOutputToContain('The name must not contain')
+            ->assertExitCode(2);
+
+        expect(User::query()->count())->toBe(0);
+    });
+
+    it('does not judge the name given for an account that exists: its own is kept', function (): void {
+        $user = User::factory()->create(['name' => 'Already Here', 'email' => 'jane@example.test']);
+
+        $this->artisan('inventaire:make-admin', ['email' => 'jane@example.test', '--name' => "Ada\nLovelace", '--no-interaction' => true])->assertSuccessful();
+
+        expect($user->fresh()->name)->toBe('Already Here')->and($user->fresh()->is_admin)->toBeTrue();
+    });
+
     it('refuses to create an account without a name when nobody can be asked', function (): void {
         $this->artisan('inventaire:make-admin', ['email' => 'jane@example.test', '--no-interaction' => true])
             ->expectsOutputToContain('give its name with --name')

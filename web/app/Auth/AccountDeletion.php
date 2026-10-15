@@ -85,21 +85,20 @@ final class AccountDeletion
 
         $this->locks->loginCode($email);
 
-        // The administrators and the account in one go, lowest id first: two administrators deleting themselves
-        // at the same moment would otherwise each hold their own row and wait for the other's.
-        $accounts = User::query()
-            ->where(fn ($query) => $query->where('is_admin', true)->orWhere('id', $user->getKey()))
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get();
-
-        $locked = $accounts->first(fn (User $account): bool => $account->is($user));
+        // The administrators and the account in one go, lowest id first, by primary key (see Locks::administratorsAnd()
+        // for why not with a filter on is_admin): two administrators deleting themselves at the same moment would
+        // otherwise each hold their own row and wait for the other's. When an administrator deletes the account, most
+        // of these rows are held already and cost nothing (the exception is explained at
+        // UserAdministration::handOverWorkspaces()).
+        $accounts = $this->locks->administratorsAnd([$user->getKey()]);
+        $locked = $accounts->get((int) $user->getKey());
 
         if ($locked === null) {
             // Deleted by somebody else while this waited (or before it began, for a stale copy of the account).
             throw (new ModelNotFoundException)->setModel(User::class, [$user->getKey()]);
         }
 
+        // Another administrator among the locked rows is one for the whole transaction (see Locks::administratorsAnd()).
         if ($locked->is_admin && $accounts->doesntContain(fn (User $account): bool => $account->is_admin && ! $account->is($locked))) {
             throw new AccountDeletionRefused(AccountDeletionRefused::LAST_ADMINISTRATOR);
         }

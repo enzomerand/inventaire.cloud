@@ -6,6 +6,7 @@ namespace App\Installer;
 
 use App\Auth\EmailAddress;
 use App\Installer\Settings\DatabaseSettings;
+use App\Rules\PersonName;
 use App\Services\LocaleResolver;
 use DateTimeZone;
 use Illuminate\Validation\Rule;
@@ -264,7 +265,7 @@ enum InstallStep: string
                 'api_key' => ['required', 'string', 'max:255'],
             ],
             self::Administrator => [
-                'name' => ['required', 'string', 'max:255'],
+                'name' => PersonName::rules(),
                 'email' => EmailAddress::rules(),
             ],
         };

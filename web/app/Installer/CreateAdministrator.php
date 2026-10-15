@@ -7,6 +7,7 @@ namespace App\Installer;
 use App\Auth\Accounts;
 use App\Auth\EmailAddress;
 use App\Installer\Exceptions\InstallationException;
+use App\Rules\PersonName;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -40,12 +41,16 @@ final class CreateAdministrator implements PostMigrationHook
         // Whatever form the address was stored in (a configuration edited by hand), it is judged and used in canonical form.
         $values['email'] = EmailAddress::normalize((string) $values['email']);
 
+        // The name too, as the forms do: trimmed first, so that one made of spaces is missing, and then judged by the
+        // same rules as the name of any account.
+        $values['name'] = PersonName::trim((string) $values['name']);
+
         $validator = Validator::make($values, InstallStep::Administrator->rules(), [], InstallStep::Administrator->attributes());
 
         if ($validator->fails()) {
             throw new InstallationException('The administrator cannot be created: :reason', ['reason' => $validator->errors()->first()]);
         }
 
-        $this->accounts->administrator($values['email'], trim((string) $values['name']));
+        $this->accounts->administrator($values['email'], $values['name']);
     }
 }

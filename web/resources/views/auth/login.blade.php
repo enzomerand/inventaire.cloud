@@ -5,12 +5,18 @@
 
     Alpine runs in its CSP build: expressions stay simple (property access, method calls, comparisons) and the
     values the component needs come from the data-* attributes of its root, never from Blade inside an expression.
+
+    When an administrator has closed registration the page says so, to everybody alike: it names no address and
+    reveals nothing about any (the sign-in steps answer the same for an address that has an account and one that has
+    not).
 --}}
 @extends('layouts.app')
 
 @section('title', __('Sign in'))
 
 @section('content')
+    @inject('settings', 'App\Settings\InstanceSettings')
+
     <div class="row justify-content-center">
         <div class="col-12 col-md-8 col-lg-5 col-xl-4">
             <div
@@ -22,7 +28,12 @@
             >
                 <div class="card-body">
                     <h1 class="card-title h2 mb-1">{{ __('Sign in') }}</h1>
-                    <p class="text-secondary">{{ __('No password needed: we email you a 6-digit code. If you are new here, the same steps create your account.') }}</p>
+                    @if ($settings->registrationOpen())
+                        <p class="text-secondary">{{ __('No password needed: we email you a 6-digit code. If you are new here, the same steps create your account.') }}</p>
+                    @else
+                        <p class="text-secondary">{{ __('No password needed: we email you a 6-digit code.') }}</p>
+                        <div class="alert alert-info" role="note">{{ __('Sign-ups are closed: only existing accounts can sign in.') }}</div>
+                    @endif
 
                     <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
 
