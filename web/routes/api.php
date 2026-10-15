@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
 use App\Http\Controllers\Api\V1\CurrentWorkspaceController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Middleware\RequireStatefulRequest;
 use Illuminate\Support\Facades\Route;
@@ -27,6 +28,8 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/me', MeController::class)->name('me');
+        // A session action (it signs this device in again): the web front only.
+        Route::post('/me/sign-out-everywhere', SignOutEverywhereController::class)->middleware(RequireStatefulRequest::class)->name('me.sign-out-everywhere');
         Route::put('/me/current-workspace', CurrentWorkspaceController::class)->name('me.current-workspace');
 
         Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');

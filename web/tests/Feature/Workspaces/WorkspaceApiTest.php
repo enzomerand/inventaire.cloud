@@ -190,6 +190,9 @@ describe('renaming', function (): void {
         $workspace->members()->attach($viewer->id, ['role' => 'viewer']);
 
         $this->actingAs(memberOfOne('Eve'))->patchJson("/api/v1/workspaces/{$workspace->ulid}", ['name' => ''], frontend())->assertNotFound();
+
+        // Somebody else's request: the session of the previous one (whose fingerprint is not this user's) is not theirs.
+        $this->flushSession();
         $this->actingAs($viewer)->patchJson("/api/v1/workspaces/{$workspace->ulid}", ['name' => ''], frontend())->assertForbidden();
     });
 

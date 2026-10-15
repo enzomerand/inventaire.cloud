@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
 /**
@@ -82,14 +83,40 @@ class User extends Authenticatable implements HasLocalePreference
     }
 
     /**
-     * Accounts have no password, but the framework still asks for its hash: the "remember me" cookie is only
-     * honoured when the user has one, as a string. A constant keeps it working; the cookie's real secret is the
-     * remember token, which every device of the account shares (signing out of one device keeps it, so the
-     * others stay signed in; "sign out everywhere" renews it).
+     * Gives every new account a "remember me" token, so that the fingerprint of its sessions
+     * ({@see self::getAuthPassword()}) exists from the start, whatever creates the account.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $user): void {
+            if (empty($user->getRememberToken())) {
+                $user->setRememberToken(Str::random(60));
+            }
+        });
+    }
+
+    /**
+     * Accounts have no password, but the framework still asks for a "password hash": it is what ties a session
+     * and a "remember me" cookie to the credentials they were opened with. Here it is derived from the remember
+     * token, which every device of the account shares, so that renewing the token ("sign out everywhere") makes
+     * the framework refuse every session and every cookie that was opened before:
+     *
+     * - the "remember me" cookie carries the token itself, and a cookie with an old token no longer finds the user;
+     * - a session stores the fingerprint when it is opened, and `AuthenticateSession` (on the web pages and, through
+     *   Sanctum, on the API) signs the session out as soon as the fingerprint no longer matches.
+     *
+     * Signing out of one device keeps the token, so the other devices stay signed in. An account without a token
+     * (which only a row inserted by hand can be) has an empty fingerprint, which the framework treats as "no check".
      */
     public function getAuthPassword(): string
     {
-        return '';
+        $token = $this->getRememberToken();
+
+        if (! is_string($token) || $token === '') {
+            return '';
+        }
+
+        return hash_hmac('sha256', 'session-fingerprint|'.$token, config()->string('app.key'));
     }
 
     /**

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\RedirectIfNotInstalled;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\SetReferrerPolicy;
@@ -33,6 +34,11 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // The web front calls the API with its session cookie: Sanctum makes the requests that come from the
         // application's own host (config/sanctum.php) stateful, every other client stays stateless.
         $middleware->statefulApi();
+
+        // "Sign out everywhere" renews the account's remember token, which its sessions' fingerprint derives from:
+        // every other session is refused on the web pages (this middleware) and on the API (Sanctum's own
+        // AuthenticateSession, part of statefulApi() and now effective: see App\Models\User::getAuthPassword()).
+        $middleware->web(append: [AuthenticateSession::class]);
 
         // A signed-out visitor of a page goes to the login page; an API client has nowhere to be redirected to
         // and gets a 401 in JSON (the default would also fail while no "login" route exists).
