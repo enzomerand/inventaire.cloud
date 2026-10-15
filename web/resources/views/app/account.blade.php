@@ -23,7 +23,6 @@
     <div class="row row-cards">
         <div class="col-12 col-lg-8">
             <div class="d-flex flex-column gap-3">
-                {{-- Profile --}}
                 <div
                     class="card"
                     x-data="accountProfile"
@@ -59,7 +58,6 @@
                     </form>
                 </div>
 
-                {{-- Security --}}
                 <div class="card" x-data="accountSecurity" data-url="{{ route('api.v1.me.sign-out-everywhere', absolute: false) }}">
                     <div class="card-header">
                         <h2 class="card-title">{{ __('Security') }}</h2>
@@ -81,7 +79,6 @@
                     </div>
                 </div>
 
-                {{-- Data --}}
                 <div class="card" x-data="accountData" data-url="{{ route('api.v1.me.export', absolute: false) }}">
                     <div class="card-header">
                         <h2 class="card-title">{{ __('Your data') }}</h2>
@@ -96,7 +93,6 @@
                     </div>
                 </div>
 
-                {{-- Danger zone --}}
                 <div
                     class="card border-danger"
                     x-data="accountDeletion"

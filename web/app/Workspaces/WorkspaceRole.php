@@ -41,16 +41,4 @@ enum WorkspaceRole: string
     {
         return $this === self::Owner;
     }
-
-    /**
-     * The role as a person reads it, in the language of the request.
-     */
-    public function label(): string
-    {
-        return match ($this) {
-            self::Owner => __('Owner'),
-            self::Editor => __('Editor'),
-            self::Viewer => __('Viewer'),
-        };
-    }
 }

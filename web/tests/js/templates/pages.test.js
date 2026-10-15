@@ -67,7 +67,7 @@ const MESSAGES = {
     'account.notice.saved': 'Account updated',
     'account.notice.signed_out_everywhere': 'Signed out everywhere else',
     'account.notice.code_sent': 'Code sent',
-    'account.notice.code_resent': 'New code sent',
+    'login.notice.code_resent': 'New code sent',
     'account.error.last_administrator': 'Last administrator',
     'account.error.sole_owner': 'Hand your workspaces over',
 };

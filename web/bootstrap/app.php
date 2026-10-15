@@ -34,12 +34,6 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // application's own host (config/sanctum.php) stateful, every other client stays stateless.
         $middleware->statefulApi();
 
-        // "Sign out everywhere" renews the account's remember token, which its sessions' fingerprint derives from:
-        // every other session is refused on the API (App\Http\Middleware\AuthenticateApiSession, which config/sanctum.php
-        // puts in Sanctum's stateful group) and on the web pages of the signed-in space (AuthenticateSession, on the
-        // `auth` routes of routes/web.php: the public pages do not look the visitor up for it). See
-        // App\Models\User::getAuthPassword().
-
         // A signed-out visitor of a page goes to the login page; an API client has nowhere to be redirected to
         // and gets a 401 in JSON (the default would also fail while no "login" route exists).
         $middleware->redirectGuestsTo(fn (Request $request): ?string => $request->is('api/*') ? null : route('login'));

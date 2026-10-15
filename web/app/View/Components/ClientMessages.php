@@ -63,7 +63,6 @@ class ClientMessages extends Component
             'account.notice.saved' => __('Your account was updated. The page is about to reload.'),
             'account.notice.signed_out_everywhere' => __('You are signed out of all your other devices.'),
             'account.notice.code_sent' => __('A code was sent to your email address.'),
-            'account.notice.code_resent' => __('A new code was sent.'),
             'account.error.last_administrator' => __('You are the last administrator of this instance: make somebody else an administrator first (php artisan inventaire:make-admin).'),
             'account.error.sole_owner' => __('You are the only owner of workspaces that other people belong to: hand them over or delete them first.'),
         ];

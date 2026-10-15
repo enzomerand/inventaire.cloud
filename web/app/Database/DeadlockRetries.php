@@ -31,13 +31,13 @@ final class DeadlockRetries
      * @param  Closure(): TValue  $work  Opens its own outermost transaction and leaves nothing behind when it fails.
      * @return TValue
      */
-    public static function run(Closure $work, int $attempts = self::ATTEMPTS): mixed
+    public static function run(Closure $work): mixed
     {
         $detector = app(ConcurrencyErrorDetector::class);
 
         return retry(
-            $attempts,
-            fn (): mixed => $work(),
+            self::ATTEMPTS,
+            $work,
             fn (int $attempt): int => random_int(1, 20) * $attempt,
             $detector->causedByConcurrencyError(...),
         );

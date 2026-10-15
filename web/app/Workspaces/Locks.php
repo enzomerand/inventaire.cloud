@@ -17,15 +17,11 @@ use Illuminate\Database\Eloquent\Collection;
  * Two rules must hold at all times: every workspace has a member, and every account belongs to a workspace. Both
  * are judged by reading memberships, and two requests that each judge "somebody else is left" and then both remove
  * their own side break them (two co-owners deleting their accounts, two members each deleting a different shared
- * workspace). So every code path that removes memberships or workspaces follows this protocol, inside one
- * transaction:
- *
- * 1. lock the accounts it touches, lowest id first ({@see self::users()});
- * 2. then the workspaces it touches, lowest id first ({@see self::workspaces()});
- * 3. then read the memberships it judges with a locking read ({@see self::memberships()}), and decide.
- *
- * A membership can therefore only disappear while both its account and its workspace are locked by whoever removes
- * it: reading under those locks gives a verdict that stays true until the commit.
+ * workspace). So whatever removes memberships or workspaces does it inside one transaction, and judges under the
+ * locks below: a membership can then only disappear while both its account and its workspace are locked by whoever
+ * removes it, and a verdict read under those locks stays true until the commit. Locking reads are also what makes the
+ * verdict right on MySQL and MariaDB, where a plain read inside a transaction answers from the snapshot taken at its
+ * first read, which may predate a commit the lock waited for.
  *
  * The global lock order
  * ---------------------
@@ -34,20 +30,18 @@ use Illuminate\Database\Eloquent\Collection;
  * more than one of these locks takes them in the same order:
  *
  * 1. the sign-in code of an address (`login_codes`, by address: {@see self::loginCode()});
- * 2. the accounts (`users`), lowest id first;
- * 3. the workspaces (`workspaces`), lowest id first;
- * 4. the memberships (`workspace_user`), by id.
+ * 2. the accounts (`users`), lowest id first ({@see self::users()});
+ * 3. the workspaces (`workspaces`), lowest id first ({@see self::workspaces()});
+ * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
  * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels, never go back up: after a
  * workspace or a membership, it does not lock an account or a sign-in code. Code that adds members (the invitations
- * of lot 9) must follow the same order: accounts, then the workspace, then the memberships. What still gets caught, the database aborts one of the
- * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many
- * requests may collide, as sign-ups do), always the outermost transaction: a deadlock rolls the whole of it back, so
- * a nested transaction cannot retry by itself.
+ * of lot 9) must follow the same order: accounts, then the workspace, then the memberships.
  *
- * Locking reads are also what makes the verdict right on MySQL and MariaDB, where a plain read inside a
- * transaction answers from the snapshot taken at its first read, which may predate a commit the lock waited for.
+ * What still gets caught, the database aborts one of the requests and the caller retries (`transaction($callback, 3)`,
+ * or {@see DeadlockRetries} when many requests may collide, as sign-ups do), always the outermost transaction: a
+ * deadlock rolls the whole of it back, so a nested transaction cannot retry by itself.
  */
 final class Locks
 {

@@ -41,8 +41,8 @@ export default function accountProfile() {
          * @returns {void}
          */
         init() {
-            this.name = this.$root.dataset.name ?? '';
-            this.locale = this.$root.dataset.locale ?? '';
+            this.name = this.$root.dataset.name;
+            this.locale = this.$root.dataset.locale;
         },
 
         /**

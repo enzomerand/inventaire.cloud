@@ -419,37 +419,6 @@ describe('signing out everywhere and the API tokens', function (): void {
     });
 });
 
-describe('the migration that ends the sessions opened before fingerprints', function (): void {
-    it('empties the sessions table, and can be run again', function (): void {
-        $migration = require database_path('migrations/2026_10_15_400000_end_sessions_opened_before_fingerprints.php');
-        $user = User::factory()->create();
-        DB::table('sessions')->insert([
-            ['id' => 'a', 'user_id' => $user->id, 'ip_address' => '203.0.113.5', 'user_agent' => 'Firefox', 'payload' => '', 'last_activity' => time()],
-            ['id' => 'b', 'user_id' => null, 'ip_address' => null, 'user_agent' => null, 'payload' => '', 'last_activity' => time()],
-        ]);
-
-        $migration->up();
-        expect(DB::table('sessions')->count())->toBe(0);
-
-        $migration->up();
-        expect(DB::table('sessions')->count())->toBe(0)
-            ->and(User::query()->whereKey($user->id)->exists())->toBeTrue();
-    });
-
-    it('ends the sessions of the database, and leaves alone the "remember me" cookies that carry the current fingerprint', function (): void {
-        useSessionDriver('database');
-        [, $laptop, $phone] = accountOnTwoDevices($this);
-        assertSignedIn($laptop);
-
-        (require database_path('migrations/2026_10_15_400000_end_sessions_opened_before_fingerprints.php'))->up();
-
-        // The session rows are gone. A "remember me" cookie issued by this version still carries the right fingerprint
-        // and signs its device in again; the ones of the previous version do not (see the test of those above).
-        expect(DB::table('sessions')->count())->toBe(0);
-        $phone->withoutSession()->visit('/app')->assertOk();
-    });
-});
-
 describe('the fingerprint of an account', function (): void {
     it('derives from the remember token and from nothing else', function (): void {
         $first = User::factory()->make(['remember_token' => 'token-one']);

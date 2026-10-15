@@ -196,7 +196,7 @@ describe('the scripts', function (): void {
             'workspaces.role.owner', 'workspaces.role.editor', 'workspaces.role.viewer',
             'workspaces.rename_named', 'workspaces.delete_named', 'workspaces.confirm_delete',
             'workspaces.notice.created', 'workspaces.notice.renamed', 'workspaces.notice.deleted', 'workspaces.error.last',
-            'account.notice.saved', 'account.notice.signed_out_everywhere', 'account.notice.code_sent', 'account.notice.code_resent',
+            'account.notice.saved', 'account.notice.signed_out_everywhere', 'account.notice.code_sent', 'login.notice.code_resent',
             'account.error.last_administrator', 'account.error.sole_owner',
         ])
             ->and($messages['workspaces.role.owner'])->toBe('Owner')

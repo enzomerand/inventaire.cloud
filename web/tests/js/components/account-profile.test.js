@@ -36,16 +36,6 @@ describe('profile card of the account page', () => {
         expect(component.busy).toBe(false);
     });
 
-    it('copes with a root that carries no values', () => {
-        const bare = accountProfile();
-        bare.$root = { dataset: {} };
-
-        bare.init();
-
-        expect(bare.name).toBe('');
-        expect(bare.locale).toBe('');
-    });
-
     it('can be saved only with a name, and when nothing is in flight', () => {
         expect(component.canSave).toBe(true);
 

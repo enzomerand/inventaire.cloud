@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Auth\AccountDeletion;
 use App\Auth\Exceptions\AccountDeletionRefused;
 use App\Models\AccountDeletionCode;
 use App\Models\LoginCode;
@@ -465,16 +464,6 @@ describe('deleting the account through the model, whoever asks', function (): vo
             ->and(DB::table('personal_access_tokens')->where('tokenable_id', $user->id)->exists())->toBeFalse();
     });
 
-    it('is what the account deletion service does, so that there is one way', function (): void {
-        $user = User::factory()->withPersonalWorkspace()->create();
-        $workspace = $user->workspaces()->sole();
-
-        app(AccountDeletion::class)->delete($user);
-
-        expect(User::query()->whereKey($user->id)->exists())->toBeFalse()
-            ->and(Workspace::query()->whereKey($workspace->id)->exists())->toBeFalse();
-    });
-
     it('refuses an account that is the only owner of a shared workspace, and changes nothing', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
         $guest = User::factory()->withPersonalWorkspace()->create();
@@ -527,9 +516,7 @@ describe('deleting the account through the model, whoever asks', function (): vo
         $stale = User::query()->findOrFail($user->id);
         $user->delete();
 
-        // The model, and the service behind it, both refuse a copy of an account somebody else deleted first.
         expect(fn () => $stale->delete())->toThrow(ModelNotFoundException::class)
-            ->and(fn () => app(AccountDeletion::class)->delete($stale))->toThrow(ModelNotFoundException::class)
             ->and(User::query()->pluck('id')->all())->toBe([$bystander->id])
             ->and(Workspace::query()->count())->toBe(1);
     });

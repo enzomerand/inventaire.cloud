@@ -40,14 +40,6 @@ describe('workspace switcher', () => {
             expect(component.workspaces).toEqual(LIST);
         });
 
-        it('copes with a page that has no list', () => {
-            component.$root.dataset = { url: '/x' };
-
-            component.init();
-
-            expect(store.items).toEqual([]);
-        });
-
         it('names the current workspace, and nothing while there is none', () => {
             expect(component.currentName).toBe('');
 

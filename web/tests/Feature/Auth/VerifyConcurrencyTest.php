@@ -5,8 +5,8 @@ declare(strict_types=1);
 use App\Auth\LoginCodes;
 use App\Models\LoginCode;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\Process\Process;
 use Tests\Support\CommitsDatabaseChanges;
+use Tests\Support\ConcurrentChildren;
 
 /*
  * Wrong codes typed at the same moment from many visitors, through the real HTTP stack, in separate PHP processes
@@ -43,48 +43,9 @@ function removeCommittedRows(): void
  */
 function typeCodeInParallel(string $directory, string $email, string $code, int $processes): array
 {
-    $go = $directory.'/go';
-    @unlink($go);
-    $environment = array_merge(getenv(), $_ENV, ['CACHE_STORE' => 'database']);
-    $children = [];
+    $commands = array_map(fn (int $number): array => [$email, $code, "10.7.0.{$number}"], range(1, $processes));
 
-    foreach (range(1, $processes) as $number) {
-        $child = new Process([PHP_BINARY, base_path('tests/Support/verify-code.php'), $email, $code, "10.7.0.{$number}", $go], base_path(), $environment);
-        $child->setTimeout(120);
-        $child->start();
-        $children[] = $child;
-    }
-
-    // Everybody boots first, then everybody starts typing.
-    $deadline = microtime(true) + 90;
-
-    foreach ($children as $child) {
-        while (! str_contains($child->getOutput(), "ready\n")) {
-            if (! $child->isRunning() || microtime(true) > $deadline) {
-                throw new RuntimeException('A child process did not get ready: '.$child->getOutput().$child->getErrorOutput());
-            }
-
-            usleep(5_000);
-        }
-    }
-
-    touch($go);
-
-    $answers = [];
-
-    foreach ($children as $child) {
-        $child->wait();
-
-        if ($child->getExitCode() !== 0) {
-            throw new RuntimeException('A child process failed: '.$child->getOutput().$child->getErrorOutput());
-        }
-
-        // The answer is the last JSON line: whatever else the process printed ("ready", a warning...) is not it.
-        $results = array_values(array_filter(explode("\n", $child->getOutput()), fn (string $line): bool => str_starts_with($line, '{')));
-        $answers[] = json_decode($results === [] ? '' : $results[array_key_last($results)], true, flags: JSON_THROW_ON_ERROR);
-    }
-
-    return $answers;
+    return ConcurrentChildren::run($directory, base_path('tests/Support/verify-code.php'), $commands, ['CACHE_STORE' => 'database']);
 }
 
 /**

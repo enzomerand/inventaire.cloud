@@ -34,18 +34,16 @@ final class AuthenticateApiSession extends SanctumAuthenticateSession
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if ($request->hasSession() && $request->user() !== null) {
-            $lacking = Collection::make(Arr::wrap(config('sanctum.guard')))
-                ->mapWithKeys(fn ($name): array => [(string) $name => $this->auth->guard(is_string($name) ? $name : null)])
-                ->filter(fn ($guard, string $name): bool => $guard instanceof SessionGuard && SessionFingerprint::isMissing($request, $guard, $name));
+        $lacking = Collection::make(Arr::wrap(config('sanctum.guard')))
+            ->mapWithKeys(fn ($name): array => [(string) $name => $this->auth->guard(is_string($name) ? $name : null)])
+            ->filter(fn ($guard, string $name): bool => $guard instanceof SessionGuard && SessionFingerprint::isMissing($request, $guard, $name));
 
-            if ($lacking->isNotEmpty()) {
-                $lacking->each->logoutCurrentDevice();
+        if ($lacking->isNotEmpty()) {
+            $lacking->each->logoutCurrentDevice();
 
-                $request->session()->flush();
+            $request->session()->flush();
 
-                throw new AuthenticationException('Unauthenticated.', [...$lacking->keys()->all(), 'sanctum']);
-            }
+            throw new AuthenticationException('Unauthenticated.', [...$lacking->keys()->all(), 'sanctum']);
         }
 
         return parent::handle($request, $next);

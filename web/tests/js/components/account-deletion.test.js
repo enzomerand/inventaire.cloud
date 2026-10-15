@@ -16,7 +16,7 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
     t: (key, replacements = {}) => {
         const messages = {
             'account.notice.code_sent': 'Code sent',
-            'account.notice.code_resent': 'New code sent',
+            'login.notice.code_resent': 'New code sent',
             'account.error.last_administrator': 'You are the last administrator',
             'account.error.sole_owner': 'Hand your workspaces over',
             'login.error.throttled': 'Wait :seconds seconds',
@@ -110,16 +110,6 @@ describe('danger zone of the account page', () => {
             expect(component.phase).toBe('idle');
             expect(component.error).toBe('Hand your workspaces over');
             expect(component.blocking).toEqual(workspaces);
-        });
-
-        it('copes with a refusal that lists nothing', async () => {
-            http.post.mockRejectedValue(
-                new HttpError(409, 'Conflict', { code: 'sole_owner_of_shared_workspaces', body: {} }),
-            );
-
-            await component.start();
-
-            expect(component.blocking).toEqual([]);
         });
 
         it('tells how long to wait when throttled, in seconds then in minutes', async () => {

@@ -19,14 +19,3 @@ it('lets every role see, the editors and owners edit, and only the owners manage
     'editor' => [WorkspaceRole::Editor, true, true, false],
     'viewer' => [WorkspaceRole::Viewer, true, false, false],
 ]);
-
-it('is labelled in the language of the request', function (): void {
-    expect(WorkspaceRole::Owner->label())->toBe('Propriétaire')
-        ->and(WorkspaceRole::Editor->label())->toBe('Éditeur')
-        ->and(WorkspaceRole::Viewer->label())->toBe('Lecteur');
-
-    app()->setLocale('en');
-
-    expect(WorkspaceRole::Owner->label())->toBe('Owner')
-        ->and(WorkspaceRole::Viewer->label())->toBe('Viewer');
-});

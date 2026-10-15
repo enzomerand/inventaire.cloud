@@ -87,7 +87,7 @@ export default function accountDeletion() {
                 this.code = '';
                 this.phase = 'code';
                 this.focus('code');
-                notify('success', t(again ? 'account.notice.code_resent' : 'account.notice.code_sent'));
+                notify('success', t(again ? 'login.notice.code_resent' : 'account.notice.code_sent'));
             } catch (error) {
                 this.fail(error);
             } finally {
@@ -175,7 +175,7 @@ export default function accountDeletion() {
             } else if (error.status === 409 && error.code === 'sole_owner_of_shared_workspaces') {
                 this.phase = 'idle';
                 this.error = t('account.error.sole_owner');
-                this.blocking = Array.isArray(error.body?.workspaces) ? error.body.workspaces : [];
+                this.blocking = error.body.workspaces;
             } else if (error.status === 419) {
                 // Silent calls are not reloaded by the HTTP helper; the message says the page will be.
                 this.error = error.message;

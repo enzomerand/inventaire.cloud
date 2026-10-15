@@ -82,7 +82,7 @@ final class AccountDeletionController extends Controller
         }
 
         try {
-            $this->deletion->delete($user);
+            $user->delete();
         } catch (AccountDeletionRefused $refusal) {
             return $this->refusal($refusal);
         } catch (ModelNotFoundException) {

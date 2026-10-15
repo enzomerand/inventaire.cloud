@@ -39,7 +39,7 @@ export default function workspaceSwitcher() {
          * @returns {void}
          */
         init() {
-            this.$store.workspaces.replace(JSON.parse(this.$root.dataset.workspaces ?? '[]'));
+            this.$store.workspaces.replace(JSON.parse(this.$root.dataset.workspaces));
         },
 
         /**

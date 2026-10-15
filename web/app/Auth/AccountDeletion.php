@@ -64,17 +64,6 @@ final class AccountDeletion
     }
 
     /**
-     * Deletes the account and what goes with it, in one transaction: if anything fails, nothing is deleted.
-     *
-     * @throws AccountDeletionRefused When the account cannot be deleted yet; nothing was changed.
-     * @throws ModelNotFoundException When the account is already gone (somebody else deleted it first): there was nothing to delete.
-     */
-    public function delete(User $user): void
-    {
-        $user->delete();
-    }
-
-    /**
      * Removes what goes with the account, just before its row is deleted. Called by the `deleting` event of
      * {@see User}, inside the transaction of {@see User::delete()}; use that, not this.
      *

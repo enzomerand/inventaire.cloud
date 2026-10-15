@@ -7,8 +7,8 @@ use App\Models\Workspace;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\Process\Process;
 use Tests\Support\CommitsDatabaseChanges;
+use Tests\Support\ConcurrentChildren;
 
 /*
  * Accounts and workspaces deleted at the same moment, in separate PHP processes against the real database.
@@ -42,49 +42,7 @@ function removeConcurrencyRows(): void
  */
 function actTogether(string $directory, array $commands): array
 {
-    $go = $directory.'/go-deletion';
-    @unlink($go);
-    $environment = array_merge(getenv(), $_ENV);
-    $children = [];
-
-    foreach ($commands as $command) {
-        $child = new Process([PHP_BINARY, base_path('tests/Support/concurrent-action.php'), $go, ...array_map('strval', $command)], base_path(), $environment);
-        $child->setTimeout(120);
-        $child->start();
-        $children[] = $child;
-    }
-
-    // Everybody boots first, then everybody acts.
-    $deadline = microtime(true) + 90;
-
-    foreach ($children as $child) {
-        while (! str_contains($child->getOutput(), "ready\n")) {
-            if (! $child->isRunning() || microtime(true) > $deadline) {
-                throw new RuntimeException('A child process did not get ready: '.$child->getOutput().$child->getErrorOutput());
-            }
-
-            usleep(5_000);
-        }
-    }
-
-    touch($go);
-
-    $answers = [];
-
-    foreach ($children as $child) {
-        $child->wait();
-
-        if ($child->getExitCode() !== 0) {
-            throw new RuntimeException('A child process failed: '.$child->getOutput().$child->getErrorOutput());
-        }
-
-        $results = array_values(array_filter(explode("\n", $child->getOutput()), fn (string $line): bool => str_starts_with($line, '{')));
-        $answers[] = json_decode($results === [] ? '' : $results[array_key_last($results)], true, flags: JSON_THROW_ON_ERROR);
-    }
-
-    @unlink($go);
-
-    return $answers;
+    return ConcurrentChildren::run($directory, base_path('tests/Support/concurrent-action.php'), $commands);
 }
 
 /**

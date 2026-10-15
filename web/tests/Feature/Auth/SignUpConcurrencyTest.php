@@ -8,8 +8,8 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Workspaces\WorkspaceRole;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\Process\Process;
 use Tests\Support\CommitsDatabaseChanges;
+use Tests\Support\ConcurrentChildren;
 
 /*
  * Several people signing up at the same moment, each with their own address, through the real HTTP stack, in separate
@@ -49,49 +49,13 @@ function removeSignUpRows(): void
  */
 function signUpTogether(string $directory, array $emails, array $codes): array
 {
-    $go = $directory.'/go-sign-up';
-    @unlink($go);
-    $environment = array_merge(getenv(), $_ENV, ['CACHE_STORE' => 'database']);
-    $children = [];
+    $commands = [];
 
     foreach ($emails as $number => $email) {
-        $child = new Process([PHP_BINARY, base_path('tests/Support/verify-code.php'), $email, $codes[$email], '10.8.0.'.($number + 1), $go, 'Person '.($number + 1)], base_path(), $environment);
-        $child->setTimeout(120);
-        $child->start();
-        $children[] = $child;
+        $commands[] = [$email, $codes[$email], '10.8.0.'.($number + 1), 'Person '.($number + 1)];
     }
 
-    // Everybody boots first, then everybody signs up.
-    $deadline = microtime(true) + 90;
-
-    foreach ($children as $child) {
-        while (! str_contains($child->getOutput(), "ready\n")) {
-            if (! $child->isRunning() || microtime(true) > $deadline) {
-                throw new RuntimeException('A child process did not get ready: '.$child->getOutput().$child->getErrorOutput());
-            }
-
-            usleep(5_000);
-        }
-    }
-
-    touch($go);
-
-    $answers = [];
-
-    foreach ($children as $child) {
-        $child->wait();
-
-        if ($child->getExitCode() !== 0) {
-            throw new RuntimeException('A child process failed: '.$child->getOutput().$child->getErrorOutput());
-        }
-
-        $results = array_values(array_filter(explode("\n", $child->getOutput()), fn (string $line): bool => str_starts_with($line, '{')));
-        $answers[] = json_decode($results === [] ? '' : $results[array_key_last($results)], true, flags: JSON_THROW_ON_ERROR);
-    }
-
-    @unlink($go);
-
-    return $answers;
+    return ConcurrentChildren::run($directory, base_path('tests/Support/verify-code.php'), $commands, ['CACHE_STORE' => 'database']);
 }
 
 describe('people signing up at the same moment', function (): void {

@@ -31,7 +31,6 @@
                         <div class="list-group-item">
                             <div class="row align-items-center g-2">
                                 <div class="col-12 col-md">
-                                    {{-- Renaming --}}
                                     <form class="d-flex gap-2" x-show="isEditing(item)" @submit.prevent="saveRename(item)" novalidate>
                                         <label class="visually-hidden" :for="'workspace-name-' + item.id">{{ __('Name') }}</label>
                                         <input
@@ -46,7 +45,6 @@
                                         <button type="button" class="btn" @click="cancelRename" :disabled="busy">{{ __('Cancel') }}</button>
                                     </form>
 
-                                    {{-- Reading --}}
                                     <div class="d-flex flex-wrap align-items-center gap-2" x-show="!isEditing(item)">
                                         <span class="fw-bold text-break" x-text="item.name"></span>
                                         <span class="badge bg-primary-lt" x-show="item.current">{{ __('Current') }}</span>
@@ -55,7 +53,6 @@
                                 </div>
 
                                 <div class="col-12 col-md-auto">
-                                    {{-- Deleting asks for a confirmation --}}
                                     <div class="d-flex flex-wrap align-items-center gap-2" x-show="isConfirming(item)">
                                         <span class="text-danger" x-text="confirmText(item)"></span>
                                         <button type="button" class="btn btn-danger" @click="confirmDelete(item)" :disabled="busy">{{ __('Delete') }}</button>

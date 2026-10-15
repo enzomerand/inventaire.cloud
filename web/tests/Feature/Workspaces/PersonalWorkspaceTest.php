@@ -149,15 +149,6 @@ describe('making an administrator', function (): void {
 });
 
 describe('ensuring a workspace', function (): void {
-    it('creates one for an account that has none, once', function (): void {
-        $user = User::factory()->create();
-
-        app(Workspaces::class)->ensure($user);
-        app(Workspaces::class)->ensure($user);
-
-        personalWorkspaceOf($user);
-    });
-
     it('leaves an account that belongs to a workspace of somebody else alone', function (): void {
         $owner = User::factory()->withPersonalWorkspace()->create();
         $guest = User::factory()->create();
