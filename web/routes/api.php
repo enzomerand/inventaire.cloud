@@ -5,7 +5,9 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
+use App\Http\Controllers\Api\V1\CurrentWorkspaceController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Middleware\RequireStatefulRequest;
 use Illuminate\Support\Facades\Route;
 
@@ -25,5 +27,11 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/me', MeController::class)->name('me');
+        Route::put('/me/current-workspace', CurrentWorkspaceController::class)->name('me.current-workspace');
+
+        Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');
+        Route::post('/workspaces', [WorkspaceController::class, 'store'])->name('workspaces.store');
+        Route::patch('/workspaces/{workspace}', [WorkspaceController::class, 'update'])->name('workspaces.update');
+        Route::delete('/workspaces/{workspace}', [WorkspaceController::class, 'destroy'])->name('workspaces.destroy');
     });
 });
