@@ -54,6 +54,20 @@ describe('the administration pages', function (): void {
             ->assertSee('href="'.route('app.admin.settings').'"', false);
     })->with('admin pages');
 
+    it('give the users page its script and its endpoint', function (): void {
+        $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+            ->get(route('app.admin.users'), ['Accept-Language' => 'en'])
+            ->assertOk()
+            ->assertSee('x-data="adminUsers"', false)
+            ->assertSee('data-url="/api/v1/admin/users"', false)
+            ->assertSee('Search by name or email address')
+            ->assertSee('New account')
+            ->assertSee('Create the account')
+            // The scripts find their messages in the page.
+            ->assertSee('admin.users.confirm_delete', false)
+            ->assertSee('admin.users.notice.created', false);
+    });
+
     it('mark the tab that is open', function (): void {
         $admin = User::factory()->admin()->withPersonalWorkspace()->create();
 

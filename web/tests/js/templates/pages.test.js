@@ -1,8 +1,9 @@
 /**
- * The workspaces and account pages under the real Alpine CSP build.
+ * The workspaces, account and administration pages under the real Alpine CSP build.
  *
  * `alpine-csp.test.js` scans the templates for syntax the CSP build refuses; this file goes further and runs them:
- * the Blade source of the switcher, of the workspaces page and of the account page is turned into plain HTML (the few
+ * the Blade source of the switcher, of the workspaces page, of the account page and of the administration's users page
+ * is turned into plain HTML (the few
  * constructs they use are supported, anything else fails loudly so this helper is extended on purpose), mounted with
  * the real components, and driven the way a person would. Only the network (`http`), the toasts and the navigation
  * are replaced.
@@ -39,6 +40,7 @@ const ROUTES = {
     'api.v1.me.export': '/api/v1/me/export',
     'api.v1.me.deletion-code': '/api/v1/me/deletion-code',
     'api.v1.me.destroy': '/api/v1/me',
+    'api.v1.admin.users.index': '/api/v1/admin/users',
     home: '/',
     'app.workspaces': '/app/workspaces',
 };
@@ -70,6 +72,22 @@ const MESSAGES = {
     'login.notice.code_resent': 'New code sent',
     'account.error.last_administrator': 'Last administrator',
     'account.error.sole_owner': 'Hand your workspaces over',
+    'admin.users.range': ':first–:last of :total',
+    'admin.users.workspace_count': 'Workspaces: :count',
+    'admin.users.created_on': 'Created on :date',
+    'admin.users.promote': 'Make administrator',
+    'admin.users.demote': 'Remove administrator',
+    'admin.users.promote_named': 'Make :name an administrator',
+    'admin.users.demote_named': 'Remove :name from the administrators',
+    'admin.users.delete_named': 'Delete the account of :name',
+    'admin.users.confirm_delete': 'Delete the account of :name for good?',
+    'admin.users.notice.created': 'Account created',
+    'admin.users.notice.promoted': 'Promoted',
+    'admin.users.notice.demoted': 'Demoted',
+    'admin.users.notice.deleted': 'Account deleted',
+    'admin.users.error.account_exists': 'Already an account',
+    'admin.users.error.last_administrator': 'Keep one administrator',
+    'admin.users.error.self_deletion': 'Not your own account',
 };
 
 /** Escapes text for an HTML attribute, like Blade's `{{ }}`. */
@@ -88,6 +106,8 @@ function render(path) {
         .replace(/\{\{--[\s\S]*?--\}\}/g, '')
         .replace(/@php[\s\S]*?@endphp/g, '')
         .replace(/@extends\([^)]*\)/g, '')
+        // The tabs of the administration are not under test.
+        .replace(/@include\([^\n]*\)\n/g, '')
         .replace(/@section\('(?:title|heading)'[^\n]*\)\n/g, '');
 
     // The content section is the page; the layout around it is not under test.
@@ -159,6 +179,7 @@ describe('the workspaces and account pages under the real Alpine CSP build', () 
             accountDeletion: '../../../resources/js/components/account-deletion.js',
             accountProfile: '../../../resources/js/components/account-profile.js',
             accountSecurity: '../../../resources/js/components/account-security.js',
+            adminUsers: '../../../resources/js/components/admin-users.js',
             workspaceSwitcher: '../../../resources/js/components/workspace-switcher.js',
             workspaces: '../../../resources/js/components/workspaces.js',
         };
@@ -599,6 +620,224 @@ describe('the workspaces and account pages under the real Alpine CSP build', () 
 
                 expect(visible(card().querySelector('form'))).toBe(false);
                 expect(buttons('Delete my account…')).toHaveLength(1);
+            });
+        });
+    });
+
+    describe('the administration users page', () => {
+        const ADA = {
+            id: 2,
+            name: 'Ada Lovelace',
+            email: 'ada@example.com',
+            is_admin: false,
+            is_self: false,
+            workspaces_count: 2,
+            created_at: '2026-10-14T09:00:00+00:00',
+        };
+        const GRACE = {
+            ...ADA,
+            id: 3,
+            name: 'Grace Hopper',
+            email: 'grace@example.com',
+            is_admin: true,
+            workspaces_count: 1,
+        };
+        const ME = { ...ADA, id: 1, name: 'Jane Admin', email: 'jane@example.com', is_admin: true, is_self: true };
+
+        /** What `GET /api/v1/admin/users` answers for one page. */
+        const answer = (items, meta = {}) => ({
+            data: items,
+            meta: {
+                current_page: 1,
+                last_page: 1,
+                total: items.length,
+                from: items.length ? 1 : null,
+                to: items.length || null,
+                ...meta,
+            },
+        });
+
+        /** The accounts the list shows, one element each. */
+        const accounts = () =>
+            [...document.querySelectorAll('.list-group-item')].filter((item) => item.querySelector('.fw-bold'));
+
+        /** The names of the accounts the list shows. */
+        const names = () => accounts().map((item) => item.querySelector('.fw-bold').textContent);
+
+        beforeEach(async () => {
+            http.get.mockResolvedValue(answer([ADA, GRACE, ME]));
+            await mount('app/admin/users.blade.php');
+        });
+
+        it('reads the first page when it opens, and lists the accounts with what an administrator needs to know', () => {
+            expect(http.get).toHaveBeenCalledWith('/api/v1/admin/users', { params: { q: '', page: 1 } });
+            expect(names()).toEqual(['Ada Lovelace', 'Grace Hopper', 'Jane Admin']);
+            expect(
+                accounts().map((item) =>
+                    [...item.querySelectorAll('.badge')].filter(visible).map((badge) => badge.textContent.trim()),
+                ),
+            ).toEqual([[], ['Administrator'], ['Administrator', 'You']]);
+            expect(accounts()[0].textContent).toContain('ada@example.com');
+            expect(accounts()[0].textContent).toContain('Workspaces: 2');
+            expect(accounts()[0].textContent).toMatch(/Created on .*2026/);
+            expect(document.body.textContent).toContain('1–3 of 3');
+            // The spinner and the empty message are hidden.
+            expect([...document.querySelectorAll('.list-group-item')].filter(visible)).toHaveLength(3);
+        });
+
+        it('offers actions on every account but the one of the administrator who is looking', () => {
+            const actions = accounts().map((item) => ({
+                toggle: buttons('Make administrator', item).length + buttons('Remove administrator', item).length,
+                delete: [...item.querySelectorAll('button')].filter(
+                    (button) =>
+                        visible(button) && button.getAttribute('aria-label')?.startsWith('Delete the account of'),
+                ).length,
+            }));
+
+            expect(actions).toEqual([
+                { toggle: 1, delete: 1 },
+                { toggle: 1, delete: 1 },
+                { toggle: 0, delete: 0 },
+            ]);
+            expect(buttons('Make administrator', accounts()[0])).toHaveLength(1);
+            expect(buttons('Remove administrator', accounts()[1])).toHaveLength(1);
+        });
+
+        it('makes an account an administrator, in place', async () => {
+            http.patch.mockResolvedValue({ data: { ...ADA, is_admin: true } });
+
+            await press('Make administrator', accounts()[0]);
+
+            expect(http.patch).toHaveBeenCalledWith('/api/v1/admin/users/2', { is_admin: true });
+            expect(notify).toHaveBeenCalledWith('success', 'Promoted');
+            expect(
+                [...accounts()[0].querySelectorAll('.badge')].filter(visible).map((badge) => badge.textContent.trim()),
+            ).toEqual(['Administrator']);
+            expect(buttons('Remove administrator', accounts()[0])).toHaveLength(1);
+        });
+
+        it('says why the last administrator stays one', async () => {
+            http.patch.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'last_administrator' }));
+
+            await press('Remove administrator', accounts()[1]);
+
+            expect(notify).toHaveBeenCalledWith('danger', 'Keep one administrator');
+            expect(buttons('Remove administrator', accounts()[1])).toHaveLength(1);
+        });
+
+        it('asks for a confirmation in the row before deleting, which can be given up', async () => {
+            await press('Delete the account of Ada Lovelace', accounts()[0]);
+
+            expect(accounts()[0].textContent).toContain('Delete the account of Ada Lovelace for good?');
+            expect(buttons('Delete', accounts()[0])).toHaveLength(1);
+            expect(buttons('Make administrator', accounts()[0])).toHaveLength(0);
+            // Only that row asks.
+            expect(buttons('Delete', accounts()[1])).toHaveLength(0);
+
+            await press('Cancel', accounts()[0]);
+
+            expect(buttons('Delete', accounts()[0])).toHaveLength(0);
+            expect(buttons('Make administrator', accounts()[0])).toHaveLength(1);
+            expect(http.delete).not.toHaveBeenCalled();
+        });
+
+        it('deletes the account once confirmed, then shows the list as the server holds it', async () => {
+            http.delete.mockResolvedValue(null);
+            http.get.mockResolvedValue(answer([GRACE, ME]));
+
+            await press('Delete the account of Ada Lovelace', accounts()[0]);
+            await press('Delete', accounts()[0]);
+
+            expect(http.delete).toHaveBeenCalledWith('/api/v1/admin/users/2');
+            expect(notify).toHaveBeenCalledWith('success', 'Account deleted');
+            expect(names()).toEqual(['Grace Hopper', 'Jane Admin']);
+        });
+
+        it('searches the typed word and pages through the results', async () => {
+            http.get.mockResolvedValue(answer([ADA], { current_page: 1, last_page: 2, total: 30, from: 1, to: 25 }));
+            const search = document.querySelector('form[role="search"]');
+
+            await type(search.querySelector('input'), ' ada ');
+            search.dispatchEvent(new Event('submit', { cancelable: true }));
+            await flush();
+
+            expect(http.get).toHaveBeenLastCalledWith('/api/v1/admin/users', { params: { q: 'ada', page: 1 } });
+            expect(document.body.textContent).toContain('1–25 of 30');
+            expect(buttons('Previous')[0].disabled).toBe(true);
+            expect(buttons('Next')[0].disabled).toBe(false);
+
+            http.get.mockResolvedValue(answer([GRACE], { current_page: 2, last_page: 2, total: 30, from: 26, to: 30 }));
+            await press('Next');
+
+            expect(http.get).toHaveBeenLastCalledWith('/api/v1/admin/users', { params: { q: 'ada', page: 2 } });
+            expect(names()).toEqual(['Grace Hopper']);
+            expect(buttons('Next')[0].disabled).toBe(true);
+            expect(buttons('Previous')[0].disabled).toBe(false);
+        });
+
+        it('says so when nothing matches', async () => {
+            http.get.mockResolvedValue(answer([]));
+            const search = document.querySelector('form[role="search"]');
+
+            await type(search.querySelector('input'), 'nobody');
+            search.dispatchEvent(new Event('submit', { cancelable: true }));
+            await flush();
+
+            expect(names()).toEqual([]);
+            expect(document.body.textContent).toContain('No account found.');
+        });
+
+        describe('the creation form', () => {
+            const form = () => document.querySelector('form.card-body');
+            const fields = () => form().querySelectorAll('input');
+
+            it('needs an address and a name', async () => {
+                const submit = form().querySelector('button[type="submit"]');
+
+                expect(submit.disabled).toBe(true);
+
+                await type(fields()[0], 'new@example.com');
+                expect(submit.disabled).toBe(true);
+
+                await type(fields()[1], 'New Person');
+                expect(submit.disabled).toBe(false);
+            });
+
+            it('creates the account, empties the form and shows the list from the top', async () => {
+                http.post.mockResolvedValue({ data: {} });
+                http.get.mockResolvedValue(answer([{ ...ADA, id: 9, name: 'New Person' }, ADA, GRACE, ME]));
+
+                await type(fields()[0], ' new@example.com ');
+                await type(fields()[1], 'New Person');
+                form().dispatchEvent(new Event('submit', { cancelable: true }));
+                await flush();
+
+                expect(http.post).toHaveBeenCalledWith('/api/v1/admin/users', {
+                    email: 'new@example.com',
+                    name: 'New Person',
+                });
+                expect(notify).toHaveBeenCalledWith('success', 'Account created');
+                expect(fields()[0].value).toBe('');
+                expect(fields()[1].value).toBe('');
+                expect(names()[0]).toBe('New Person');
+            });
+
+            it('says under the form that the address already has an account', async () => {
+                http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'account_exists' }));
+
+                await type(fields()[0], 'ada@example.com');
+                await type(fields()[1], 'Ada');
+                form().dispatchEvent(new Event('submit', { cancelable: true }));
+                await flush();
+
+                const alert = form().querySelector('.alert');
+                expect(visible(alert)).toBe(true);
+                expect(alert.textContent).toBe('Already an account');
+                expect(fields()[0].value).toBe('ada@example.com');
+            });
+
+            it('shows no refusal until there is one', () => {
+                expect(visible(form().querySelector('.alert'))).toBe(false);
             });
         });
     });

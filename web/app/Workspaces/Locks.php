@@ -35,22 +35,28 @@ use Illuminate\Database\Eloquent\Collection;
  * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
- * personal workspace); deleting an account takes 1 to 4. A transaction may skip levels: creating an account takes
+ * personal workspace); deleting an account takes 1 to 4; so does an administrator deleting one, who first hands over
+ * the workspaces it alone owns (and who, like the administrators changing who is one, locks all the administrators
+ * with the account: see `UserAdministration`). A transaction may skip levels: creating an account takes
  * none of 2 to 4 for its personal workspace, since the account and the workspace are invisible to everybody until the
  * commit and the workspace is inserted without reading any membership (see {@see Workspaces::createPersonal()}).
  * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
- * memberships: it is what lets the two exceptions below stay safety nets.
+ * memberships: it is what lets the exceptions below stay safety nets.
  *
- * Two paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
+ * Three paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
  *
  * - `Workspaces::delete()` locks, after the workspace and its memberships, the accounts of the members who joined that
  *   workspace meanwhile (a request that committed in that gap);
  * - `AccountDeletion` locks, after the memberships of the account, the workspaces the account joined meanwhile (the
  *   account is locked by then, and adding it to a workspace locks it first, so this is for a membership added without
- *   that lock).
+ *   that lock);
+ * - `UserAdministration`, when an administrator deletes an account, locks first the administrators, the account and
+ *   the people who can take over the workspaces it alone owns (all in one statement, lowest id first, then the
+ *   workspaces and their memberships), and then, once the memberships are read, the accounts of the members who joined
+ *   those workspaces meanwhile.
  *
- * Only these two can end up waiting for each other, in a race that narrow. The database then aborts one of the
+ * Only these three can end up waiting for each other, in a race that narrow. The database then aborts one of the
  * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many requests may
  * collide, as sign-ups do), always the outermost transaction: a deadlock rolls the whole of it back, so a nested
  * transaction cannot retry by itself.

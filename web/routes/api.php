@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\AccountDeletionController;
 use App\Http\Controllers\Api\V1\AccountExportController;
+use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
@@ -44,5 +45,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::post('/workspaces', [WorkspaceController::class, 'store'])->middleware('throttle:workspace-creation')->name('workspaces.store');
         Route::patch('/workspaces/{workspace}', [WorkspaceController::class, 'update'])->name('workspaces.update');
         Route::delete('/workspaces/{workspace}', [WorkspaceController::class, 'destroy'])->name('workspaces.destroy');
+
+        // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a
+        // session; API tokens do not reach it). Accounts are identified by their numeric id (digits only, and few enough for any database to read).
+        Route::prefix('admin')->name('admin.')->middleware([RequireStatefulRequest::class, 'can:admin'])->group(function (): void {
+            Route::get('/users', [AdminUserController::class, 'index'])->name('users.index');
+            Route::post('/users', [AdminUserController::class, 'store'])->name('users.store');
+            Route::patch('/users/{user}', [AdminUserController::class, 'update'])->where('user', '[0-9]{1,18}')->name('users.update');
+            Route::delete('/users/{user}', [AdminUserController::class, 'destroy'])->where('user', '[0-9]{1,18}')->name('users.destroy');
+        });
     });
 });
