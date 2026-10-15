@@ -1,6 +1,6 @@
 {{--
     The signed-in user's menu in the header: who they are, links to their space, their workspaces and their account,
-    and the sign-out action.
+    the administration (administrators only) and the sign-out action.
 
     Alpine runs in its CSP build: the component is referenced by name and gets its values from the data-*
     attributes below. Signing out goes through the API (resources/js/components/account-menu.js), then the
@@ -31,6 +31,9 @@
         <a class="dropdown-item" href="{{ route('app') }}">{{ __('My space') }}</a>
         <a class="dropdown-item" href="{{ route('app.workspaces') }}">{{ __('Workspaces') }}</a>
         <a class="dropdown-item" href="{{ route('app.account') }}">{{ __('My account') }}</a>
+        @can('admin')
+            <a class="dropdown-item" href="{{ route('app.admin.users') }}">{{ __('Administration') }}</a>
+        @endcan
         <button type="button" class="dropdown-item" @click="signOut" :disabled="busy">{{ __('Sign out') }}</button>
     </div>
 </div>
