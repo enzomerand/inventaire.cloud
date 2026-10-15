@@ -65,7 +65,7 @@
                         <h2 class="card-title">{{ __('Security') }}</h2>
                     </div>
                     <div class="card-body">
-                        <p>{{ __('Signed in on a device you no longer use, or lost a phone? Sign out of all your other devices: they will ask for a new code. This device stays signed in.') }}</p>
+                        <p>{{ __('Signed in on a device you no longer use, or lost a phone? Sign out of all your other devices: they will ask for a new code, and your API tokens stop working. This device stays signed in.') }}</p>
                         <button type="button" class="btn" x-show="!confirming" @click="ask">
                             <x-tabler-logout aria-hidden="true" />
                             {{ __('Sign out everywhere') }}

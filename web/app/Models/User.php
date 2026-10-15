@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Auth\AccountDeletion;
 use App\Auth\EmailAddress;
+use App\Auth\Exceptions\AccountDeletionRefused;
 use App\Workspaces\Workspaces;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
@@ -85,6 +87,8 @@ class User extends Authenticatable implements HasLocalePreference
     /**
      * Gives every new account a "remember me" token, so that the fingerprint of its sessions
      * ({@see self::getAuthPassword()}) exists from the start, whatever creates the account.
+     *
+     * Also hands the deletion of an account over to {@see AccountDeletion}, whoever deletes it (see {@see self::delete()}).
      */
     protected static function booted(): void
     {
@@ -93,6 +97,26 @@ class User extends Authenticatable implements HasLocalePreference
                 $user->setRememberToken(Str::random(60));
             }
         });
+
+        static::deleting(function (self $user): void {
+            app(AccountDeletion::class)->release($user);
+        });
+    }
+
+    /**
+     * Deletes the account, and with it everything that belongs to it alone (see {@see AccountDeletion}).
+     *
+     * It runs in one transaction, retried when the database picks it as the loser of a deadlock, and the `deleting`
+     * event releases what goes with the account (its sole-member workspaces, one by one through their own
+     * `delete()`, its tokens, sessions and codes) before the row itself goes. An account that cannot be deleted yet
+     * (the only owner of a shared workspace, the last administrator) raises an `AccountDeletionRefused` and
+     * nothing is changed.
+     *
+     * @throws AccountDeletionRefused
+     */
+    public function delete(): ?bool
+    {
+        return $this->getConnection()->transaction(fn (): ?bool => parent::delete(), 3);
     }
 
     /**
@@ -107,6 +131,12 @@ class User extends Authenticatable implements HasLocalePreference
      *
      * Signing out of one device keeps the token, so the other devices stay signed in. An account without a token
      * (which only a row inserted by hand can be) has an empty fingerprint, which the framework treats as "no check".
+     *
+     * Warning: this is a fingerprint, not a password hash. Anything that assumes the account has a password
+     * misbehaves with it: `Auth::logout()` (and `logout()` of a guard) renews the shared token and so signs the
+     * account out of every device, not just this one; `logoutOtherDevices()` and `Hash::check()` against it, or the
+     * `password.confirm` middleware, can never work. Sign out of this device with `logoutCurrentDevice()`, and out
+     * of the others with `SignOutEverywhereController`. An architecture test forbids the calls that go wrong.
      */
     public function getAuthPassword(): string
     {

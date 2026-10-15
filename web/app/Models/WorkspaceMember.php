@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Workspaces\StoredRole;
 use App\Workspaces\WorkspaceRole;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Support\Carbon;
@@ -36,7 +37,8 @@ final class WorkspaceMember extends Pivot
     protected function casts(): array
     {
         return [
-            'role' => WorkspaceRole::class,
+            // Not the framework's enum cast: a role this version does not know is read as a viewer instead of failing.
+            'role' => StoredRole::class,
         ];
     }
 }

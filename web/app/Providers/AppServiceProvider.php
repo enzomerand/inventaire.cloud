@@ -33,6 +33,17 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();
+        $this->registerWorkspaceLimiters();
+    }
+
+    /**
+     * The rate limiter of the workspace endpoints that create rows for anybody who is signed in (limit in
+     * config/workspaces.php, `create_per_hour`), keyed on the user.
+     */
+    private function registerWorkspaceLimiters(): void
+    {
+        RateLimiter::for('workspace-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('workspaces.create_per_hour'))
+            ->by('workspace-creation:'.$this->signedInKey($request)));
     }
 
     /**

@@ -6,9 +6,14 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Workspaces\Exceptions\LastWorkspaceException;
+use App\Workspaces\Exceptions\WorkspaceLimitReachedException;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 
 uses(RefreshDatabase::class);
 
@@ -75,8 +80,27 @@ describe('the current workspace', function (): void {
             ->and(app(Workspaces::class)->current($user->fresh())->is($first))->toBeTrue();
     });
 
-    it('is none for an account that has no workspace', function (): void {
-        expect(app(Workspaces::class)->current(User::factory()->create()))->toBeNull();
+    it('is the personal workspace given again to an account that has none, once', function (): void {
+        // An account that lost every membership (a row removed by hand, a restore, a bug): it is never left stuck.
+        $user = User::factory()->create();
+
+        $workspace = app(Workspaces::class)->current($user);
+
+        expect($workspace?->name)->toBe('Espace personnel')
+            ->and(app(Workspaces::class)->roleOf($user, $workspace))->toBe(WorkspaceRole::Owner)
+            ->and($user->current_workspace_id)->toBe($workspace->id)
+            ->and($user->fresh()->current_workspace_id)->toBe($workspace->id);
+
+        expect(app(Workspaces::class)->current($user->fresh())?->is($workspace))->toBeTrue()
+            ->and($user->workspaces()->count())->toBe(1);
+    });
+
+    it('is none only when the account itself is gone', function (): void {
+        $user = User::factory()->create();
+        DB::table('users')->delete();
+
+        expect(app(Workspaces::class)->current($user))->toBeNull()
+            ->and(Workspace::query()->count())->toBe(0);
     });
 
     it('does not write when it is already the current one', function (): void {
@@ -206,5 +230,124 @@ describe('deleting', function (): void {
         app(Workspaces::class)->delete($owner->refresh(), $shared);
 
         expect($guest->workspaces()->count())->toBe(1);
+    });
+});
+
+describe('making sure an account has a workspace', function (): void {
+    it('gives the personal workspace to an account that has none, and does nothing for one that has', function (): void {
+        $bare = User::factory()->create();
+        $settled = User::factory()->withPersonalWorkspace()->create();
+
+        app(Workspaces::class)->ensure($bare);
+        app(Workspaces::class)->ensure($bare);
+        app(Workspaces::class)->ensure($settled);
+
+        expect($bare->workspaces()->count())->toBe(1)
+            ->and($bare->current_workspace_id)->toBe($bare->workspaces()->sole()->id)
+            ->and($settled->workspaces()->count())->toBe(1);
+    });
+
+    it('does not fail on an account that was deleted in the meantime, and creates nothing', function (): void {
+        $user = User::factory()->create();
+        DB::table('users')->where('id', $user->id)->delete();
+
+        app(Workspaces::class)->ensure($user);
+
+        expect(Workspace::query()->count())->toBe(0);
+    });
+});
+
+describe('the number of workspaces of an account', function (): void {
+    it('is capped, whoever created them', function (): void {
+        config(['workspaces.max_per_user' => 3]);
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        app(Workspaces::class)->create($owner, 'Hers')->members()->attach($user->id, ['role' => 'viewer']);
+        app(Workspaces::class)->create($user, 'Mine');
+
+        expect(fn () => app(Workspaces::class)->create($user, 'One too many'))->toThrow(WorkspaceLimitReachedException::class)
+            ->and($user->workspaces()->count())->toBe(3)
+            ->and(Workspace::query()->where('name', 'One too many')->exists())->toBeFalse();
+    });
+
+    it('leaves the personal workspace of a new account out of the way', function (): void {
+        config(['workspaces.max_per_user' => 1]);
+
+        $user = User::factory()->withPersonalWorkspace()->create();
+
+        expect($user->workspaces()->count())->toBe(1);
+    });
+
+    it('fails on an account deleted in the meantime, not on a foreign key', function (): void {
+        $user = User::factory()->create();
+        DB::table('users')->where('id', $user->id)->delete();
+
+        expect(fn () => app(Workspaces::class)->create($user, 'Shop'))->toThrow(ModelNotFoundException::class);
+    });
+});
+
+describe('deleting under the locks', function (): void {
+    it('fails on a workspace that another request deleted first', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $shop = app(Workspaces::class)->create($user, 'Shop');
+        $stale = Workspace::query()->findOrFail($shop->id);
+        app(Workspaces::class)->delete($user->refresh(), $shop);
+
+        expect(fn () => app(Workspaces::class)->delete($user->refresh(), $stale))->toThrow(ModelNotFoundException::class);
+    });
+
+    it('refuses somebody who is no longer a member, as if the workspace did not exist', function (): void {
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        $other = User::factory()->withPersonalWorkspace()->create();
+        $shop = app(Workspaces::class)->create($owner, 'Shop');
+
+        try {
+            app(Workspaces::class)->delete($other, $shop);
+        } catch (AuthorizationException $exception) {
+            expect($exception->status())->toBe(404)
+                ->and(Workspace::query()->whereKey($shop->id)->exists())->toBeTrue();
+
+            return;
+        }
+
+        throw new RuntimeException('A stranger deleted the workspace.');
+    });
+
+    it('refuses a member who is no longer an owner', function (): void {
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        $editor = User::factory()->withPersonalWorkspace()->create();
+        $shop = app(Workspaces::class)->create($owner, 'Shop');
+        $shop->members()->attach($editor->id, ['role' => 'editor']);
+
+        expect(fn () => app(Workspaces::class)->delete($editor, $shop))->toThrow(AuthorizationException::class, 'Seul un propriétaire')
+            ->and(Workspace::query()->whereKey($shop->id)->exists())->toBeTrue();
+    });
+
+    it('goes through the model, one workspace at a time, so that its events fire', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $shop = app(Workspaces::class)->create($user, 'Shop');
+        $deleted = [];
+        Event::listen('eloquent.deleted: '.Workspace::class, function (Workspace $workspace) use (&$deleted): void {
+            $deleted[] = $workspace->id;
+        });
+
+        app(Workspaces::class)->delete($user->refresh(), $shop);
+
+        expect($deleted)->toBe([$shop->id]);
+    });
+
+    it('gives a personal workspace to every member who had no other one, and none to the others', function (): void {
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        $stranded = User::factory()->create();
+        $settled = User::factory()->withPersonalWorkspace()->create();
+        $shared = app(Workspaces::class)->create($owner, 'Shared');
+        $shared->members()->attach($stranded->id, ['role' => 'viewer']);
+        $shared->members()->attach($settled->id, ['role' => 'editor']);
+
+        app(Workspaces::class)->delete($owner->refresh(), $shared);
+
+        expect($stranded->workspaces()->count())->toBe(1)
+            ->and($settled->workspaces()->count())->toBe(1)
+            ->and($stranded->fresh()->current_workspace_id)->toBe($stranded->workspaces()->sole()->id);
     });
 });

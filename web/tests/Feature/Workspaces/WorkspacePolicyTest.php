@@ -72,6 +72,36 @@ it('forbids a member who lacks the right, and says the workspace is not there to
     throw new RuntimeException('A stranger was not refused.');
 })->with(['update', 'delete', 'manage']);
 
+it('tells a member who lacks the right what they cannot do, not always the same thing', function (): void {
+    [$viewer, $workspace] = userWithRole(WorkspaceRole::Viewer);
+
+    $message = function (string $ability) use ($viewer, $workspace): string {
+        try {
+            Gate::forUser($viewer)->authorize($ability, $workspace);
+        } catch (AuthorizationException $exception) {
+            return $exception->getMessage();
+        }
+
+        throw new RuntimeException("{$ability} was not refused.");
+    };
+
+    $messages = [$message('update'), $message('delete'), $message('manage')];
+
+    expect($messages)->toBe([
+        'Seul un propriétaire de cet espace de travail peut le modifier.',
+        'Seul un propriétaire de cet espace de travail peut le supprimer.',
+        'Seul un propriétaire de cet espace de travail peut le gérer.',
+    ]);
+
+    app()->setLocale('en');
+
+    expect([$message('update'), $message('delete'), $message('manage')])->toBe([
+        'Only an owner of this workspace can change it.',
+        'Only an owner of this workspace can delete it.',
+        'Only an owner of this workspace can manage it.',
+    ]);
+});
+
 it('lets anybody who is signed in create a workspace', function (): void {
     expect(Gate::forUser(User::factory()->create())->allows('create', Workspace::class))->toBeTrue();
 });

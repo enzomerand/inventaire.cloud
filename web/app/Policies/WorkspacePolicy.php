@@ -36,7 +36,7 @@ final class WorkspacePolicy
      */
     public function view(User $user, Workspace $workspace): Response
     {
-        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canView());
+        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canView(), __('You are not allowed to see this workspace.'));
     }
 
     /**
@@ -44,7 +44,7 @@ final class WorkspacePolicy
      */
     public function update(User $user, Workspace $workspace): Response
     {
-        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canManage());
+        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canManage(), __('Only an owner of this workspace can change it.'));
     }
 
     /**
@@ -52,7 +52,7 @@ final class WorkspacePolicy
      */
     public function delete(User $user, Workspace $workspace): Response
     {
-        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canManage());
+        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canManage(), __('Only an owner of this workspace can delete it.'));
     }
 
     /**
@@ -60,15 +60,16 @@ final class WorkspacePolicy
      */
     public function manage(User $user, Workspace $workspace): Response
     {
-        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canManage());
+        return $this->allowIf($user, $workspace, fn (WorkspaceRole $role): bool => $role->canManage(), __('Only an owner of this workspace can manage it.'));
     }
 
     /**
      * Allows when the role of the user in the workspace satisfies the test; a non-member is told the workspace is not there.
      *
      * @param  callable(WorkspaceRole): bool  $allows
+     * @param  string  $denial  What a member who lacks the right is told: it names the action that was refused.
      */
-    private function allowIf(User $user, Workspace $workspace, callable $allows): Response
+    private function allowIf(User $user, Workspace $workspace, callable $allows, string $denial): Response
     {
         $role = $this->workspaces->roleOf($user, $workspace);
 
@@ -76,6 +77,6 @@ final class WorkspacePolicy
             return Response::denyAsNotFound();
         }
 
-        return $allows($role) ? Response::allow() : Response::deny(__('Only an owner of this workspace can do this.'));
+        return $allows($role) ? Response::allow() : Response::deny($denial);
     }
 }

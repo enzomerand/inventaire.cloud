@@ -182,10 +182,12 @@ Every answer under `/api` is JSON, even for a client that sends no `Accept` head
 Inventories live in workspaces. Every account belongs to at least one, in which it holds a role, and works in one at a time (its *current* workspace).
 
 - **Tables.** `workspaces` (`id` for the database, a unique `ulid` for the outside world: URLs, API, never the numeric key), `workspace_user` (the membership: `role`, one row per user and workspace, deleted with either side) and `users.current_workspace_id` (forgotten if that workspace is deleted).
-- **Roles** (`App\Workspaces\WorkspaceRole`): `owner`, `editor`, `viewer`. The abilities are asked through `canView()`, `canEdit()` (content, from lot 4 on) and `canManage()` (the workspace itself: rename, delete, members), never by comparing roles. `App\Policies\WorkspacePolicy` maps them to actions: any member can see a workspace, only owners change, delete or manage it. Somebody who does not belong to a workspace is answered `404`, as if it did not exist; a member without the right gets `403`.
+- **Roles** (`App\Workspaces\WorkspaceRole`): `owner`, `editor`, `viewer`. The abilities are asked through `canView()`, `canEdit()` (content, from lot 4 on) and `canManage()` (the workspace itself: rename, delete, members), never by comparing roles. `App\Policies\WorkspacePolicy` maps them to actions: any member can see a workspace, only owners change, delete or manage it. Somebody who does not belong to a workspace is answered `404`, as if it did not exist; a member without the right gets `403`, with a message that names what was refused. The `role` column is a free string, so a row may hold a word this version does not know (a rollback, an edit by hand): `App\Workspaces\StoredRole` reads it as `viewer`, the role with the fewest rights, and logs a warning once per value and process, instead of failing the pages that list workspaces.
 - **A personal workspace for everyone.** An account always has one: it is created, named "Personal space" in the language of the account, in the transaction that creates the account (`Accounts::register()`: sign-up, the installer's administrator, `inventaire:make-admin`), when an existing account without any is promoted to administrator, and at sign-in for an account that lost its last one. The migration `give_every_user_a_workspace` gives one to every account that existed before workspaces did; it can be run again safely.
-- **The current workspace** is `users.current_workspace_id`; when it is empty, or no longer a workspace the user belongs to, it is the first one they joined. Creating a workspace makes it current. Deleting the current one moves the user to another.
+- **The current workspace** is `users.current_workspace_id`; when it is empty, or no longer a workspace the user belongs to, it is the first one they joined. Creating a workspace makes it current. Deleting the current one moves the user to another. `Workspaces::current()` heals an account that belongs to none (the rules prevent it, but a row changed by hand or a restore can break them): it gives it its personal workspace, so that nobody is ever stuck without somewhere to work.
 - **The last workspace** of an account cannot be deleted (`409`, `"code": "last_workspace"`). Deleting a workspace that other people belong to gives a personal workspace to those who had no other one.
+- **Limits.** An account cannot belong to more than `workspaces.max_per_user` workspaces (50; `WORKSPACES_MAX_PER_USER`): beyond it, creating one is a `409` with `"code": "workspace_limit_reached"` and the `limit`. Creating is also throttled per user to `workspaces.create_per_hour` (20 an hour; `WORKSPACES_CREATE_PER_HOUR`), then `429`. Both are in `config/workspaces.php`.
+- **Concurrency.** "Every workspace has a member" and "every account has a workspace" are judged by reading memberships, so two requests judging at the same moment (two co-owners deleting their accounts, two members each deleting a different workspace they share) could break them together. Everything that removes memberships or workspaces (deleting a workspace, deleting an account) therefore runs in one transaction under the row locks of `App\Workspaces\Locks`, always in the same order: the accounts it touches by ascending id, then the workspaces by ascending id, then a locking read of the memberships it judges; the verdict is given under those locks, and a transaction the database picks as the loser of a deadlock is retried (3 attempts). Code that adds members later (invitations) locks the workspace first. Creating a workspace and giving an account its personal one lock the account's row (no duplicates, no foreign-key error for an account deleted meanwhile, and the limit above cannot be crossed by going fast).
 
 | Endpoint                            | What it does                                                                                  |
 |-------------------------------------|-----------------------------------------------------------------------------------------------|
@@ -205,15 +207,17 @@ In the interface, the header has a switcher (before the account menu) and `/app/
 
 ### Signing out everywhere
 
-`POST /api/v1/me/sign-out-everywhere` (the web front only) ends the sessions of every device but the current one. It renews the account's remember token and signs the current device in again with a fresh session and a cookie for the new token.
+`POST /api/v1/me/sign-out-everywhere` (the web front only) ends the sessions of every device but the current one and revokes the account's API tokens (a lost device may hold one; they are not tied to a session). It renews the account's remember token and signs the current device in again with a fresh session, a cookie for the new token and the new fingerprint (the framework stores it in the session as the device signs in, before any other request).
 
-How it works: the framework ties a session and a "remember me" cookie to a "password hash" of the account. Accounts have no password, so `User::getAuthPassword()` derives that fingerprint from the remember token (an HMAC with `APP_KEY`, empty for an account without a token). The cookie carries the token itself, so a copied cookie with an old token no longer finds the account; a session stores the fingerprint when it is opened, and `AuthenticateSession` signs it out as soon as it differs: on the web pages with `App\Http\Middleware\AuthenticateSession` (the framework's, which waits for the installation to be over so that the install wizard never looks anybody up), and on the API with Sanctum's own middleware for the requests of the web front. Signing out of one device keeps the token, so the others stay signed in. Every account gets a token when it is created, and the migration `give_every_user_a_remember_token` gives one to those that have none.
+How it works: the framework ties a session and a "remember me" cookie to a "password hash" of the account. Accounts have no password, so `User::getAuthPassword()` derives that fingerprint from the remember token (an HMAC with `APP_KEY`, empty for an account without a token). The cookie carries the token itself, so a copied cookie with an old token no longer finds the account; a session stores the fingerprint when it is opened, and `AuthenticateSession` signs it out as soon as it differs. That check runs on the pages of the signed-in space only (the `auth` routes of `routes/web.php`: `/app/*`), with `App\Http\Middleware\AuthenticateSession` (the framework's, which waits for the installation to be over so that the install wizard never looks anybody up), and on the API with `App\Http\Middleware\AuthenticateApiSession` (Sanctum's own middleware for the requests of the web front, replaced in `config/sanctum.php`). The public pages never look the visitor up for it: a visitor with a revoked session who opens the home page simply sees it, and is signed out when they enter `/app`. Both refuse a signed-in session that carries no fingerprint (`App\Auth\SessionFingerprint`) instead of giving it the current one as the framework does, which would let a session that predates the fingerprints outlive any sign-out everywhere; a request signed in by a valid "remember me" cookie is not concerned. Signing out of one device keeps the token, so the others stay signed in. Every account gets a token when it is created, and the migration `give_every_user_a_remember_token` gives one to those that have none.
 
-When updating an instance that did not have this: a session that is still alive has no fingerprint in it yet and is given one at its next request, so those people stay signed in. A "remember me" cookie issued before carries the previous constant, empty fingerprint and is refused once: whoever relied on it (their session had expired) signs in with a code again.
+Because the fingerprint stands where the framework expects a password hash, a few framework helpers misbehave on this application and must not be used: `logout()` (renews the shared token, so it signs the account out of every device), `logoutOtherDevices()` and the `password.confirm` middleware. Sign out of this device with `logoutCurrentDevice()`. `tests/Unit/AuthenticationGuardrailsTest.php` fails if `app/`, `routes/` or `bootstrap/` use them.
+
+When updating an instance that did not have this: a session opened before has no fingerprint, and is refused. The migration `end_sessions_opened_before_fingerprints` deletes the rows of the `sessions` table (sessions kept in files, the cache or Redis are refused when they come back, by the same rule), so **everybody signs in again once**, with a code, at the update. A "remember me" cookie issued before carries the previous constant, empty fingerprint and is refused as well.
 
 ### Your data (GDPR)
 
-`GET /api/v1/me/export` (throttled: `account_export` in `config/auth.php`) downloads `inventaire-export-YYYY-MM-DD.json`: the profile and the workspaces with the role in each. The document is versioned (`format`, `version`) and each workspace already carries an empty `inventories` list, which the inventories of lot 4 will fill without changing the structure. Nothing secret is in it, and nothing about other people.
+`GET /api/v1/me/export` (throttled: `account_export` in `config/auth.php`) downloads `inventaire-export-YYYY-MM-DD.json`: the profile, the workspaces with the role in each, the sessions the account has in the database (`sessions`: `ip_address`, `user_agent`, `last_activity`; empty when sessions are kept anywhere else) and the metadata of its API tokens (`tokens`: `name`, `abilities`, `last_used_at`, `created_at`). The document is versioned (`format`, `version`) and each workspace already carries an empty `inventories` list, which the inventories of lot 4 will fill without changing the structure. Nothing secret is in it (no session id, no token, no hash), and nothing about other people.
 
 ### Deleting the account
 
@@ -222,9 +226,9 @@ Deleting cannot be undone, so it takes a code mailed to the address of the accou
 1. `POST /api/v1/me/deletion-code` mails a 6-digit code, in the language of the account (plain text and simple HTML, like the sign-in code's mail). It is a code of its own: it lives in the `account_deletion_codes` table (one row per user, a keyed hash derived from `APP_KEY`, the purpose and the user, valid 10 minutes for 5 wrong guesses), never replaces or spends a sign-in code, and cannot be used for one. Sending is throttled per user (3 per 10 minutes, 6 per hour).
 2. `DELETE /api/v1/me` with `{ "code": "123456" }`, throttled to 5 per minute. A code that is not accepted is a `422` with `"code"` set to `deletion_code_wrong`, `deletion_code_expired` (never asked, replaced or expired) or `deletion_code_exhausted`.
 
-The limits are in `account_deletion` in `config/auth.php`. Deleting happens in one transaction (if anything fails, nothing is deleted) and removes:
+The limits are in `account_deletion` in `config/auth.php`. There is one way to delete an account, whoever asks (this page, an administrator later, `tinker`): `User::delete()`. It runs in one transaction (if anything fails, nothing is deleted; a deadlock is retried) and the model's `deleting` event calls `AccountDeletion::release()`, which judges the rules and removes what goes with the account under the locks described in [Workspaces](#workspaces) (the administrators and the account first, in id order, then its workspaces), so that two administrators deleting themselves at once, or two co-owners, are judged one after the other. `AccountDeletion::delete()` is `$user->delete()`; deleting rows with a query raises no model event and is not a way to delete an account. It removes:
 
-- the workspaces that nobody else belongs to, with everything in them;
+- the workspaces that nobody else belongs to, with everything in them, each one through its own `Workspace::delete()` so that its model events fire (what lot 4 stores for a workspace, files on disk or S3, is purged there);
 - the account's place in the workspaces shared with other people (it just leaves them);
 - its rows in the `sessions` table (when sessions are kept in the database), the sign-in code waiting for its address, its deletion code and its API tokens, then the user.
 
@@ -246,7 +250,7 @@ php artisan inventaire:upgrade --optimize
 
 An instance installed before sign-in existed has no administrator and the upgrade does not create one (the installer's hooks only run during the installation): create one with `php artisan inventaire:make-admin you@example.com --name="Your Name"`. The same upgrade removes the `password` column and the `password_reset_tokens` table, which accounts no longer use.
 
-The upgrade that brings workspaces gives every existing account a personal workspace and a remember token (idempotent migrations). Sessions that are still alive keep working; a "remember me" cookie issued before is refused once, so people whose session had expired sign in with a code again (see [Signing out everywhere](#signing-out-everywhere)).
+The upgrade that brings workspaces gives every existing account a personal workspace and a remember token (idempotent migrations). It also ends every session kept in the database, and a "remember me" cookie issued before is refused: **everybody signs in again once**, with a code (see [Signing out everywhere](#signing-out-everywhere)).
 
 `inventaire:upgrade` reloads the configuration (so an edited `.env` is used), applies the pending migrations under a file lock (a second upgrade running at the same time waits for it, up to 10 minutes) and clears the route, view and event caches. With `--optimize` it rebuilds them afterwards; it can be run as often as you like, and with Docker the update is automatic (see below).
 
@@ -343,20 +347,22 @@ The tests never touch the real `.env`, installer state, cached configuration or 
 
 Several devices in one test: the test client keeps one session store and no cookies between calls, so two "browsers" would share what the first one stored. `tests/Support/Device.php` plays one browser (it keeps its own cookies, empties the process's session store before each call and forgets the guards), which is how the sign-out-everywhere and account-deletion tests prove that another session or a copied cookie is refused, on the array driver and with `session.driver=database`. Switching `actingAs()` from one user to another inside a test needs `$this->flushSession()` in between, for the same reason (the session fingerprint of the first user is still in the store).
 
+Deleting at the same moment is tested with real processes: `tests/Feature/Account/DeletionConcurrencyTest.php` starts PHP processes (`tests/Support/concurrent-action.php`, which waits for a go signal like `tests/Support/verify-code.php`) that delete accounts and workspaces against the same data, on whichever engine runs the suite, and checks that no workspace is left without a member, no account without a workspace, and that one of two administrators deleting themselves is refused instead of deadlocking. Those tests commit to the test database and remove their rows afterwards.
+
 Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless the configured database name ends with `_test`. A stale cached config (`php artisan config:clear` fixes it) or a `DB_DATABASE` exported in your shell can therefore never wipe the development database.
 
 ## Project structure
 
 ```text
 app/
-  Auth/             Sign-in codes (LoginCodes), account creation (Accounts), account deletion (AccountDeletion, AccountDeletionCodes) and export (AccountExport)
+  Auth/             Sign-in codes (LoginCodes), account creation (Accounts), session fingerprint check (SessionFingerprint), account deletion (AccountDeletion, AccountDeletionCodes) and export (AccountExport)
   Console/Commands/ inventaire:install (console wizard), inventaire:install-token, inventaire:install-status, inventaire:upgrade, inventaire:make-admin
   Http/
     Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints, Api/V1/ the JSON API)
     Middleware/     SetLocale (global): applies the language chosen by LocaleResolver;
                     RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate;
                     RequireStatefulRequest: session endpoints are for the web front only;
-                    AuthenticateSession: signs out the sessions of an account that signed out everywhere
+                    AuthenticateSession (web, signed-in space) and AuthenticateApiSession (API): sign out the sessions of an account that signed out everywhere
     Requests/       Form requests (validation)
     Resources/      JSON resources of the API (UserResource, WorkspaceResource)
     Responses/      ApiError: the conflicts (409) and coded validation failures of the API
@@ -364,10 +370,10 @@ app/
   Mail/             LoginCodeMail, AccountDeletionCodeMail
   Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember
   Policies/         WorkspacePolicy: who may do what with a workspace
-  Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: sign-in rate limiters
+  Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: the rate limiters (sign-in, account, workspace creation)
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   View/Components/  Blade component classes (ClientMessages, WorkspaceSwitcher)
-  Workspaces/       Workspaces (the rules: create, delete, current workspace), WorkspaceRole, Membership
+  Workspaces/       Workspaces (the rules: create, delete, current workspace), Locks (the row locks every removal follows), WorkspaceRole, StoredRole (reads a stored role safely), Membership
 config/             Laravel configuration (app.php lists the supported locales)
 lang/               fr.json (UI strings) and fr/ (framework messages)
 resources/

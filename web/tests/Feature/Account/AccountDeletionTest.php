@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Auth\AccountDeletion;
+use App\Auth\Exceptions\AccountDeletionRefused;
 use App\Models\AccountDeletionCode;
 use App\Models\LoginCode;
 use App\Models\User;
@@ -397,5 +399,116 @@ describe('what stops the deletion', function (): void {
         forgetPreviousRequest($this);
 
         confirmDeletion($this, $user, $code)->assertNoContent();
+    });
+});
+
+describe('deleting the account through the model, whoever asks', function (): void {
+    it('leaves no workspace behind, and deletes the ones nobody else belongs to one at a time, with their events', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $other = User::factory()->withPersonalWorkspace()->create();
+        $mine = app(Workspaces::class)->create($user, 'Mine');
+        $shared = app(Workspaces::class)->create($other, 'Shared');
+        $shared->members()->attach($user->id, ['role' => 'editor']);
+        $personal = $user->workspaces()->orderBy('workspace_user.id')->firstOrFail();
+        $user->createToken('script');
+        $deleted = [];
+        Event::listen('eloquent.deleted: '.Workspace::class, function (Workspace $workspace) use (&$deleted): void {
+            $deleted[] = $workspace->id;
+        });
+
+        $user->delete();
+
+        expect(User::query()->whereKey($user->id)->exists())->toBeFalse()
+            ->and($deleted)->toBe([$personal->id, $mine->id])
+            ->and(Workspace::query()->whereDoesntHave('members')->count())->toBe(0)
+            ->and(Workspace::query()->whereKey($shared->id)->exists())->toBeTrue()
+            ->and(WorkspaceMember::query()->where('user_id', $user->id)->exists())->toBeFalse()
+            ->and(DB::table('personal_access_tokens')->where('tokenable_id', $user->id)->exists())->toBeFalse();
+    });
+
+    it('is what the account deletion service does, so that there is one way', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $workspace = $user->workspaces()->sole();
+
+        app(AccountDeletion::class)->delete($user);
+
+        expect(User::query()->whereKey($user->id)->exists())->toBeFalse()
+            ->and(Workspace::query()->whereKey($workspace->id)->exists())->toBeFalse();
+    });
+
+    it('refuses an account that is the only owner of a shared workspace, and changes nothing', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $guest = User::factory()->withPersonalWorkspace()->create();
+        $shared = app(Workspaces::class)->create($user, 'Shared');
+        $shared->members()->attach($guest->id, ['role' => 'viewer']);
+        $personal = $user->workspaces()->orderBy('workspace_user.id')->firstOrFail();
+
+        try {
+            $user->delete();
+        } catch (AccountDeletionRefused $refusal) {
+            expect($refusal->reason)->toBe(AccountDeletionRefused::SOLE_OWNER_OF_SHARED_WORKSPACES)
+                ->and(array_map(fn (Workspace $workspace): int => $workspace->id, $refusal->workspaces))->toBe([$shared->id])
+                ->and(User::query()->whereKey($user->id)->exists())->toBeTrue()
+                ->and(Workspace::query()->whereIn('id', [$personal->id, $shared->id])->count())->toBe(2);
+
+            return;
+        }
+
+        throw new RuntimeException('The account was deleted.');
+    });
+
+    it('refuses the last administrator', function (): void {
+        $admin = User::factory()->admin()->withPersonalWorkspace()->create();
+
+        expect(fn () => $admin->delete())->toThrow(AccountDeletionRefused::class)
+            ->and(User::query()->whereKey($admin->id)->exists())->toBeTrue()
+            ->and($admin->workspaces()->count())->toBe(1);
+    });
+
+    it('lets the last co-owner take the shared workspace with them: one after the other, none is left without a member', function (): void {
+        $ada = User::factory()->withPersonalWorkspace()->create();
+        $grace = User::factory()->withPersonalWorkspace()->create();
+        $shared = app(Workspaces::class)->create($ada, 'Shared');
+        $shared->members()->attach($grace->id, ['role' => 'owner']);
+
+        $ada->delete();
+
+        expect(Workspace::query()->whereKey($shared->id)->exists())->toBeTrue()
+            ->and(WorkspaceMember::query()->where('workspace_id', $shared->id)->pluck('user_id')->all())->toBe([$grace->id]);
+
+        $grace->delete();
+
+        expect(Workspace::query()->count())->toBe(0)
+            ->and(User::query()->count())->toBe(0);
+    });
+
+    it('does nothing for an account somebody else deleted first', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $stale = User::query()->findOrFail($user->id);
+        $user->delete();
+
+        expect($stale->delete())->toBeTrue()
+            ->and(Workspace::query()->count())->toBe(0);
+    });
+
+    it('deletes nothing when one of the workspaces fails to go', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        app(Workspaces::class)->create($user, 'Second');
+        $seen = 0;
+        Event::listen('eloquent.deleting: '.Workspace::class, function () use (&$seen): void {
+            if (++$seen === 2) {
+                throw new RuntimeException('The disk went away.');
+            }
+        });
+
+        try {
+            $user->delete();
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        expect($seen)->toBe(2)
+            ->and(User::query()->whereKey($user->id)->exists())->toBeTrue()
+            ->and($user->workspaces()->count())->toBe(2);
     });
 });

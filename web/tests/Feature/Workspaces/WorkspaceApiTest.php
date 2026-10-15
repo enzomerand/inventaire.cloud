@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceMember;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 
 uses(RefreshDatabase::class);
 
@@ -345,5 +347,92 @@ describe('choosing the current workspace', function (): void {
         $hers->members()->detach($user->id);
 
         $this->actingAs($user)->putJson('/api/v1/me/current-workspace', ['workspace' => $hers->ulid], frontend())->assertUnprocessable();
+    });
+
+    it('checks that I belong to the workspace before it writes my choice', function (): void {
+        $user = memberOfOne();
+        $personal = $user->workspaces()->sole();
+        $hers = sharedWorkspace(memberOfOne('Grace'), 'Hers', [$user->id => WorkspaceRole::Viewer]);
+
+        // The membership ends after the request was validated and before the workspace is read: the person is
+        // removed by an owner, or leaves, at that very moment.
+        Event::listen('eloquent.retrieved: '.Workspace::class, function () use ($user, $hers): void {
+            WorkspaceMember::query()->where('user_id', $user->id)->where('workspace_id', $hers->id)->delete();
+        });
+
+        $this->actingAs($user)->putJson('/api/v1/me/current-workspace', ['workspace' => $hers->ulid], frontend())->assertNotFound();
+
+        expect($user->fresh()->current_workspace_id)->toBe($personal->id);
+    });
+});
+
+describe('the limits on creating workspaces', function (): void {
+    it('throttles creating, per person', function (): void {
+        config(['workspaces.create_per_hour' => 3]);
+        $user = memberOfOne();
+        $other = memberOfOne('Grace');
+
+        foreach (range(1, 3) as $number) {
+            $this->flushSession();
+            $this->actingAs($user)->postJson('/api/v1/workspaces', ['name' => "Shop {$number}"], frontend())->assertCreated();
+        }
+
+        $this->flushSession();
+        $this->actingAs($user)->postJson('/api/v1/workspaces', ['name' => 'One too many'], frontend())->assertTooManyRequests();
+
+        // The allowance is the person's own, and renewing it takes an hour; reading is not throttled.
+        $this->flushSession();
+        $this->actingAs($other)->postJson('/api/v1/workspaces', ['name' => 'Hers'], frontend())->assertCreated();
+        $this->flushSession();
+        $this->actingAs($user)->getJson('/api/v1/workspaces', frontend())->assertOk();
+        $this->travel(61)->minutes();
+        $this->flushSession();
+        $this->actingAs($user)->postJson('/api/v1/workspaces', ['name' => 'An hour later'], frontend())->assertCreated();
+
+        expect($user->workspaces()->count())->toBe(5);
+    });
+
+    it('is 20 an hour unless configured otherwise', function (): void {
+        expect(config('workspaces.create_per_hour'))->toBe(20)
+            ->and(config('workspaces.max_per_user'))->toBe(50);
+    });
+
+    it('stops at the number of workspaces a person can belong to, with a code to tell it by', function (): void {
+        config(['workspaces.max_per_user' => 2]);
+        $user = memberOfOne();
+
+        $this->actingAs($user)->postJson('/api/v1/workspaces', ['name' => 'Second'], frontend())->assertCreated();
+        $this->flushSession();
+
+        $this->actingAs($user)->postJson('/api/v1/workspaces', ['name' => 'Third'], frontend(['Accept-Language' => 'en']))
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'workspace_limit_reached')
+            ->assertJsonPath('limit', 2)
+            ->assertJsonPath('message', 'You cannot belong to more than 2 workspaces.');
+
+        expect($user->workspaces()->count())->toBe(2)
+            ->and(Workspace::query()->where('name', 'Third')->exists())->toBeFalse();
+    });
+
+    it('counts the workspaces of others that I belong to, and is told in the language of the request', function (): void {
+        config(['workspaces.max_per_user' => 2]);
+        $user = memberOfOne();
+        sharedWorkspace(memberOfOne('Grace'), 'Hers', [$user->id => WorkspaceRole::Viewer]);
+
+        $this->actingAs($user)->postJson('/api/v1/workspaces', ['name' => 'Mine'], frontend(['Accept-Language' => 'fr']))
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Vous ne pouvez pas appartenir à plus de 2 espaces de travail.');
+    });
+
+    it('lets the person delete one and create another', function (): void {
+        config(['workspaces.max_per_user' => 2]);
+        $user = memberOfOne();
+        $shop = sharedWorkspace($user, 'Shop');
+
+        $this->actingAs($user->fresh())->postJson('/api/v1/workspaces', ['name' => 'Refused'], frontend())->assertStatus(409);
+        $this->flushSession();
+        $this->actingAs($user)->deleteJson("/api/v1/workspaces/{$shop->ulid}", [], frontend())->assertNoContent();
+        $this->flushSession();
+        $this->actingAs($user->fresh())->postJson('/api/v1/workspaces', ['name' => 'Accepted'], frontend())->assertCreated();
     });
 });

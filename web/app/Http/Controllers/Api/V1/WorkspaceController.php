@@ -11,6 +11,7 @@ use App\Http\Responses\ApiError;
 use App\Models\Workspace;
 use App\Policies\WorkspacePolicy;
 use App\Workspaces\Exceptions\LastWorkspaceException;
+use App\Workspaces\Exceptions\WorkspaceLimitReachedException;
 use App\Workspaces\Membership;
 use App\Workspaces\Workspaces;
 use Illuminate\Http\JsonResponse;
@@ -38,12 +39,23 @@ final class WorkspaceController extends Controller
     }
 
     /**
-     * Creates a workspace owned by the user, who starts working in it (`201`).
+     * Creates a workspace owned by the user, who starts working in it (`201`). Creating is throttled per user
+     * (`workspaces.create_per_hour`), and an account cannot belong to more than `workspaces.max_per_user`
+     * workspaces (`409`, `workspace_limit_reached`).
      */
     public function store(WorkspaceNameRequest $request): JsonResponse
     {
         $user = $this->user($request);
-        $workspace = $this->workspaces->create($user, $request->name());
+
+        try {
+            $workspace = $this->workspaces->create($user, $request->name());
+        } catch (WorkspaceLimitReachedException $limit) {
+            return ApiError::conflict(
+                trans_choice('You cannot belong to more than :count workspace.|You cannot belong to more than :count workspaces.', $limit->limit),
+                WorkspaceLimitReachedException::CODE,
+                ['limit' => $limit->limit],
+            );
+        }
 
         return $this->respond($this->workspaces->membership($user, $workspace))->setStatusCode(201);
     }

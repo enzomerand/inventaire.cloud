@@ -41,7 +41,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::put('/me/current-workspace', CurrentWorkspaceController::class)->name('me.current-workspace');
 
         Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');
-        Route::post('/workspaces', [WorkspaceController::class, 'store'])->name('workspaces.store');
+        Route::post('/workspaces', [WorkspaceController::class, 'store'])->middleware('throttle:workspace-creation')->name('workspaces.store');
         Route::patch('/workspaces/{workspace}', [WorkspaceController::class, 'update'])->name('workspaces.update');
         Route::delete('/workspaces/{workspace}', [WorkspaceController::class, 'destroy'])->name('workspaces.destroy');
     });

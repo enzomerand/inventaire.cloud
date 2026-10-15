@@ -9,30 +9,43 @@ use App\Models\LoginCode;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMember;
+use App\Workspaces\Locks;
 use App\Workspaces\WorkspaceRole;
-use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Deleting an account, and everything that belongs to it alone.
  *
+ * There is one way to delete an account, whoever asks (the person from their account page, an administrator
+ * later, a script in `tinker`): `User::delete()`. It runs in a transaction and calls {@see self::release()} from
+ * the model's `deleting` event, so that nothing can be forgotten by going around this class. (Deleting rows with a
+ * query, `User::query()->delete()`, raises no model event and is not a way to delete an account.)
+ *
  * What goes with the account:
  *
- * - the workspaces nobody else belongs to, with everything in them (inventories, from lot 4 on);
+ * - the workspaces nobody else belongs to, with everything in them (inventories, from lot 4 on): each one is
+ *   deleted through its own `delete()`, so that its model events fire and what is stored for it can be purged;
  * - its place in the workspaces shared with others: it just leaves them;
  * - its sessions (the rows of the `sessions` table, when sessions are kept in the database), the sign-in code that
  *   may be waiting for its address, its deletion code and its API tokens.
  *
- * What stops it, so that nothing is left without anyone in charge (the person must act first):
+ * What stops it, so that nothing is left without anyone in charge (the person must act first; the deletion is
+ * refused with an {@see AccountDeletionRefused} and nothing is changed):
  *
  * - being the only owner of a workspace that other people belong to (ownership has to be handed over);
  * - being the last administrator of the instance.
+ *
+ * The verdict is given under row locks ({@see Locks}): the administrators and the account first, lowest id first,
+ * then the workspaces it belongs to, so that two accounts deleted at the same moment (two administrators, two
+ * co-owners of a workspace) are judged one after the other and neither leaves the instance without an
+ * administrator, nor a workspace without a member.
  *
  * Confirming the deletion with a code is the caller's job ({@see AccountDeletionCodes}).
  */
 final class AccountDeletion
 {
-    public function __construct(private readonly DatabaseManager $db) {}
+    public function __construct(private readonly Locks $locks) {}
 
     /**
      * Tells what would stop the account from being deleted, without changing anything.
@@ -41,7 +54,11 @@ final class AccountDeletion
      */
     public function ensureDeletable(User $user): void
     {
-        $this->check($user, lock: false);
+        if ($user->is_admin && ! User::query()->where('is_admin', true)->whereKeyNot($user->getKey())->exists()) {
+            throw new AccountDeletionRefused(AccountDeletionRefused::LAST_ADMINISTRATOR);
+        }
+
+        $this->soleWorkspaces($user, lock: false);
     }
 
     /**
@@ -51,23 +68,43 @@ final class AccountDeletion
      */
     public function delete(User $user): void
     {
-        $this->db->transaction(function () use ($user): void {
-            // Taken before anything is read, so that two requests (the same person twice, or two administrators
-            // deleting themselves at the same moment) judge the state one after the other.
-            if (User::query()->whereKey($user->getKey())->lockForUpdate()->first() === null) {
-                return;
-            }
+        $user->delete();
+    }
 
-            $alone = $this->check($user, lock: true);
+    /**
+     * Removes what goes with the account, just before its row is deleted. Called by the `deleting` event of
+     * {@see User}, inside the transaction of {@see User::delete()}; use that, not this.
+     *
+     * @throws AccountDeletionRefused When the account cannot be deleted yet.
+     */
+    public function release(User $user): void
+    {
+        // The administrators and the account in one go, lowest id first: two administrators deleting themselves
+        // at the same moment would otherwise each hold their own row and wait for the other's.
+        $accounts = User::query()
+            ->where(fn ($query) => $query->where('is_admin', true)->orWhere('id', $user->getKey()))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
 
-            Workspace::query()->whereIn('id', $alone)->delete();
+        $locked = $accounts->first(fn (User $account): bool => $account->is($user));
 
-            LoginCode::query()->where('email', $user->email)->delete();
-            $user->tokens()->delete();
-            $this->forgetSessions($user);
+        if ($locked === null) {
+            // Deleted by somebody else while this waited: nothing left to release.
+            return;
+        }
 
-            $user->delete();
-        });
+        if ($locked->is_admin && $accounts->doesntContain(fn (User $account): bool => $account->is_admin && ! $account->is($locked))) {
+            throw new AccountDeletionRefused(AccountDeletionRefused::LAST_ADMINISTRATOR);
+        }
+
+        foreach ($this->soleWorkspaces($locked, lock: true) as $workspace) {
+            $workspace->delete();
+        }
+
+        LoginCode::query()->where('email', $locked->email)->delete();
+        $locked->tokens()->delete();
+        $this->forgetSessions($locked);
     }
 
     /**
@@ -84,52 +121,53 @@ final class AccountDeletion
     }
 
     /**
-     * Applies the rules to the account.
+     * Applies the rules about workspaces to the account.
      *
-     * @param  bool  $lock  Whether to lock the rows the verdict depends on (inside a transaction that deletes).
-     * @return list<int> The keys of the workspaces that belong to the account alone, which go with it.
+     * @param  bool  $lock  Whether to lock the workspaces the verdict depends on, and read their members with locking
+     *                      reads (inside the transaction that deletes). Otherwise it just looks.
+     * @return Collection<int, Workspace> The workspaces that belong to the account alone, which go with it, lowest id first.
      *
-     * @throws AccountDeletionRefused
+     * @throws AccountDeletionRefused When the account is the only owner of workspaces that others belong to.
      */
-    private function check(User $user, bool $lock): array
+    private function soleWorkspaces(User $user, bool $lock): Collection
     {
-        if ($user->is_admin) {
-            $administrators = User::query()->where('is_admin', true)->orderBy('id');
+        // Which workspaces to lock is read first, without a lock: the account's row is locked, so nobody else can
+        // remove a membership of it, and the locking read below catches whatever was added in the meantime.
+        $ids = WorkspaceMember::query()->where('user_id', $user->getKey())->pluck('workspace_id');
 
-            if ($lock) {
-                $administrators->lockForUpdate();
-            }
-
-            if ($administrators->pluck('id')->reject(fn ($id): bool => (int) $id === (int) $user->getKey())->isEmpty()) {
-                throw new AccountDeletionRefused(AccountDeletionRefused::LAST_ADMINISTRATOR);
-            }
+        if ($lock) {
+            $workspaces = $this->locks->workspaces($ids);
+            $missed = $this->locks->memberships('user_id', [$user->getKey()])->pluck('workspace_id')->diff($workspaces->keys());
+            $workspaces = $workspaces->union($this->locks->workspaces($missed))->sortKeys();
+            $members = $this->locks->memberships('workspace_id', $workspaces->keys());
+        } else {
+            $workspaces = Workspace::query()->whereIn('id', $ids)->orderBy('id')->get()->keyBy('id');
+            $members = WorkspaceMember::query()->whereIn('workspace_id', $ids)->get();
         }
 
-        $mine = WorkspaceMember::query()->where('user_id', $user->getKey())->get();
-        $others = WorkspaceMember::query()
-            ->whereIn('workspace_id', $mine->pluck('workspace_id'))
-            ->where('user_id', '!=', $user->getKey())
-            ->get()
-            ->groupBy('workspace_id');
-
-        $alone = [];
+        $byWorkspace = $members->groupBy('workspace_id');
+        $alone = new Collection;
         $stuck = [];
 
-        foreach ($mine as $membership) {
-            $companions = $others->get($membership->workspace_id);
+        foreach ($workspaces as $id => $workspace) {
+            $present = $byWorkspace->get($id, new Collection);
+            $mine = $present->first(fn (WorkspaceMember $member): bool => (int) $member->user_id === (int) $user->getKey());
 
-            if ($companions === null) {
-                $alone[] = $membership->workspace_id;
-            } elseif ($membership->role === WorkspaceRole::Owner && $companions->doesntContain(fn (WorkspaceMember $other): bool => $other->role === WorkspaceRole::Owner)) {
-                $stuck[] = $membership->workspace_id;
+            if ($mine === null) {
+                continue;
+            }
+
+            $companions = $present->reject(fn (WorkspaceMember $member): bool => (int) $member->user_id === (int) $user->getKey());
+
+            if ($companions->isEmpty()) {
+                $alone->push($workspace);
+            } elseif ($mine->role === WorkspaceRole::Owner && $companions->doesntContain(fn (WorkspaceMember $other): bool => $other->role === WorkspaceRole::Owner)) {
+                $stuck[] = $workspace;
             }
         }
 
         if ($stuck !== []) {
-            throw new AccountDeletionRefused(
-                AccountDeletionRefused::SOLE_OWNER_OF_SHARED_WORKSPACES,
-                array_values(Workspace::query()->whereIn('id', $stuck)->orderBy('id')->get()->all()),
-            );
+            throw new AccountDeletionRefused(AccountDeletionRefused::SOLE_OWNER_OF_SHARED_WORKSPACES, $stuck);
         }
 
         return $alone;

@@ -6,6 +6,7 @@ use App\Http\Middleware\AuthenticateSession;
 use App\Installer\InstallationState;
 use App\Models\User;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Cookie\CookieValuePrefix;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -62,6 +63,48 @@ function assertSignedOut(Device $device): void
 {
     $device->visit('/app')->assertRedirect(route('login'));
     $device->request('GET', '/api/v1/me')->assertUnauthorized();
+}
+
+/**
+ * Opens the session a device holds in the session store of the process (the way the next request would), reads what
+ * a callback finds there and puts the store back to empty.
+ *
+ * @template T
+ *
+ * @param  callable(Session): T  $read
+ * @return T
+ */
+function inSessionOf(Device $device, callable $read): mixed
+{
+    $store = app('session')->driver();
+    $store->flush();
+    $store->setId((string) $device->sessionId());
+    $store->start();
+
+    try {
+        return $read($store);
+    } finally {
+        $store->flush();
+    }
+}
+
+/**
+ * The fingerprint a device's session holds right now, without any request in between.
+ */
+function fingerprintOf(Device $device): ?string
+{
+    return inSessionOf($device, fn ($session): mixed => $session->get('password_hash_web'));
+}
+
+/**
+ * Takes the fingerprint out of a device's session, as a session opened before fingerprints existed lacks it.
+ */
+function forgetFingerprintOf(Device $device): void
+{
+    inSessionOf($device, function ($session): void {
+        $session->forget('password_hash_web');
+        $session->save();
+    });
 }
 
 describe('signing out everywhere', function (): void {
@@ -167,31 +210,25 @@ describe('signing out of one device', function (): void {
 });
 
 describe('a session or a cookie from before this update', function (): void {
-    it('is carried over when the session is still alive: it is given its fingerprint at its next request, and follows the others from then on', function (string $driver): void {
+    it('is refused when the session is still alive but has no fingerprint: the person signs in once more', function (string $driver): void {
         useSessionDriver($driver);
         [, $laptop, $phone] = accountOnTwoDevices($this);
 
-        // A session opened by the previous version has no fingerprint in it: take it out of the phone's.
-        $store = app('session')->driver();
-        $store->flush();
-        $store->setId((string) $phone->sessionId());
-        $store->start();
-        $store->forget('password_hash_web');
-        $store->save();
-        $store->flush();
-
-        assertSignedIn($phone);
-
-        $store->flush();
-        $store->setId((string) $phone->sessionId());
-        $store->start();
-        expect($store->has('password_hash_web'))->toBeTrue();
-        $store->flush();
-
-        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+        // A session opened by the previous version has no fingerprint in it: take it out of the phone's. Giving it
+        // the current one at its next request, as the framework does, would let it outlive any later sign-out
+        // everywhere, since it would then carry the fingerprint of whoever asked first.
+        forgetFingerprintOf($phone);
 
         assertSignedOut($phone);
+        assertSignedIn($laptop);
     })->with(['array', 'database']);
+
+    it('refuses a session without a fingerprint on the API too, with a JSON 401', function (): void {
+        [, , $phone] = accountOnTwoDevices($this);
+        forgetFingerprintOf($phone);
+
+        $phone->request('GET', '/api/v1/me')->assertUnauthorized()->assertJsonPath('message', 'Unauthenticated.');
+    });
 
     it('is refused when it is a "remember me" cookie: the person signs in once more', function (): void {
         $user = User::factory()->create(['email' => 'ada@example.com']);
@@ -214,6 +251,133 @@ describe('a session or a cookie from before this update', function (): void {
 
         // ...and the previous version's, made with its constant, empty fingerprint, is not.
         $send($cookie(''))->assertUnauthorized();
+    });
+});
+
+describe('the fingerprint of a new session', function (): void {
+    it('is in the session as soon as the person is signed in, before any other request', function (string $driver): void {
+        useSessionDriver($driver);
+        $user = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.com']);
+        $device = new Device($this);
+
+        $device->signIn('ada@example.com')->assertOk();
+
+        expect(fingerprintOf($device))->toBe(app('auth')->guard('web')->hashPasswordForCookie($user->fresh()->getAuthPassword()));
+    })->with(['array', 'database']);
+
+    it('is the new one on the device that signed out everywhere, again before any other request', function (string $driver): void {
+        useSessionDriver($driver);
+        [$user, $laptop] = accountOnTwoDevices($this);
+        $old = fingerprintOf($laptop);
+
+        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+
+        expect(fingerprintOf($laptop))->toBe(app('auth')->guard('web')->hashPasswordForCookie($user->fresh()->getAuthPassword()))
+            ->not->toBe($old);
+    })->with(['array', 'database']);
+
+    it('is also given to an account created by signing up', function (): void {
+        $device = new Device($this);
+        $device->request('POST', '/api/v1/auth/code', ['email' => 'new@example.com'])->assertOk();
+        $device->request('POST', '/api/v1/auth/verify', ['email' => 'new@example.com', 'code' => lastSentCode(), 'name' => 'New Person'])->assertCreated();
+
+        expect(fingerprintOf($device))->toMatch('/^[0-9a-f]{64}$/');
+    });
+});
+
+describe('the pages of the signed-in space and the others', function (): void {
+    it('lets a revoked session open the public home, and sends it to the login page from the signed-in space', function (): void {
+        [, $laptop, $phone] = accountOnTwoDevices($this);
+        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+
+        // The public pages do not check the session at all: nothing redirects a visitor away from the home page.
+        $phone->visit('/')->assertOk()->assertViewIs('home');
+
+        foreach (['/app', '/app/workspaces', '/app/account'] as $page) {
+            $phone->visit($page)->assertRedirect(route('login'));
+        }
+    });
+
+    it('is sent on by the login page and ended by the signed-in space, which the next visit shows', function (): void {
+        [, $laptop, $phone] = accountOnTwoDevices($this);
+        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+
+        $phone->visit('/login')->assertRedirect(route('app'));
+        $phone->visit('/app')->assertRedirect(route('login'));
+        $phone->visit('/login')->assertOk();
+    });
+
+    it('does not ask a visitor who is not signed in for anything', function (): void {
+        $this->get('/')->assertOk()->assertViewIs('home');
+        $this->get('/login')->assertOk();
+        $this->get('/app')->assertRedirect(route('login'));
+    });
+
+    it('keeps the session of a device that is up to date on the signed-in space', function (): void {
+        [, $laptop] = accountOnTwoDevices($this);
+
+        $laptop->visit('/app')->assertOk();
+        $laptop->visit('/app/workspaces')->assertOk();
+    });
+});
+
+describe('signing out everywhere and the API tokens', function (): void {
+    it('revokes them, since a lost device may hold one', function (): void {
+        [$user, $laptop] = accountOnTwoDevices($this);
+        $plain = $user->createToken('script')->plainTextToken;
+        $user->createToken('other script');
+        $someoneElse = User::factory()->create();
+        $someoneElse->createToken('theirs');
+
+        $bearer = function (string $token): TestResponse {
+            // A client of its own: no cookie, no session, the guards of the previous call forgotten.
+            $this->flushSession();
+            $this->flushHeaders();
+            $this->app['auth']->forgetGuards();
+            $this->app['auth']->shouldUse('web');
+
+            return $this->withToken($token)->getJson('/api/v1/me');
+        };
+
+        $bearer($plain)->assertOk()->assertJsonPath('data.id', $user->id);
+
+        $laptop->request('POST', '/api/v1/me/sign-out-everywhere')->assertNoContent();
+
+        $bearer($plain)->assertUnauthorized();
+        expect(DB::table('personal_access_tokens')->where('tokenable_id', $user->id)->count())->toBe(0)
+            ->and(DB::table('personal_access_tokens')->where('tokenable_id', $someoneElse->id)->count())->toBe(1);
+        assertSignedIn($laptop);
+    });
+});
+
+describe('the migration that ends the sessions opened before fingerprints', function (): void {
+    it('empties the sessions table, and can be run again', function (): void {
+        $migration = require database_path('migrations/2026_10_15_400000_end_sessions_opened_before_fingerprints.php');
+        $user = User::factory()->create();
+        DB::table('sessions')->insert([
+            ['id' => 'a', 'user_id' => $user->id, 'ip_address' => '203.0.113.5', 'user_agent' => 'Firefox', 'payload' => '', 'last_activity' => time()],
+            ['id' => 'b', 'user_id' => null, 'ip_address' => null, 'user_agent' => null, 'payload' => '', 'last_activity' => time()],
+        ]);
+
+        $migration->up();
+        expect(DB::table('sessions')->count())->toBe(0);
+
+        $migration->up();
+        expect(DB::table('sessions')->count())->toBe(0)
+            ->and(User::query()->whereKey($user->id)->exists())->toBeTrue();
+    });
+
+    it('ends the sessions of the database, and leaves alone the "remember me" cookies that carry the current fingerprint', function (): void {
+        useSessionDriver('database');
+        [, $laptop, $phone] = accountOnTwoDevices($this);
+        assertSignedIn($laptop);
+
+        (require database_path('migrations/2026_10_15_400000_end_sessions_opened_before_fingerprints.php'))->up();
+
+        // The session rows are gone. A "remember me" cookie issued by this version still carries the right fingerprint
+        // and signs its device in again; the ones of the previous version do not (see the test of those above).
+        expect(DB::table('sessions')->count())->toBe(0);
+        $phone->withoutSession()->visit('/app')->assertOk();
     });
 });
 

@@ -9,25 +9,34 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Services\LocaleResolver;
 use App\Workspaces\Exceptions\LastWorkspaceException;
+use App\Workspaces\Exceptions\WorkspaceLimitReachedException;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 /**
  * Creating, finding and deleting the workspaces of a user.
  *
  * The rules that keep the data coherent live here, whatever the caller (sign-up, the API, the command line):
  *
- * - every account belongs to at least one workspace: a personal one is created with the account, and a workspace
- *   cannot be deleted from under the last member it has left a place in;
- * - the creator of a workspace is its owner and starts working in it;
+ * - every account belongs to at least one workspace: a personal one is created with the account, a workspace
+ *   cannot be deleted from under the last member it has left a place in, and an account found without any (which
+ *   only a row changed by hand can be) is given one again by {@see self::current()};
+ * - the creator of a workspace is its owner and starts working in it, and nobody belongs to more workspaces than
+ *   `workspaces.max_per_user` allows;
  * - the current workspace of a user is the one they chose, or else the first they joined, so that it always exists
  *   even when the chosen one was deleted or the membership ended.
+ *
+ * Whatever removes memberships or workspaces does it under the row locks of {@see Locks}, so that requests made at
+ * the same moment judge the state one after the other.
  */
 final class Workspaces
 {
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly LocaleResolver $locales,
+        private readonly Locks $locks,
     ) {}
 
     /**
@@ -46,14 +55,22 @@ final class Workspaces
     /**
      * Makes sure the user belongs to at least one workspace, creating the personal one if they do not.
      *
-     * Safe to call again: it does nothing for a user who already has a workspace.
+     * Safe to call again: it does nothing for a user who already has a workspace. The account's row is locked
+     * before its memberships are looked at, so that two requests for the same account (two sign-ins at once) do
+     * not each create a personal workspace, and an account deleted in the meantime is left alone instead of
+     * failing on a foreign key.
      */
     public function ensure(User $user): void
     {
         $this->db->transaction(function () use ($user): void {
-            if (! WorkspaceMember::query()->where('user_id', $user->getKey())->exists()) {
-                $this->createPersonal($user);
+            $locked = $this->locks->users([$user->getKey()])->first();
+
+            if ($locked === null || $this->locks->memberships('user_id', [$locked->getKey()])->isNotEmpty()) {
+                return;
             }
+
+            $this->createPersonal($locked);
+            $this->adopt($user, $locked);
         });
     }
 
@@ -61,10 +78,24 @@ final class Workspaces
      * Creates a workspace owned by the user, who starts working in it.
      *
      * @param  string  $name  Already validated and trimmed.
+     *
+     * @throws WorkspaceLimitReachedException When the user already belongs to as many workspaces as allowed.
      */
     public function create(User $user, string $name): Workspace
     {
         return $this->db->transaction(function () use ($user, $name): Workspace {
+            // The account's row, locked: two requests of the same person count their workspaces one after the other
+            // (the limit cannot be crossed by going fast), and an account deleted meanwhile fails here, not on a key.
+            if ($this->locks->users([$user->getKey()])->isEmpty()) {
+                throw (new ModelNotFoundException)->setModel(User::class, [$user->getKey()]);
+            }
+
+            $limit = config()->integer('workspaces.max_per_user');
+
+            if ($this->locks->memberships('user_id', [$user->getKey()])->count() >= $limit) {
+                throw new WorkspaceLimitReachedException($limit);
+            }
+
             $workspace = new Workspace(['name' => $name]);
             $workspace->save();
 
@@ -108,36 +139,77 @@ final class Workspaces
      * The user keeps working: if the workspace was their current one, another takes its place. A member of the
      * workspace who has no other one is given a personal workspace, since nobody is left without any.
      *
+     * Everything this judges (that the user is still an owner, that they have another workspace, who the members
+     * are and whether they have another one) is judged under the locks of {@see Locks}: the user, the members and
+     * the workspace, so that two requests deleting two workspaces that the same people share cannot both find
+     * "another one is left" and take them both. The workspace goes through its own `delete()`, so that its model
+     * events fire (what is stored for a workspace is purged there).
+     *
      * @throws LastWorkspaceException When it is the only workspace of the user.
+     * @throws ModelNotFoundException When the workspace was deleted in the meantime.
+     * @throws AuthorizationException When the user is no longer an owner of it.
      */
     public function delete(User $user, Workspace $workspace): void
     {
         $this->db->transaction(function () use ($user, $workspace): void {
-            // Taken before anything is read: two requests deleting two workspaces of the same user must not both
-            // find "another one is left" and take them both.
-            User::query()->whereKey($user->getKey())->lockForUpdate()->first();
+            // The accounts first: the user and the members as far as they can be told before any lock; the ones
+            // who joined while this waited are locked below.
+            $candidates = WorkspaceMember::query()->where('workspace_id', $workspace->getKey())->pluck('user_id')->push($user->getKey());
+            $accounts = $this->locks->users($candidates);
 
-            $others = $user->workspaces()->where('workspaces.id', '!=', $workspace->getKey())->orderBy('workspace_user.id')->get();
+            $locked = $this->locks->workspaces([$workspace->getKey()])->first();
+
+            if ($locked === null) {
+                throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
+            }
+
+            $members = $this->locks->memberships('workspace_id', [$workspace->getKey()]);
+            $accounts = $accounts->union($this->locks->users($members->pluck('user_id')->diff($accounts->keys())));
+
+            $own = $members->firstWhere('user_id', $user->getKey());
+
+            if ($own === null) {
+                throw (new AuthorizationException)->withStatus(404);
+            }
+
+            if (! $own->role->canManage()) {
+                throw new AuthorizationException(__('Only an owner of this workspace can delete it.'));
+            }
+
+            $others = $this->locks->memberships('user_id', [$user->getKey()])
+                ->reject(fn (WorkspaceMember $other): bool => (int) $other->workspace_id === (int) $workspace->getKey())
+                ->values();
 
             if ($others->isEmpty()) {
                 throw new LastWorkspaceException;
             }
 
-            $stranded = User::query()
-                ->whereIn('id', WorkspaceMember::query()->select('user_id')->where('workspace_id', $workspace->getKey())->where('user_id', '!=', $user->getKey()))
-                ->whereDoesntHave('workspaces', fn ($query) => $query->where('workspaces.id', '!=', $workspace->getKey()))
-                ->get();
+            $companions = $members->pluck('user_id')->map(fn ($id): int => (int) $id)->reject(fn (int $id): bool => $id === (int) $user->getKey())->values();
+            $kept = $this->locks->memberships('user_id', $companions)
+                ->reject(fn (WorkspaceMember $other): bool => (int) $other->workspace_id === (int) $workspace->getKey())
+                ->pluck('user_id')
+                ->map(fn ($id): int => (int) $id);
+            $stranded = $companions->reject(fn (int $id): bool => $kept->contains($id));
 
-            if ($user->current_workspace_id === $workspace->getKey()) {
-                $this->makeCurrent($user, $others->firstOrFail());
+            $actor = $accounts->get((int) $user->getKey()) ?? $user;
+
+            if ($actor->current_workspace_id === $workspace->getKey()) {
+                $actor->current_workspace_id = (int) $others->firstOrFail()->workspace_id;
+                $actor->save();
             }
 
-            $workspace->delete();
+            $locked->delete();
 
-            foreach ($stranded as $member) {
-                $this->createPersonal($member);
+            foreach ($stranded as $id) {
+                $member = $accounts->get($id);
+
+                if ($member !== null) {
+                    $this->createPersonal($member);
+                }
             }
-        });
+
+            $this->adopt($user, $actor);
+        }, 3);
     }
 
     /**
@@ -171,11 +243,22 @@ final class Workspaces
 
     /**
      * The workspace the user is working in: the one they chose if they still belong to it, else the first one
-     * they joined. Null only for an account that has none (which {@see self::ensure()} prevents).
+     * they joined.
+     *
+     * An account that belongs to none (the rules prevent it, but a row changed by hand, a restore or a bug can
+     * break them) is given its personal workspace here, so that nobody is ever stuck without somewhere to work.
+     * Null only when the account itself no longer exists.
      */
     public function current(User $user): ?Workspace
     {
-        foreach ($this->memberships($user) as $membership) {
+        $memberships = $this->memberships($user);
+
+        if ($memberships === []) {
+            $this->ensure($user);
+            $memberships = $this->memberships($user);
+        }
+
+        foreach ($memberships as $membership) {
             if ($membership->current) {
                 return $membership->workspace;
             }
@@ -195,6 +278,15 @@ final class Workspaces
             ->first();
 
         return $membership?->role;
+    }
+
+    /**
+     * Brings the current workspace of the caller's copy of the account in line with the one that was locked and saved.
+     */
+    private function adopt(User $user, User $fresh): void
+    {
+        $user->setAttribute('current_workspace_id', $fresh->current_workspace_id);
+        $user->syncOriginalAttribute('current_workspace_id');
     }
 
     /**

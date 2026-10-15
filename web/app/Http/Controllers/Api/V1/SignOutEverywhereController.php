@@ -18,16 +18,22 @@ use Illuminate\Support\Str;
 final class SignOutEverywhereController extends Controller
 {
     /**
-     * Renews the account's remember token, then signs this device in again with the new one.
+     * Revokes the account's API tokens, renews its remember token, then signs this device in again with the new one.
      *
      * The token is what every session and "remember me" cookie of the account is tied to (see
      * {@see User::getAuthPassword()}): once it changes, the other devices are refused wherever they
      * come back, on the web pages as on the API, whether they hold a session or only the cookie. This device is
      * given a fresh session and a cookie for the new token, so it stays signed in; the session id changes with it.
+     *
+     * The API tokens are not tied to a session, so they would survive: a lost device may hold one, and signing out
+     * everywhere is what a person does about a lost device. They are revoked first, so that a failure leaves
+     * nothing half done on the side that matters.
      */
     public function __invoke(Request $request): Response
     {
         $user = $this->user($request);
+
+        $user->tokens()->delete();
 
         /** @var SessionGuard $guard */
         $guard = Auth::guard('web');
