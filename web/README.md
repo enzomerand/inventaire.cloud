@@ -19,7 +19,7 @@ Privacy by design: no CDN, no Google Fonts, no external request from the browser
 
 ## Requirements
 
-- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB)
+- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB) and `intl` (currencies and their decimals, the sorting of names)
 - [Composer](https://getcomposer.org) 2
 - Node.js 20.19+ / 22.12+ and npm
 - [Docker](https://www.docker.com) with Compose, for the development database and mail services
@@ -103,7 +103,7 @@ The wizard is one page with a progress bar and one AJAX endpoint per step. Each 
 
 1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` or `imagick`, `zip`, `curl`) and write access to `storage/`, `bootstrap/cache/` and `.env`.
 2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables (the check creates, then drops, a table named `installer_probe_check`: it is refused if one already exists, and never touches it). An interrupted installation can be resumed on the same database.
-3. **Application**: public URL, default language and timezone.
+3. **Application**: public URL, default language and display timezone. Dates are always stored in UTC; the display timezone (`APP_TIMEZONE`) is only the zone the server uses when it writes a date itself, such as in the name of a download. Pages show dates in the timezone of the browser.
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).
 5. **File storage**: the local disk, or an S3-compatible service (key, secret, region, bucket, endpoint, path-style). The check writes, reads and deletes a temporary file.
 6. **Documenso** (optional, can be skipped): instance URL and API token. The check is one authenticated call to the Documenso API, `GET {url}/api/v2/envelope?page=1&perPage=1`, with the bare token in the `Authorization` header ([Documenso API reference](https://docs.documenso.com/docs/developers/api)).
@@ -201,6 +201,61 @@ Answers are in the `data` envelope. Errors have a `message` in the language of t
 
 In the interface, the header has a switcher (before the account menu) and `/app/workspaces` lists the workspaces to create, rename in place, delete (with a confirmation in the row) and choose between. The switcher and the page share one Alpine store, so a change shows in the header without a reload.
 
+## Inventories
+
+An inventory is a table of items that share the same typed fields, kept in a workspace. Its **fields** say what an item can hold, its **items** hold it; both go with the inventory when it is deleted, and an inventory goes with its workspace (foreign keys cascade, and the models' own `delete()` is what the application calls).
+
+- **Tables.** `inventories` (`workspace_id`, `name` 120, `description`), `inventory_fields` (`inventory_id`, `name` 120, `type`, `options` JSON, `required`, `position`) and `items` (`inventory_id`, `values` JSON, `created_by`, `updated_by`: forgotten, not deleted, with the account). Each has a unique `ulid` for the outside world (URLs, API) and keeps its numeric key to itself; ULIDs are looked up whatever their case, also as the child of another binding (`App\Models\Concerns\HasUlidRouteKey`).
+- **Values.** `items.values` is one JSON object keyed by the ULID of the field, always written as an object (`{}` when empty: `App\Models\Casts\JsonObject`). An empty value (null, an empty text, an empty list) is never stored: the key is removed. Numbers are stored as decimal **strings** (`"12.50"`), never as JSON numbers, which MySQL and MariaDB would turn into floating point values. What is read back goes through the type again (`present()`), and only for the fields that exist, in their order: a stray key left in a row is never given out.
+- **Roles** (`App\Policies\InventoryPolicy`; the abilities are mapped from `WorkspaceRole` in `InventoryPolicy::abilities()`, which the API also gives as `abilities`): every member reads; owners and editors add and change inventories, their fields and their items; only owners delete an inventory. A non-member gets `404`, like a workspace; a member without the right `403`. A row that does not exist and a row you may not see are answered alike (the framework's `ModelNotFoundException` is rendered as a plain `404`: its own message would name the model and the key).
+- **Quotas** (`config/inventories.php`): `max_per_workspace` inventories per workspace (100; `INVENTORIES_MAX_PER_WORKSPACE`, counted under the lock of the workspace's row), `max_fields` fields (100; `INVENTORIES_MAX_FIELDS`) and `max_items` items (10000; `INVENTORIES_MAX_ITEMS`) per inventory, counted under the lock of the inventory's row. Beyond one, the API answers `409` with `"code": "inventory_limit_reached"`, `field_limit_reached` or `item_limit_reached`, and the `limit`.
+- **Concurrency.** Every write to an inventory (its name, its fields, its items) locks the inventory first, then reads its fields with a plain read while it holds the lock (`App\Workspaces\Locks`, which documents the global order: ... workspaces, memberships, inventories, items; the fields have no row locks of their own, because a locking read on them would also lock the gap where the first field of the next inventory goes, on MySQL and MariaDB, and make unrelated inventories wait for each other), in one transaction retried on a deadlock. That is what makes a quota exact, a field name unique (no portable unique index folds capitals and accents, so it is checked in PHP under the lock), a field deletion leave no orphan value in an item written at the same moment, and two updates of one item merge instead of overwriting each other.
+- **Fields.** Names (of fields, inventories and choices) are kept in Unicode normalization form C, so an accented letter written as one character or as a letter plus a combining accent is the same text. Field names are unique per inventory: the case is not counted (`Straße` is `STRASSE`) and neither is the way an accent is written, but **accents do count** (`Prénom` is not `Prenom`). A new field goes at the end; `PUT .../fields/order` takes the ULIDs of *all* the fields, each once, or answers `422`. The **type cannot change** once the field exists (`422` on `type`). Options sent in an update are merged over the ones the field has (an option sent as `null` goes back to its default) and judged together by the type; an option the type does not have is a `422` on `options.<name>`. Changing options takes from the items only what can no longer mean anything, in the same transaction and through the query builder (`updated_at` untouched): the ids of **choices deleted** from a select or a multiple choice, and the **ratings above a lowered maximum**, are removed from every item. Any other change (decimals, minimum, maximum or unit of a number, currency, length of a text, format of a barcode, labels and colors of choices, new choices...) leaves the stored values exactly as they are: they were valid when written and are not judged again until somebody changes them. **Deleting a field** removes its key from every item of the inventory in the same transaction, by chunks, through the query builder (the items keep their `updated_at`).
+- **Items.** `values` is keyed by the ULID of the field (in any case, as in a URL) and validated against the fields as they are under the lock: a key that is no field of the inventory is a `422` on `values.<key>` (never ignored); a required field must have a value when the item is created and cannot be cleared when its key is sent (an update that does not mention it leaves it alone, whatever the item holds); an update only changes the keys it sends, an empty value clears; an update that changes nothing writes nothing. Messages name the field by its name. The list is 50 a page, newest first (`data`, `links`, `meta`).
+
+**Field types** (one class each in `app/Inventories/Fields/`, behind the `FieldType` contract and the `FieldTypes` registry; `GET /api/v1/field-types` lists them with their label). Every write goes `prepare` (trim) → empty? (clears) → rules → `normalize` (what is stored):
+
+| `type`        | Options (defaults)                                                                                   | A value, and what is stored                                                                                   |
+|---------------|------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| `text`        | `max_length` 1..1000 (255)                                                                           | One line, no control character (`App\Rules\SingleLineText`), trimmed.                                         |
+| `textarea`    |                                                                                                      | Up to 10000 characters; line breaks (stored as `\n`) and tabs allowed, other control characters refused.      |
+| `number`      | `decimals` 0..6 (0), `min`, `max`, `unit` (16)                                                       | A JSON number or a string with a dot, below 1e15; **more decimals than allowed is a `422`**, never rounded (a float in exponent notation, `1.0e-5`, is shifted to plain digits exactly; one too far from zero to be read exactly must be sent as text); stored `"12.50"`. |
+| `money`       | `currency`: ISO 4217 code of a currency **in use somewhere today** (`EUR`; from ICU's currency map: no peseta, no franc, no funds code or metal); a field keeps the currency it has | As a number, with the decimals of the currency (ICU: 2 euro, 0 yen, 3 dinar). ICU is asked **once**, when the field is created and when its currency changes: the decimals are then kept in the options of the field (`{"currency": "EUR", "decimals": 2}`; read-only, `decimals` cannot be sent), so a later update of the ICU data cannot make stored amounts fail.                                 |
+| `percentage`  | `decimals` 0..4 (2)                                                                                  | As a number: `"12.50"` is 12.5 %.                                                                             |
+| `boolean`     |                                                                                                      | `true`/`false` (`1`/`0`); `false` is a value.                                                                 |
+| `date`        |                                                                                                      | `YYYY-MM-DD`, years 1000..9999.                                                                               |
+| `datetime`    |                                                                                                      | ISO 8601 **with its offset**, stored in UTC to the second (`2026-10-15T12:30:00Z`); a fraction of a second is refused (`Date.toISOString()` writes one), nothing is dropped silently. |
+| `time`        |                                                                                                      | `HH:MM`.                                                                                                      |
+| `select`      | `choices`: 1..200 of `{id, label (100), color}`; `color` is one of `gray red orange yellow green teal blue indigo purple pink` | The id of a choice.                                                                          |
+| `multiselect` | the same                                                                                             | A list of ids, each once.                                                                                     |
+| `tags`        |                                                                                                      | Up to 30 lines of 1..50 characters; trimmed, repeats (capitals ignored) dropped.                              |
+| `url`         |                                                                                                      | `http` or `https`, at most 2048 characters.                                                                   |
+| `email`       |                                                                                                      | At most 254 characters, kept as written.                                                                      |
+| `phone`       |                                                                                                      | At most 32 characters: optional leading `+`, digits, spaces and `().-`, at least 3 digits.                    |
+| `rating`      | `max` 3..10 (5)                                                                                      | A whole number from 1 to `max`, stored as a JSON **integer** (the one exception to decimal strings: a small whole number has no precision to lose). |
+| `color`       |                                                                                                      | `#rrggbb`, stored in lowercase.                                                                               |
+| `barcode`     | `format`: `any`, `ean13`, `ean8`, `upca`, `isbn10`, `isbn13` (`any`)                                 | The check digit is verified (ISBNs may be written with hyphens; stored as digits); `any`: 1..64 of letters, digits, `-` `.`. |
+
+The **choices** of a `select` or `multiselect` have ids made by the server (8 random characters, `a-z0-9`) when a choice is sent without one, and kept when the choice already exists. An id the field never had is **not** taken from the client: that choice gets a new one, so a deleted choice cannot come back with its old id and bring old values with it. Values hold ids, never labels, so a choice can be renamed freely; a value whose choice was deleted is dropped when read (the items are not rewritten).
+
+| Endpoint | What it does |
+|----------|--------------|
+| `GET /api/v1/field-types` | `[{type, label}]`. |
+| `GET /api/v1/workspaces/{id}/inventories` | Every inventory of the workspace, by name (the case ignored, accents counted as a second difference, numbers as numbers), with `fields_count`, `items_count` and `abilities` (`update`, `delete`, `manage_fields`, `edit_items`). |
+| `POST /api/v1/workspaces/{id}/inventories` | `name` (required, one line, 120), `description` (2000): adds one (`201`; editors and owners). |
+| `GET /api/v1/inventories/{id}` | One inventory with its `fields` in order. |
+| `PATCH /api/v1/inventories/{id}` | `name` and/or `description` (editors and owners). |
+| `DELETE /api/v1/inventories/{id}` | Deletes it with its fields and items (`204`; owners only). |
+| `POST /api/v1/inventories/{id}/fields` | `type`, `name`, `required`, `options`: adds a field at the end (`201`). |
+| `PATCH /api/v1/inventories/{id}/fields/{field}` | `name`, `required`, `options` (merged): changes it. |
+| `DELETE /api/v1/inventories/{id}/fields/{field}` | Deletes it and its values (`204`). |
+| `PUT /api/v1/inventories/{id}/fields/order` | `fields`: all the ULIDs, in the new order; answers the fields in that order. |
+| `GET /api/v1/inventories/{id}/items` | A page of items, newest first (`page`). |
+| `POST /api/v1/inventories/{id}/items` | `values`: adds an item (`201`). |
+| `GET`, `PATCH`, `DELETE /api/v1/inventories/{id}/items/{item}` | Reads, changes (`values`, partial) or deletes (`204`) an item of that inventory (any other is a `404`). |
+
+Answers are in the `data` envelope; ids are ULIDs and dates ISO 8601. Item, field and inventory ULIDs that belong to another inventory (or workspace) are a `404`, never a `403`.
+
 ## Administration
 
 The administrators of the instance (`users.is_admin`) have an "Administration" entry in the account menu, which opens `/app/admin/users` and `/app/admin/settings`. Everything is behind the `admin` gate (`Gate::define('admin')` in `AppServiceProvider`), judged on the account as stored at every request: promoting or demoting somebody takes effect at once. The pages need a signed-in session like the rest of the space and answer `403` to anybody who is not an administrator; the API (`/api/v1/admin/*`) answers `401` to a visitor, `403` to a non-administrator (whether the account in the path exists or not: the id is looked up after the gate, so nobody can count the accounts) and, like the other session actions, `403` with `"code": "not_stateful"` to a caller that has no session. A request that carries an API token (`Authorization: Bearer`) is refused with `403` and `"code": "session_required"` (`App\Http\Middleware\RefuseApiTokens`), even when it sends the `Origin` of the application, which makes Sanctum start a session and fall back to the token: a token, whatever its abilities, must not do what a person does to other people's accounts.
@@ -259,7 +314,7 @@ When updating an instance that did not have this: a session opened before has no
 
 ### Your data (GDPR)
 
-`GET /api/v1/me/export` (throttled: `account_export` in `config/auth.php`) downloads `inventaire-export-YYYY-MM-DD.json`: the profile, the workspaces with the role in each, the sessions the account has in the database (`sessions`: `ip_address`, `user_agent`, `last_activity`; empty when sessions are kept anywhere else) and the metadata of its API tokens (`tokens`: `name`, `abilities`, `last_used_at`, `created_at`). The document is versioned (`format`, `version`) and each workspace already carries an empty `inventories` list, which the inventories of lot 4 will fill without changing the structure. Nothing secret is in it (no session id, no token, no hash), and nothing about other people.
+`GET /api/v1/me/export` (throttled: `account_export` in `config/auth.php`) downloads `inventaire-export-YYYY-MM-DD.json`: the profile, the workspaces with the role in each, the sessions the account has in the database (`sessions`: `ip_address`, `user_agent`, `last_activity`; empty when sessions are kept anywhere else) and the metadata of its API tokens (`tokens`: `name`, `abilities`, `last_used_at`, `created_at`). The document is versioned (`format`, `version`). Each workspace carries its `inventories`: for every one its `id`, `name`, `description`, dates, `fields` (`id`, `name`, `type`, `options`, `required`, `position`) and `items_count`, the **number** of its items. **The items themselves are not in the file**: an inventory can hold thousands of them, too many for a document built in memory and sent in one answer. Their content comes with the export of the inventories (lot 6), streamed one inventory at a time. Nothing secret is in it (no session id, no token, no hash), and nothing about other people.
 
 ### Deleting the account
 
@@ -294,6 +349,8 @@ An instance installed before sign-in existed has no administrator and the upgrad
 
 The upgrade that brings workspaces gives every existing account a personal workspace and a remember token (idempotent migrations). It also leaves the sessions opened before without a fingerprint, which are refused, and a "remember me" cookie issued before is refused as well: **everybody signs in again once**, with a code (see [Signing out everywhere](#signing-out-everywhere)).
 
+The upgrade that follows brings dates stored in UTC. Until then they were stored in the timezone of the instance (`APP_TIMEZONE`); the migration converts them from that timezone to UTC, so keep `APP_TIMEZONE` as it was until the upgrade has run. It also deletes the sign-in and account deletion codes that are pending: whoever was waiting for one asks for another. `APP_TIMEZONE` is from then on the display timezone only (rolling the migration back converts the dates back).
+
 `inventaire:upgrade` reloads the configuration (so an edited `.env` is used), applies the pending migrations under a file lock (a second upgrade running at the same time waits for it, up to 10 minutes) and clears the route, view and event caches. With `--optimize` it rebuilds them afterwards; it can be run as often as you like, and with Docker the update is automatic (see below).
 
 ## Self-hosting with Docker
@@ -311,7 +368,7 @@ The application listens on <http://localhost:8080> (`APP_PORT` in `.env` changes
 ### Two ways to configure it
 
 - **Wizard.** Set `DB_PASSWORD` only. Open the application: it redirects to the install wizard, which asks for the rest. Its one-time setup token is printed by `docker compose exec app php artisan inventaire:install-token`. The database settings come from the compose file, so the wizard shows them read-only.
-- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, timezone, SMTP, file storage, the first administrator `ADMIN_NAME` and `ADMIN_EMAIL`...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
+- **Environment.** Put the whole configuration in `.env` (the full list is in `docker/.env.example`: URL, language, display timezone, SMTP, file storage, the first administrator `ADMIN_NAME` and `ADMIN_EMAIL`...). Every variable set there reaches the container as a real environment variable and shows read-only in the wizard ("set by the environment"). When nothing is left to ask, the instance installs itself the first time the `app` container starts, with the same live checks as the wizard (database, SMTP, storage). If one fails the container stops with the reason (`docker compose logs app`) and Compose retries until you fix it.
 
 ### What is kept where
 
@@ -406,15 +463,17 @@ app/
                     RequireStatefulRequest: session endpoints are for the web front only;
                     AuthenticateSession (web, signed-in space) and AuthenticateApiSession (API): sign out the sessions of an account that signed out everywhere
     Requests/       Form requests (validation)
-    Resources/      JSON resources of the API (UserResource, WorkspaceResource, AdminUserResource)
+    Resources/      JSON resources of the API (UserResource, WorkspaceResource, AdminUserResource, InventoryResource, InventoryFieldResource, ItemResource, FieldTypeResource)
     Responses/      ApiError: the conflicts (409) and coded validation failures of the API
+  Inventories/      Inventories, InventoryFields, Items (the rules, under the locks), ItemValues (validates and presents the values of an item), the quota exceptions, and Fields/: one class per field type behind FieldType, with the FieldTypes registry
   Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator, post-migration hooks (see "Installing an instance")
   Mail/             LoginCodeMail, AccountDeletionCodeMail, WelcomeMail, and AfterResponse (sends a mail once the response has gone)
-  Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember
-  Policies/         WorkspacePolicy: who may do what with a workspace
+  Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember, Inventory, InventoryField, Item (Concerns/: HasUlidRouteKey; Casts/: JsonObject)
+  Policies/         WorkspacePolicy and InventoryPolicy: who may do what with a workspace, an inventory, its fields and its items
   Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: the rate limiters (sign-in, account, workspace creation) and the "admin" gate
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   Settings/         InstanceSettings: the settings of the instance, kept in the settings table
+  Support/          DisplayTime: the timezone of the instance, for the dates the server writes for people (everything is stored in UTC)
   View/Components/  Blade component classes (ClientMessages, WorkspaceSwitcher)
   Workspaces/       Workspaces (the rules: create, delete, current workspace), Locks (the row locks every removal follows), WorkspaceRole, StoredRole (reads a stored role safely), Membership
 config/             Laravel configuration (app.php lists the supported locales)

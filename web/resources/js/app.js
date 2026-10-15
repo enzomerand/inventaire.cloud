@@ -26,15 +26,23 @@ import adminUsers from './components/admin-users.js';
 import flashNotice from './components/flash-notice.js';
 import installer from './components/installer.js';
 import installerToken from './components/installer-token.js';
+import inventoryFields from './components/inventory-fields.js';
+import inventoryHeader from './components/inventory-header.js';
+import inventoryItems from './components/inventory-items.js';
 import localeSwitcher from './components/locale-switcher.js';
 import login from './components/login.js';
 import toasts from './components/toasts.js';
+import workspaceInventories from './components/workspace-inventories.js';
 import workspaceSwitcher from './components/workspace-switcher.js';
 import workspaces from './components/workspaces.js';
+import { reloadWhenRestored } from './lib/restore.js';
 import { createToastsStore } from './stores/toasts.js';
 import { createWorkspacesStore } from './stores/workspaces.js';
 
 window.Alpine = Alpine;
+
+// A page restored from the back/forward cache comes back with the state it was left in: reload it instead.
+reloadWhenRestored();
 
 Alpine.store('toasts', createToastsStore());
 Alpine.store('workspaces', createWorkspacesStore());
@@ -49,9 +57,13 @@ Alpine.data('adminUsers', adminUsers);
 Alpine.data('flashNotice', flashNotice);
 Alpine.data('installer', installer);
 Alpine.data('installerToken', installerToken);
+Alpine.data('inventoryFields', inventoryFields);
+Alpine.data('inventoryHeader', inventoryHeader);
+Alpine.data('inventoryItems', inventoryItems);
 Alpine.data('localeSwitcher', localeSwitcher);
 Alpine.data('login', login);
 Alpine.data('toasts', toasts);
+Alpine.data('workspaceInventories', workspaceInventories);
 Alpine.data('workspaceSwitcher', workspaceSwitcher);
 Alpine.data('workspaces', workspaces);
 

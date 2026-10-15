@@ -2,13 +2,15 @@
  * Alpine component behind the workspace switcher in the header.
  *
  * It seeds the shared `workspaces` store (see stores/workspaces.js) with the list the server rendered, shows it,
- * and changes the current workspace through the API. The page is reloaded afterwards, since what it shows depends on
- * the workspace. The endpoint and the list come from the markup (`data-url`, `data-workspaces` on the root),
- * because the CSP build of Alpine does not allow Blade to inject values into expressions.
+ * and changes the current workspace through the API. The person is taken to the page of that workspace afterwards, since
+ * what a page shows depends on the workspace. The endpoints and the list come from the markup (`data-url`,
+ * `data-workspace-url`, `data-workspaces` on the root), because the CSP build of Alpine does not allow Blade to inject
+ * values into expressions.
  */
+import { fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { notify } from '../lib/notify.js';
-import { reloadPage } from '../lib/page.js';
+import { redirectTo } from '../lib/page.js';
 
 /**
  * @returns {Record<string, any>}
@@ -21,6 +23,11 @@ export default function workspaceSwitcher() {
         /** Endpoint that chooses the current workspace (PUT), from `data-url` on the component root. */
         get url() {
             return this.$root.dataset.url;
+        },
+
+        /** Page of a workspace, with `__id__` where its ULID goes, from `data-workspace-url` on the component root. */
+        get workspaceUrl() {
+            return this.$root.dataset.workspaceUrl;
         },
 
         /** The workspaces of the person, from the shared store. */
@@ -53,7 +60,7 @@ export default function workspaceSwitcher() {
         },
 
         /**
-         * Makes a workspace the current one, then reloads the page so that it shows that workspace.
+         * Makes a workspace the current one, then takes the person to its page.
          *
          * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated. A 422 means
          * the workspace is no longer one the person belongs to: the server's translated message is shown.
@@ -81,7 +88,7 @@ export default function workspaceSwitcher() {
                 return;
             }
 
-            reloadPage();
+            redirectTo(fillUrl(this.workspaceUrl, item.id));
         },
     };
 }

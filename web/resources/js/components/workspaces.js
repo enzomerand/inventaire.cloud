@@ -4,13 +4,15 @@
  *
  * The list lives in the shared `workspaces` store (see stores/workspaces.js), which the header shows as well; after
  * every change the component asks the API for the list again, so what is shown is what the server holds. Deleting
- * asks for a confirmation in the row itself. The endpoints come from the markup (`data-url`, `data-current-url`
- * on the root), because the CSP build of Alpine does not allow Blade to inject values into expressions.
+ * asks for a confirmation in the row itself. The endpoints come from the markup (`data-url`, `data-current-url`,
+ * `data-workspace-url` on the root), because the CSP build of Alpine does not allow Blade to inject values into
+ * expressions.
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are
  * shown as a toast, with the server's translated validation message when there is one, and a message of our own for
  * the refusal to delete the last workspace.
  */
+import { fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
@@ -45,6 +47,11 @@ export default function workspaces() {
         /** Endpoint that chooses the current workspace (PUT), from `data-current-url` on the component root. */
         get currentUrl() {
             return this.$root.dataset.currentUrl;
+        },
+
+        /** Page of a workspace, with `__id__` where its ULID goes, from `data-workspace-url` on the component root. */
+        get workspaceUrl() {
+            return this.$root.dataset.workspaceUrl;
         },
 
         /** The workspaces of the person, from the shared store. */
@@ -87,6 +94,16 @@ export default function workspaces() {
          */
         canDelete(item) {
             return this.canManage(item) && this.items.length > 1;
+        },
+
+        /**
+         * Where the page of a workspace is: its name links there.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        pageUrl(item) {
+            return fillUrl(this.workspaceUrl, item.id);
         },
 
         /**

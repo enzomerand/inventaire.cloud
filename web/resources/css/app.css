@@ -107,3 +107,38 @@
         margin-inline: var(--app-dropdown-gutter);
     }
 }
+
+/*
+ * Inventories. A color swatch (the color of a choice, of a color field), text that keeps the line breaks it was typed
+ * with, a description cut after a few lines on a card, and the rows of the table of items that open the item on click.
+ */
+.app-swatch {
+    display: inline-block;
+    flex: none;
+    width: 1.25rem;
+    height: 1.25rem;
+    border: 1px solid var(--tblr-border-color);
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+.app-multiline {
+    white-space: pre-line;
+}
+
+.app-clamp {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+}
+
+.app-row-link {
+    cursor: pointer;
+}
+
+/* A long value wraps inside its cell instead of stretching the table. */
+.app-cell {
+    max-width: 24rem;
+}

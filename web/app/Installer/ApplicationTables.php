@@ -33,6 +33,9 @@ final class ApplicationTables
         'workspace_user',
         'account_deletion_codes',
         'settings',
+        'inventories',
+        'inventory_fields',
+        'items',
     ];
 
     /**

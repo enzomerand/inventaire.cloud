@@ -62,21 +62,27 @@ describe('the migrations', function (): void {
     it('go back and forth', function (): void {
         $workspaces = require database_path('migrations/2026_10_15_100000_create_workspaces_tables.php');
         $deletionCodes = require database_path('migrations/2026_10_15_300000_create_account_deletion_codes_table.php');
+        // Inventories hang from workspaces: they go first on the way down and come last on the way up.
+        $inventories = require database_path('migrations/2026_10_20_100000_create_inventories_tables.php');
 
+        $inventories->down();
         $deletionCodes->down();
         $workspaces->down();
 
         try {
             expect(Schema::hasTable('workspaces'))->toBeFalse()
+                ->and(Schema::hasTable('inventories'))->toBeFalse()
                 ->and(Schema::hasTable('workspace_user'))->toBeFalse()
                 ->and(Schema::hasTable('account_deletion_codes'))->toBeFalse()
                 ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeFalse();
         } finally {
             $workspaces->up();
             $deletionCodes->up();
+            $inventories->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()
+            ->and(Schema::hasTable('inventories'))->toBeTrue()
             ->and(Schema::hasTable('workspace_user'))->toBeTrue()
             ->and(Schema::hasTable('account_deletion_codes'))->toBeTrue()
             ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeTrue();

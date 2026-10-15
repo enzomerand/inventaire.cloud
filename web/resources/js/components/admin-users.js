@@ -103,7 +103,7 @@ export default function adminUsers() {
         get rangeLabel() {
             return this.total === 0
                 ? ''
-                : t('admin.users.range', { first: this.from, last: this.to, total: this.total });
+                : t('pagination.range', { first: this.from, last: this.to, total: this.total });
         },
 
         /**

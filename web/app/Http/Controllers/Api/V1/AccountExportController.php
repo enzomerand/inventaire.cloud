@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Auth\AccountExport;
 use App\Http\Controllers\Controller;
+use App\Support\DisplayTime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,7 +16,7 @@ use Illuminate\Http\Request;
 final class AccountExportController extends Controller
 {
     /**
-     * The export of the signed-in account, as a JSON file to download (`inventaire-export-YYYY-MM-DD.json`).
+     * The export of the signed-in account, as a JSON file to download (`inventaire-export-YYYY-MM-DD.json`, the day in the timezone of the instance).
      *
      * The route is throttled; the answer is never cached, since it holds personal data.
      */
@@ -25,7 +26,7 @@ final class AccountExportController extends Controller
             $export->for($this->user($request)),
             200,
             [
-                'Content-Disposition' => 'attachment; filename=inventaire-export-'.now()->format('Y-m-d').'.json',
+                'Content-Disposition' => 'attachment; filename=inventaire-export-'.DisplayTime::of(now())->format('Y-m-d').'.json',
                 'Cache-Control' => 'no-store, private',
             ],
             JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,

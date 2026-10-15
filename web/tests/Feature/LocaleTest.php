@@ -132,7 +132,16 @@ describe('locale configuration', function (): void {
         app()->setLocale('fr');
         $french = $messages->messages();
 
+        // Words French spells like English (the names of two colors of the palette).
+        $spelledAlike = ['Orange', 'Indigo'];
+
         foreach ($english as $key => $text) {
+            if (in_array($text, $spelledAlike, true)) {
+                expect($french[$key])->toBe($text);
+
+                continue;
+            }
+
             expect($french[$key])->not->toBe($text, "Missing French translation for \"{$text}\"");
         }
     });

@@ -74,7 +74,7 @@ describe('a role the database holds but this version does not know', function ()
     it('does not keep the page with the workspace switcher from rendering', function (): void {
         [$member] = memberWithUnknownRole();
 
-        $page = $this->actingAs($member)->get(route('app'), ['Accept-Language' => 'en'])->assertOk();
+        $page = $this->actingAs($member)->get(route('app.workspaces'), ['Accept-Language' => 'en'])->assertOk();
 
         preg_match('/data-workspaces="([^"]*)"/', $page->getContent(), $match);
         $items = json_decode(html_entity_decode($match[1] ?? '[]', ENT_QUOTES), true, flags: JSON_THROW_ON_ERROR);

@@ -1,0 +1,89 @@
+/**
+ * English messages and a `t()` / `tn()` that read them, for the tests of the components that mock `lib/i18n.js`.
+ */
+
+/** The messages of the inventory pages, as the server would hand them over in English. */
+export const MESSAGES = {
+    'pagination.range': ':first–:last of :total',
+    'inventories.items.one': ':count item',
+    'inventories.items.other': ':count items',
+    'inventories.fields.one': ':count field',
+    'inventories.fields.other': ':count fields',
+    'inventories.confirm_delete.one': 'Delete :name and its :count item?',
+    'inventories.confirm_delete.other': 'Delete :name and its :count items?',
+    'inventories.notice.updated': 'Inventory updated.',
+    'inventories.notice.item_added': 'Item added.',
+    'inventories.notice.item_saved': 'Item saved.',
+    'inventories.notice.item_deleted': 'Item deleted.',
+    'inventories.error.limit': 'Inventory limit reached (:count per workspace).',
+    'inventories.error.item_limit': 'Item limit reached (:count per inventory).',
+    'inventories.item.title_create': 'New item',
+    'inventories.item.title_edit': 'Edit the item',
+    'inventories.item.title_view': 'Item',
+    'inventories.item.edit': 'Edit the item',
+    'inventories.item.show': 'Show the details of the item',
+    'inventories.item.none': 'Not set',
+    'inventories.item.remove_tag': 'Remove the tag :name',
+    'fields.boolean.yes': 'Yes',
+    'fields.boolean.no': 'No',
+    'fields.rating': ':value out of :max',
+    'fields.title_add': 'Add a field',
+    'fields.title_edit': 'Edit the field',
+    'fields.confirm_delete': 'Delete the field :name?',
+    'fields.move_up_named': 'Move :name up',
+    'fields.move_down_named': 'Move :name down',
+    'fields.edit_named': 'Edit :name',
+    'fields.delete_named': 'Delete :name',
+    'fields.notice.added': 'Field added.',
+    'fields.notice.saved': 'Field saved.',
+    'fields.notice.deleted': 'Field deleted.',
+    'fields.error.limit': 'Field limit reached (:count per inventory).',
+    'fields.choice.remove': 'Remove the choice',
+    'fields.choice.remove_named': 'Remove the choice :name',
+    'fields.barcode.any': 'Any code',
+    'fields.color.none': 'No color',
+    'fields.color.gray': 'Gray',
+    'fields.color.red': 'Red',
+    'fields.color.orange': 'Orange',
+    'fields.color.yellow': 'Yellow',
+    'fields.color.green': 'Green',
+    'fields.color.teal': 'Teal',
+    'fields.color.blue': 'Blue',
+    'fields.color.indigo': 'Indigo',
+    'fields.color.purple': 'Purple',
+    'fields.color.pink': 'Pink',
+    'fields.summary.max_length': 'Maximum length: :count',
+    'fields.summary.decimals': 'Decimals: :count',
+    'fields.summary.unit': 'Unit: :unit',
+    'fields.summary.min': 'Minimum: :value',
+    'fields.summary.max': 'Maximum: :value',
+    'fields.summary.currency': 'Currency: :currency',
+    'fields.summary.choices': 'Choices: :list',
+    'fields.summary.format': 'Format: :format',
+};
+
+/**
+ * The message of a key, with its placeholders filled in.
+ *
+ * @param {string} key
+ * @param {Record<string, string | number>} [replacements]
+ * @returns {string}
+ */
+export function t(key, replacements = {}) {
+    return Object.entries(replacements).reduce(
+        (text, [name, value]) => text.replaceAll(':' + name, String(value)),
+        MESSAGES[key] ?? key,
+    );
+}
+
+/**
+ * The message of a key in the plural form of a count (English: one, or other).
+ *
+ * @param {string} key
+ * @param {number} count
+ * @param {Record<string, string | number>} [replacements]
+ * @returns {string}
+ */
+export function tn(key, count, replacements = {}) {
+    return t(`${key}.${count === 1 ? 'one' : 'other'}`, { count, ...replacements });
+}

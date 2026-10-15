@@ -28,7 +28,7 @@ final class InstallCommand extends Command
         {--db-no-password : Store an empty database password}
         {--app-url= : Public URL of the instance}
         {--locale= : Default language (fr or en)}
-        {--timezone= : Timezone, e.g. Europe/Paris}
+        {--timezone= : Display timezone, e.g. Europe/Paris (dates are stored in UTC and shown in this timezone)}
         {--mail-host= : SMTP host}
         {--mail-port= : SMTP port}
         {--mail-scheme= : smtp (STARTTLS when offered) or smtps (implicit TLS)}

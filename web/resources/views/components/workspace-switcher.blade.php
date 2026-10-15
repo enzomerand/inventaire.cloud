@@ -5,7 +5,8 @@
     Alpine runs in its CSP build: the component is referenced by name and gets its values from the data-*
     attributes below (the list of workspaces as JSON, read by resources/js/components/workspace-switcher.js, which
     shares it through the "workspaces" store with the workspaces page). The name of the current workspace is also
-    written here as plain text, for the time before the scripts run.
+    written here as plain text, for the time before the scripts run. Choosing a workspace takes the person to its
+    page (data-workspace-url, where __id__ stands for the ULID).
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
@@ -18,6 +19,7 @@
     class="nav-item dropdown"
     x-data="workspaceSwitcher"
     data-url="{{ route('api.v1.me.current-workspace', absolute: false) }}"
+    data-workspace-url="{{ route('app.workspace', ['workspace' => '__id__'], absolute: false) }}"
     data-workspaces="{{ json_encode($list, JSON_THROW_ON_ERROR) }}"
 >
     <button

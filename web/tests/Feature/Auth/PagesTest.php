@@ -44,12 +44,15 @@ describe('the login page', function (): void {
 });
 
 describe('the space of a signed-in user', function (): void {
-    it('is shown to them, with an empty state saying that inventories come soon', function (): void {
-        $this->actingAs(User::factory()->create(['name' => 'Ada Lovelace']))
-            ->get(route('app'), ['Accept-Language' => 'en'])
+    it('sends them on to the page of the workspace they work in, which says it holds no inventory yet', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);
+        $personal = $user->workspaces()->firstOrFail();
+
+        $this->actingAs($user)->get(route('app'))->assertRedirect(route('app.workspace', ['workspace' => $personal->ulid]));
+
+        $this->actingAs($user)->withHeaders(['Accept-Language' => 'en'])->followingRedirects()->get(route('app'))
             ->assertOk()
             ->assertSee('No inventory yet')
-            ->assertSee('Inventories are coming soon')
             ->assertSee('class="empty"', false);
     });
 
@@ -62,7 +65,7 @@ describe('the space of a signed-in user', function (): void {
     });
 
     it('is translated', function (): void {
-        $this->actingAs(User::factory()->create())->get(route('app'), ['Accept-Language' => 'fr'])
+        $this->actingAs(User::factory()->create())->withHeaders(['Accept-Language' => 'fr'])->followingRedirects()->get(route('app'))
             ->assertOk()
             ->assertSee('Aucun inventaire pour')
             ->assertSee('Mon espace');
@@ -96,7 +99,7 @@ describe('the header', function (): void {
     it('escapes the name of the user', function (): void {
         $user = User::factory()->create(['name' => '<script>alert(1)</script>']);
 
-        $this->actingAs($user)->get(route('app'))->assertOk()->assertDontSee('<script>alert(1)</script>', false);
+        $this->actingAs($user)->followingRedirects()->get(route('app'))->assertOk()->assertDontSee('<script>alert(1)</script>', false);
     });
 
     it('stays server-rendered and public: the home page never redirects', function (): void {

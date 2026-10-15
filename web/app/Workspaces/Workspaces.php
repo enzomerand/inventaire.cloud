@@ -301,9 +301,19 @@ final class Workspaces
      */
     public function roleOf(User $user, Workspace $workspace): ?WorkspaceRole
     {
+        return $this->roleIn($user, $workspace->getKey());
+    }
+
+    /**
+     * The role of the user in the workspace with this key, or null when they are not a member.
+     *
+     * For what belongs to a workspace and only knows its key (an inventory): no need to load the workspace to ask.
+     */
+    public function roleIn(User $user, int $workspaceId): ?WorkspaceRole
+    {
         $membership = WorkspaceMember::query()
             ->where('user_id', $user->getKey())
-            ->where('workspace_id', $workspace->getKey())
+            ->where('workspace_id', $workspaceId)
             ->first();
 
         return $membership?->role;

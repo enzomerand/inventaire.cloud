@@ -6,6 +6,7 @@ use App\Auth\AccountExport;
 use App\Models\User;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\Support\Device;
@@ -23,6 +24,19 @@ describe('the export of the account', function (): void {
             ->and($response->headers->get('Cache-Control'))->toContain('no-store')->toContain('private');
         expect(json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR))->toBeArray();
     });
+
+    it('is named after the day in the timezone of the instance, not in UTC', function (string $zone, string $moment, string $day): void {
+        config(['app.display_timezone' => $zone]);
+        $this->travelTo(Carbon::parse($moment, 'UTC'));
+
+        $response = $this->actingAs(User::factory()->create())->get('/api/v1/me/export', frontend())->assertOk();
+
+        expect($response->headers->get('Content-Disposition'))->toBe("attachment; filename=inventaire-export-{$day}.json");
+    })->with([
+        'ahead of UTC, already the next day' => ['Europe/Paris', '2026-10-14 22:30:00', '2026-10-15'],
+        'UTC itself' => ['UTC', '2026-10-14 22:30:00', '2026-10-14'],
+        'behind UTC, still the day before' => ['America/New_York', '2026-10-15 01:30:00', '2026-10-14'],
+    ]);
 
     it('holds the profile of the account and nothing secret', function (): void {
         $user = User::factory()->speaking('en')->create(['name' => 'Ada Lovelace', 'email' => 'ada@example.com']);
