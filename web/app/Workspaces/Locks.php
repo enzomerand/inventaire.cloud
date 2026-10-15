@@ -30,14 +30,15 @@ use Illuminate\Database\Eloquent\Collection;
  * more than one of these locks takes them in the same order (but for the two paths named below):
  *
  * 1. the sign-in code of an address (`login_codes`, by address: {@see self::loginCode()});
- * 2. the accounts (`users`), lowest id first ({@see self::users()});
+ * 2. the accounts (`users`), lowest id first ({@see self::users()}, or {@see self::administratorsAnd()} when the verdict
+ *    depends on the administrators too);
  * 3. the workspaces (`workspaces`), lowest id first ({@see self::workspaces()});
  * 4. the memberships (`workspace_user`), by id, read with a locking read ({@see self::memberships()}).
  *
  * Signing in takes 1 then 2 (and 4, to read the memberships of an account that has none yet, before it is given its
  * personal workspace); deleting an account takes 1 to 4; so does an administrator deleting one, who first hands over
  * the workspaces it alone owns (and who, like the administrators changing who is one, locks all the administrators
- * with the account: see `UserAdministration`). A transaction may skip levels: creating an account takes
+ * with the account: see {@see self::administratorsAnd()}). A transaction may skip levels: creating an account takes
  * none of 2 to 4 for its personal workspace, since the account and the workspace are invisible to everybody until the
  * commit and the workspace is inserted without reading any membership (see {@see Workspaces::createPersonal()}).
  * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
@@ -90,6 +91,34 @@ final class Locks
         $users = $ids === [] ? new Collection : User::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
         return $users;
+    }
+
+    /**
+     * Locks every administrator and the given accounts, lowest id first, and returns the ones that exist, by id.
+     *
+     * For the verdicts that depend on who administers the instance ("an administrator remains"). The administrators are
+     * read first, without a lock, and then everything is locked by primary key in one statement. A locking read that
+     * filtered on `is_admin` would scan the whole table (the column has no index) and, on MySQL and MariaDB at their
+     * default isolation level, lock every row *and every gap* it passes, the one after the last account included: sign-ups
+     * and sign-ins would wait for as long as a deletion lasts. An index on the column would not change that, since the
+     * lock on its first entry still covers the gap where the accounts that are not administrators are inserted. Locking
+     * by primary key takes record locks only, on rows that exist (an id that is gone costs a gap lock, but between ids
+     * that were taken, not at the end of the table where accounts are inserted).
+     *
+     * What the caller learns is a lower bound: an account is an administrator for the whole transaction when it is one
+     * in the returned collection (the row is locked and was read as it is now, not as it was at the first read). One
+     * made an administrator between the first read and the locks is not locked, so it is not counted; that can only make
+     * a caller refuse something it could have allowed ("this is the last administrator"), never allow what leaves
+     * the instance without one.
+     *
+     * @param  iterable<int|string>  $ids  Accounts to lock besides the administrators.
+     * @return Collection<int, User>
+     */
+    public function administratorsAnd(iterable $ids): Collection
+    {
+        $administrators = User::query()->where('is_admin', true)->pluck('id')->all();
+
+        return $this->users([...$administrators, ...$ids]);
     }
 
     /**

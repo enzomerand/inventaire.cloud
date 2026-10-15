@@ -109,6 +109,20 @@ describe('the settings', function (): void {
         'a list' => [[false], 422],
     ]);
 
+    it('are changed only for the ones that are sent: a request must send at least one', function (array $data): void {
+        $admin = User::factory()->admin()->create();
+        app(InstanceSettings::class)->setRegistrationOpen(false);
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', $data, frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('settings');
+
+        expect(json_decode((string) DB::table('settings')->where('key', 'registration_open')->value('value')))->toBeFalse();
+    })->with([
+        'nothing' => [[]],
+        'only what is not known' => [['something_else' => 'x']],
+    ]);
+
     it('are not changed by a request that is refused', function (): void {
         $this->actingAs(User::factory()->admin()->create())->putJson('/api/v1/admin/settings', ['registration_open' => 'closed'], frontend())->assertUnprocessable();
 

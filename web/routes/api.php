@@ -53,7 +53,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         // enough for any database to read), which the controller looks up itself: see UserController::find().
         Route::prefix('admin')->name('admin.')->middleware([RequireStatefulRequest::class, RefuseApiTokens::class, 'can:admin'])->group(function (): void {
             Route::get('/users', [AdminUserController::class, 'index'])->name('users.index');
-            Route::post('/users', [AdminUserController::class, 'store'])->name('users.store');
+            Route::post('/users', [AdminUserController::class, 'store'])->middleware('throttle:admin-user-creation')->name('users.store');
             Route::patch('/users/{user}', [AdminUserController::class, 'update'])->where('user', '[0-9]{1,18}')->name('users.update');
             Route::delete('/users/{user}', [AdminUserController::class, 'destroy'])->where('user', '[0-9]{1,18}')->name('users.destroy');
 

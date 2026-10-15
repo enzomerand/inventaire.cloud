@@ -51,7 +51,7 @@ final class UserController extends Controller
     public function store(CreateUserRequest $request): JsonResponse
     {
         try {
-            $user = $this->users->create($request->email(), $request->name());
+            $user = $this->users->create($this->user($request), $request->email(), $request->name());
         } catch (UserAdministrationRefused $refusal) {
             return $this->refusal($refusal);
         }
@@ -63,7 +63,8 @@ final class UserController extends Controller
 
     /**
      * Makes the account an administrator, or not any more (`is_admin`). The last administrator cannot be demoted
-     * (`409`, `last_administrator`).
+     * (`409`, `last_administrator`); an administrator who was demoted while the request was handled gets a `403`,
+     * `not_administrator`.
      *
      * @param  string  $user  The id of the account, which the route has limited to digits.
      */
@@ -76,7 +77,7 @@ final class UserController extends Controller
         }
 
         try {
-            $account = $this->users->setAdministrator($account, $request->administrator());
+            $account = $this->users->setAdministrator($this->user($request), $account, $request->administrator());
         } catch (UserAdministrationRefused $refusal) {
             return $this->refusal($refusal);
         } catch (ModelNotFoundException $exception) {
@@ -88,9 +89,11 @@ final class UserController extends Controller
 
     /**
      * Deletes the account (`204`) the way its owner would: the workspaces nobody else belongs to go with it, and a
-     * workspace it alone owned and that others belong to is handed over to its longest-standing member first. Not
-     * the administrator's own account (`409`, `self_deletion`: they do that from their account page), and not the
-     * last administrator (`409`, `last_administrator`).
+     * workspace it alone owned and that others belong to is handed over first, to its longest-standing editor (or to
+     * its longest-standing member when it has no editor). Not the administrator's own account (`409`,
+     * `self_deletion`: they do that from their account page), and not the last administrator (`409`,
+     * `last_administrator`). An administrator who was demoted while the request was handled gets a `403`,
+     * `not_administrator`, as for the other changes.
      *
      * @param  string  $user  The id of the account, which the route has limited to digits.
      */
@@ -149,10 +152,15 @@ final class UserController extends Controller
     }
 
     /**
-     * The 409 for a request the rules refuse.
+     * The 409 for a request the rules refuse, or the 403 for an administrator who is not one any more.
      */
     private function refusal(UserAdministrationRefused $refusal): JsonResponse
     {
+        // An administrator demoted while the request was on its way: the gate let them in, the locks say otherwise.
+        if ($refusal->reason === UserAdministrationRefused::NOT_ADMINISTRATOR) {
+            return ApiError::forbidden(__('This action is unauthorized.'), $refusal->reason);
+        }
+
         $message = match ($refusal->reason) {
             UserAdministrationRefused::ACCOUNT_EXISTS => __('An account already exists for this address.'),
             UserAdministrationRefused::LAST_ADMINISTRATOR => __('This is the last administrator of the instance: make somebody else an administrator first.'),

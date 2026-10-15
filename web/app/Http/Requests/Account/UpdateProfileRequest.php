@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Account;
 
+use App\Rules\PersonName;
 use App\Services\LocaleResolver;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -14,16 +15,13 @@ use Illuminate\Validation\Rule;
  */
 final class UpdateProfileRequest extends FormRequest
 {
-    /** Longest name, in characters (the same limit as when the account is created). */
-    public const NAME_MAX_LENGTH = 255;
-
     /**
      * @return array<string, list<mixed>>
      */
     public function rules(): array
     {
         return [
-            'name' => ['sometimes', 'required', 'string', 'max:'.self::NAME_MAX_LENGTH],
+            'name' => ['sometimes', ...PersonName::rules()],
             'locale' => ['sometimes', 'required', 'string', Rule::in(app(LocaleResolver::class)->supported())],
         ];
     }
@@ -45,14 +43,15 @@ final class UpdateProfileRequest extends FormRequest
     }
 
     /**
-     * Trims the name before it is validated, so that a name made of spaces counts as empty.
+     * Trims the name before it is validated, so that a name made of spaces counts as empty. The rules of a name are
+     * those of {@see PersonName}, the same as when an administrator creates the account.
      */
     protected function prepareForValidation(): void
     {
         $name = $this->input('name');
 
         if (is_string($name)) {
-            $this->merge(['name' => preg_replace('/^[\s\p{Z}\p{C}]+|[\s\p{Z}\p{C}]+$/u', '', $name) ?? $name]);
+            $this->merge(['name' => PersonName::trim($name)]);
         }
     }
 }

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Admin;
 
+use App\Settings\InstanceSettings;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 /**
- * The settings of the instance an administrator changes: every one is required, so that a request says what the
- * instance is to be, not what to leave alone.
+ * The settings of the instance an administrator changes: a partial update. Each setting is optional, and the ones
+ * that are not sent keep what they hold; a request that sends none of them changes nothing and is refused.
  */
 final class UpdateSettingsRequest extends FormRequest
 {
@@ -18,15 +20,39 @@ final class UpdateSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'registration_open' => ['required', 'boolean'],
+            InstanceSettings::REGISTRATION_OPEN => ['sometimes', 'required', 'boolean'],
         ];
     }
 
     /**
-     * Whether new addresses can create an account.
+     * Refuses a request that sends no setting at all (an error under `settings`).
+     *
+     * @return list<callable(Validator): void>
      */
-    public function registrationOpen(): bool
+    public function after(): array
     {
-        return $this->boolean('registration_open');
+        return [
+            function (Validator $validator): void {
+                if (! $this->hasAny(array_keys($this->rules()))) {
+                    $validator->errors()->add('settings', __('Send at least one setting.'));
+                }
+            },
+        ];
+    }
+
+    /**
+     * The settings that were sent, with their new values: only those, so that the others are left alone.
+     *
+     * @return array{registration_open?: bool}
+     */
+    public function settings(): array
+    {
+        $settings = [];
+
+        if ($this->has(InstanceSettings::REGISTRATION_OPEN)) {
+            $settings[InstanceSettings::REGISTRATION_OPEN] = $this->boolean(InstanceSettings::REGISTRATION_OPEN);
+        }
+
+        return $settings;
     }
 }

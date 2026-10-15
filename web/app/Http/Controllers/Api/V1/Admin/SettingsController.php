@@ -30,11 +30,12 @@ final class SettingsController extends Controller
     }
 
     /**
-     * Changes the settings, and answers with them as they are now.
+     * Changes the settings that the request carries (the others keep their value, and at least one is required: `422`
+     * otherwise), and answers with all of them as they are now.
      */
     public function update(UpdateSettingsRequest $request): JsonResponse
     {
-        $this->settings->setRegistrationOpen($request->registrationOpen());
+        $this->settings->update($request->settings());
 
         return $this->show();
     }

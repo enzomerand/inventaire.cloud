@@ -50,14 +50,28 @@ function adminActTogether(string $directory, array $commands): array
 }
 
 describe('administrators acting at the same moment', function (): void {
-    it('keep one administrator when two demote each other', function (): void {
+    it('keep one administrator when two step down at the same moment', function (): void {
         foreach (range(1, 4) as $_) {
             $first = User::factory()->admin()->withPersonalWorkspace()->create();
             $second = User::factory()->admin()->withPersonalWorkspace()->create();
 
-            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $second->id], ['admin-demote', $first->id]]);
+            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $first->id, $first->id], ['admin-demote', $second->id, $second->id]]);
 
             expect($outcomes)->toBe(['demoted', 'refused:last_administrator'])
+                ->and(User::query()->where('is_admin', true)->count())->toBe(1);
+
+            removeAdminRows();
+        }
+    });
+
+    it('keep one administrator when two demote each other: the one who lost is no administrator any more', function (): void {
+        foreach (range(1, 4) as $_) {
+            $first = User::factory()->admin()->withPersonalWorkspace()->create();
+            $second = User::factory()->admin()->withPersonalWorkspace()->create();
+
+            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $first->id, $second->id], ['admin-demote', $second->id, $first->id]]);
+
+            expect($outcomes)->toBe(['demoted', 'refused:not_administrator'])
                 ->and(User::query()->where('is_admin', true)->count())->toBe(1);
 
             removeAdminRows();
@@ -71,11 +85,50 @@ describe('administrators acting at the same moment', function (): void {
 
             $outcomes = adminActTogether($this->sandbox->root, [['admin-delete', $first->id, $second->id], ['admin-delete', $second->id, $first->id]]);
 
-            expect($outcomes)->toBe(['deleted', 'refused:last_administrator'])
+            // The one who comes second was deleted by the first: it is judged again under the locks, and is refused.
+            expect($outcomes)->toBe(['deleted', 'refused:not_administrator'])
                 ->and(User::query()->where('is_admin', true)->count())->toBe(1);
 
             removeAdminRows();
         }
+    });
+
+    it('refuse what an administrator demoted meanwhile asks for', function (): void {
+        foreach (range(1, 4) as $_) {
+            $demoter = User::factory()->admin()->withPersonalWorkspace()->create();
+            $demoted = User::factory()->admin()->withPersonalWorkspace()->create();
+            $victim = User::factory()->withPersonalWorkspace()->create();
+
+            $outcomes = adminActTogether($this->sandbox->root, [['admin-demote', $demoter->id, $demoted->id], ['admin-delete', $demoted->id, $victim->id]]);
+
+            // Either the deletion came first, while its author still was an administrator, or it was refused.
+            expect($outcomes)->toBeIn([['deleted', 'demoted'], ['demoted', 'refused:not_administrator']])
+                ->and(User::query()->whereKey($victim->id)->exists())->toBe($outcomes === ['demoted', 'refused:not_administrator'])
+                ->and(User::query()->whereKey($demoted->id)->value('is_admin'))->toBeFalse();
+
+            removeAdminRows();
+        }
+    });
+
+    it('do not make sign-ups wait while they hold the locks of a verdict', function (): void {
+        User::factory()->admin()->withPersonalWorkspace()->create();
+        $member = User::factory()->withPersonalWorkspace()->create();
+
+        // One process holds the locks of the administrators and of an account; another inserts an account meanwhile. A
+        // lock on every row and gap the filter on is_admin passes (MySQL and MariaDB) would make that insert wait for
+        // the other to finish, which it never does: it gives up when its lock wait times out.
+        $signals = [$this->sandbox->root.'/go.locked', $this->sandbox->root.'/go.released'];
+        array_map(fn (string $signal): bool => @unlink($signal), $signals);
+
+        try {
+            $answers = ConcurrentChildren::run($this->sandbox->root, base_path('tests/Support/concurrent-action.php'), [['hold-admin-lock', $member->id], ['insert-user']]);
+        } finally {
+            array_map(fn (string $signal): bool => @unlink($signal), $signals);
+        }
+
+        expect($answers[0]['result'])->toBe('held')
+            ->and($answers[1]['result'])->toBe('inserted')
+            ->and(User::query()->where('email', 'newcomer@example.com')->exists())->toBeTrue();
     });
 
     it('never leave a shared workspace without an owner when its only owner is deleted while the member next in line deletes themselves', function (): void {

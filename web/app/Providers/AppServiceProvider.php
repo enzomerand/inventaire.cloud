@@ -51,6 +51,17 @@ class AppServiceProvider extends ServiceProvider
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();
         $this->registerWorkspaceLimiters();
+        $this->registerAdminLimiters();
+    }
+
+    /**
+     * The rate limiter of the administration endpoint that sends a mail to an address the administrator chooses
+     * (limit in config/admin.php, `user_creation_per_hour`), keyed on the administrator.
+     */
+    private function registerAdminLimiters(): void
+    {
+        RateLimiter::for('admin-user-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('admin.user_creation_per_hour'))
+            ->by('admin-user-creation:'.$this->signedInKey($request)));
     }
 
     /**

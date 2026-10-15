@@ -19,6 +19,9 @@ final class UserAdministrationRefused extends RuntimeException
     /** The change would leave the instance without an administrator. */
     public const LAST_ADMINISTRATOR = 'last_administrator';
 
+    /** The administrator who asked is not one any more: they were demoted (or deleted) while the request was handled. */
+    public const NOT_ADMINISTRATOR = 'not_administrator';
+
     /** An administrator asked to delete their own account here: that is done from the account page, with a code. */
     public const SELF_DELETION = 'self_deletion';
 

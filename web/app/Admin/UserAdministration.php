@@ -19,7 +19,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Collection as SupportCollection;
+use Illuminate\Support\Facades\Log;
 
 /**
  * What the administrators of the instance do with its accounts: find them, create them, make them administrators
@@ -32,7 +32,11 @@ use Illuminate\Support\Collection as SupportCollection;
  * Everything that changes accounts judges under row locks taken in the global order of {@see Locks}, in one transaction
  * that is retried when the database picks it as the loser of a deadlock ({@see DeadlockRetries}): two administrators
  * demoting each other at the same moment, or deleting each other, are judged one after the other and the last one is
- * refused.
+ * refused. The administrator who asks is judged again under those locks: one who was demoted while the request was
+ * on its way no longer does what only administrators do ({@see UserAdministrationRefused::NOT_ADMINISTRATOR}).
+ *
+ * Every change an administrator makes (an account created, made an administrator or not any more, deleted) leaves one
+ * line in the log, with the id of the administrator and the id of the account, and nothing else: no address, no name.
  */
 final class UserAdministration
 {
@@ -67,12 +71,13 @@ final class UserAdministration
      * Creates an account for an address, with its personal workspace (the same way signing up does), in the default
      * language of the instance. The person signs in with a code like anybody else; telling them is up to the caller.
      *
+     * @param  User  $actor  The administrator who asks.
      * @param  string  $email  Address, in any case: it is stored in canonical form.
      * @param  string  $name  Already validated and trimmed.
      *
      * @throws UserAdministrationRefused When the address already has an account.
      */
-    public function create(string $email, string $name): User
+    public function create(User $actor, string $email, string $name): User
     {
         $email = EmailAddress::normalize($email);
 
@@ -88,6 +93,8 @@ final class UserAdministration
         if (! $created) {
             throw new UserAdministrationRefused(UserAdministrationRefused::ACCOUNT_EXISTS);
         }
+
+        $this->log('account created', $actor, $user);
 
         return $user;
     }
@@ -107,17 +114,25 @@ final class UserAdministration
     /**
      * Makes an account an administrator, or takes that away. Doing it again changes nothing.
      *
+     * @param  User  $actor  The administrator who asks.
+     * @param  User  $user  The account to change.
      * @return User The account as it is now.
      *
-     * @throws UserAdministrationRefused When it is the last administrator and would stop being one.
+     * @throws UserAdministrationRefused When the actor is no longer an administrator, or when it is the last administrator and would stop being one.
      * @throws ModelNotFoundException When the account is gone.
      */
-    public function setAdministrator(User $user, bool $administrator): User
+    public function setAdministrator(User $actor, User $user, bool $administrator): User
     {
-        return $this->db->transaction(function () use ($user, $administrator): User {
-            // The administrators and the account in one go, lowest id first, like AccountDeletion: two administrators
-            // demoting each other at the same moment would otherwise each hold their own row and wait for the other's.
-            $accounts = $this->lockAdministratorsAnd([$user->getKey()]);
+        // Retried as a whole, like the other changes: a deadlock rolls the transaction back and the accounts are read
+        // again for each attempt.
+        [$locked, $changed] = DeadlockRetries::run(fn (): array => $this->db->transaction(function () use ($actor, $user, $administrator): array {
+            // The administrators, the actor and the account in one go, lowest id first, like AccountDeletion: two
+            // administrators demoting each other at the same moment would otherwise each hold their own row and wait
+            // for the other's.
+            $accounts = $this->locks->administratorsAnd([$actor->getKey(), $user->getKey()]);
+
+            $this->ensureAdministrator($actor, $accounts);
+
             $locked = $accounts->get((int) $user->getKey());
 
             if ($locked === null) {
@@ -125,7 +140,7 @@ final class UserAdministration
             }
 
             if ($locked->is_admin === $administrator) {
-                return $locked;
+                return [$locked, false];
             }
 
             if (! $administrator && $accounts->doesntContain(fn (User $account): bool => $account->is_admin && ! $account->is($locked))) {
@@ -135,22 +150,29 @@ final class UserAdministration
             $locked->is_admin = $administrator;
             $locked->save();
 
-            return $locked;
-        }, 3);
+            return [$locked, true];
+        }));
+
+        if ($changed) {
+            $this->log($administrator ? 'account made an administrator' : 'administrator rights taken away', $actor, $locked);
+        }
+
+        return $locked;
     }
 
     /**
      * Deletes an account, the way the owner's own deletion does (see {@see User::delete()}: the workspaces nobody else
      * belongs to go with it, it just leaves the others), after making sure no shared workspace is left without an owner.
      *
-     * When the account is the only owner of a workspace that other people belong to, the member who has been in it the
-     * longest (the oldest membership) becomes its owner first, whatever their role was. All of it is one transaction:
+     * When the account is the only owner of a workspace that other people belong to, one of the other members becomes
+     * its owner first: the one who has been in it the longest among its editors, or, when it has none, the one who has
+     * been in it the longest, whatever their role (the oldest membership in both cases). All of it is one transaction:
      * if the deletion is refused or fails, nobody's role has changed.
      *
      * @param  User  $actor  The administrator who asks.
      * @param  User  $target  The account to delete.
      *
-     * @throws UserAdministrationRefused When the target is the actor.
+     * @throws UserAdministrationRefused When the target is the actor, or the actor is no longer an administrator.
      * @throws AccountDeletionRefused When the target is the last administrator.
      * @throws ModelNotFoundException When the account is gone.
      */
@@ -164,26 +186,32 @@ final class UserAdministration
 
         // Retried as a whole: a deadlock rolls back the transaction that the hand-over and the deletion share, and
         // the account is read again for each attempt.
-        DeadlockRetries::run(fn () => $this->db->transaction(function () use ($id): void {
+        DeadlockRetries::run(fn () => $this->db->transaction(function () use ($actor, $id): void {
             $user = User::query()->whereKey($id)->firstOrFail();
 
-            $this->handOverWorkspaces($user);
+            $this->handOverWorkspaces($actor, $user);
             $user->delete();
         }));
+
+        $this->log('account deleted', $actor, $target);
     }
 
     /**
-     * Gives every workspace the account is the only owner of, and that other people belong to, a new owner: the member
-     * of the longest standing.
+     * Gives every workspace the account is the only owner of, and that other people belong to, a new owner: the editor
+     * of the longest standing, or the member of the longest standing when it has no editor.
      *
      * Locks are taken in the order of {@see Locks}, and it is the same order as the deletion that follows takes them
-     * (which then finds them held): the sign-in code of the address, then the administrators, the account and the
-     * people who could take over, in one statement, lowest id first, then the workspaces, then their memberships.
-     * Whom to lock is read before any lock; the memberships are read again under the locks, and the accounts of
-     * members who joined in the meantime are locked last, once the workspace is (the path that goes back up the order
-     * that `Workspaces::delete()` takes too, see Locks).
+     * (which then finds them held): the sign-in code of the address, then the administrators, the actor, the account
+     * and the people who could take over, in one statement, lowest id first, then the workspaces, then their
+     * memberships. Whom to lock is read before any lock; the memberships are read again under the locks, and the
+     * accounts of members who joined in the meantime are locked last, once the workspace is (the path that goes back
+     * up the order that `Workspaces::delete()` takes too, see Locks).
+     *
+     * @param  User  $actor  The administrator who asks, judged again once the accounts are locked.
+     *
+     * @throws UserAdministrationRefused When the actor is no longer an administrator.
      */
-    private function handOverWorkspaces(User $user): void
+    private function handOverWorkspaces(User $actor, User $user): void
     {
         // The address first, then the accounts (see AccountDeletion::release() for why the sign-in code comes first).
         $this->locks->loginCode($user->email);
@@ -197,7 +225,9 @@ final class UserAdministration
             ? collect()
             : WorkspaceMember::query()->whereIn('workspace_id', $owned)->where('user_id', '!=', $user->getKey())->pluck('user_id');
 
-        $accounts = $this->lockAdministratorsAnd(array_values([$user->getKey(), ...$others->all()]));
+        $accounts = $this->locks->administratorsAnd(array_values([$actor->getKey(), $user->getKey(), ...$others->all()]));
+
+        $this->ensureAdministrator($actor, $accounts);
 
         $workspaces = $this->locks->workspaces($owned);
         $members = $this->locks->memberships('workspace_id', $workspaces->keys());
@@ -215,32 +245,41 @@ final class UserAdministration
             }
 
             $companions = $present->reject(fn (WorkspaceMember $member): bool => (int) $member->user_id === (int) $user->getKey());
-            $successor = $companions->sortBy('id')->first();
 
-            if ($successor === null || $companions->contains(fn (WorkspaceMember $member): bool => $member->role->canManage())) {
+            if ($companions->isEmpty() || $companions->contains(fn (WorkspaceMember $member): bool => $member->role->canManage())) {
                 continue;
             }
+
+            // The oldest editor, or, without any, the oldest member: the order of joining is that of the membership ids.
+            $editors = $companions->filter(fn (WorkspaceMember $member): bool => $member->role === WorkspaceRole::Editor);
+            $successor = ($editors->isEmpty() ? $companions : $editors)->sortBy('id')->firstOrFail();
 
             WorkspaceMember::query()->whereKey($successor->getKey())->update(['role' => WorkspaceRole::Owner->value, 'updated_at' => now()]);
         }
     }
 
     /**
-     * Locks every administrator and the given accounts in one statement, lowest id first, and returns them by id.
+     * Makes sure the administrator who asks still is one, once the accounts are locked: they may have been demoted (or
+     * deleted) by another administrator since the request was authorized, and a request that began as an administrator's
+     * must not finish as one's after that.
      *
-     * @param  list<int|string>  $ids  Accounts to lock besides the administrators.
-     * @return SupportCollection<int, User>
+     * @param  Collection<int, User>  $locked  The accounts locked by {@see Locks::administratorsAnd()}, which include the actor.
+     *
+     * @throws UserAdministrationRefused When the actor is no longer an administrator.
      */
-    private function lockAdministratorsAnd(array $ids): SupportCollection
+    private function ensureAdministrator(User $actor, Collection $locked): void
     {
-        /** @var SupportCollection<int, User> $accounts */
-        $accounts = User::query()
-            ->where(fn ($query) => $query->where('is_admin', true)->orWhereIn('id', $ids))
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get()
-            ->keyBy('id');
+        if ($locked->get((int) $actor->getKey())?->is_admin !== true) {
+            throw new UserAdministrationRefused(UserAdministrationRefused::NOT_ADMINISTRATOR);
+        }
+    }
 
-        return $accounts;
+    /**
+     * Writes the line of the log that says what an administrator did: who did it and to which account, as ids, and
+     * nothing that identifies a person (no address, no name).
+     */
+    private function log(string $what, User $actor, User $target): void
+    {
+        Log::info('Administration: '.$what.'.', ['actor_id' => $actor->getKey(), 'target_id' => $target->getKey()]);
     }
 }

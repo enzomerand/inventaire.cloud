@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Requests\Admin;
 
 use App\Auth\EmailAddress;
-use App\Http\Requests\Account\UpdateProfileRequest;
+use App\Rules\PersonName;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * The address and the name of an account an administrator creates.
+ * The address and the name of an account an administrator creates. The name follows the rules of {@see PersonName},
+ * like the one a person gives on their account page.
  */
 final class CreateUserRequest extends FormRequest
 {
@@ -20,7 +21,7 @@ final class CreateUserRequest extends FormRequest
     {
         return [
             'email' => EmailAddress::rules(),
-            'name' => ['required', 'string', 'max:'.UpdateProfileRequest::NAME_MAX_LENGTH],
+            'name' => PersonName::rules(),
         ];
     }
 
@@ -53,7 +54,7 @@ final class CreateUserRequest extends FormRequest
         $name = $this->input('name');
 
         if (is_string($name)) {
-            $this->merge(['name' => preg_replace('/^[\s\p{Z}\p{C}]+|[\s\p{Z}\p{C}]+$/u', '', $name) ?? $name]);
+            $this->merge(['name' => PersonName::trim($name)]);
         }
     }
 }

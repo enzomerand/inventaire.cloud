@@ -69,6 +69,24 @@ describe('changing the name and the language', function (): void {
         'a number' => [12],
     ]);
 
+    it('refuses a name with a control character in it, line breaks included, like the creation of an account by an administrator does', function (string $name): void {
+        $user = User::factory()->create(['name' => 'Ada']);
+
+        $this->actingAs($user)->patchJson('/api/v1/me', ['name' => $name], frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('name');
+
+        expect($user->fresh()->name)->toBe('Ada');
+    })->with('names with a control character');
+
+    it('accepts unusual names', function (string $name): void {
+        $user = User::factory()->create(['name' => 'Ada']);
+
+        $this->actingAs($user)->patchJson('/api/v1/me', ['name' => $name], frontend())->assertOk();
+
+        expect($user->fresh()->name)->toBe($name);
+    })->with('unusual names that are fine');
+
     it('accepts a name of 255 characters', function (): void {
         $this->actingAs(User::factory()->create())->patchJson('/api/v1/me', ['name' => str_repeat('é', 255)], frontend())->assertOk();
     });

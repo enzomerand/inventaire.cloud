@@ -10,7 +10,9 @@ use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 
@@ -55,6 +57,26 @@ function adminRoleOf(User $user, Workspace $workspace): ?string
     $role = DB::table('workspace_user')->where('workspace_id', $workspace->id)->where('user_id', $user->id)->value('role');
 
     return is_string($role) ? $role : null;
+}
+
+/**
+ * Runs the callback and returns the lines the administration wrote in the log meanwhile: message and context.
+ *
+ * @return list<array{string, array<string, mixed>}>
+ */
+function administrationLog(Closure $callback): array
+{
+    $lines = [];
+
+    Event::listen(MessageLogged::class, function (MessageLogged $logged) use (&$lines): void {
+        if ($logged->level === 'info' && str_starts_with((string) $logged->message, 'Administration:')) {
+            $lines[] = [(string) $logged->message, $logged->context];
+        }
+    });
+
+    $callback();
+
+    return $lines;
 }
 
 dataset('administration calls', [
@@ -320,6 +342,20 @@ describe('creating an account', function (): void {
             ->and(sentMails())->toBe([]);
     });
 
+    it('refuses a name with a control character in it, line breaks included, and creates nothing', function (string $name): void {
+        adminCall($this, adminAccount(), 'POST', '/api/v1/admin/users', ['email' => 'ada@example.com', 'name' => $name])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('name');
+
+        expect(User::query()->count())->toBe(1)->and(sentMails())->toBe([]);
+    })->with('names with a control character');
+
+    it('accepts unusual names', function (string $name): void {
+        adminCall($this, adminAccount(), 'POST', '/api/v1/admin/users', ['email' => 'ada@example.com', 'name' => $name])
+            ->assertCreated()
+            ->assertJsonPath('data.name', $name);
+    })->with('unusual names that are fine');
+
     it('refuses an address or a name that is not valid', function (array $data, string $field): void {
         adminCall($this, adminAccount(), 'POST', '/api/v1/admin/users', $data)->assertUnprocessable()->assertJsonValidationErrors($field);
 
@@ -385,6 +421,27 @@ describe('promoting and demoting', function (): void {
             ->assertJsonPath('code', 'last_administrator');
 
         expect($admin->fresh()?->is_admin)->toBeTrue();
+    });
+
+    it('refuses a change asked by an administrator who was demoted while the request was handled', function (): void {
+        $admin = adminAccount();
+        adminAccount('other@example.com');
+        $ada = User::factory()->create();
+        $demoted = false;
+
+        // The gate lets the administrator in; another administrator demotes them before the locks are taken.
+        DB::listen(function (QueryExecuted $query) use (&$demoted, $admin): void {
+            if (! $demoted && str_starts_with($query->sql, 'select') && str_contains($query->sql, 'users')) {
+                $demoted = true;
+                DB::table('users')->where('id', $admin->id)->update(['is_admin' => false]);
+            }
+        });
+
+        adminCall($this, $admin, 'PATCH', "/api/v1/admin/users/{$ada->id}", ['is_admin' => true])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'not_administrator');
+
+        expect($demoted)->toBeTrue()->and($ada->fresh()?->is_admin)->toBeFalse();
     });
 
     it('changes nothing, and refuses nothing, when the account already is what is asked', function (): void {
@@ -464,9 +521,9 @@ describe('deleting an account', function (): void {
         expect(User::query()->where('is_admin', true)->count())->toBe(1);
     });
 
-    it('refuses to delete the last administrator, and then hands nothing over', function (): void {
+    it('refuses a deletion asked by an account that is not an administrator any more, and then hands nothing over', function (): void {
         // An administrator who has just been demoted elsewhere, but whose session still says otherwise: a race the
-        // gate cannot see, which the rules under the locks must.
+        // gate cannot see, which the check under the locks must.
         $actor = User::factory()->withPersonalWorkspace()->create();
         $actor->is_admin = true;
         $last = adminAccount('last@example.com');
@@ -475,13 +532,34 @@ describe('deleting an account', function (): void {
         adminJoin($shared, $viewer, WorkspaceRole::Viewer);
 
         adminCall($this, $actor, 'DELETE', "/api/v1/admin/users/{$last->id}")
-            ->assertStatus(409)
-            ->assertJsonPath('code', 'last_administrator');
+            ->assertForbidden()
+            ->assertJsonPath('code', 'not_administrator');
 
         // The hand-over was part of the same transaction: it went away with the refusal.
         expect(User::query()->whereKey($last->id)->exists())->toBeTrue()
             ->and(adminRoleOf($viewer, $shared))->toBe('viewer')
             ->and(adminRoleOf($last, $shared))->toBe('owner');
+    });
+
+    it('refuses a deletion asked by an administrator who was demoted while the request was handled', function (): void {
+        $admin = adminAccount();
+        $other = adminAccount('other@example.com');
+        $ada = User::factory()->withPersonalWorkspace()->create();
+        $demoted = false;
+
+        // The gate lets the administrator in; another administrator demotes them before the locks are taken.
+        DB::listen(function (QueryExecuted $query) use (&$demoted, $admin): void {
+            if (! $demoted && str_starts_with($query->sql, 'select') && str_contains($query->sql, 'users')) {
+                $demoted = true;
+                DB::table('users')->where('id', $admin->id)->update(['is_admin' => false]);
+            }
+        });
+
+        adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$ada->id}")->assertForbidden()->assertJsonPath('code', 'not_administrator');
+
+        expect($demoted)->toBeTrue()
+            ->and(User::query()->whereKey($ada->id)->exists())->toBeTrue()
+            ->and(User::query()->whereKey($other->id)->value('is_admin'))->toBeTrue();
     });
 
     it('answers 404 for an account that is not there', function (): void {
@@ -506,29 +584,44 @@ describe('deleting an account', function (): void {
 });
 
 describe('handing workspaces over before deleting their only owner', function (): void {
-    it('makes the member of the longest standing the owner, whatever their role', function (): void {
+    it('makes the editor of the longest standing the owner, before any viewer', function (): void {
         $admin = adminAccount();
         $owner = User::factory()->withPersonalWorkspace()->create(['email' => 'owner@example.com']);
         // Created in the opposite order of joining: the oldest account is not the oldest member.
-        $late = User::factory()->withPersonalWorkspace()->create(['email' => 'late@example.com']);
-        $early = User::factory()->withPersonalWorkspace()->create(['email' => 'early@example.com']);
-        $editor = User::factory()->withPersonalWorkspace()->create(['email' => 'editor@example.com']);
+        $laterEditor = User::factory()->withPersonalWorkspace()->create(['email' => 'later@example.com']);
+        $earlyEditor = User::factory()->withPersonalWorkspace()->create(['email' => 'early-editor@example.com']);
+        $viewer = User::factory()->withPersonalWorkspace()->create(['email' => 'viewer@example.com']);
         $shared = app(Workspaces::class)->create($owner, 'Shared');
-        adminJoin($shared, $early, WorkspaceRole::Viewer);
-        adminJoin($shared, $late, WorkspaceRole::Viewer);
-        adminJoin($shared, $editor, WorkspaceRole::Editor);
+        adminJoin($shared, $viewer, WorkspaceRole::Viewer);
+        adminJoin($shared, $earlyEditor, WorkspaceRole::Editor);
+        adminJoin($shared, $laterEditor, WorkspaceRole::Editor);
 
         adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$owner->id}")->assertNoContent();
 
         expect(User::query()->whereKey($owner->id)->exists())->toBeFalse()
             ->and(Workspace::query()->whereKey($shared->id)->exists())->toBeTrue()
-            ->and(adminRoleOf($early, $shared))->toBe('owner')
-            ->and(adminRoleOf($late, $shared))->toBe('viewer')
-            ->and(adminRoleOf($editor, $shared))->toBe('editor')
+            ->and(adminRoleOf($earlyEditor, $shared))->toBe('owner')
+            ->and(adminRoleOf($laterEditor, $shared))->toBe('editor')
+            ->and(adminRoleOf($viewer, $shared))->toBe('viewer')
             ->and(WorkspaceMember::query()->where('workspace_id', $shared->id)->count())->toBe(3);
     });
 
-    it('hands over each shared workspace to its own longest-standing member', function (): void {
+    it('falls back to the member of the longest standing when the workspace has no editor', function (): void {
+        $admin = adminAccount();
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        $late = User::factory()->withPersonalWorkspace()->create();
+        $early = User::factory()->withPersonalWorkspace()->create();
+        $shared = app(Workspaces::class)->create($owner, 'Shared');
+        adminJoin($shared, $early, WorkspaceRole::Viewer);
+        adminJoin($shared, $late, WorkspaceRole::Viewer);
+
+        adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$owner->id}")->assertNoContent();
+
+        expect(adminRoleOf($early, $shared))->toBe('owner')
+            ->and(adminRoleOf($late, $shared))->toBe('viewer');
+    });
+
+    it('hands over each shared workspace to its own successor', function (): void {
         $admin = adminAccount();
         $owner = User::factory()->withPersonalWorkspace()->create();
         $ada = User::factory()->withPersonalWorkspace()->create();
@@ -538,14 +631,14 @@ describe('handing workspaces over before deleting their only owner', function ()
         adminJoin($one, $grace, WorkspaceRole::Viewer);
         adminJoin($one, $ada, WorkspaceRole::Editor);
         adminJoin($two, $ada, WorkspaceRole::Viewer);
-        adminJoin($two, $grace, WorkspaceRole::Viewer);
+        adminJoin($two, $grace, WorkspaceRole::Editor);
 
         adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$owner->id}")->assertNoContent();
 
-        expect(adminRoleOf($grace, $one))->toBe('owner')
-            ->and(adminRoleOf($ada, $one))->toBe('editor')
-            ->and(adminRoleOf($ada, $two))->toBe('owner')
-            ->and(adminRoleOf($grace, $two))->toBe('viewer');
+        expect(adminRoleOf($ada, $one))->toBe('owner')
+            ->and(adminRoleOf($grace, $one))->toBe('viewer')
+            ->and(adminRoleOf($grace, $two))->toBe('owner')
+            ->and(adminRoleOf($ada, $two))->toBe('viewer');
     });
 
     it('leaves the roles alone when another owner remains, or when the account is not an owner', function (): void {
@@ -602,6 +695,96 @@ describe('handing workspaces over before deleting their only owner', function ()
         expect(User::query()->whereKey($owner->id)->exists())->toBeTrue()
             ->and(adminRoleOf($viewer, $shared))->toBe('viewer')
             ->and(adminRoleOf($owner, $shared))->toBe('owner');
+    });
+});
+
+describe('the limit on creating accounts', function (): void {
+    it('is 60 an hour unless configured otherwise', function (): void {
+        expect(config('admin.user_creation_per_hour'))->toBe(60);
+    });
+
+    it('throttles creating, per administrator, with the answer the other limits give', function (): void {
+        config(['admin.user_creation_per_hour' => 2]);
+        $admin = adminAccount();
+        $other = adminAccount('other@example.com');
+
+        foreach ([1, 2] as $number) {
+            $this->flushSession();
+            adminCall($this, $admin, 'POST', '/api/v1/admin/users', ['email' => "new{$number}@example.com", 'name' => 'New'])->assertCreated();
+        }
+
+        $this->flushSession();
+        adminCall($this, $admin, 'POST', '/api/v1/admin/users', ['email' => 'toomany@example.com', 'name' => 'New'])
+            ->assertTooManyRequests()
+            ->assertHeader('Retry-After')
+            ->assertJsonStructure(['message']);
+
+        // The allowance is the administrator's own, reading and the other changes are not counted, and an hour renews it.
+        $this->flushSession();
+        adminCall($this, $other, 'POST', '/api/v1/admin/users', ['email' => 'hers@example.com', 'name' => 'New'])->assertCreated();
+        $this->flushSession();
+        adminCall($this, $admin, 'GET', '/api/v1/admin/users')->assertOk();
+        $this->travel(61)->minutes();
+        $this->flushSession();
+        adminCall($this, $admin, 'POST', '/api/v1/admin/users', ['email' => 'later@example.com', 'name' => 'New'])->assertCreated();
+
+        expect(User::query()->where('email', 'toomany@example.com')->exists())->toBeFalse()
+            ->and(User::query()->count())->toBe(2 + 2 + 1 + 1);
+    });
+
+    it('does not count what administrators do to existing accounts', function (): void {
+        config(['admin.user_creation_per_hour' => 1]);
+        $admin = adminAccount();
+        $ada = User::factory()->create();
+
+        adminCall($this, $admin, 'PATCH', "/api/v1/admin/users/{$ada->id}", ['is_admin' => true])->assertOk();
+        $this->flushSession();
+        adminCall($this, $admin, 'PATCH', "/api/v1/admin/users/{$ada->id}", ['is_admin' => false])->assertOk();
+        $this->flushSession();
+        adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$ada->id}")->assertNoContent();
+    });
+});
+
+describe('the log of what administrators do', function (): void {
+    it('has one line for each account created, promoted, demoted and deleted, with the two ids and nothing else', function (): void {
+        $admin = adminAccount();
+        $ada = null;
+
+        $lines = administrationLog(function () use ($admin, &$ada): void {
+            $created = adminCall($this, $admin, 'POST', '/api/v1/admin/users', ['email' => 'ada.lovelace@example.com', 'name' => 'Ada Lovelace'])->assertCreated();
+            $ada = $created->json('data.id');
+            $this->flushSession();
+            adminCall($this, $admin, 'PATCH', "/api/v1/admin/users/{$ada}", ['is_admin' => true])->assertOk();
+            $this->flushSession();
+            adminCall($this, $admin, 'PATCH', "/api/v1/admin/users/{$ada}", ['is_admin' => false])->assertOk();
+            $this->flushSession();
+            adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$ada}")->assertNoContent();
+        });
+
+        expect($lines)->toBe([
+            ['Administration: account created.', ['actor_id' => $admin->id, 'target_id' => $ada]],
+            ['Administration: account made an administrator.', ['actor_id' => $admin->id, 'target_id' => $ada]],
+            ['Administration: administrator rights taken away.', ['actor_id' => $admin->id, 'target_id' => $ada]],
+            ['Administration: account deleted.', ['actor_id' => $admin->id, 'target_id' => $ada]],
+        ])->and(json_encode($lines))->not->toContain('@')->not->toContain('Lovelace')->not->toContain('Istrator');
+    });
+
+    it('says nothing about a request that changes nothing or is refused', function (): void {
+        $admin = adminAccount();
+        $ada = User::factory()->create(['email' => 'ada@example.com']);
+
+        $lines = administrationLog(function () use ($admin, $ada): void {
+            // Already what is asked, an address that has an account, the administrator's own account, an invalid name.
+            adminCall($this, $admin, 'PATCH', "/api/v1/admin/users/{$ada->id}", ['is_admin' => false])->assertOk();
+            $this->flushSession();
+            adminCall($this, $admin, 'POST', '/api/v1/admin/users', ['email' => 'ada@example.com', 'name' => 'Ada'])->assertStatus(409);
+            $this->flushSession();
+            adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$admin->id}")->assertStatus(409);
+            $this->flushSession();
+            adminCall($this, $admin, 'POST', '/api/v1/admin/users', ['email' => 'grace@example.com', 'name' => "Gr\nace"])->assertUnprocessable();
+        });
+
+        expect($lines)->toBe([]);
     });
 });
 
