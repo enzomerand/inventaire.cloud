@@ -167,7 +167,7 @@ describe('the page of a template', function (): void {
         $page = templateDom($this->get('/templates/sample-home')->assertOk());
 
         expect(templateTexts($page, '//h1'))->toBe(['Inventaire du logement'])
-            ->and(templateTexts($page, '//title'))->toBe(['Inventaire du logement : modèle d\'inventaire gratuit · '.config('app.name')])
+            ->and(templateTexts($page, '//title'))->toBe(['Inventaire du logement : modèle gratuit · '.config('app.name')])
             ->and(templateTexts($page, '//p[contains(@class, "lead")]'))->toBe(['Listez vos biens pièce par pièce, avec leur valeur, leur facture et leur garantie.'])
             ->and(templateTexts($page, '//div[contains(@class, "col-lg-8")]//p[not(contains(@class, "lead"))]'))->toBe([
                 'Ce modèle sert à garder une trace de tout ce que contient votre logement, par exemple pour votre assurance habitation.',

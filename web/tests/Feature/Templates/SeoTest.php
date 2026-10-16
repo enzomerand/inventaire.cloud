@@ -325,7 +325,7 @@ describe('the structured data', function (): void {
             ->and($data[0])->toBe([
                 '@context' => 'https://schema.org',
                 '@type' => 'WebPage',
-                'name' => 'Outils : modèle d\'inventaire gratuit',
+                'name' => 'Outils : modèle gratuit',
                 'description' => 'Retrouvez chaque outil, son état et la personne à qui vous l\'avez prêté.',
                 'url' => 'http://localhost/templates/sample-tools',
                 'inLanguage' => 'fr',
