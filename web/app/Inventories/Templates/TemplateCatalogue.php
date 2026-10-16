@@ -9,6 +9,7 @@ use Collator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use JsonException;
+use Throwable;
 
 /**
  * The templates the instance offers: one JSON file each, in the folder `inventories.templates_path`
@@ -31,7 +32,8 @@ use JsonException;
  * A file that cannot be used is left out and logged as a warning, never a failure of the page that asked: it is not
  * valid JSON, it is too big, it needs a newer version of the application, or {@see TemplateValidator} found something
  * wrong with it. The other templates are not affected. The warning is written when the verdict is made, not each time it
- * is read from the cache. A folder that does not exist is an empty catalogue, logged once per process.
+ * is read from the cache. A folder that does not exist is an empty catalogue, logged once per process. A cache store that
+ * fails does not fail the page either: the files are judged in memory by each process, and a warning says so.
  */
 final class TemplateCatalogue
 {
@@ -169,10 +171,38 @@ final class TemplateCatalogue
         }
 
         /** @var array<string, array<string, mixed>> $verdict */
-        $verdict = Cache::remember($this->cacheKey($files), self::CACHE_TTL, fn (): array => $this->judge($path, $files));
+        $verdict = $this->verdictOn($path, $files);
 
         foreach ($verdict as $slug => $data) {
             $this->templates[(string) $slug] = Template::fromArray((string) $slug, $data);
+        }
+    }
+
+    /**
+     * The verdict on the files, from the cache or, when there is none, made now and kept there.
+     *
+     * A cache that cannot be reached or written to (the store is down, full or misconfigured) does not fail the page that
+     * asked: the files are judged in memory, for this process only, and a warning says why. A verdict that was made before
+     * the store failed is the one used, so the files are never judged (and logged) twice.
+     *
+     * @param  array<string, array{size: int|false, content: string|false}>  $files
+     * @return array<string, array<string, mixed>>
+     */
+    private function verdictOn(string $path, array $files): array
+    {
+        $judged = null;
+
+        try {
+            /** @var array<string, array<string, mixed>> */
+            return Cache::remember($this->cacheKey($files), self::CACHE_TTL, function () use ($path, $files, &$judged): array {
+                $judged = $this->judge($path, $files);
+
+                return $judged;
+            });
+        } catch (Throwable $exception) {
+            Log::warning('The cache of the inventory templates cannot be used: they are judged again by each process until it can.', ['exception' => $exception]);
+
+            return $judged ?? $this->judge($path, $files);
         }
     }
 

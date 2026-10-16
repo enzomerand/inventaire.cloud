@@ -115,6 +115,40 @@ describe('the verdict', function (): void {
     });
 });
 
+describe('a cache that cannot be used', function (): void {
+    it('does not fail the page: the files are judged in memory, with a warning, and the other files are logged once', function (): void {
+        templateFolderWithOneBrokenFile();
+        Cache::shouldReceive('remember')->andThrow(new RuntimeException('cache down'));
+        Cache::makePartial();
+        Log::spy();
+        $catalogue = app(TemplateCatalogue::class);
+
+        expect($catalogue->find('sample-shop'))->toBeInstanceOf(Template::class)
+            ->and($catalogue->all())->toHaveCount(1)
+            ->and($this->getJson('/api/v1/templates')->assertOk()->json('data.*.slug'))->toBe(['sample-shop']);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'cache') && ($context['exception'] ?? null) instanceof RuntimeException)->once();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'not valid JSON') && str_ends_with($context['file'] ?? '', 'broken.json'))->once();
+    });
+
+    it('does not fail the page either when the verdict was judged and only its storing failed', function (): void {
+        templateFolderWithOneBrokenFile();
+        // The files are judged inside the call, then the store refuses the entry.
+        Cache::shouldReceive('remember')->andReturnUsing(function (string $key, int $ttl, Closure $judge): never {
+            $judge();
+
+            throw new RuntimeException('cache full');
+        });
+        Cache::makePartial();
+        Log::spy();
+
+        expect(app(TemplateCatalogue::class)->find('sample-shop'))->toBeInstanceOf(Template::class);
+
+        // Judged once, not again for the fallback.
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'not valid JSON'))->once();
+    });
+});
+
 describe('the key of the cache entry', function (): void {
     it('changes with the content of a file, so that an edited template shows at once', function (): void {
         $folder = templateFolderWithOneBrokenFile();
