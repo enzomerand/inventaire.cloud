@@ -42,6 +42,7 @@ class ClientMessages extends Component
             'install.status.skipped' => __('Skipped'),
             'install.status.pending' => __('To do'),
             'install.requirement.ok' => __('Met'),
+            'install.requirement.warning' => __('Warning'),
             'install.requirement.missing' => __('Not met'),
             'install.mail.code_sent' => __('A verification code was sent. Check the inbox of the test address.'),
             'install.warning.documenso_insecure_url' => __('The Documenso address uses plain http: the API token travels unencrypted. Prefer https unless Documenso runs on this machine or a private network.'),

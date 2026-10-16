@@ -198,9 +198,23 @@ describe('installer wizard', () => {
             expect(wizard.statusClass({ status: 'pending' })).toBe('bg-yellow-lt');
             expect(wizard.requirementLabel({ ok: false })).toBe('install.requirement.missing');
             expect(wizard.requirementClass({ ok: true })).toBe('bg-green-lt');
+            expect(wizard.requirementClass({ ok: false })).toBe('bg-red-lt');
             expect(wizard.isSummaryItem(wizard.steps[1])).toBe(true);
             expect(wizard.isSummaryItem(wizard.steps[0])).toBe(false);
             expect(wizard.isSummaryItem(wizard.steps[4])).toBe(false);
+        });
+
+        it('shows a requirement that is met in a degraded way as a warning, not as met', () => {
+            const degraded = { ok: true, warning: true };
+
+            expect(wizard.requirementLabel(degraded)).toBe('install.requirement.warning');
+            expect(wizard.requirementClass(degraded)).toBe('bg-yellow-lt');
+            expect(wizard.requirementLabel({ ok: true, warning: false })).toBe('install.requirement.ok');
+            expect(wizard.requirementLabel({ ok: true })).toBe('install.requirement.ok');
+            expect(wizard.requirementClass({ ok: true, warning: false })).toBe('bg-green-lt');
+            // A requirement that is not met is not met, whatever else the server says of it.
+            expect(wizard.requirementLabel({ ok: false, warning: true })).toBe('install.requirement.missing');
+            expect(wizard.requirementClass({ ok: false, warning: true })).toBe('bg-red-lt');
         });
     });
 
