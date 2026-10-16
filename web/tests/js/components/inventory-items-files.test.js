@@ -52,7 +52,7 @@ const INVOICE = attachment('d1', 'docs', {
     has_thumbnail: false,
     thumbnail_url: null,
     size: 1048576,
-    uploaded_by: { id: 'u1', name: 'Ada' },
+    uploaded_by: { id: 1, name: 'Ada' },
 });
 const NOTES = attachment('n1', null, {
     name: 'notes.txt',

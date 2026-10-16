@@ -3355,9 +3355,9 @@ describe('the pages under the real Alpine CSP build', () => {
                 const REVISION = {
                     id: 3,
                     action: 'updated',
-                    user: { id: 'u1', name: 'Ada' },
+                    user: { id: 1, name: 'Ada' },
                     created_at: '2026-10-15T10:00:00Z',
-                    changes: [{ field: 'name', before: 'Racks', after: 'Shelf' }],
+                    changes: [{ field: { id: 'name', name: 'Name', type: 'text' }, before: 'Racks', after: 'Shelf' }],
                 };
 
                 it('reads the revisions when it is shown and lists them with what changed', async () => {
@@ -3369,7 +3369,12 @@ describe('the pages under the real Alpine CSP build', () => {
                                 action: 'attachment_added',
                                 user: null,
                                 created_at: '2026-10-15T09:00:00Z',
-                                changes: { attachment: 'a1', name: 'front.jpg', field: 'photos' },
+                                changes: [
+                                    {
+                                        attachment: { id: 'a1', name: 'front.jpg' },
+                                        field: { id: 'photos', name: 'Photos', type: 'photo' },
+                                    },
+                                ],
                             },
                         ],
                     });
@@ -3441,7 +3446,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 it('shows what a person typed as text, never as markup', async () => {
                     await openFiles({
                         revisions: [
-                            { ...REVISION, user: { id: 'u1', name: '<img src=x onerror="window.pwned = true">' } },
+                            { ...REVISION, user: { id: 1, name: '<img src=x onerror="window.pwned = true">' } },
                         ],
                     });
                     await openDialog();
@@ -3494,9 +3499,11 @@ describe('the pages under the real Alpine CSP build', () => {
                             {
                                 id: 4,
                                 action: 'created',
-                                user: { id: 'u1', name: 'Ada' },
+                                user: { id: 1, name: 'Ada' },
                                 created_at: '2026-10-15T08:00:00Z',
-                                changes: [{ field: 'name', before: null, after: 'Shelf' }],
+                                changes: [
+                                    { field: { id: 'name', name: 'Name', type: 'text' }, before: null, after: 'Shelf' },
+                                ],
                             },
                         ],
                     });

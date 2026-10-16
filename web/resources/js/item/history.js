@@ -5,8 +5,10 @@
  * first, 25 to a page (`GET .../items/{item}/revisions`); the dialog reads the first page when the history is first shown,
  * adds the next page on "Load more", and reads again from the start when the item changed since (a file added, say). Each
  * revision is a title ("Ada · Oct 15, 2026, 10:00 AM") and the lines that say what happened ("Price: 10 → 12", "File added:
- * invoice.pdf"). The values arrive presented like those of an item, so they are shown with the field types' own formatting.
- * Authors and fields that no longer exist are named as such. Everything is data for `x-text`, never markup.
+ * invoice.pdf"). The values arrive presented like those of an item (through the current definition of their field), so they
+ * are shown with the field types' own formatting. A change whose field no longer exists comes with raw stored values the
+ * server cannot present: it is told as "Deleted field", and the values are not shown. Authors that no longer exist are named
+ * as such. Everything is data for `x-text`, never markup.
  */
 import { describeValue } from '../fields/index.js';
 import { fillUrl } from '../lib/forms.js';
@@ -20,13 +22,26 @@ const TITLE_SEPARATOR = ' · ';
 /**
  * @typedef {import('../fields/types.js').Field} Field
  *
+ * @typedef {object} RevisionField The field a change is about, as the history names it.
+ * @property {string} id
+ * @property {string} name
+ * @property {string} type
+ *
+ * @typedef {object} ValueChange One value that changed (`created` and `updated`).
+ * @property {RevisionField | null} field Null when the field was deleted since: the values are then the stored ones.
+ * @property {any} before The value before (null when there was none, and for the creation of the item).
+ * @property {any} after The value after.
+ *
+ * @typedef {object} AttachmentChange The file that was added or removed (`attachment_added` and `attachment_removed`).
+ * @property {{ id: string | null, name: string | null }} attachment
+ * @property {RevisionField | null} field The file or photo field it belonged to; null for a plain attachment, or when the field was deleted since.
+ *
  * @typedef {object} Revision A revision, as the API describes it.
- * @property {number | string} id
+ * @property {number} id
  * @property {'created' | 'updated' | 'attachment_added' | 'attachment_removed' | string} action
- * @property {{ id: string, name: string } | null} user Who made the change; null once their account is gone.
+ * @property {{ id: number, name: string } | null} user Who made the change; null once their account is gone.
  * @property {string} created_at
- * @property {{ field: string | null, before: any, after: any }[] | { attachment: string, name: string, field: string | null }} changes
- *   The values that changed (null for `field` when the field no longer exists), or the file that came or went.
+ * @property {(ValueChange | AttachmentChange)[]} changes A list in both cases: the values that changed, or the one file.
  *
  * @typedef {object} RevisionRow A revision as the dialog shows it.
  * @property {string} id
@@ -35,43 +50,36 @@ const TITLE_SEPARATOR = ' · ';
  */
 
 /**
- * A stored value as a short text, whatever the field it belonged to: the field's own formatting when the field still
- * exists, else the value as it was stored.
- *
- * @param {Field | undefined} field
- * @param {any} value
- * @returns {string}
- */
-function valueText(field, value) {
-    if (field !== undefined) {
-        return cellValueText(describeValue(field, value));
-    }
-
-    if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
-        return t('inventories.item.none');
-    }
-
-    return Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value);
-}
-
-/**
  * The line that says how one value changed.
  *
- * @param {{ field: string | null, before: any, after: any }} change
+ * The field is the current definition from the inventory when it is there (it knows the choices, the currency...), else what
+ * the revision says of it. A field that was deleted since has no definition to show its values with, and the values the server
+ * gives for it are raw: only its absence is told.
+ *
+ * @param {ValueChange} change
  * @param {Field[]} fields The fields of the inventory.
  * @param {boolean} created Whether the item was created with this value (there is no "before" then).
  * @returns {string}
  */
 function changeText(change, fields, created) {
-    const field = change.field === null ? undefined : fields.find((one) => one.id === change.field);
-    const name = field?.name ?? t('history.deleted_field');
+    if (change.field === null || change.field === undefined) {
+        return t('history.deleted_field');
+    }
+
+    const described = change.field;
+    const field = fields.find((one) => one.id === described.id) ?? {
+        ...described,
+        options: {},
+        required: false,
+        position: 0,
+    };
 
     return created
-        ? t('history.value', { field: name, value: valueText(field, change.after) })
+        ? t('history.value', { field: field.name, value: cellValueText(describeValue(field, change.after)) })
         : t('history.change', {
-              field: name,
-              before: valueText(field, change.before),
-              after: valueText(field, change.after),
+              field: field.name,
+              before: cellValueText(describeValue(field, change.before)),
+              after: cellValueText(describeValue(field, change.after)),
           });
 }
 
@@ -84,7 +92,8 @@ function changeText(change, fields, created) {
  */
 export function revisionLines(revision, fields) {
     if (revision.action === 'attachment_added' || revision.action === 'attachment_removed') {
-        const name = Array.isArray(revision.changes) ? '' : (revision.changes?.name ?? '');
+        const change = /** @type {AttachmentChange | undefined} */ (revision.changes?.[0]);
+        const name = change?.attachment?.name ?? '';
 
         return [
             {
@@ -97,7 +106,7 @@ export function revisionLines(revision, fields) {
     }
 
     const created = revision.action === 'created';
-    const changes = Array.isArray(revision.changes) ? revision.changes : [];
+    const changes = /** @type {ValueChange[]} */ (Array.isArray(revision.changes) ? revision.changes : []);
     const lines = changes.map((change, index) => ({
         key: 'change-' + index,
         text: changeText(change, fields, created),

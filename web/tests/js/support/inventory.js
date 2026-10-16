@@ -125,6 +125,7 @@ export function attachment(id, fieldId = null, extra = {}) {
         height: 480,
         has_thumbnail: true,
         uploaded_at: '2026-10-15T11:30:00Z',
+        uploaded_by: null,
         url: `/api/v1/attachments/${id}`,
         thumbnail_url: `/api/v1/attachments/${id}/thumbnail`,
         ...extra,

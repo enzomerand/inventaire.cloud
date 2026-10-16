@@ -39,9 +39,9 @@ function revision(id, extra = {}) {
     return {
         id,
         action: 'updated',
-        user: { id: 'u1', name: 'Ada' },
+        user: { id: 1, name: 'Ada' },
         created_at: '2026-10-15T10:00:00Z',
-        changes: [{ field: 'name', before: 'Hammer', after: 'Claw hammer' }],
+        changes: [{ field: { id: 'name', name: 'Name', type: 'text' }, before: 'Hammer', after: 'Claw hammer' }],
         ...extra,
     };
 }
