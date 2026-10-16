@@ -92,6 +92,25 @@ abstract class AbstractFieldType implements FieldType
     }
 
     /**
+     * A text, as it was stored (a reference, an address, a color, a barcode: written as text whatever it looks like, so that a
+     * leading zero or a plus sign survives); anything else is nothing.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return is_string($stored) ? ExportValue::text($stored) : ExportValue::empty();
+    }
+
+    /**
+     * No unit, unless the type says so.
+     */
+    public function exportUnit(InventoryField $field): ?string
+    {
+        return null;
+    }
+
+    /**
      * Not searched.
      */
     public function searchText(mixed $stored, InventoryField $field): ?string

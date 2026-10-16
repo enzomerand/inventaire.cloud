@@ -55,4 +55,14 @@ final class BooleanType extends AbstractFieldType
     {
         return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
+
+    /**
+     * Yes or no. `false` is a value: only a missing one is nothing.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return is_bool($stored) ? ExportValue::boolean($stored) : ExportValue::empty();
+    }
 }

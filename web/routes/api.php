@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
 use App\Http\Controllers\Api\V1\CurrentWorkspaceController;
+use App\Http\Controllers\Api\V1\ExportController;
 use App\Http\Controllers\Api\V1\FieldTypeController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryFieldController;
@@ -90,6 +91,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::get('/inventories/{inventory}/items/{item}/attachments/{attachment}', [AttachmentController::class, 'show'])->name('inventories.items.attachments.show');
             Route::get('/inventories/{inventory}/items/{item}/attachments/{attachment}/thumbnail', [AttachmentController::class, 'thumbnail'])->name('inventories.items.attachments.thumbnail');
             Route::delete('/inventories/{inventory}/items/{item}/attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('inventories.items.attachments.destroy');
+
+            // Exports: a file of the items (a spreadsheet, a CSV, a JSON, a PDF, a zip of the photos), written by a queued job for the
+            // person who asked and nobody else: an export of another person is a 404, whatever their role.
+            Route::get('/inventories/{inventory}/exports', [ExportController::class, 'index'])->name('inventories.exports.index');
+            Route::post('/inventories/{inventory}/exports', [ExportController::class, 'store'])->middleware('throttle:exports')->name('inventories.exports.store');
+            Route::get('/inventories/{inventory}/exports/{export}', [ExportController::class, 'show'])->name('inventories.exports.show');
+            Route::get('/inventories/{inventory}/exports/{export}/download', [ExportController::class, 'download'])->name('inventories.exports.download');
+            Route::delete('/inventories/{inventory}/exports/{export}', [ExportController::class, 'destroy'])->name('inventories.exports.destroy');
         });
 
         // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a

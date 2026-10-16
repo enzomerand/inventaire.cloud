@@ -76,6 +76,72 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Exports
+    |--------------------------------------------------------------------------
+    |
+    | A member of a workspace can take the items of an inventory out as a
+    | spreadsheet, a CSV, a JSON, a PDF or a zip of the photos. A queued job
+    | writes the file, which is stored with the other private files and can be
+    | downloaded by the person who asked for it only.
+    |
+    | - `exports_per_minute`: exports one person may ask for in a minute
+    |   (`INVENTORIES_EXPORTS_PER_MINUTE`, 10), `429` beyond.
+    | - `max_active_exports`: exports one person may have at once **for one
+    |   inventory**, not expired ones, whatever their state
+    |   (`INVENTORIES_MAX_ACTIVE_EXPORTS`, 10): the API answers 409
+    |   (`export_limit_reached`) beyond, until one is deleted or expires.
+    |   Counted under the lock of the person's row.
+    | - `export_storage_per_user`: bytes the exports of one person may weigh in
+    |   all, across their inventories (`INVENTORIES_EXPORT_STORAGE_PER_USER`,
+    |   megabytes, 2048): the sum of the sizes of their exports that did not
+    |   expire, plus the one asked for. A zip counts for the sum of the files it
+    |   will hold from the moment it is asked for, the other formats once
+    |   written; a failed export weighs nothing. The API answers 409
+    |   (`export_storage_full`) beyond, until some are deleted or expire. Counted
+    |   under the lock of the person's row.
+    | - `export_ttl_hours`: hours a finished export is kept, then purged by
+    |   `inventaire:prune-exports` (`INVENTORIES_EXPORT_TTL_HOURS`, 24).
+    | - `pdf_max_items`: items a PDF may hold (`INVENTORIES_PDF_MAX_ITEMS`,
+    |   500). The library lays the whole document out in memory, and its
+    |   memory goes with the text it lays out: 500 items of 8 short values take
+    |   71 MB and 1.5 seconds, and 500 items of 8 texts cut at the limit of a
+    |   cell (120 characters) take 148 MB and 5 seconds, over the 24 MB of a
+    |   worker, with a 256 MB `memory_limit`. The limit is for an inventory of up
+    |   to 8 fields, and lower in proportion beyond (12 fields: 333 items). The
+    |   API answers 422 beyond; the job fails with `pdf_too_large` for an
+    |   inventory that has grown since, or whose HTML is over 1 MB (a table) or
+    |   4 MiB (cards): raise the limit with that in mind. The other formats are
+    |   streamed and have no limit but the quota of items of an inventory.
+    | - `export_stale_minutes`: minutes after which an export that is still
+    |   waiting (`pending`) is marked failed by `inventaire:prune-exports`
+    |   (`INVENTORIES_EXPORT_STALE_MINUTES`, 60), counted from the day it was
+    |   asked for: the queue is assumed not to be running. Its job may still be
+    |   in the queue, and exits without writing anything when it is picked up,
+    |   since the export is no longer pending. One that is running is judged on
+    |   the time since it started instead: it is given up on after the time a
+    |   job may run (15 minutes) plus 5, whenever it was asked for.
+    |
+    | The jobs that write the files go on their own queue, `exports`: the Docker
+    |   example runs a worker for it (`export-worker`, `QUEUE_WORKER_QUEUES=exports`)
+    |   next to the one of the short jobs (`default`). A single worker must listen
+    |   to both, `--queue=default,exports`, which the image's worker does without
+    |   `QUEUE_WORKER_QUEUES` and `composer dev` does.
+    |
+    */
+    'exports_per_minute' => (int) env('INVENTORIES_EXPORTS_PER_MINUTE', 10),
+
+    'max_active_exports' => (int) env('INVENTORIES_MAX_ACTIVE_EXPORTS', 10),
+
+    'export_storage_per_user' => (int) round((float) env('INVENTORIES_EXPORT_STORAGE_PER_USER', 2048) * 1048576),
+
+    'export_ttl_hours' => (int) env('INVENTORIES_EXPORT_TTL_HOURS', 24),
+
+    'pdf_max_items' => (int) env('INVENTORIES_PDF_MAX_ITEMS', 500),
+
+    'export_stale_minutes' => (int) env('INVENTORIES_EXPORT_STALE_MINUTES', 60),
+
+    /*
+    |--------------------------------------------------------------------------
     | Inventory templates
     |--------------------------------------------------------------------------
     |

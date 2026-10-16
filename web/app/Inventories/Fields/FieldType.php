@@ -28,7 +28,8 @@ use Illuminate\Validation\ValidationException;
  * And what is read back goes through {@see self::present()}, which drops what no longer makes sense (a choice that
  * was deleted from the field since the value was written). What a value adds to the text a person can search an item by
  * is told by {@see self::searchText()}. How the values are sorted and filtered when the items are listed is told by
- * {@see self::queryKind()}, and whether they are added up by {@see self::summable()}.
+ * {@see self::queryKind()}, and whether they are added up by {@see self::summable()}. How a value is written in an export
+ * file is told by {@see self::exportValue()} and the unit shown in the header of its column by {@see self::exportUnit()}.
  *
  * A type whose value is not sent but made by uploading files says so with {@see self::filledByUpload()}.
  *
@@ -125,6 +126,24 @@ interface FieldType
      * A stored value as it is given back. Returns an empty value (null or an empty list) for what must not be shown.
      */
     public function present(mixed $stored, InventoryField $field): mixed;
+
+    /**
+     * A stored value as it leaves the application in an export: its genre ({@see ExportKind}), its raw value and what a format
+     * needs to write it (the decimals, the currency, the unit). A value that is missing, or that the field no longer understands
+     * (a choice that was deleted), is {@see ExportValue::empty()}, as {@see self::present()} gives it back empty.
+     *
+     * @param  array<string, string>  $fileNames  The names of the files attached to the item, by the ULID of the attachment: the
+     *                                            value of a file or photo field is a list of those ULIDs and is exported as the
+     *                                            names of the files. The other types ignore them.
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue;
+
+    /**
+     * What follows the name of the field in the header of a spreadsheet or of a CSV, between brackets: the currency of an
+     * amount, the percent sign of a percentage, the unit of a number. Null for the types that have none, and for a number
+     * without a unit.
+     */
+    public function exportUnit(InventoryField $field): ?string;
 
     /**
      * The text a stored value adds to what a person can search its item by, or null when the type is not searched (a

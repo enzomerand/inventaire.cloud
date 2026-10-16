@@ -87,6 +87,22 @@ final class MoneyType extends DecimalType
     }
 
     /**
+     * The currency, which is the unit of the header of an amount's column ("Price (EUR)").
+     */
+    public function exportUnit(InventoryField $field): string
+    {
+        return $this->exportCurrency($field);
+    }
+
+    /**
+     * The currency of the field (the euro when the field says nothing).
+     */
+    protected function exportCurrency(InventoryField $field): string
+    {
+        return (string) $field->option('currency', self::DEFAULT_CURRENCY);
+    }
+
+    /**
      * The decimals stored with the field; ICU's for the currency only when the field has none stored.
      */
     public function decimals(InventoryField $field): int

@@ -10,11 +10,13 @@ use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Templates\TemplateCatalogue;
+use App\Jobs\GenerateExport;
 use App\Models\User;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -56,6 +58,13 @@ class AppServiceProvider extends ServiceProvider
         // someone takes effect at once.
         Gate::define('admin', fn (User $user): bool => $user->is_admin);
 
+        // `composer dev` (`artisan dev`) runs a queue listener; the framework's one only listens to `default`, and the exports are
+        // on their own queue (see GenerateExport). `default` first, as the worker of the Docker image does. Only on a
+        // development machine: `artisan dev` is not run anywhere else.
+        if ($this->app->isLocal()) {
+            DevCommands::artisan('queue:listen --tries=1 --timeout=0 --queue=default,'.GenerateExport::QUEUE, 'queue');
+        }
+
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();
         $this->registerWorkspaceLimiters();
@@ -68,7 +77,7 @@ class AppServiceProvider extends ServiceProvider
      * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the two
      * of the catalogue of templates, keyed on the user when there is one, else on the network: the one of its API endpoints
      * (`templates_per_minute`) and the one of its public pages and the sitemap (`public_pages_per_minute`), which do not
-     * share a count.
+     * share a count. And the one of the endpoint that asks for an export (`exports_per_minute`), keyed on the user.
      */
     private function registerInventoryLimiters(): void
     {
@@ -85,6 +94,10 @@ class AppServiceProvider extends ServiceProvider
         // limit is higher, and their count is not the one of the API (a crawler must not use up what a client of the API has).
         RateLimiter::for('public-pages', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.public_pages_per_minute'))
             ->by('public-pages:'.$this->signedInKey($request)));
+
+        // Asking for an export queues a job that reads a whole inventory (`exports_per_minute`), keyed on the user.
+        RateLimiter::for('exports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.exports_per_minute'))
+            ->by('exports:'.$this->signedInKey($request)));
     }
 
     /**

@@ -16,8 +16,8 @@ use Illuminate\Foundation\Application;
  */
 final class RequirementsChecker
 {
-    /** Extensions the application cannot run without. GD is the only image library it uses (thumbnails): Imagick does not stand in for it. */
-    private const EXTENSIONS = ['mbstring', 'openssl', 'tokenizer', 'xml', 'ctype', 'json', 'bcmath', 'fileinfo', 'intl', 'zip', 'curl', 'gd'];
+    /** Extensions the application cannot run without. GD is the only image library it uses (thumbnails): Imagick does not stand in for it. `dom`, `xmlreader`, `libxml` and `filter` are what the spreadsheet files of the exports (OpenSpout) and the PDF (dompdf) are written with. */
+    private const EXTENSIONS = ['mbstring', 'openssl', 'tokenizer', 'xml', 'ctype', 'json', 'bcmath', 'fileinfo', 'intl', 'zip', 'curl', 'gd', 'dom', 'xmlreader', 'libxml', 'filter'];
 
     /** @var Closure(string): bool */
     private readonly Closure $extensionLoaded;
@@ -88,7 +88,7 @@ final class RequirementsChecker
 
     /**
      * The minimum PHP version required by composer.json (`require.php`), e.g.
-     * "8.3" for "^8.3", or null when it cannot be read.
+     * "8.4" for "^8.4", or null when it cannot be read.
      */
     public function minimumPhpVersion(): ?string
     {

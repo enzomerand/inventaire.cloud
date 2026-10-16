@@ -85,6 +85,28 @@ final class FieldTypes
     }
 
     /**
+     * The ids of the photo fields among these fields: the ones that take images only. A field whose type this version does not know
+     * is left out.
+     *
+     * @param  iterable<InventoryField>  $fields
+     * @return list<int>
+     */
+    public function photoFieldIds(iterable $fields): array
+    {
+        $ids = [];
+
+        foreach ($fields as $field) {
+            $type = $this->of($field);
+
+            if ($type instanceof UploadedFilesType && $type->imagesOnly()) {
+                $ids[] = (int) $field->getKey();
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
      * The keys of every type, in the order they are offered.
      *
      * @return list<string>

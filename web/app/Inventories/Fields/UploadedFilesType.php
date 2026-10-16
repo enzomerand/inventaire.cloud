@@ -110,4 +110,22 @@ abstract class UploadedFilesType extends AbstractFieldType
 
         return array_values(array_filter($stored, fn (mixed $ulid): bool => is_string($ulid) && preg_match('/^[0-9a-z]{26}$/', $ulid) === 1));
     }
+
+    /**
+     * The names of the files, in the order they were attached, joined by a comma; a file that is gone is left out.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        $names = [];
+
+        foreach (is_array($stored) ? $stored : [] as $ulid) {
+            if (is_string($ulid) && isset($fileNames[$ulid])) {
+                $names[] = $fileNames[$ulid];
+            }
+        }
+
+        return ExportValue::text(implode(', ', $names));
+    }
 }

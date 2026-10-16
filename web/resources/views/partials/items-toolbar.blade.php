@@ -1,7 +1,7 @@
 {{--
     What narrows, orders and lays out the items of an inventory: the search box, the filters button (with how many filters
-    are in force), the choice between the table and the gallery, the sort, the filters as removable chips, and how many
-    items match.
+    are in force), the choice between the table and the gallery, the button that opens the export dialog (partials/export-dialog,
+    for every role: reading the items is all it takes), the sort, the filters as removable chips, and how many items match.
 
     Included in the items card of the page of an inventory (app/inventory.blade.php), so it reads the inventoryItems
     component (resources/js/components/inventory-items.js, with resources/js/grid/criteria.js). The sort select and its
@@ -51,6 +51,12 @@
                     <x-tabler-layout-grid aria-hidden="true" />
                 </button>
             </div>
+        </div>
+        <div class="col-auto">
+            <button type="button" class="btn" aria-haspopup="dialog" @click="openExport">
+                <x-tabler-file-export aria-hidden="true" />
+                {{ __('Export') }}
+            </button>
         </div>
         <div class="col-12 col-sm-auto" :class="sortBarClass">
             <div class="input-group">

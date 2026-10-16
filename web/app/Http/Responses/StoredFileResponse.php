@@ -7,6 +7,7 @@ namespace App\Http\Responses;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Attachments\FileNames;
 use App\Models\Attachment;
+use App\Models\Export;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +33,8 @@ use Throwable;
  *   revalidated each time (`no-cache`) with an `ETag` made of its ULID, which is enough since a stored file never changes:
  *   a reader who loses access (removed from the workspace, file deleted) is not served from their cache for an hour, and one
  *   who still has it costs a 304. The thumbnail, a small image shown by the dozen, is kept for an hour.
+ *
+ * The file of an export gets the same treatment ({@see self::export()}), with a name of its own and no cache at all.
  *
  * The file is streamed from the disk: it is never read into memory whole. A file that is not on its disk is a 404; a disk that
  * is no longer configured is a 404 too; a disk that cannot be read right now (the bucket is down) is a 503, written in the log.
@@ -73,7 +76,7 @@ final class StoredFileResponse
             'Content-Length' => (string) $attachment->size,
         ];
 
-        return self::stream($attachment, $attachment->path, $storage, $headers);
+        return self::stream($attachment->disk, $attachment->path, $storage, $headers);
     }
 
     /**
@@ -85,7 +88,7 @@ final class StoredFileResponse
             return ApiError::notFound(__('This file has no thumbnail.'), 'thumbnail_not_found');
         }
 
-        return self::stream($attachment, $attachment->thumbnail_path, $storage, [
+        return self::stream($attachment->disk, $attachment->thumbnail_path, $storage, [
             'Content-Type' => 'image/jpeg',
             'Content-Disposition' => 'inline; filename=thumbnail.jpg',
             'X-Content-Type-Options' => 'nosniff',
@@ -95,20 +98,39 @@ final class StoredFileResponse
     }
 
     /**
-     * Streams a path of the disk of the attachment with the headers given.
+     * The file of an export, always a download: the name it was given, `nosniff`, a sandbox for whatever it renders, and never
+     * kept by a cache (it is the reader's own data, and it goes away within the day). The caller has checked that the export is
+     * the reader's, is completed and has not expired.
+     */
+    public static function export(Export $export, AttachmentStorage $storage): StreamedResponse|JsonResponse
+    {
+        $name = $export->file_name ?? 'export';
+
+        return self::stream($export->disk, (string) $export->path, $storage, [
+            'Content-Type' => $export->mime ?? 'application/octet-stream',
+            'Content-Disposition' => HeaderUtils::makeDisposition('attachment', $name, FileNames::asciiFallback($name)),
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => self::SANDBOX,
+            'Cache-Control' => 'private, no-store',
+            'Content-Length' => (string) $export->size,
+        ]);
+    }
+
+    /**
+     * Streams a path of a disk, by the name of the disk, with the headers given.
      *
      * @param  array<string, string>  $headers
      */
-    private static function stream(Attachment $attachment, string $path, AttachmentStorage $storage, array $headers): StreamedResponse|JsonResponse
+    private static function stream(string $diskName, string $path, AttachmentStorage $storage, array $headers): StreamedResponse|JsonResponse
     {
         try {
-            $disk = $storage->disk($attachment->disk);
+            $disk = $storage->disk($diskName);
         } catch (InvalidArgumentException $exception) {
-            Log::warning('A stored file is on a disk that is not configured any more.', ['disk' => $attachment->disk, 'path' => $path, 'exception' => $exception]);
+            Log::warning('A stored file is on a disk that is not configured any more.', ['disk' => $diskName, 'path' => $path, 'exception' => $exception]);
 
             return self::gone();
         } catch (Throwable $exception) {
-            return self::unavailable($attachment->disk, $path, $exception);
+            return self::unavailable($diskName, $path, $exception);
         }
 
         $failure = null;
@@ -121,7 +143,7 @@ final class StoredFileResponse
         }
 
         if (! is_resource($stream)) {
-            return self::unreadable($disk, $attachment->disk, $path, $failure);
+            return self::unreadable($disk, $diskName, $path, $failure);
         }
 
         return new StreamedResponse(function () use ($stream): void {

@@ -167,7 +167,7 @@ function render(path) {
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
         // table of the items are parts of the page of an inventory, and so are the parts of the dialog of an item.
         .replace(
-            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
+            /@include\('partials\.(field-value|items-toolbar|items-filters|export-dialog|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
             (_match, name) => render(`partials/${name}.blade.php`),
         )
         // The tabs of the administration are not under test.
@@ -3505,6 +3505,320 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(buttons('Save', itemDialog())).toHaveLength(0);
                 expect(buttons('Delete', itemDialog())).toHaveLength(0);
                 expect(buttons('Close', itemDialog().querySelector('.modal-footer'))).toHaveLength(1);
+            });
+        });
+
+        describe('exporting the items', () => {
+            const EXPORTS = '/api/v1/inventories/tools/exports';
+            const exportDialog = () => document.querySelector('#export-modal-title').closest('.modal');
+            const radios = (name) => [...exportDialog().querySelectorAll(`input[name="export-${name}"]`)];
+            const radio = (name, value) => radios(name).find((one) => one.value === value);
+            const separator = () => exportDialog().querySelector('#export-delimiter');
+            const startButton = () => buttons('Start the export', exportDialog())[0];
+            const footerAlert = () => exportDialog().querySelector('.modal-footer [role="alert"]');
+            const rowsOf = () => [...exportDialog().querySelectorAll('.list-group-item')];
+            const searchBox = () => document.querySelector('input[type="search"]');
+
+            /** An export as the API describes it: finished unless the test says otherwise. */
+            function record(id, extra = {}) {
+                return {
+                    id,
+                    format: 'xlsx',
+                    scope: 'all',
+                    status: 'completed',
+                    error: null,
+                    file_name: `tools-${id}.xlsx`,
+                    size: 2048,
+                    items_count: 2,
+                    created_at: '2026-10-15T10:00:00Z',
+                    completed_at: '2026-10-15T10:00:05Z',
+                    expires_at: '2026-10-16T10:00:00Z',
+                    download_url: `${EXPORTS}/${id}/download`,
+                    ...extra,
+                };
+            }
+
+            /** Opens the page, then the export dialog, which finds the given exports. */
+            async function openDialog(list = []) {
+                await open();
+
+                const readItems = http.get.getMockImplementation();
+
+                http.get.mockImplementation(async (url, options) =>
+                    url === EXPORTS ? { data: list } : readItems(url, options),
+                );
+                await press('Export');
+            }
+
+            it('is offered by a button of the toolbar to every role, even a viewer', async () => {
+                PAGE.abilities = { update: false, delete: false, manage_fields: false, edit_items: false };
+                await open();
+
+                const button = buttons('Export');
+
+                expect(button).toHaveLength(1);
+                expect(button[0].closest('.row')).not.toBeNull();
+                expect(button[0].getAttribute('aria-haspopup')).toBe('dialog');
+                expect(button[0].querySelector('svg')).not.toBeNull();
+            });
+
+            it('opens a dialog that reads the exports, with the cursor on the format that is chosen', async () => {
+                await openDialog([record('e1')]);
+
+                expect(showModal).toHaveBeenCalledWith(exportDialog(), {
+                    focus: ['input[name="export-format"]:checked'],
+                });
+                expect(http.get).toHaveBeenCalledWith(EXPORTS, expect.objectContaining({ silent: false }));
+                expect(exportDialog().getAttribute('aria-labelledby')).toBe('export-modal-title');
+                expect(document.querySelector('#export-modal-title').textContent).toBe('Export the items');
+            });
+
+            it('offers the six formats as radio cards that say what each is good for, Excel chosen', async () => {
+                await openDialog();
+
+                expect(radios('format').map((one) => one.value)).toEqual(['xlsx', 'ods', 'csv', 'json', 'pdf', 'zip']);
+                expect(radios('format').map((one) => one.checked)).toEqual([true, false, false, false, false, false]);
+
+                const cards = [...exportDialog().querySelectorAll('.form-selectgroup-item')];
+
+                expect(cards.map((card) => card.querySelector('strong').textContent)).toEqual([
+                    'Excel (.xlsx)',
+                    'OpenDocument (.ods)',
+                    'CSV',
+                    'JSON',
+                    'PDF',
+                    'Files (.zip)',
+                ]);
+                expect(cards[2].textContent).toContain('Plain text that any spreadsheet or program can read.');
+                // A card is one label around its radio: a click anywhere on it chooses the format.
+                expect(cards.every((card) => card.tagName === 'LABEL' && card.querySelector('input') !== null)).toBe(
+                    true,
+                );
+                expect(exportDialog().querySelector('fieldset legend').textContent).toBe('Format');
+            });
+
+            it('shows the separator of a CSV file, and the files of a ZIP, only for those formats', async () => {
+                await openDialog();
+
+                expect(visible(separator())).toBe(false);
+                expect(visible(radio('files', 'photos'))).toBe(false);
+
+                await tick(radio('format', 'csv'), true);
+
+                expect(visible(separator())).toBe(true);
+                expect(visible(radio('files', 'photos'))).toBe(false);
+                expect(exportDialog().querySelector('label[for="export-delimiter"]').textContent).toBe('CSV separator');
+                expect([...separator().options].map((one) => one.value)).toEqual(['semicolon', 'comma', 'tab']);
+                // The separator also decides the decimal sign: each choice says which one it comes with.
+                expect([...separator().options].map((one) => one.textContent)).toEqual([
+                    'Semicolon (Excel in French, decimals with a comma)',
+                    'Comma (decimals with a point)',
+                    'Tab (decimals with a point)',
+                ]);
+
+                await tick(radio('format', 'zip'), true);
+
+                expect(visible(separator())).toBe(false);
+                expect(visible(radio('files', 'photos'))).toBe(true);
+                expect(radio('files', 'photos').checked).toBe(true);
+                expect(radios('files').map((one) => one.labels[0].textContent.trim())).toEqual([
+                    'The photos of the photo fields',
+                    'All the attachments, photos and other files',
+                ]);
+            });
+
+            it('does not offer the current view while nothing narrows or orders the list, and offers it afterwards', async () => {
+                await openDialog();
+
+                expect(radio('scope', 'all').checked).toBe(true);
+                expect(radio('scope', 'view').disabled).toBe(true);
+                expect(radio('scope', 'view').getAttribute('aria-describedby')).toBe('export-scope-view-hint');
+                expect(exportDialog().querySelector('#export-scope-view-hint').textContent).toBe(
+                    'Search, filter or sort the items first to export only that view.',
+                );
+                expect(exportDialog().querySelector('label[for="export-scope-view"]').textContent).toBe('Current view');
+
+                // Narrow the list down, with the dialog closed (the page cannot be reached behind it).
+                await type(searchBox(), 'ham');
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                await flush();
+                await press('Export');
+
+                expect(radio('scope', 'view').disabled).toBe(false);
+                expect(exportDialog().querySelector('#export-scope-view-hint').textContent).toMatch(
+                    / items?, as the list/,
+                );
+            });
+
+            it('asks for an export of the options chosen, and shows it at once, waiting', async () => {
+                http.post.mockResolvedValue({
+                    data: record('new', {
+                        format: 'csv',
+                        status: 'pending',
+                        file_name: null,
+                        size: null,
+                        items_count: null,
+                        completed_at: null,
+                        expires_at: null,
+                        download_url: null,
+                    }),
+                });
+                await openDialog();
+                await tick(radio('format', 'csv'), true);
+                await choose(separator(), 'tab');
+
+                await submit(exportDialog().querySelector('form'));
+
+                expect(http.post).toHaveBeenCalledWith(EXPORTS, { format: 'csv', scope: 'all', delimiter: 'tab' });
+                expect(rowsOf()).toHaveLength(1);
+                expect(rowsOf()[0].querySelector('.fw-medium').textContent).toBe('CSV');
+                expect(rowsOf()[0].querySelector('.badge').textContent).toBe('Waiting');
+                expect(visible(rowsOf()[0].querySelector('a'))).toBe(false);
+                expect(exportDialog().querySelector('[aria-live="polite"]').textContent).toBe(
+                    'Export started. It will be ready in a moment.',
+                );
+                expect(visible(footerAlert())).toBe(false);
+            });
+
+            it('asks for the current view as the parameters of the list', async () => {
+                http.post.mockResolvedValue({ data: record('new') });
+                await open();
+                await type(searchBox(), 'ham');
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                await flush();
+                await press('Export');
+                await tick(radio('scope', 'view'), true);
+
+                await submit(exportDialog().querySelector('form'));
+
+                expect(http.post).toHaveBeenCalledWith(EXPORTS, {
+                    format: 'xlsx',
+                    scope: 'view',
+                    query: { q: 'ham' },
+                });
+            });
+
+            it('lists the exports: the file of the ones that are ready is a plain link, the others have none', async () => {
+                await openDialog([
+                    record('e1'),
+                    record('e2', {
+                        format: 'pdf',
+                        scope: 'view',
+                        status: 'running',
+                        file_name: null,
+                        size: null,
+                        items_count: null,
+                        download_url: null,
+                    }),
+                    record('e3', { status: 'failed', error: 'The export could not be made.', download_url: null }),
+                ]);
+
+                expect(rowsOf().map((row) => row.querySelector('.badge').textContent)).toEqual([
+                    'Ready',
+                    'In progress',
+                    'Failed',
+                ]);
+                expect(rowsOf()[0].querySelector('.text-secondary').textContent).toContain('All items');
+                expect(rowsOf()[1].querySelector('.text-secondary').textContent).toContain('Current view');
+                expect(visible(rowsOf()[2].querySelector('.text-danger'))).toBe(true);
+                expect(rowsOf()[2].querySelector('.text-danger').textContent).toBe('The export could not be made.');
+
+                const [ready, running, failed] = rowsOf().map((row) => row.querySelector('a'));
+
+                expect(visible(ready)).toBe(true);
+                expect(ready.getAttribute('href')).toBe(`${EXPORTS}/e1/download`);
+                expect(ready.hasAttribute('download')).toBe(true);
+                expect(ready.getAttribute('aria-label')).toBe('Download tools-e1.xlsx');
+                // The API recognises the web front by its Referer: the link must not hide it.
+                expect(ready.hasAttribute('rel')).toBe(false);
+                expect(ready.textContent.trim()).toBe('Download');
+                expect(visible(running)).toBe(false);
+                expect(visible(failed)).toBe(false);
+            });
+
+            it('deletes an export from its row', async () => {
+                http.delete.mockResolvedValue(null);
+                await openDialog([record('e1'), record('e2')]);
+
+                const remove = rowsOf()[0].querySelector('button[data-export-delete]');
+
+                expect(remove.textContent.trim()).toBe('Delete');
+                expect(remove.getAttribute('aria-label')).toMatch(/^Delete the Excel \(\.xlsx\) export of /);
+
+                remove.click();
+                await flush();
+
+                expect(http.delete).toHaveBeenCalledWith(`${EXPORTS}/e1`);
+                expect(rowsOf()).toHaveLength(1);
+                expect(rowsOf()[0].querySelector('a').getAttribute('href')).toBe(`${EXPORTS}/e2/download`);
+                expect(exportDialog().querySelector('[aria-live="polite"]').textContent).toBe('Export deleted.');
+            });
+
+            it('says when there is no export yet, and when the list cannot be read', async () => {
+                const empty = () =>
+                    [...exportDialog().querySelectorAll('p')].find((one) =>
+                        one.textContent.startsWith('No export yet.'),
+                    );
+                const unread = () => exportDialog().querySelector('.alert-warning');
+
+                await openDialog([]);
+
+                expect(visible(exportDialog().querySelector('.list-group'))).toBe(false);
+                expect(visible(empty())).toBe(true);
+                expect(visible(unread())).toBe(false);
+
+                const base = http.get.getMockImplementation();
+
+                http.get.mockImplementation(async (url, options) => {
+                    if (url === EXPORTS) {
+                        throw new HttpError(500, 'Down.');
+                    }
+
+                    return base(url, options);
+                });
+                await press('Export');
+
+                expect(visible(unread())).toBe(true);
+                expect(unread().textContent).toContain('The exports could not be loaded.');
+                expect(visible(empty())).toBe(false);
+
+                http.get.mockImplementation(async (url, options) =>
+                    url === EXPORTS ? { data: [record('e1')] } : base(url, options),
+                );
+                await press('Try again', exportDialog());
+
+                expect(rowsOf()).toHaveLength(1);
+                expect(visible(unread())).toBe(false);
+                expect(visible(empty())).toBe(false);
+            });
+
+            it('says why an export was refused, under the buttons, where it stays in view', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(409, 'Something went wrong.', { code: 'export_limit_reached' }),
+                );
+                await openDialog();
+
+                expect(footerAlert()).not.toBeNull();
+                expect(visible(footerAlert())).toBe(false);
+
+                await submit(exportDialog().querySelector('form'));
+
+                expect(visible(footerAlert())).toBe(true);
+                expect(footerAlert().textContent).toBe(
+                    'You already have too many exports of this inventory. Delete some, then try again.',
+                );
+                expect(startButton().disabled).toBe(false);
+            });
+
+            it('keeps a polite live region and a way to close the dialog', async () => {
+                await openDialog();
+
+                const status = exportDialog().querySelector('[role="status"]');
+
+                expect(status.getAttribute('aria-live')).toBe('polite');
+                expect(buttons('Close', exportDialog().querySelector('.modal-footer'))).toHaveLength(1);
+                expect(buttons('Close', exportDialog().querySelector('.modal-header'))).toHaveLength(1);
+                expect(startButton().type).toBe('submit');
             });
         });
 

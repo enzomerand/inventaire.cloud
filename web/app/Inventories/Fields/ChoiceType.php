@@ -172,6 +172,20 @@ abstract class ChoiceType extends AbstractFieldType
      */
     protected function labelsText(array $ids, InventoryField $field): ?string
     {
+        $found = $this->choiceLabels($ids, $field);
+
+        return $found === [] ? null : implode(' ', $found);
+    }
+
+    /**
+     * The labels of the choices with these ids, in the order the ids are given. An id the field no longer has, or that is not a
+     * text, is left out.
+     *
+     * @param  array<array-key, mixed>  $ids
+     * @return list<string>
+     */
+    protected function choiceLabels(array $ids, InventoryField $field): array
+    {
         $labels = array_column(self::choicesOf($field->options), 'label', 'id');
         $found = [];
 
@@ -181,7 +195,7 @@ abstract class ChoiceType extends AbstractFieldType
             }
         }
 
-        return $found === [] ? null : implode(' ', $found);
+        return $found;
     }
 
     /**

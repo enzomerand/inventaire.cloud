@@ -6,12 +6,18 @@
     "keywords": ["laravel", "inventory"],
     "license": "AGPL-3.0-only",
     "require": {
-        "php": "^8.3",
+        "php": "^8.4",
+        "ext-dom": "*",
+        "ext-gd": "*",
         "ext-intl": "*",
+        "ext-xmlreader": "*",
+        "ext-zip": "*",
+        "dompdf/dompdf": "^3.1",
         "laravel/framework": "^13.17",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
         "league/flysystem-aws-s3-v3": "^3.0",
+        "openspout/openspout": "^5.12",
         "secondnetwork/blade-tabler-icons": "^3.49"
     },
     "require-dev": {

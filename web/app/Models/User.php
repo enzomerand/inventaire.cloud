@@ -8,6 +8,8 @@ use App\Auth\AccountDeletion;
 use App\Auth\EmailAddress;
 use App\Auth\Exceptions\AccountDeletionRefused;
 use App\Database\DeadlockRetries;
+use App\Inventories\Attachments\AttachmentCleanup;
+use App\Inventories\Exports\ExportCleanup;
 use App\Workspaces\Workspaces;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
@@ -90,7 +92,9 @@ class User extends Authenticatable implements HasLocalePreference
      * Gives every new account a "remember me" token, so that the fingerprint of its sessions
      * ({@see self::getAuthPassword()}) exists from the start, whatever creates the account.
      *
-     * Also hands the deletion of an account over to {@see AccountDeletion}, whoever deletes it (see {@see self::delete()}).
+     * Also hands the deletion of an account over to {@see AccountDeletion}, whoever deletes it (see {@see self::delete()}), and has
+     * the files of the exports the account asked for purged once the deletion is committed ({@see ExportCleanup}, then
+     * {@see AttachmentCleanup::purgeCollected()}: the database deletes their rows, and nothing else would remove their files).
      */
     protected static function booted(): void
     {
@@ -102,6 +106,11 @@ class User extends Authenticatable implements HasLocalePreference
 
         static::deleting(function (self $user): void {
             app(AccountDeletion::class)->release($user);
+            app(ExportCleanup::class)->collectForUser($user);
+        });
+
+        static::deleted(function (self $user): void {
+            app(AttachmentCleanup::class)->purgeCollected($user);
         });
     }
 

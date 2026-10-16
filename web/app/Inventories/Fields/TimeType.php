@@ -49,4 +49,14 @@ final class TimeType extends AbstractFieldType
             }
         }];
     }
+
+    /**
+     * The time, as it was stored (`HH:MM`).
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return is_string($stored) && preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]$/D', $stored) === 1 ? ExportValue::time($stored) : ExportValue::empty();
+    }
 }

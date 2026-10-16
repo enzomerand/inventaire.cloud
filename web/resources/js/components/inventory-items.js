@@ -30,6 +30,9 @@
  * uploads) `../item/files.js`, the history `../item/history.js`. Files never travel with the values of an item: each goes
  * up on its own request, and the files chosen while an item is added go up right after the form was saved.
  *
+ * The toolbar's "Export" button opens a second dialog, `../export/dialog.js`: it exports the items, or the view the grid
+ * holds (its `query`), in a format the person picks, and lists the exports they asked for lately.
+ *
  * The dialog cannot be closed by hand (Escape, a click outside, a button) while a request that holds it is on its way: it
  * closes itself when the request is done. A request belongs to the dialog that was open when it began (`dialogToken`): an
  * answer that finds another dialog in its place leaves it alone.
@@ -54,6 +57,7 @@ import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
 import { compose } from '../lib/compose.js';
+import exportDialog from '../export/dialog.js';
 import gridCriteria from '../grid/criteria.js';
 import gridInline from '../grid/inline.js';
 import gridView from '../grid/gallery.js';
@@ -95,7 +99,7 @@ function summedIds(fields) {
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), {
+    return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), exportDialog(), {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -391,6 +395,7 @@ export default function inventoryItems() {
          */
         destroy() {
             this.stopSearchTimer();
+            this.stopExportPolling();
         },
 
         /**

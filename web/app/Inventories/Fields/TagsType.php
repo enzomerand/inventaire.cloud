@@ -125,4 +125,14 @@ final class TagsType extends AbstractFieldType
 
         return $tags === [] ? null : implode(' ', $tags);
     }
+
+    /**
+     * The tags joined by a comma.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return ExportValue::text(is_array($stored) ? implode(', ', array_filter($stored, is_string(...))) : '');
+    }
 }

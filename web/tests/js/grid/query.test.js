@@ -5,6 +5,7 @@ import {
     emptyQuery,
     fromSearch,
     hasCriteria,
+    toBody,
     toParams,
     toSearch,
     totalsKeyOf,
@@ -77,6 +78,67 @@ describe('the query of the list of items', () => {
         it('leaves out the direction when it is ascending (what the API does without one) or when nothing is sorted', () => {
             expect(toParams({ ...emptyQuery(), sort: 'price', direction: 'asc' })).toEqual({ sort: 'price' });
             expect(toParams({ ...emptyQuery(), direction: 'desc' })).toEqual({});
+        });
+    });
+
+    describe('as the body of a request', () => {
+        /** Writes a nested body back the way a query string writes it: `filter[<field>][in][0]`. */
+        function flatten(value, prefix = '') {
+            return Object.entries(value).flatMap(([key, one]) => {
+                const name = prefix === '' ? key : `${prefix}[${key}]`;
+
+                return typeof one === 'object' ? flatten(one, name) : [[name, one]];
+            });
+        }
+
+        it('is empty for the default view', () => {
+            expect(toBody(emptyQuery())).toEqual({});
+        });
+
+        it('nests the filters by field and by condition, and the choices of a filter as a list', () => {
+            expect(toBody(fullQuery())).toEqual({
+                q: 'claw hammer',
+                sort: 'price',
+                direction: 'desc',
+                filter: {
+                    [PRICE]: { min: '10', max: '50.50' },
+                    [STATE]: { in: ['aaaaaaaa', 'bbbbbbbb'] },
+                    [FRAGILE]: { is: 'false' },
+                    [PHOTO]: { empty: 'true' },
+                    [NOTES]: { empty: 'false' },
+                    [SEEN]: { min: '2026-10-15T08:00:00Z' },
+                },
+            });
+            expect(Array.isArray(toBody(fullQuery()).filter[STATE].in)).toBe(true);
+        });
+
+        it('says the very same thing as the parameters of the list, without the page', () => {
+            for (const query of [
+                emptyQuery(),
+                fullQuery(),
+                { ...emptyQuery(), q: 'saw' },
+                { ...emptyQuery(), sort: 'x' },
+            ]) {
+                expect(Object.fromEntries(flatten(toBody(query)))).toEqual(toParams(query));
+            }
+        });
+
+        it('leaves out a filter that holds no condition, as the parameters do', () => {
+            const query = { ...emptyQuery(), filters: { [STATE]: { in: [] }, [PRICE]: { min: '1' } } };
+
+            expect(toBody(query)).toEqual({ filter: { [PRICE]: { min: '1' } } });
+        });
+
+        it('never builds a key that means something to an object', () => {
+            const query = { ...emptyQuery(), filters: { __proto__x: { min: '1' } } };
+
+            Object.defineProperty(query.filters, '__proto__', { value: { min: '2' }, enumerable: true });
+
+            const body = toBody(query);
+
+            expect(Object.keys(body.filter)).toEqual(['__proto__x']);
+            expect(Object.getPrototypeOf(body.filter)).toBe(Object.prototype);
+            expect({}.min).toBeUndefined();
         });
     });
 

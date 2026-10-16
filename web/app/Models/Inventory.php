@@ -100,6 +100,17 @@ final class Inventory extends Model
     }
 
     /**
+     * The exports asked for from the inventory, whoever asked. The route key of an export is its ULID, and an export is bound
+     * through this relation (`/inventories/{inventory}/exports/{export}`), so an export of another inventory is a 404.
+     *
+     * @return HasMany<Export, $this>
+     */
+    public function exports(): HasMany
+    {
+        return $this->hasMany(Export::class);
+    }
+
+    /**
      * The items of the inventory. Unordered: the caller says whether it wants the newest first or something else.
      *
      * @return HasMany<Item, $this>

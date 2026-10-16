@@ -61,4 +61,14 @@ final class SelectType extends ChoiceType
     {
         return is_string($stored) ? $this->labelsText([$stored], $field) : null;
     }
+
+    /**
+     * The label of the choice (the value holds its id); a choice the field no longer has is nothing.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return ExportValue::text(implode(', ', is_string($stored) ? $this->choiceLabels([$stored], $field) : []));
+    }
 }

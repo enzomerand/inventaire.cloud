@@ -56,10 +56,10 @@ it('takes the PHP version from composer.json', function (): void {
 });
 
 it('fails when PHP is too old', function (): void {
-    $php = requirement(checker($this, phpVersion: '8.2.30')->check(), 'php');
+    $php = requirement(checker($this, phpVersion: '8.3.30')->check(), 'php');
 
-    expect($php->ok)->toBeFalse()->and($php->detail)->toContain('8.2.30');
-    expect(requirement(checker($this, phpVersion: '8.3.0')->check(), 'php')->ok)->toBeTrue();
+    expect($php->ok)->toBeFalse()->and($php->detail)->toContain('8.3.30');
+    expect(requirement(checker($this, phpVersion: '8.4.0')->check(), 'php')->ok)->toBeTrue();
 });
 
 it('lists the extension that is missing', function (): void {
@@ -70,6 +70,15 @@ it('lists the extension that is missing', function (): void {
         ->and(requirement($requirements, 'ext-mbstring')->ok)->toBeTrue()
         ->and(RequirementsChecker::passed($requirements))->toBeFalse();
 });
+
+it('requires what the exports are written with: the XML extensions of the spreadsheet files and of the PDF', function (string $extension): void {
+    $requirements = checker($this, [$extension])->check();
+
+    expect(requirement($requirements, 'ext-'.$extension)->ok)->toBeFalse()
+        ->and(requirement($requirements, 'ext-'.$extension)->detail)->toContain($extension)
+        ->and(RequirementsChecker::passed($requirements))->toBeFalse()
+        ->and(requirement(checker($this)->check(), 'ext-'.$extension)->ok)->toBeTrue();
+})->with(['dom', 'xmlreader', 'libxml', 'filter']);
 
 it('accepts either database driver but needs one', function (): void {
     expect(requirement(checker($this, ['pdo_pgsql'])->check(), 'database-driver')->ok)->toBeTrue()
