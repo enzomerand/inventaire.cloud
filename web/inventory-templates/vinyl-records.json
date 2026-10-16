@@ -1,0 +1,220 @@
+{
+  "category": "collection",
+  "icon": "vinyl",
+  "name": { "fr": "Collection de vinyles", "en": "Vinyl record collection" },
+  "summary": {
+    "fr": "Cataloguez vos vinyles : artiste, album, année, label, format, état du disque et de la pochette, prix, valeur estimée et photos de la pochette.",
+    "en": "Catalog your vinyl records: artist, album, year, label, format, record and sleeve condition, price, estimated value and cover photos."
+  },
+  "description": {
+    "fr": [
+      "Ce modèle s'adresse aux collectionneurs de disques, des premiers pressages aux rééditions récentes. Chaque fiche décrit l'album (artiste, année, label, numéro de catalogue, format, genre), l'état du disque et de la pochette selon la grille de cotation courante (M, NM, VG+, VG, G), ainsi que le prix payé et la valeur estimée.",
+      "Photographiez la pochette, face et dos, et notez dans « Pressage et remarques » ce qui distingue votre exemplaire : pays de pressage, vinyle de couleur, inscriptions gravées près de l'étiquette centrale. Le code-barres, quand il existe, aide à identifier la bonne édition.",
+      "Astuces : filtrez par genre ou par label pour explorer votre collection, triez la colonne « Valeur estimée » pour repérer vos pièces les plus précieuses, et affichez les totaux des colonnes « Prix d'achat » et « Valeur estimée » pour suivre la valeur de l'ensemble. La vue galerie montre la première photo de chaque fiche, comme dans un bac de disquaire."
+    ],
+    "en": [
+      "This template is for record collectors, from first pressings to recent reissues. Each card describes the album (artist, year, label, catalog number, format, genre), the condition of the record and of the sleeve using the common grading scale (M, NM, VG+, VG, G), as well as the price paid and the estimated value.",
+      "Photograph the cover, front and back, and note in \"Pressing notes\" what sets your copy apart: country of pressing, colored vinyl, hand-etched markings near the center label. The barcode, when there is one, helps you identify the right edition.",
+      "Tips: filter by genre or label to explore your collection, sort the \"Estimated value\" column to spot your most valuable pieces, and show the totals of the \"Purchase price\" and \"Estimated value\" columns to follow the value of the whole collection. The gallery view shows the first photo of each item, like a record store crate."
+    ]
+  },
+  "fields": [
+    { "key": "name", "type": "text", "name": { "fr": "Album", "en": "Album" }, "required": true },
+    { "key": "artist", "type": "text", "name": { "fr": "Artiste", "en": "Artist" } },
+    {
+      "key": "year",
+      "type": "number",
+      "name": { "fr": "Année", "en": "Year" },
+      "options": { "decimals": 0, "min": "1900", "max": "2100" }
+    },
+    { "key": "label", "type": "text", "name": { "fr": "Label", "en": "Label" } },
+    { "key": "catalogue", "type": "text", "name": { "fr": "Numéro de catalogue", "en": "Catalog number" } },
+    {
+      "key": "format",
+      "type": "select",
+      "name": { "fr": "Format", "en": "Format" },
+      "options": {
+        "choices": [
+          { "key": "lp", "label": { "fr": "33 tours (30 cm)", "en": "12-inch LP" }, "color": "blue" },
+          { "key": "single", "label": { "fr": "45 tours (17 cm)", "en": "7-inch single" }, "color": "orange" },
+          {
+            "key": "maxi",
+            "label": { "fr": "Maxi 45 tours (30 cm)", "en": "12-inch single" },
+            "color": "purple"
+          },
+          { "key": "box", "label": { "fr": "Coffret", "en": "Box set" }, "color": "indigo" },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    {
+      "key": "genre",
+      "type": "select",
+      "name": { "fr": "Genre", "en": "Genre" },
+      "options": {
+        "choices": [
+          { "key": "rock_pop", "label": { "fr": "Rock et pop", "en": "Rock and pop" }, "color": "red" },
+          { "key": "jazz_blues", "label": { "fr": "Jazz et blues", "en": "Jazz and blues" }, "color": "indigo" },
+          { "key": "soul_funk", "label": { "fr": "Soul et funk", "en": "Soul and funk" }, "color": "orange" },
+          { "key": "electronic", "label": { "fr": "Électronique", "en": "Electronic" }, "color": "teal" },
+          { "key": "hip_hop", "label": { "fr": "Hip-hop et rap", "en": "Hip-hop and rap" }, "color": "purple" },
+          { "key": "classical", "label": { "fr": "Classique", "en": "Classical" }, "color": "yellow" },
+          { "key": "world", "label": { "fr": "Musiques du monde", "en": "World music" }, "color": "green" },
+          { "key": "soundtrack", "label": { "fr": "Bandes originales", "en": "Soundtracks" }, "color": "pink" },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    {
+      "key": "disc_condition",
+      "type": "select",
+      "name": { "fr": "État du disque", "en": "Record condition" },
+      "options": {
+        "choices": [
+          { "key": "m", "label": { "fr": "Neuf (M)", "en": "Mint (M)" }, "color": "green" },
+          { "key": "nm", "label": { "fr": "Quasi neuf (NM)", "en": "Near mint (NM)" }, "color": "teal" },
+          {
+            "key": "vg_plus",
+            "label": { "fr": "Très bon plus (VG+)", "en": "Very good plus (VG+)" },
+            "color": "blue"
+          },
+          { "key": "vg", "label": { "fr": "Très bon (VG)", "en": "Very good (VG)" }, "color": "yellow" },
+          { "key": "g", "label": { "fr": "Correct ou moins (G)", "en": "Good or lower (G)" }, "color": "red" }
+        ]
+      }
+    },
+    {
+      "key": "sleeve_condition",
+      "type": "select",
+      "name": { "fr": "État de la pochette", "en": "Sleeve condition" },
+      "options": {
+        "choices": [
+          { "key": "m", "label": { "fr": "Neuf (M)", "en": "Mint (M)" }, "color": "green" },
+          { "key": "nm", "label": { "fr": "Quasi neuf (NM)", "en": "Near mint (NM)" }, "color": "teal" },
+          {
+            "key": "vg_plus",
+            "label": { "fr": "Très bon plus (VG+)", "en": "Very good plus (VG+)" },
+            "color": "blue"
+          },
+          { "key": "vg", "label": { "fr": "Très bon (VG)", "en": "Very good (VG)" }, "color": "yellow" },
+          { "key": "g", "label": { "fr": "Correct ou moins (G)", "en": "Good or lower (G)" }, "color": "red" }
+        ]
+      }
+    },
+    {
+      "key": "price",
+      "type": "money",
+      "name": { "fr": "Prix d'achat", "en": "Purchase price" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "value",
+      "type": "money",
+      "name": { "fr": "Valeur estimée", "en": "Estimated value" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "barcode",
+      "type": "barcode",
+      "name": { "fr": "Code-barres", "en": "Barcode" },
+      "options": { "format": "any" }
+    },
+    { "key": "notes", "type": "textarea", "name": { "fr": "Pressage et remarques", "en": "Pressing notes" } },
+    {
+      "key": "photos",
+      "type": "photo",
+      "name": { "fr": "Photos de la pochette", "en": "Cover photos" },
+      "options": { "max_files": 2 }
+    }
+  ],
+  "examples": {
+    "fr": [
+      {
+        "name": "Nuits d'été",
+        "artist": "Orchestre du Vieux-Port",
+        "year": "1974",
+        "label": "Disques Méridien",
+        "catalogue": "MER 3021",
+        "format": "lp",
+        "genre": "jazz_blues",
+        "disc_condition": "nm",
+        "sleeve_condition": "vg_plus",
+        "price": "18.00",
+        "value": "45.00",
+        "notes": "Premier pressage français, pochette ouvrante."
+      },
+      {
+        "name": "Neon Avenue",
+        "artist": "Kira Vance",
+        "year": "1985",
+        "label": "Skyline Records",
+        "catalogue": "SKY-8512",
+        "format": "maxi",
+        "genre": "electronic",
+        "disc_condition": "vg_plus",
+        "sleeve_condition": "vg",
+        "price": "9.00",
+        "value": "20.00"
+      },
+      {
+        "name": "Marées",
+        "artist": "Les Heures Bleues",
+        "year": "2021",
+        "label": "Océan Vinyle",
+        "catalogue": "OV-014",
+        "format": "lp",
+        "genre": "rock_pop",
+        "disc_condition": "m",
+        "sleeve_condition": "m",
+        "price": "26.00",
+        "value": "30.00",
+        "barcode": "3760123450140",
+        "notes": "Réédition sur vinyle bleu, 180 g, tirage limité à 500 exemplaires."
+      }
+    ],
+    "en": [
+      {
+        "name": "Summer Nights",
+        "artist": "The Old Harbor Orchestra",
+        "year": "1974",
+        "label": "Meridian Records",
+        "catalogue": "MER 3021",
+        "format": "lp",
+        "genre": "jazz_blues",
+        "disc_condition": "nm",
+        "sleeve_condition": "vg_plus",
+        "price": "18.00",
+        "value": "45.00",
+        "notes": "First French pressing, gatefold sleeve."
+      },
+      {
+        "name": "Neon Avenue",
+        "artist": "Kira Vance",
+        "year": "1985",
+        "label": "Skyline Records",
+        "catalogue": "SKY-8512",
+        "format": "maxi",
+        "genre": "electronic",
+        "disc_condition": "vg_plus",
+        "sleeve_condition": "vg",
+        "price": "9.00",
+        "value": "20.00"
+      },
+      {
+        "name": "Tides",
+        "artist": "The Blue Hours",
+        "year": "2021",
+        "label": "Ocean Vinyl",
+        "catalogue": "OV-014",
+        "format": "lp",
+        "genre": "rock_pop",
+        "disc_condition": "m",
+        "sleeve_condition": "m",
+        "price": "26.00",
+        "value": "30.00",
+        "barcode": "3760123450140",
+        "notes": "Reissue on blue vinyl, 180 g, limited to 500 copies."
+      }
+    ]
+  }
+}

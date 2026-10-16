@@ -1,0 +1,175 @@
+{
+  "category": "home",
+  "icon": "box",
+  "name": { "fr": "Cartons de déménagement", "en": "Moving boxes" },
+  "summary": {
+    "fr": "Numérotez vos cartons de déménagement : pièce d'arrivée, contenu, poids, précautions et photos, pour tout retrouver vite dans le nouveau logement.",
+    "en": "Number your moving boxes: destination room, contents, weight, handling notes and photos, so you can find everything fast in your new home."
+  },
+  "description": {
+    "fr": [
+      "Ce modèle est fait pour préparer un déménagement, qu'il s'agisse d'un appartement, d'une maison ou de bureaux. Chaque carton reçoit un nom ou un numéro, une pièce d'arrivée, une taille, un contenu, des précautions de manutention, un poids estimé et une valeur.",
+      "Prenez le contenu en photo avant de fermer le carton, puis inscrivez sur celui-ci son numéro et sa pièce d'arrivée. Au déballage, une recherche sur un objet (une bouilloire, un chargeur) vous mène directement au bon carton. Cochez « À ouvrir en premier » pour les cartons des premiers jours.",
+      "Astuces : pendant le chargement, passez le statut de chaque carton à « Chargé », puis à « Livré » à l'arrivée, et filtrez sur ce qui reste à décharger. Le total de la colonne « Poids estimé » aide à préparer le camion, et celui de la colonne « Valeur estimée » sert de base si vous déclarez le contenu à votre assureur ou au déménageur."
+    ],
+    "en": [
+      "This template is made for planning a move, whether it is an apartment, a house or an office. Each box gets a name or number, a destination room, a size, its contents, handling precautions, an estimated weight and a value.",
+      "Photograph the contents before sealing the box, then write its number and destination room on the outside. When unpacking, a search for an item (a kettle, a charger) takes you straight to the right box. Tick \"Open first\" for the boxes you need on day one.",
+      "Tips: during loading, set each box to \"Loaded\", then to \"Delivered\" on arrival, and filter on what is still to unload. The total of the \"Estimated weight\" column helps you plan the truck, and the total of the \"Estimated value\" column is a starting point if you declare the contents to your insurer or to the movers."
+    ]
+  },
+  "fields": [
+    { "key": "name", "type": "text", "name": { "fr": "Carton", "en": "Box" }, "required": true },
+    {
+      "key": "room",
+      "type": "select",
+      "name": { "fr": "Pièce d'arrivée", "en": "Destination room" },
+      "options": {
+        "choices": [
+          { "key": "kitchen", "label": { "fr": "Cuisine", "en": "Kitchen" }, "color": "blue" },
+          { "key": "living", "label": { "fr": "Salon", "en": "Living room" }, "color": "orange" },
+          { "key": "bedroom", "label": { "fr": "Chambre", "en": "Bedroom" }, "color": "purple" },
+          { "key": "bathroom", "label": { "fr": "Salle de bains", "en": "Bathroom" }, "color": "teal" },
+          { "key": "office", "label": { "fr": "Bureau", "en": "Office" }, "color": "indigo" },
+          { "key": "kids", "label": { "fr": "Chambre d'enfant", "en": "Kids' room" }, "color": "pink" },
+          {
+            "key": "basement",
+            "label": { "fr": "Cave et garage", "en": "Basement and garage" },
+            "color": "yellow"
+          },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    {
+      "key": "size",
+      "type": "select",
+      "name": { "fr": "Taille", "en": "Size" },
+      "options": {
+        "choices": [
+          { "key": "small", "label": { "fr": "Petit", "en": "Small" }, "color": "green" },
+          { "key": "medium", "label": { "fr": "Moyen", "en": "Medium" }, "color": "blue" },
+          { "key": "large", "label": { "fr": "Grand", "en": "Large" }, "color": "purple" },
+          { "key": "wardrobe", "label": { "fr": "Penderie", "en": "Wardrobe box" }, "color": "pink" }
+        ]
+      }
+    },
+    { "key": "contents", "type": "textarea", "name": { "fr": "Contenu", "en": "Contents" } },
+    {
+      "key": "handling",
+      "type": "multiselect",
+      "name": { "fr": "Précautions", "en": "Handling" },
+      "options": {
+        "choices": [
+          { "key": "fragile", "label": { "fr": "Fragile", "en": "Fragile" }, "color": "red" },
+          { "key": "heavy", "label": { "fr": "Lourd", "en": "Heavy" }, "color": "orange" },
+          { "key": "liquids", "label": { "fr": "Liquides", "en": "Liquids" }, "color": "blue" },
+          { "key": "upright", "label": { "fr": "Ne pas coucher", "en": "Keep upright" }, "color": "purple" },
+          { "key": "valuables", "label": { "fr": "Objets de valeur", "en": "Valuables" }, "color": "yellow" }
+        ]
+      }
+    },
+    {
+      "key": "status",
+      "type": "select",
+      "name": { "fr": "Avancement", "en": "Progress" },
+      "options": {
+        "choices": [
+          { "key": "packed", "label": { "fr": "Emballé", "en": "Packed" }, "color": "gray" },
+          { "key": "loaded", "label": { "fr": "Chargé", "en": "Loaded" }, "color": "orange" },
+          { "key": "delivered", "label": { "fr": "Livré", "en": "Delivered" }, "color": "blue" },
+          { "key": "unpacked", "label": { "fr": "Déballé", "en": "Unpacked" }, "color": "green" }
+        ]
+      }
+    },
+    {
+      "key": "weight",
+      "type": "number",
+      "name": { "fr": "Poids estimé", "en": "Estimated weight" },
+      "options": { "decimals": 1, "min": "0", "unit": "kg" }
+    },
+    { "key": "open_first", "type": "boolean", "name": { "fr": "À ouvrir en premier", "en": "Open first" } },
+    {
+      "key": "value",
+      "type": "money",
+      "name": { "fr": "Valeur estimée", "en": "Estimated value" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "photos",
+      "type": "photo",
+      "name": { "fr": "Photos du contenu", "en": "Photos of the contents" },
+      "options": { "max_files": 2 }
+    }
+  ],
+  "examples": {
+    "fr": [
+      {
+        "name": "Carton 01 – Vaisselle",
+        "room": "kitchen",
+        "size": "medium",
+        "contents": "Assiettes, verres et saladiers calés dans du papier bulle.",
+        "handling": ["fragile", "upright"],
+        "status": "loaded",
+        "weight": "14.5",
+        "open_first": false,
+        "value": "180.00"
+      },
+      {
+        "name": "Carton 07 – Livres",
+        "room": "office",
+        "size": "small",
+        "contents": "Romans et bandes dessinées, une soixantaine de volumes.",
+        "handling": ["heavy"],
+        "status": "delivered",
+        "weight": "22.0",
+        "open_first": false,
+        "value": "300.00"
+      },
+      {
+        "name": "Carton 12 – Premiers jours",
+        "room": "bedroom",
+        "size": "medium",
+        "contents": "Draps, serviettes, trousse de toilette, chargeurs, bouilloire et café.",
+        "status": "packed",
+        "weight": "9.0",
+        "open_first": true,
+        "value": "120.00"
+      }
+    ],
+    "en": [
+      {
+        "name": "Box 01 – Dishes",
+        "room": "kitchen",
+        "size": "medium",
+        "contents": "Plates, glasses and mixing bowls wrapped in bubble wrap.",
+        "handling": ["fragile", "upright"],
+        "status": "loaded",
+        "weight": "14.5",
+        "open_first": false,
+        "value": "180.00"
+      },
+      {
+        "name": "Box 07 – Books",
+        "room": "office",
+        "size": "small",
+        "contents": "Novels and comic books, about sixty volumes.",
+        "handling": ["heavy"],
+        "status": "delivered",
+        "weight": "22.0",
+        "open_first": false,
+        "value": "300.00"
+      },
+      {
+        "name": "Box 12 – First days",
+        "room": "bedroom",
+        "size": "medium",
+        "contents": "Sheets, towels, toiletry bag, chargers, kettle and coffee.",
+        "status": "packed",
+        "weight": "9.0",
+        "open_first": true,
+        "value": "120.00"
+      }
+    ]
+  }
+}

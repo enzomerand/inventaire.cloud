@@ -1,0 +1,176 @@
+{
+  "category": "collection",
+  "icon": "bottle",
+  "name": { "fr": "Cave à vin", "en": "Wine cellar" },
+  "summary": {
+    "fr": "Gérez votre cave à vin : domaine, appellation, millésime, nombre de bouteilles, prix, période de garde, emplacement et photo de l'étiquette.",
+    "en": "Manage your wine cellar: producer, appellation, vintage, bottle count, price, drinking window, storage spot and label photo."
+  },
+  "description": {
+    "fr": [
+      "Ce modèle s'adresse aux amateurs qui veulent savoir ce qu'il y a dans leur cave, suivre le vieillissement de leurs vins et ne pas oublier une belle bouteille. Chaque ligne décrit une cuvée : domaine, appellation, couleur, millésime, cépages, nombre de bouteilles et prix.",
+      "Les champs « À boire à partir de » et « À boire avant » donnent la période de garde : triez la colonne « À boire avant » pour ouvrir en priorité les bouteilles qui arrivent à maturité. Notez l'emplacement (casier, rangée) pour retrouver une bouteille sans fouiller, et gardez vos impressions dans les notes de dégustation.",
+      "Astuces : photographiez l'étiquette de chaque cuvée, filtrez par couleur ou par appellation pour préparer un repas, et affichez le total de la colonne « Bouteilles en cave » pour connaître la taille de votre cave. Quand vous ouvrez une bouteille, diminuez simplement la quantité : l'historique garde la trace de chaque changement."
+    ],
+    "en": [
+      "This template is for enthusiasts who want to know what is in their cellar, follow how their wines age and never forget a great bottle. Each row describes a wine: producer, appellation, type, vintage, grape varieties, number of bottles and price.",
+      "The \"Drink from\" and \"Drink before\" fields give the drinking window: sort the \"Drink before\" column to open the bottles that are reaching their peak first. Note the location (rack, row) to find a bottle without rummaging, and keep your impressions in the tasting notes.",
+      "Tips: photograph the label of each wine, filter by type or appellation to plan a meal, and show the total of the \"Bottles in the cellar\" column to know the size of your cellar. When you open a bottle, simply lower the quantity: the history keeps track of every change."
+    ]
+  },
+  "fields": [
+    { "key": "name", "type": "text", "name": { "fr": "Cuvée", "en": "Wine" }, "required": true },
+    { "key": "producer", "type": "text", "name": { "fr": "Domaine ou producteur", "en": "Producer" } },
+    {
+      "key": "appellation",
+      "type": "text",
+      "name": { "fr": "Appellation ou région", "en": "Appellation or region" }
+    },
+    {
+      "key": "type",
+      "type": "select",
+      "name": { "fr": "Couleur", "en": "Type" },
+      "options": {
+        "choices": [
+          { "key": "red", "label": { "fr": "Rouge", "en": "Red" }, "color": "red" },
+          { "key": "white", "label": { "fr": "Blanc", "en": "White" }, "color": "yellow" },
+          { "key": "rose", "label": { "fr": "Rosé", "en": "Rosé" }, "color": "pink" },
+          { "key": "sparkling", "label": { "fr": "Effervescent", "en": "Sparkling" }, "color": "teal" },
+          { "key": "sweet", "label": { "fr": "Moelleux ou liquoreux", "en": "Sweet" }, "color": "orange" },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    {
+      "key": "vintage",
+      "type": "number",
+      "name": { "fr": "Millésime", "en": "Vintage" },
+      "options": { "decimals": 0, "min": "1900", "max": "2100" }
+    },
+    { "key": "grapes", "type": "tags", "name": { "fr": "Cépages", "en": "Grape varieties" } },
+    {
+      "key": "quantity",
+      "type": "number",
+      "name": { "fr": "Bouteilles en cave", "en": "Bottles in the cellar" },
+      "options": { "decimals": 0, "min": "0" }
+    },
+    {
+      "key": "price",
+      "type": "money",
+      "name": { "fr": "Prix par bouteille", "en": "Price per bottle" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "drink_from",
+      "type": "number",
+      "name": { "fr": "À boire à partir de", "en": "Drink from" },
+      "options": { "decimals": 0, "min": "1900", "max": "2200" }
+    },
+    {
+      "key": "drink_until",
+      "type": "number",
+      "name": { "fr": "À boire avant", "en": "Drink before" },
+      "options": { "decimals": 0, "min": "1900", "max": "2200" }
+    },
+    { "key": "location", "type": "text", "name": { "fr": "Emplacement", "en": "Location" } },
+    {
+      "key": "rating",
+      "type": "rating",
+      "name": { "fr": "Ma note", "en": "My rating" },
+      "options": { "max": 5 }
+    },
+    { "key": "tasting", "type": "textarea", "name": { "fr": "Notes de dégustation", "en": "Tasting notes" } },
+    {
+      "key": "photos",
+      "type": "photo",
+      "name": { "fr": "Photos de l'étiquette", "en": "Label photos" },
+      "options": { "max_files": 2 }
+    }
+  ],
+  "examples": {
+    "fr": [
+      {
+        "name": "Les Grands Champs",
+        "producer": "Domaine des Trois Chênes",
+        "appellation": "Saint-Émilion grand cru",
+        "type": "red",
+        "vintage": "2018",
+        "grapes": ["Merlot", "Cabernet franc"],
+        "quantity": "6",
+        "price": "34.50",
+        "drink_from": "2025",
+        "drink_until": "2035",
+        "location": "Casier A, rangée 2",
+        "rating": 4,
+        "tasting": "Fruits noirs et tanins soyeux. À carafer une heure avant de servir."
+      },
+      {
+        "name": "Cuvée Silex",
+        "producer": "Domaine Marchand-Lenoir",
+        "appellation": "Chablis premier cru",
+        "type": "white",
+        "vintage": "2020",
+        "grapes": ["Chardonnay"],
+        "quantity": "3",
+        "price": "28.00",
+        "drink_from": "2023",
+        "drink_until": "2030",
+        "location": "Casier C, rangée 1",
+        "rating": 5,
+        "tasting": "Tendu et minéral, finale saline. Parfait avec des huîtres."
+      },
+      {
+        "name": "Brut Réserve",
+        "producer": "Maison Delacour",
+        "appellation": "Champagne",
+        "type": "sparkling",
+        "grapes": ["Chardonnay", "Pinot noir", "Pinot meunier"],
+        "quantity": "12",
+        "price": "39.90",
+        "location": "Casier D, rangée 3"
+      }
+    ],
+    "en": [
+      {
+        "name": "Les Grands Champs",
+        "producer": "Domaine des Trois Chênes",
+        "appellation": "Saint-Émilion Grand Cru",
+        "type": "red",
+        "vintage": "2018",
+        "grapes": ["Merlot", "Cabernet Franc"],
+        "quantity": "6",
+        "price": "34.50",
+        "drink_from": "2025",
+        "drink_until": "2035",
+        "location": "Rack A, row 2",
+        "rating": 4,
+        "tasting": "Dark fruit and silky tannins. Decant for an hour before serving."
+      },
+      {
+        "name": "Cuvée Silex",
+        "producer": "Domaine Marchand-Lenoir",
+        "appellation": "Chablis Premier Cru",
+        "type": "white",
+        "vintage": "2020",
+        "grapes": ["Chardonnay"],
+        "quantity": "3",
+        "price": "28.00",
+        "drink_from": "2023",
+        "drink_until": "2030",
+        "location": "Rack C, row 1",
+        "rating": 5,
+        "tasting": "Tense and mineral with a saline finish. Perfect with oysters."
+      },
+      {
+        "name": "Brut Réserve",
+        "producer": "Maison Delacour",
+        "appellation": "Champagne",
+        "type": "sparkling",
+        "grapes": ["Chardonnay", "Pinot Noir", "Pinot Meunier"],
+        "quantity": "12",
+        "price": "39.90",
+        "location": "Rack D, row 3"
+      }
+    ]
+  }
+}

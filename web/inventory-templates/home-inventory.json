@@ -1,0 +1,194 @@
+{
+  "category": "home",
+  "icon": "home",
+  "name": { "fr": "Inventaire du logement", "en": "Home inventory" },
+  "summary": {
+    "fr": "Recensez les biens de votre logement pièce par pièce, avec prix, date d'achat, photos et factures : un inventaire pratique pour l'assurance ou un déménagement.",
+    "en": "List everything in your home room by room, with price, purchase date, photos and invoices: a handy inventory for insurance claims or a move."
+  },
+  "description": {
+    "fr": [
+      "Cet inventaire s'adresse à toute personne qui veut garder une trace de ce que contient son logement : propriétaires, locataires, personnes sur le point de déménager ou simplement prévoyantes. Chaque objet est rattaché à une pièce et à une catégorie, avec sa marque, son numéro de série, sa date et son prix d'achat, sa valeur estimée et son état.",
+      "Ajoutez une ou plusieurs photos de chaque objet et déposez la facture ou le certificat de garantie dans le champ prévu : en cas de sinistre, de cambriolage ou de litige, tout est au même endroit. Pensez aussi aux objets de valeur (bijoux, instruments de musique, œuvres d'art) en renseignant leur valeur estimée.",
+      "Astuces : filtrez sur une pièce pour faire le tour du logement une pièce à la fois, triez la colonne « Fin de garantie » pour voir quelles garanties expirent en premier, et affichez le total de la colonne « Valeur estimée », pour tout le logement ou pièce par pièce, pour connaître la valeur de vos biens. Chaque fiche garde l'historique de ses modifications."
+    ],
+    "en": [
+      "This inventory is for anyone who wants a clear record of what their home contains: owners, tenants, people about to move, or the simply cautious. Each item is tied to a room and a category, with its brand, serial number, purchase date and price, estimated value and condition.",
+      "Add one or more photos of each item and attach the invoice or warranty certificate to the matching field, so that after a fire, a break-in or a dispute everything is in one place. Don't forget valuables such as jewelry, musical instruments or artwork: note their estimated value.",
+      "Tips: filter on a room to go through your home one room at a time, sort the \"Warranty end\" column to see which warranties expire first, and show the total of the \"Estimated value\" column, for the whole home or room by room, to know what your belongings are worth. Each item keeps a history of its changes."
+    ]
+  },
+  "fields": [
+    { "key": "name", "type": "text", "name": { "fr": "Objet", "en": "Item" }, "required": true },
+    {
+      "key": "room",
+      "type": "select",
+      "name": { "fr": "Pièce", "en": "Room" },
+      "options": {
+        "choices": [
+          { "key": "kitchen", "label": { "fr": "Cuisine", "en": "Kitchen" }, "color": "blue" },
+          { "key": "living", "label": { "fr": "Salon", "en": "Living room" }, "color": "orange" },
+          { "key": "bedroom", "label": { "fr": "Chambre", "en": "Bedroom" }, "color": "purple" },
+          { "key": "bathroom", "label": { "fr": "Salle de bains", "en": "Bathroom" }, "color": "teal" },
+          { "key": "office", "label": { "fr": "Bureau", "en": "Office" }, "color": "indigo" },
+          {
+            "key": "garage",
+            "label": { "fr": "Garage et cave", "en": "Garage and basement" },
+            "color": "yellow"
+          },
+          { "key": "outdoor", "label": { "fr": "Extérieur", "en": "Outdoors" }, "color": "green" },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    {
+      "key": "category",
+      "type": "select",
+      "name": { "fr": "Catégorie", "en": "Category" },
+      "options": {
+        "choices": [
+          { "key": "furniture", "label": { "fr": "Mobilier", "en": "Furniture" }, "color": "orange" },
+          { "key": "appliance", "label": { "fr": "Électroménager", "en": "Appliances" }, "color": "blue" },
+          { "key": "electronics", "label": { "fr": "High-tech", "en": "Electronics" }, "color": "indigo" },
+          { "key": "decor", "label": { "fr": "Décoration", "en": "Decor" }, "color": "pink" },
+          {
+            "key": "clothing",
+            "label": { "fr": "Linge et vêtements", "en": "Clothing and linens" },
+            "color": "purple"
+          },
+          {
+            "key": "tools",
+            "label": { "fr": "Outillage et bricolage", "en": "Tools and DIY" },
+            "color": "teal"
+          },
+          {
+            "key": "valuables",
+            "label": { "fr": "Bijoux et objets de valeur", "en": "Jewelry and valuables" },
+            "color": "yellow"
+          },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    { "key": "brand_model", "type": "text", "name": { "fr": "Marque et modèle", "en": "Brand and model" } },
+    {
+      "key": "serial",
+      "type": "barcode",
+      "name": { "fr": "Numéro de série", "en": "Serial number" },
+      "options": { "format": "any" }
+    },
+    { "key": "purchase_date", "type": "date", "name": { "fr": "Date d'achat", "en": "Purchase date" } },
+    {
+      "key": "price",
+      "type": "money",
+      "name": { "fr": "Prix d'achat", "en": "Purchase price" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "value",
+      "type": "money",
+      "name": { "fr": "Valeur estimée", "en": "Estimated value" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "condition",
+      "type": "select",
+      "name": { "fr": "État", "en": "Condition" },
+      "options": {
+        "choices": [
+          { "key": "new", "label": { "fr": "Neuf", "en": "New" }, "color": "green" },
+          { "key": "good", "label": { "fr": "Bon état", "en": "Good" }, "color": "teal" },
+          { "key": "fair", "label": { "fr": "État moyen", "en": "Fair" }, "color": "yellow" },
+          { "key": "worn", "label": { "fr": "Usé", "en": "Worn" }, "color": "red" }
+        ]
+      }
+    },
+    { "key": "warranty_end", "type": "date", "name": { "fr": "Fin de garantie", "en": "Warranty end" } },
+    {
+      "key": "photos",
+      "type": "photo",
+      "name": { "fr": "Photos", "en": "Photos" },
+      "options": { "max_files": 3 }
+    },
+    {
+      "key": "documents",
+      "type": "file",
+      "name": { "fr": "Factures et garanties", "en": "Invoices and warranties" },
+      "options": { "max_files": 5 }
+    }
+  ],
+  "examples": {
+    "fr": [
+      {
+        "name": "Lave-linge frontal 9 kg",
+        "room": "kitchen",
+        "category": "appliance",
+        "brand_model": "Bosch Série 6 WGG244A0FF",
+        "serial": "FD9034122871",
+        "purchase_date": "2025-03-18",
+        "price": "649.00",
+        "value": "540.00",
+        "condition": "good",
+        "warranty_end": "2027-03-18"
+      },
+      {
+        "name": "Canapé d'angle convertible",
+        "room": "living",
+        "category": "furniture",
+        "brand_model": "IKEA Friheten",
+        "purchase_date": "2021-09-04",
+        "price": "799.00",
+        "value": "350.00",
+        "condition": "fair"
+      },
+      {
+        "name": "Téléviseur OLED 55 pouces",
+        "room": "living",
+        "category": "electronics",
+        "brand_model": "LG OLED55C3",
+        "serial": "311NTAB12345",
+        "purchase_date": "2024-11-29",
+        "price": "1290.00",
+        "value": "850.00",
+        "condition": "good",
+        "warranty_end": "2026-11-29"
+      }
+    ],
+    "en": [
+      {
+        "name": "Front-loading washing machine, 9 kg",
+        "room": "kitchen",
+        "category": "appliance",
+        "brand_model": "Bosch Series 6 WGG244A0FF",
+        "serial": "FD9034122871",
+        "purchase_date": "2025-03-18",
+        "price": "649.00",
+        "value": "540.00",
+        "condition": "good",
+        "warranty_end": "2027-03-18"
+      },
+      {
+        "name": "Convertible corner sofa",
+        "room": "living",
+        "category": "furniture",
+        "brand_model": "IKEA Friheten",
+        "purchase_date": "2021-09-04",
+        "price": "799.00",
+        "value": "350.00",
+        "condition": "fair"
+      },
+      {
+        "name": "55-inch OLED TV",
+        "room": "living",
+        "category": "electronics",
+        "brand_model": "LG OLED55C3",
+        "serial": "311NTAB12345",
+        "purchase_date": "2024-11-29",
+        "price": "1290.00",
+        "value": "850.00",
+        "condition": "good",
+        "warranty_end": "2026-11-29"
+      }
+    ]
+  }
+}

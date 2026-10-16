@@ -1,0 +1,191 @@
+{
+  "category": "collection",
+  "icon": "books",
+  "name": { "fr": "Collection de livres", "en": "Book collection" },
+  "summary": {
+    "fr": "Cataloguez votre bibliothèque : titre, auteur, ISBN, genre, statut de lecture, note, couverture et prêts, pour retrouver chaque livre en un instant.",
+    "en": "Catalog your library: title, author, ISBN, genre, reading status, rating, cover photo and loans, so you can find any book in seconds."
+  },
+  "description": {
+    "fr": [
+      "Ce modèle convient aux lecteurs qui veulent savoir ce qu'ils possèdent, éviter les doublons chez le libraire et suivre les livres prêtés. Chaque livre a un titre, un auteur, un ISBN, un genre, un statut de lecture, une note et un rangement.",
+      "Le champ « ISBN » attend un ISBN à 13 chiffres (les tirets sont acceptés) et en vérifie la clé de contrôle : une faute de frappe est détectée à la saisie. Ajoutez une photo de la couverture, la vue galerie l'affiche sur chaque fiche, et notez à qui vous avez prêté un livre, et quand, pour ne plus le perdre de vue.",
+      "Astuces : filtrez sur le statut « À lire » pour choisir votre prochaine lecture, triez par auteur pour ranger vos étagères, et filtrez la colonne « Prêté à » pour voir quels livres sont sortis. Pour un inventaire d'assurance, affichez le total de la colonne « Prix »."
+    ],
+    "en": [
+      "This template suits readers who want to know what they own, avoid buying duplicates and keep track of lent books. Each book has a title, an author, an ISBN, a genre, a reading status, a rating and a shelf.",
+      "The \"ISBN\" field expects a 13-digit ISBN (hyphens are accepted) and checks its check digit, so a typo is caught as you type it in. Add a photo of the cover, which the gallery view shows on each card, and note who borrowed a book and when so you never lose track of it.",
+      "Tips: filter on the \"To read\" status to pick your next book, sort by author to arrange your shelves, and filter the \"Lent to\" column to see which books are out. For an insurance inventory, show the total of the \"Price\" column."
+    ]
+  },
+  "fields": [
+    { "key": "title", "type": "text", "name": { "fr": "Titre", "en": "Title" }, "required": true },
+    { "key": "author", "type": "text", "name": { "fr": "Auteur", "en": "Author" } },
+    {
+      "key": "isbn",
+      "type": "barcode",
+      "name": { "fr": "ISBN", "en": "ISBN" },
+      "options": { "format": "isbn13" }
+    },
+    { "key": "publisher", "type": "text", "name": { "fr": "Éditeur", "en": "Publisher" } },
+    {
+      "key": "year",
+      "type": "number",
+      "name": { "fr": "Année de parution", "en": "Year published" },
+      "options": { "decimals": 0, "min": "1000", "max": "2100" }
+    },
+    {
+      "key": "genre",
+      "type": "select",
+      "name": { "fr": "Genre", "en": "Genre" },
+      "options": {
+        "choices": [
+          { "key": "novel", "label": { "fr": "Roman", "en": "Novel" }, "color": "blue" },
+          {
+            "key": "crime",
+            "label": { "fr": "Policier et thriller", "en": "Crime and thriller" },
+            "color": "red"
+          },
+          {
+            "key": "scifi",
+            "label": { "fr": "Science-fiction et fantasy", "en": "Science fiction and fantasy" },
+            "color": "purple"
+          },
+          { "key": "history", "label": { "fr": "Histoire", "en": "History" }, "color": "orange" },
+          {
+            "key": "science",
+            "label": { "fr": "Sciences et techniques", "en": "Science and technology" },
+            "color": "teal"
+          },
+          {
+            "key": "biography",
+            "label": { "fr": "Biographie et essai", "en": "Biography and essays" },
+            "color": "yellow"
+          },
+          { "key": "comics", "label": { "fr": "BD et manga", "en": "Comics and manga" }, "color": "pink" },
+          { "key": "children", "label": { "fr": "Jeunesse", "en": "Children's" }, "color": "green" },
+          {
+            "key": "practical",
+            "label": { "fr": "Pratique et loisirs", "en": "Practical and hobbies" },
+            "color": "indigo"
+          },
+          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+        ]
+      }
+    },
+    {
+      "key": "reading",
+      "type": "select",
+      "name": { "fr": "Statut de lecture", "en": "Reading status" },
+      "options": {
+        "choices": [
+          { "key": "unread", "label": { "fr": "À lire", "en": "To read" }, "color": "gray" },
+          { "key": "reading", "label": { "fr": "En cours", "en": "Reading" }, "color": "blue" },
+          { "key": "read", "label": { "fr": "Lu", "en": "Read" }, "color": "green" },
+          { "key": "abandoned", "label": { "fr": "Abandonné", "en": "Abandoned" }, "color": "red" }
+        ]
+      }
+    },
+    {
+      "key": "rating",
+      "type": "rating",
+      "name": { "fr": "Ma note", "en": "My rating" },
+      "options": { "max": 5 }
+    },
+    { "key": "shelf", "type": "text", "name": { "fr": "Rangement", "en": "Shelf" } },
+    { "key": "lent_to", "type": "text", "name": { "fr": "Prêté à", "en": "Lent to" } },
+    { "key": "lent_on", "type": "date", "name": { "fr": "Prêté le", "en": "Lent on" } },
+    {
+      "key": "price",
+      "type": "money",
+      "name": { "fr": "Prix", "en": "Price" },
+      "options": { "currency": "EUR" }
+    },
+    {
+      "key": "cover",
+      "type": "photo",
+      "name": { "fr": "Couverture", "en": "Cover" },
+      "options": { "max_files": 1 }
+    }
+  ],
+  "examples": {
+    "fr": [
+      {
+        "title": "L'Étranger",
+        "author": "Albert Camus",
+        "isbn": "9782070360024",
+        "publisher": "Gallimard",
+        "year": "1942",
+        "genre": "novel",
+        "reading": "read",
+        "rating": 5,
+        "shelf": "Salon, étagère 2",
+        "price": "7.50"
+      },
+      {
+        "title": "Le Petit Prince",
+        "author": "Antoine de Saint-Exupéry",
+        "isbn": "9782070408504",
+        "publisher": "Gallimard",
+        "year": "1943",
+        "genre": "children",
+        "reading": "read",
+        "rating": 5,
+        "shelf": "Chambre, étagère 1",
+        "lent_to": "Marie",
+        "lent_on": "2026-09-20",
+        "price": "8.00"
+      },
+      {
+        "title": "1984",
+        "author": "George Orwell",
+        "isbn": "9782070368228",
+        "publisher": "Gallimard",
+        "year": "1949",
+        "genre": "scifi",
+        "reading": "unread",
+        "shelf": "Bureau, étagère 3",
+        "price": "9.50"
+      }
+    ],
+    "en": [
+      {
+        "title": "The Hobbit",
+        "author": "J. R. R. Tolkien",
+        "isbn": "9780261102217",
+        "publisher": "HarperCollins",
+        "year": "1937",
+        "genre": "scifi",
+        "reading": "read",
+        "rating": 5,
+        "shelf": "Living room, shelf 2",
+        "price": "9.99"
+      },
+      {
+        "title": "Pride and Prejudice",
+        "author": "Jane Austen",
+        "isbn": "9780141439518",
+        "publisher": "Penguin Classics",
+        "year": "1813",
+        "genre": "novel",
+        "reading": "reading",
+        "rating": 4,
+        "shelf": "Bedroom, shelf 1",
+        "lent_to": "Sam",
+        "lent_on": "2026-09-20",
+        "price": "8.99"
+      },
+      {
+        "title": "Nineteen Eighty-Four",
+        "author": "George Orwell",
+        "isbn": "9780141036144",
+        "publisher": "Penguin Modern Classics",
+        "year": "1949",
+        "genre": "scifi",
+        "reading": "unread",
+        "shelf": "Office, shelf 3",
+        "price": "9.99"
+      }
+    ]
+  }
+}
