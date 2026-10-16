@@ -81,6 +81,8 @@ describe('the registry', () => {
             'rating',
             'color',
             'barcode',
+            'file',
+            'photo',
         ]);
     });
 
@@ -106,6 +108,8 @@ describe('the registry', () => {
             rating: 'rating',
             color: 'color',
             barcode: 'input',
+            file: 'files',
+            photo: 'files',
         });
     });
 
@@ -623,6 +627,8 @@ describe('typing a value', () => {
             rating: null,
             color: '',
             barcode: '',
+            file: [],
+            photo: [],
         });
     });
 
@@ -649,7 +655,10 @@ describe('typing a value', () => {
             barcode: ['4006381333931', { format: 'ean13' }],
         };
 
-        expect(Object.keys(samples)).toEqual(Object.keys(FIELD_TYPES));
+        // The files of a photo or file field are never typed in or sent with the values: they go up on their own.
+        expect(Object.keys(samples)).toEqual(
+            Object.keys(FIELD_TYPES).filter((type) => type !== 'file' && type !== 'photo'),
+        );
 
         for (const [type, [stored, options]] of Object.entries(samples)) {
             const typed = field(type, options);

@@ -244,7 +244,7 @@ final class ItemQuery
             return;
         }
 
-        // Text and tags only answer `empty`, which was handled above: no other kind of field reaches a case.
+        // Text, tags and files only answer `empty`, which was handled above: no other kind of field reaches a case.
         switch ($kind) {
             case QueryKind::Number:
                 $bound = $this->decimal($value);
@@ -446,7 +446,7 @@ final class ItemQuery
             QueryKind::Number, QueryKind::Temporal => [self::EMPTY, 'min', 'max'],
             QueryKind::Boolean => [self::EMPTY, 'is'],
             QueryKind::Choice, QueryKind::Choices => [self::EMPTY, 'in'],
-            QueryKind::Text, QueryKind::Tags => [self::EMPTY],
+            QueryKind::Text, QueryKind::Tags, QueryKind::Files => [self::EMPTY],
         };
     }
 

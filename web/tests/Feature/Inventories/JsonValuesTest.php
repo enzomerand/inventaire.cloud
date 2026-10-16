@@ -189,3 +189,51 @@ describe('what ends up in the SQL', function (): void {
         expect($values->sums(Item::query()->toBase(), []))->toBe([]);
     });
 });
+
+describe('editing the JSON object of a column in bulk', function (): void {
+    it('writes the SQL that takes a key out and sets one to null with the functions of the engine', function (string $driver, string $without, string $null): void {
+        $values = new JsonValues(jsonValuesConnection($driver));
+
+        expect($values->withoutKey('changes', '01abcdefghjkmnpqrstvwxyz00')->getValue(jsonValuesConnection($driver)->getQueryGrammar()))->toBe($without)
+            ->and($values->withKeyNull('changes', 'field')->getValue(jsonValuesConnection($driver)->getQueryGrammar()))->toBe($null);
+    })->with([
+        'PostgreSQL' => ['pgsql', '("changes"::jsonb - \'01abcdefghjkmnpqrstvwxyz00\'::text)', 'jsonb_set("changes"::jsonb, \'{"field"}\', \'null\'::jsonb)'],
+        'MySQL' => ['mysql', 'json_remove(`changes`, \'$."01abcdefghjkmnpqrstvwxyz00"\')', 'json_set(`changes`, \'$."field"\', null)'],
+        'MariaDB' => ['mariadb', 'json_remove(`changes`, \'$."01abcdefghjkmnpqrstvwxyz00"\')', 'json_set(`changes`, \'$."field"\', null)'],
+    ]);
+
+    it('keeps the rows that hold a key, and the ones that hold nothing else', function (string $driver, string $holds, string $only): void {
+        $values = new JsonValues($connection = jsonValuesConnection($driver));
+        $every = $connection->table('item_revisions');
+        $alone = $connection->table('item_revisions');
+
+        $values->whereHolds($every, 'changes', '01abcdefghjkmnpqrstvwxyz00');
+        $values->whereHoldsOnly($alone, 'changes', '01abcdefghjkmnpqrstvwxyz00');
+
+        expect($every->toSql())->toContain($holds)->and($every->getBindings())->toBe([])
+            ->and($alone->toSql())->toContain($holds)->toContain($only)->and($alone->getBindings())->toBe([]);
+    })->with([
+        'PostgreSQL' => ['pgsql', '("changes")::jsonb ?? \'01abcdefghjkmnpqrstvwxyz00\'', '("changes"::jsonb - \'01abcdefghjkmnpqrstvwxyz00\'::text) = \'{}\'::jsonb'],
+        'MySQL' => ['mysql', 'json_contains_path(`changes`, \'one\', \'$."01abcdefghjkmnpqrstvwxyz00"\')', 'json_length(`changes`) = 1'],
+        'MariaDB' => ['mariadb', 'json_contains_path(`changes`, \'one\', \'$."01abcdefghjkmnpqrstvwxyz00"\')', 'json_length(`changes`) = 1'],
+    ]);
+
+    it('refuses a column or a key that is not a lowercase name, which would end up in the SQL', function (string $name): void {
+        $values = new JsonValues($connection = jsonValuesConnection('mysql'));
+        $query = $connection->table('item_revisions');
+
+        expect(fn () => $values->withoutKey('changes', $name))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->withKeyNull('changes', $name))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->withoutKey($name, 'field'))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->whereHolds($query, $name, 'field'))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->whereHolds($query, 'changes', $name))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->whereHoldsOnly($query, 'changes', $name))->toThrow(InvalidArgumentException::class);
+    })->with(['capitals' => 'Field', 'a quote' => "a'b", 'a path' => 'a->b', 'a dot' => 'a.b', 'a space' => 'a b', 'nothing' => '', 'a comment' => 'a--', 'too long' => str_repeat('a', 65)]);
+
+    it('edits on those three engines only', function (): void {
+        $values = new JsonValues(jsonValuesConnection('sqlite'));
+
+        expect(fn () => $values->withoutKey('changes', 'field'))->toThrow(LogicException::class)
+            ->and(fn () => $values->withKeyNull('changes', 'field'))->toThrow(LogicException::class);
+    });
+});

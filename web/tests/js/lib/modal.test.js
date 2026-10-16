@@ -15,6 +15,7 @@ vi.mock('@tabler/core', () => ({
 
 const { Modal } = await import('@tabler/core');
 const { hideModal, onModalHidden, showModal } = await import('../../../resources/js/lib/modal.js');
+const { fieldFocusSelectors } = await import('../../../resources/js/grid/rows.js');
 
 /** A dialog with a name box and a note box. */
 function dialog() {
@@ -83,6 +84,96 @@ describe('the dialogs', () => {
         element.dispatchEvent(new Event('shown.bs.modal'));
 
         expect(document.activeElement).toBe(document.querySelector('#second'));
+    });
+
+    it('skips a control that is hidden when the caller names where the cursor goes, and takes the next that shows', () => {
+        const element = dialog();
+        element
+            .querySelector('.modal-body')
+            .insertAdjacentHTML(
+                'beforeend',
+                '<button id="gone" style="display: none">Gone</button><button id="star">Star</button>',
+            );
+
+        showModal(element, { focus: ['#gone', '#star'] });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#star'));
+    });
+
+    it('skips a control that is inside something hidden (a panel, an attribute, a class)', () => {
+        const element = dialog();
+        element
+            .querySelector('.modal-body')
+            .insertAdjacentHTML(
+                'beforeend',
+                '<div style="display: none"><button id="in-style">A</button></div>' +
+                    '<div hidden><button id="in-attribute">B</button></div>' +
+                    '<div class="hidden-by-class"><button id="in-class">C</button></div>' +
+                    '<button id="visible">D</button>',
+            );
+        document.head.insertAdjacentHTML('beforeend', '<style>.hidden-by-class { display: none; }</style>');
+
+        showModal(element, { focus: ['#in-style', '#in-attribute', '#in-class', '#visible'] });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#visible'));
+    });
+
+    it('falls back to the usual place when every control the caller names is hidden', () => {
+        const element = dialog();
+        element
+            .querySelector('.modal-body')
+            .insertAdjacentHTML('beforeend', '<button id="gone" style="display: none">Gone</button>');
+
+        showModal(element, { focus: ['#gone'] });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#second'));
+    });
+
+    it('does not put the cursor on a hidden control in the usual place either', () => {
+        const element = dialog();
+        element.querySelector('#second').style.display = 'none';
+
+        showModal(element);
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#first'));
+    });
+
+    it('opens on the first control that shows of a photo field that is full: its button that adds a photo is hidden', () => {
+        const element = dialog();
+        // A full photo field: the button that adds a photo is hidden (x-show), the ones that remove a photo are close buttons.
+        element.querySelector('.modal-body').insertAdjacentHTML(
+            'beforeend',
+            `<div data-field="photos">
+                <button type="button" class="btn-close" aria-label="Remove front.jpg"></button>
+                <button type="button" id="item-field-photos" style="display: none">Add a photo</button>
+            </div>`,
+        );
+
+        showModal(element, { focus: fieldFocusSelectors('photos') });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        // Nothing in the field can take the cursor: the dialog opens where it usually does.
+        expect(document.activeElement).toBe(document.querySelector('#second'));
+    });
+
+    it('opens on the button that adds a photo when the field has room for one', () => {
+        const element = dialog();
+        element.querySelector('.modal-body').insertAdjacentHTML(
+            'beforeend',
+            `<div data-field="photos">
+                <button type="button" class="btn-close" aria-label="Remove front.jpg"></button>
+                <button type="button" id="item-field-photos">Add a photo</button>
+            </div>`,
+        );
+
+        showModal(element, { focus: fieldFocusSelectors('photos') });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#item-field-photos'));
     });
 
     it('gives the focus back to the button that opened it when it is closed, however it was', () => {

@@ -30,6 +30,8 @@ use Illuminate\Validation\ValidationException;
  * is told by {@see self::searchText()}. How the values are sorted and filtered when the items are listed is told by
  * {@see self::queryKind()}, and whether they are added up by {@see self::summable()}.
  *
+ * A type whose value is not sent but made by uploading files says so with {@see self::filledByUpload()}.
+ *
  * Options follow the same split: {@see self::optionRules()} checks each option one by one as it is sent, and
  * {@see self::normalizeOptions()} fills in the defaults, puts them in canonical form and judges the options together.
  */
@@ -146,4 +148,11 @@ interface FieldType
      * which add up, false for everything else (adding up percentages or ratings means nothing).
      */
     public function summable(): bool;
+
+    /**
+     * Whether the value of the field is not sent with the item but made by uploading files to the field (the file and photo
+     * types): the key of such a field is refused when an item is created or changed, the field is never required, and the
+     * code that stores the files keeps its value ({@see UploadedFilesType}).
+     */
+    public function filledByUpload(): bool;
 }

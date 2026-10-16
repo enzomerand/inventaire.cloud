@@ -6,6 +6,7 @@ namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
 use App\Http\Resources\ItemResource;
+use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Models\Inventory;
 use App\Models\Item;
@@ -30,9 +31,13 @@ use Illuminate\Validation\ValidationException;
  *   is left behind that points to a field that is gone;
  * - an update merges into what the item holds now (the copy the request read may be older), one update after the other;
  * - the text the item is searched by ({@see ItemSearchText}) is built from the values and the fields read under that
- *   same lock, and written with them.
+ *   same lock, and written with them;
+ * - the history of the item ({@see ItemRevisions}) gets its line in the same transaction, from the values as they were and
+ *   as they become, so that a change that is rolled back leaves no trace and a change that happens always leaves one. The
+ *   history and the files of an item are deleted with it by {@see self::delete()}: no foreign key does it (see the
+ *   migrations that create their tables).
  *
- * The account of the person who writes is locked first (see {@see self::lockAuthor()}). Each write is one transaction,
+ * The account of the person who writes is locked first (see {@see Locks::author()}). Each write is one transaction,
  * retried when the database picks it as the loser of a deadlock.
  */
 final class Items
@@ -56,6 +61,8 @@ final class Items
         private readonly Locks $locks,
         private readonly ItemValues $values,
         private readonly ItemSearchText $searchText,
+        private readonly ItemRevisions $revisions,
+        private readonly AttachmentCleanup $files,
     ) {}
 
     /**
@@ -71,7 +78,7 @@ final class Items
     public function create(Inventory $inventory, array $values, User $author): Item
     {
         return DeadlockRetries::run(fn (): Item => $this->db->transaction(function () use ($inventory, $values, $author): Item {
-            $this->lockAuthor($author);
+            $this->locks->author($author);
             $locked = $this->locks->inventory($inventory->getKey());
             $fields = $locked->fields()->get();
 
@@ -90,6 +97,7 @@ final class Items
             $item->updated_by = $author->getKey();
             $item->save();
             $this->moveCount($locked, $inventory, 1);
+            $this->revisions->created($item, $author, $stored);
 
             return $item;
         }));
@@ -108,19 +116,21 @@ final class Items
     public function update(Inventory $inventory, Item $item, array $values, User $editor): Item
     {
         return DeadlockRetries::run(fn (): Item => $this->db->transaction(function () use ($inventory, $item, $values, $editor): Item {
-            $this->lockAuthor($editor);
+            $this->locks->author($editor);
             $locked = $this->locks->inventory($inventory->getKey());
-            $current = $this->lockedItem($locked, $item);
+            $current = $this->locks->itemOf($locked, $item);
             // Read last: the first plain read of the transaction opens its snapshot, and every lock is taken by now.
             $fields = $locked->fields()->get();
 
             $merged = $this->values->apply($fields, $values, $current->values, false);
 
             if (! $this->same($merged, $current->values)) {
+                $before = $current->values;
                 $current->values = $merged;
                 $current->search_text = $this->searchText->build($fields, $merged);
                 $current->updated_by = $editor->getKey();
                 $current->save();
+                $this->revisions->updated($current, $editor, $before, $merged);
             }
 
             return $current;
@@ -128,16 +138,22 @@ final class Items
     }
 
     /**
-     * Deletes an item.
+     * Deletes an item, with its history and its files: the files are counted out of the storage of the workspace in the same
+     * transaction (which is why the workspace is locked first: see {@see Locks}), and deleted from the disk once it is
+     * committed.
      *
-     * @throws ModelNotFoundException When the inventory or the item was deleted in the meantime.
+     * @throws ModelNotFoundException When the workspace, the inventory or the item was deleted in the meantime.
      */
     public function delete(Inventory $inventory, Item $item): void
     {
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($inventory, $item): void {
+            $workspace = $this->locks->workspace($inventory->workspace_id);
             $locked = $this->locks->inventory($inventory->getKey());
+            $current = $this->locks->itemOf($locked, $item);
 
-            $this->lockedItem($locked, $item)->delete();
+            $this->files->releaseItem($workspace, $locked, $current);
+            $this->revisions->forget($current);
+            $current->delete();
             $this->moveCount($locked, $inventory, -1);
         }));
     }
@@ -174,40 +190,6 @@ final class Items
             $inventory->setAttribute('items_count', $count);
             $inventory->syncOriginalAttribute('items_count');
         }
-    }
-
-    /**
-     * Locks the account of the person who writes, before anything else.
-     *
-     * The item records who wrote it (`created_by`, `updated_by`: foreign keys to the accounts), and the database takes a
-     * shared lock on that account's row when the item is saved. Taken after the inventory's, it would go back up the
-     * order of {@see Locks} (accounts come first): deleting that account holds its row and then needs the inventory to
-     * delete what is in it, while this holds the inventory and waits for the row. Taking the row first keeps the order,
-     * and an account deleted meanwhile is found out here, not by a failing foreign key.
-     *
-     * @throws ModelNotFoundException When the account was deleted in the meantime.
-     */
-    private function lockAuthor(User $author): void
-    {
-        if ($this->locks->users([$author->getKey()])->isEmpty()) {
-            throw (new ModelNotFoundException)->setModel(User::class, [$author->getKey()]);
-        }
-    }
-
-    /**
-     * The item as it is now, locked, found in the inventory it must belong to.
-     *
-     * @throws ModelNotFoundException When it was deleted meanwhile.
-     */
-    private function lockedItem(Inventory $inventory, Item $item): Item
-    {
-        $locked = $this->locks->items([$item->getKey()])->first();
-
-        if ($locked === null || (int) $locked->inventory_id !== (int) $inventory->getKey()) {
-            throw (new ModelNotFoundException)->setModel(Item::class, [$item->getKey()]);
-        }
-
-        return $locked;
     }
 
     /**

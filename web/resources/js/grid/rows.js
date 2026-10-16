@@ -2,6 +2,7 @@
  * Small pieces of the rows of the table that are not about a field.
  */
 import { describeValue } from '../fields/index.js';
+import { coverOf } from '../fields/files.js';
 import { dateFormat } from '../fields/locale.js';
 import { isBlank } from '../fields/types.js';
 import { t } from '../lib/i18n.js';
@@ -56,7 +57,9 @@ export function cellValueText(cell) {
 
 /**
  * Where the cursor goes when the dialog of an item is opened for one field: the first box, select or check box of the field
- * (not the buttons that remove a tag), else its first button (the stars of a rating, the button of a color).
+ * (not the buttons that remove a tag or a file), else its first button (the stars of a rating, the button of a color, the
+ * button that adds a file). Only a control that is shown can take the cursor (see `showModal`): the field of a full photo
+ * field has no button that adds a file on show, so the dialog then opens in its usual place.
  *
  * @param {string} fieldId
  * @returns {string[]} CSS selectors, in order of preference.
@@ -75,34 +78,42 @@ export function fieldFocusSelectors(fieldId) {
  * @property {string} id The id of the item.
  * @property {string} title The first text it holds, or "Untitled item".
  * @property {boolean} untitled Whether it holds no text to be called by.
- * @property {Record<string, any>[]} cells Up to {@link CARD_FIELDS} other fields that hold something, each with the cell of its value.
+ * @property {{ src: string, alt: string, more: string } | null} cover The first photo of its first photo field (its thumbnail, with
+ *   the file name as alternative text, and how many more photos the field holds as "+2", "" for none); null when it has none.
+ * @property {Record<string, any>[]} cells Up to {@link CARD_FIELDS} other fields that hold something, each with the cell of its
+ *   value (the field that gives the cover is left out: the cover stands for it).
  */
 
 /**
- * An item as a card of the gallery: its name (the first field of the text type that holds something) and a few other values
- * with their labels, in the order of the fields.
+ * An item as a card of the gallery: its picture (the first photo it has), its name (the first field of the text type that holds
+ * something) and a few other values with their labels, in the order of the fields.
  *
  * @param {import('../fields/types.js').Field[]} fields
- * @param {{ id: string, values?: Record<string, any> }} item
+ * @param {{ id: string, values?: Record<string, any>, attachments?: import('../fields/files.js').Attachment[] }} item
  * @returns {Card}
  */
 export function cardOf(fields, item) {
     const values = item.values ?? {};
     const named = fields.find((field) => field.type === 'text' && !isBlank(values[field.id]));
+    const picture = coverOf(fields, item);
     const cells = fields
-        .filter((field) => field !== named && !isBlank(values[field.id]))
+        .filter((field) => field !== named && field.id !== picture?.fieldId && !isBlank(values[field.id]))
         .slice(0, CARD_FIELDS)
         .map((field) => ({
             key: field.id,
             name: field.name,
             plain: false,
-            ...describeValue(field, values[field.id]),
+            ...describeValue(field, values[field.id], { attachments: item.attachments ?? [] }),
         }));
 
     return {
         id: item.id,
         title: named === undefined ? t('grid.card.untitled') : String(values[named.id]),
         untitled: named === undefined,
+        cover:
+            picture === null
+                ? null
+                : { src: picture.src, alt: picture.alt, more: picture.more > 0 ? '+' + picture.more : '' },
         cells,
     };
 }

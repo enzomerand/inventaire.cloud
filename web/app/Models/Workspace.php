@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Inventories\Attachments\AttachmentCleanup;
+use App\Inventories\Attachments\WorkspaceStorage;
 use App\Models\Concerns\HasUlidRouteKey;
 use Database\Factories\WorkspaceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -20,9 +22,13 @@ use Illuminate\Support\Carbon;
  * in each ({@see WorkspaceMember}). The numeric `id` is internal; `ulid` is the identifier the outside world uses
  * (URLs, API), so that nothing reveals how many workspaces exist or lets one be guessed ({@see HasUlidRouteKey}).
  *
+ * `storage_used` is the number of bytes its files use, kept on the row so that nothing has to add them up: it is moved
+ * only by {@see WorkspaceStorage}, with the workspace locked, in the transaction that adds or removes the file.
+ *
  * @property int $id
  * @property string $ulid
  * @property string $name
+ * @property int $storage_used
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -31,6 +37,42 @@ final class Workspace extends Model
 {
     /** @use HasFactory<WorkspaceFactory> */
     use HasFactory, HasUlidRouteKey;
+
+    /**
+     * Has the files of the workspace deleted from the disk once its deletion is committed, whichever way the model is
+     * deleted (the owner deleting it, an account that owned it alone being deleted, an administrator deleting that
+     * account): the database cascades the rows, and fires no event for them (see {@see AttachmentCleanup}). What to delete is
+     * worked out before the row goes and queued only after it has: a deletion that fails purges nothing.
+     */
+    protected static function booted(): void
+    {
+        self::deleting(function (self $workspace): void {
+            app(AttachmentCleanup::class)->collectForWorkspace($workspace);
+        });
+
+        self::deleted(function (self $workspace): void {
+            app(AttachmentCleanup::class)->purgeCollected($workspace);
+        });
+    }
+
+    /**
+     * The attributes a new workspace starts with: no file, as the column does.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = ['storage_used' => 0];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, mixed>
+     */
+    protected function casts(): array
+    {
+        return [
+            'storage_used' => 'integer',
+        ];
+    }
 
     /**
      * The users who belong to the workspace, each with a `pivot` carrying their role.

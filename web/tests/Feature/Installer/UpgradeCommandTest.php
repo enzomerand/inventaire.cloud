@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
 require_once __DIR__.'/../../Support/inventories.php';
@@ -214,6 +215,23 @@ describe('the derived data', function (): void {
         $this->artisan('inventaire:upgrade')->expectsOutputToContain('The text the items are searched by was built again.')->assertExitCode(0);
 
         expect(DB::table('items')->where('id', $item->id)->value('search_text'))->toBe('electricite');
+    });
+
+    it('adds up the files of every workspace again, corrects a counter that was wrong, and says so', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace'], 'Tools');
+        $item = itemIn($inventory);
+        DB::table('attachments')->insert(['ulid' => strtolower((string) Str::ulid()), 'inventory_id' => $inventory->id, 'item_id' => $item->id, 'disk' => 'local', 'path' => 'workspaces/a/b', 'name' => 'a.pdf', 'mime' => 'application/pdf', 'size' => 700, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('workspaces')->where('id', $team['workspace']->id)->update(['storage_used' => 9]);
+
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain('The storage counter of 1 workspace was wrong and was corrected (see the log).')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
+
+        expect((int) DB::table('workspaces')->where('id', $team['workspace']->id)->value('storage_used'))->toBe(700);
+
+        $this->artisan('inventaire:upgrade')->doesntExpectOutputToContain('storage counter')->assertExitCode(0);
     });
 
     /**

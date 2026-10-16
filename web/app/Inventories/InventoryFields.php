@@ -5,16 +5,20 @@ declare(strict_types=1);
 namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
+use App\Database\JsonValues;
+use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
 use App\Models\Inventory;
 use App\Models\InventoryField;
+use App\Models\ItemRevision;
 use App\Rules\SingleLineText;
 use App\Workspaces\Locks;
 use Closure;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use JsonException;
@@ -47,6 +51,7 @@ final class InventoryFields
         private readonly Locks $locks,
         private readonly FieldTypes $types,
         private readonly ItemSearchText $searchText,
+        private readonly AttachmentCleanup $files,
     ) {}
 
     /**
@@ -57,13 +62,18 @@ final class InventoryFields
      * @param  array<string, mixed>  $options  As sent: the type fills in the defaults and puts them in canonical form.
      *
      * @throws FieldLimitReachedException When the inventory already has as many fields as allowed.
-     * @throws ValidationException When the name is taken or the options do not fit together.
+     * @throws ValidationException When the name is taken, the options do not fit together, or the type is filled by uploading
+     *                             files and the field is required.
      * @throws ModelNotFoundException When the inventory was deleted in the meantime.
      */
     public function create(Inventory $inventory, string $type, string $name, array $options = [], bool $required = false): InventoryField
     {
         $handler = $this->types->get($type);
         $name = SingleLineText::normalize($name);
+
+        if ($required) {
+            $this->assertCanBeRequired($handler);
+        }
 
         return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $type, $name, $options, $required, $handler): InventoryField {
             $locked = $this->locks->inventory($inventory->getKey());
@@ -110,7 +120,8 @@ final class InventoryFields
      *
      * @param  array{name?: string, required?: bool, options?: array<string, mixed>}  $changes  Already validated.
      *
-     * @throws ValidationException When the name is taken or the options do not fit together.
+     * @throws ValidationException When the name is taken, the options do not fit together, or the field is filled by uploading
+     *                             files and is made required.
      * @throws ModelNotFoundException When the inventory or the field was deleted in the meantime.
      */
     public function update(Inventory $inventory, InventoryField $field, array $changes): InventoryField
@@ -127,6 +138,10 @@ final class InventoryFields
             }
 
             if (isset($changes['required'])) {
+                if ($changes['required'] && ($type = $this->types->of($current)) !== null) {
+                    $this->assertCanBeRequired($type);
+                }
+
                 $current->required = $changes['required'];
             }
 
@@ -152,24 +167,38 @@ final class InventoryFields
     }
 
     /**
-     * Deletes a field, and its values from every item of the inventory, in the same transaction.
+     * Deletes a field, and its values from every item of the inventory, in the same transaction. The files of a file or
+     * photo field go with it: their rows are deleted here, they are counted out of the storage of the workspace (which is why
+     * the workspace is locked first for such a field: see {@see Locks}) and the files are deleted from the disk once the
+     * transaction is committed.
      *
      * The values are removed with the query builder, so the items keep their `updated_at`: the items did not change,
      * the field they had a value for is gone. The text the items are searched by loses what the field said in the same
      * pass. The positions of the fields left are closed up.
+     *
+     * The history goes the same way: the values the field held are taken out of every revision of the inventory (they are
+     * the raw values of a field that no longer exists, which nobody should be handed any more), and a revision that has
+     * nothing left to say is deleted. The revisions of files stay, and no longer name the field.
      *
      * @throws ModelNotFoundException When the inventory or the field was deleted in the meantime.
      */
     public function delete(Inventory $inventory, InventoryField $field): void
     {
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($inventory, $field): void {
+            // The type of a field never changes, so the bound copy tells whether files can hang from it.
+            $workspace = $this->types->of($field)?->filledByUpload() ? $this->locks->workspace($inventory->workspace_id) : null;
             $locked = $this->locks->inventory($inventory->getKey());
             $fields = $locked->fields()->get();
             $current = $this->find($fields, $field);
 
+            if ($workspace !== null) {
+                $this->files->releaseField($workspace, $current);
+            }
+
             $remaining = $fields->reject(fn (InventoryField $other): bool => $other->is($current))->values();
 
             $this->rewriteValues($locked, $current->ulid, fn (array $values): array => array_diff_key($values, [$current->ulid => true]), $remaining);
+            $this->forgetInHistory($locked, $current->ulid);
             $current->delete();
 
             $this->renumber($remaining);
@@ -216,6 +245,19 @@ final class InventoryFields
     {
         return $fields->first(fn (InventoryField $other): bool => $other->is($field))
             ?? throw (new ModelNotFoundException)->setModel(InventoryField::class, [$field->getKey()]);
+    }
+
+    /**
+     * Refuses to make required a field whose value is made by uploading files: an item is saved first and its files are
+     * added after, so a required file could never be satisfied when the item is created.
+     *
+     * @throws ValidationException
+     */
+    private function assertCanBeRequired(FieldType $type): void
+    {
+        if ($type->filledByUpload()) {
+            throw ValidationException::withMessages(['required' => [__('A field filled by uploading files cannot be required.')]]);
+        }
     }
 
     /**
@@ -287,6 +329,37 @@ final class InventoryFields
 
             return $values;
         }, $fields);
+    }
+
+    /**
+     * Takes a deleted field out of the history of the items of the inventory: its values leave the revisions of values (the
+     * revision is deleted when nothing else is left in it), and the revisions of files that were attached to the field no
+     * longer name it.
+     *
+     * Three statements, however long the history is (it can be a hundred revisions of each of ten thousand items), with the
+     * JSON edited by the database ({@see JsonValues}, the only place that knows how each engine does it): the revisions
+     * that hold nothing but the field go first, the others lose the field, and the revisions of files lose their reference
+     * to it. A revision that was empty already stays. The inventory is locked by the caller, so no revision is written meanwhile.
+     *
+     * @param  string  $ulid  The key of the field.
+     */
+    private function forgetInHistory(Inventory $inventory, string $ulid): void
+    {
+        $json = new JsonValues($this->db->connection());
+        $revisions = fn (array $actions): Builder => $this->db->table('item_revisions')->where('inventory_id', $inventory->getKey())->whereIn('action', $actions);
+        $ofValues = [ItemRevision::CREATED, ItemRevision::UPDATED];
+
+        $nothingElse = $revisions($ofValues);
+        $json->whereHoldsOnly($nothingElse, 'changes', $ulid);
+        $nothingElse->delete();
+
+        $others = $revisions($ofValues);
+        $json->whereHolds($others, 'changes', $ulid);
+        $others->update(['changes' => $json->withoutKey('changes', $ulid)]);
+
+        $revisions([ItemRevision::ATTACHMENT_ADDED, ItemRevision::ATTACHMENT_REMOVED])
+            ->where('changes->field', $ulid)
+            ->update(['changes' => $json->withKeyNull('changes', 'field')]);
     }
 
     /**

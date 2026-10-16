@@ -50,6 +50,17 @@ final class ApiError
     }
 
     /**
+     * A 503: something the request needs (the disk of the files, say) cannot be reached right now; trying again later may work.
+     *
+     * @param  string  $message  What happened, for a person.
+     * @param  string  $code  Why, for a program.
+     */
+    public static function unavailable(string $message, string $code): JsonResponse
+    {
+        return new JsonResponse(['message' => $message, 'code' => $code], 503);
+    }
+
+    /**
      * A 422 about one field, with a machine-readable reason (the shape the framework gives validation failures, plus `code`).
      */
     public static function invalid(string $message, string $field, string $code): JsonResponse

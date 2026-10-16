@@ -53,6 +53,8 @@ final class FieldTypes
             new RatingType,
             new ColorType,
             new BarcodeType,
+            new FileType,
+            new PhotoType,
         ]);
     }
 

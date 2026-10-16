@@ -92,7 +92,8 @@ describe('the writes that depend on them', function (): void {
             'change a field' => [fn () => $fields->update($inventory, $field, ['name' => 'Renamed']), ['inventories']],
             'add an item' => [fn () => $items->create($inventory, [], $team['owner']), ['users', 'inventories']],
             'change an item' => [fn () => $items->update($inventory, $item, [$field->ulid => 'x'], $team['editor']), ['users', 'inventories', 'items']],
-            'delete an item' => [fn () => $items->delete($inventory, $item), ['inventories', 'items']],
+            // The workspace first: the files of the item are counted out of its storage (see Locks).
+            'delete an item' => [fn () => $items->delete($inventory, $item), ['workspaces', 'inventories', 'items']],
             'change the inventory' => [fn () => app(Inventories::class)->update($inventory, ['name' => 'Renamed']), ['inventories']],
             'delete a field' => [fn () => $fields->delete($inventory, $field), ['inventories']],
         ];

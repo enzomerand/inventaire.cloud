@@ -257,9 +257,9 @@ describe('finding items by words', function (): void {
         $created = inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [$name->ulid => 'Plomberie']])->assertCreated();
 
         expect(searchTextOf($item))->toBe('electricite')
-            ->and(array_keys($one->json('data')))->toBe(['id', 'values', 'created_at', 'updated_at'])
-            ->and(array_keys($list->json('data.0')))->toBe(['id', 'values', 'created_at', 'updated_at'])
-            ->and(array_keys($created->json('data')))->toBe(['id', 'values', 'created_at', 'updated_at'])
+            ->and(array_keys($one->json('data')))->toBe(['id', 'values', 'attachments', 'created_at', 'updated_at'])
+            ->and(array_keys($list->json('data.0')))->toBe(['id', 'values', 'attachments', 'created_at', 'updated_at'])
+            ->and(array_keys($created->json('data')))->toBe(['id', 'values', 'attachments', 'created_at', 'updated_at'])
             ->and($one->getContent())->not->toContain('search_text')->not->toContain('"electricite"')
             ->and($item->fresh()->toArray())->not->toHaveKey('search_text')
             ->and($item->fresh()->toJson())->not->toContain('search_text');

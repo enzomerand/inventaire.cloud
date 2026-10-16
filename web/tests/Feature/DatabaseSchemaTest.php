@@ -33,6 +33,8 @@ it('creates the core tables', function (string $table): void {
     'inventories',
     'inventory_fields',
     'items',
+    'item_revisions',
+    'attachments',
 ]);
 
 it('no longer has the password reset tokens table', function (): void {

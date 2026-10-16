@@ -59,6 +59,9 @@ function goldenSilentTypes(): array
         'datetime' => ['options' => [], 'value' => '2026-10-15T12:30:00Z'],
         'time' => ['options' => [], 'value' => '08:05'],
         'color' => ['options' => [], 'value' => '#aabbcc'],
+        // Files are listed by their attachments, not searched; their value is made by uploading (see FileFieldsTest.php).
+        'file' => ['options' => [], 'value' => null],
+        'photo' => ['options' => [], 'value' => null],
     ];
 }
 
@@ -98,7 +101,10 @@ describe('the golden search text', function (): void {
         ];
 
         foreach (goldenSilentTypes() as $type => $silent) {
-            $values[$fields[$type]->ulid] = $silent['value'];
+            // A file or photo field has no value to send: its files are uploaded.
+            if ($silent['value'] !== null) {
+                $values[$fields[$type]->ulid] = $silent['value'];
+            }
         }
 
         $item = itemIn($inventory, $values);

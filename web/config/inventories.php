@@ -26,4 +26,52 @@ return [
 
     'max_items' => (int) env('INVENTORIES_MAX_ITEMS', 10000),
 
+    /*
+    |--------------------------------------------------------------------------
+    | History of the items
+    |--------------------------------------------------------------------------
+    |
+    | Every change to an item writes a revision (who, when, which values before
+    | and after). An item keeps this many; the oldest ones are deleted when a
+    | newer one is written.
+    |
+    */
+    'max_revisions_per_item' => (int) env('INVENTORIES_MAX_REVISIONS_PER_ITEM', 100),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Files attached to items
+    |--------------------------------------------------------------------------
+    |
+    | - `attachments_disk`: the filesystem disk the files are written to, by
+    |   name (`ATTACHMENTS_DISK`); the default disk of `filesystems.php` when
+    |   empty. It must be private: the `public` disk is refused (the local
+    |   private disk is used instead, and the refusal is logged).
+    | - `max_attachment_size`: bytes one file may weigh
+    |   (`INVENTORIES_MAX_ATTACHMENT_SIZE_MB`, megabytes, 20).
+    | - `max_attachments_per_item`: files one item may hold, those of its file
+    |   and photo fields included (`INVENTORIES_MAX_ATTACHMENTS_PER_ITEM`, 20).
+    | - `storage_per_workspace`: bytes the files of one workspace may weigh in
+    |   all (`INVENTORIES_STORAGE_PER_WORKSPACE_MB`, megabytes, 1024), counted
+    |   under the lock of the workspace's row. Thumbnails are not counted.
+    | - `uploads_per_minute`: files one person may upload in a minute, in all
+    |   their workspaces (`INVENTORIES_UPLOADS_PER_MINUTE`, 30): every upload
+    |   writes a file, makes a thumbnail and takes locks, so a script in a loop
+    |   must not be able to keep the server busy with them.
+    |
+    | Beyond a limit the API answers 409 (`attachment_limit_reached`,
+    | `field_file_limit_reached`, `storage_limit_reached`), 422 (size) or 429
+    | (the pace of uploads).
+    |
+    */
+    'attachments_disk' => env('ATTACHMENTS_DISK') ?: null,
+
+    'max_attachment_size' => (int) round((float) env('INVENTORIES_MAX_ATTACHMENT_SIZE_MB', 20) * 1048576),
+
+    'max_attachments_per_item' => (int) env('INVENTORIES_MAX_ATTACHMENTS_PER_ITEM', 20),
+
+    'storage_per_workspace' => (int) round((float) env('INVENTORIES_STORAGE_PER_WORKSPACE_MB', 1024) * 1048576),
+
+    'uploads_per_minute' => (int) env('INVENTORIES_UPLOADS_PER_MINUTE', 30),
+
 ];

@@ -6,8 +6,13 @@
     Alpine runs in its CSP build: two components share the page, each referenced by name and fed by the data-* attributes
     of its root. "inventoryHeader" (resources/js/components/inventory-header.js) owns the name, the description and their
     dialogs; "inventoryItems" (resources/js/components/inventory-items.js) owns the table and the item dialog. In the
-    URL templates, __id__ stands for the ULID of the item. Everything goes through the API; the form of an item is
-    generated from the fields of the inventory. Values are shown by partials/field-value (x-text, never x-html).
+    URL templates, __id__ stands for the ULID of the item; the addresses of its revisions and of its attachments are built
+    from it by the component. Everything goes through the API; the form of an item is generated from the fields of the
+    inventory. Values are shown by partials/field-value (x-text, never x-html).
+
+    The dialog of an item that exists has three tabs: its details (the form, or the read-only list), its attachments
+    (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
+    partials/item-file-field. data-max-attachment-size is the largest file the server takes, in bytes.
 
     Do not put a display utility (d-flex...) on an element that carries :hidden: the utility wins and it never hides.
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
@@ -128,6 +133,7 @@
         data-workspace-page="{{ route('app.workspace', ['workspace' => $workspace->ulid], absolute: false) }}"
         data-can-edit="{{ $abilities['edit_items'] ? '1' : '0' }}"
         data-can-manage-fields="{{ $abilities['manage_fields'] ? '1' : '0' }}"
+        data-max-attachment-size="{{ config('inventories.max_attachment_size', 20 * 1024 * 1024) }}"
     >
         <div class="card">
             <div class="card-header">
@@ -235,149 +241,187 @@
                 <form class="modal-content" @submit.prevent="save" novalidate>
                     <div class="modal-header">
                         <h2 class="modal-title" id="item-modal-title" x-text="modalTitle"></h2>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ __('Close') }}"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ __('Close') }}" :disabled="busy"></button>
+                    </div>
+                    {{-- The tabs of an item that exists: its details, its attachments, its history. The dialog that adds an item has none. --}}
+                    <div class="px-3 px-sm-4 pt-2" x-show="showTabs">
+                        <ul class="nav nav-tabs flex-nowrap overflow-x-auto" role="tablist" aria-label="{{ __('Item') }}" @keydown="moveTab($event)">
+                            <li class="nav-item" role="presentation">
+                                <button type="button" role="tab" id="item-tab-details" aria-controls="item-panel-details" :class="tabClass('details')" :aria-selected="tabSelected('details')" :tabindex="tabIndex('details')" @click="selectTab('details')">{{ __('Item details') }}</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button type="button" role="tab" id="item-tab-files" aria-controls="item-panel-files" :class="tabClass('files')" :aria-selected="tabSelected('files')" :tabindex="tabIndex('files')" @click="selectTab('files')" x-text="filesTabLabel"></button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button type="button" role="tab" id="item-tab-history" aria-controls="item-panel-history" :class="tabClass('history')" :aria-selected="tabSelected('history')" :tabindex="tabIndex('history')" @click="selectTab('history')">{{ __('History') }}</button>
+                            </li>
+                        </ul>
                     </div>
                     <div class="modal-body">
+                        {{-- Where the progress of the uploads is told to assistive technology. It is on the page from the start: a live
+                             region that is added together with its message is not reliably announced. --}}
+                        <div class="visually-hidden" role="status" aria-live="polite" x-text="announcement"></div>
+
                         <div class="alert alert-danger" role="alert" x-show="formError" x-text="formError"></div>
 
                         <template x-if="confirming">
                             <p class="m-0" role="alert">{{ __('Delete this item? This cannot be undone.') }}</p>
                         </template>
 
-                        <template x-if="isForm && !confirming">
-                            <div>
-                                <template x-for="field in fields" :key="field.id">
-                                    <div class="mb-3" :data-field="field.id">
-                                        <label class="form-label" :class="{ required: field.required }" :for="controlId(field)" x-text="field.name"></label>
-
-                                        <template x-if="control(field) === 'input'">
-                                            <input
-                                                :id="controlId(field)"
-                                                :type="inputType(field)"
-                                                :inputmode="inputMode(field)"
-                                                :maxlength="maxLength(field)"
-                                                :class="controlClass(field)"
-                                                :value="inputValue(field)"
-                                                @input="onInput(field, $event)"
-                                                autocomplete="off"
-                                            >
-                                        </template>
-
-                                        <template x-if="control(field) === 'textarea'">
-                                            <textarea
-                                                :id="controlId(field)"
-                                                :class="controlClass(field)"
-                                                :value="inputValue(field)"
-                                                @input="onInput(field, $event)"
-                                                maxlength="10000"
-                                                rows="4"
-                                            ></textarea>
-                                        </template>
-
-                                        <template x-if="control(field) === 'select'">
-                                            <select :id="controlId(field)" :class="selectClass(field)" @change="onInput(field, $event)">
-                                                <template x-for="option in selectOptions(field)" :key="option.value">
-                                                    <option :value="option.value" :selected="isSelected(field, option.value)" x-text="option.label"></option>
-                                                </template>
-                                            </select>
-                                        </template>
-
-                                        <template x-if="control(field) === 'checks'">
-                                            <div role="group" :aria-label="field.name">
-                                                <template x-for="choice in choices(field)" :key="choice.id">
-                                                    <label class="form-check">
-                                                        <input class="form-check-input" type="checkbox" :checked="isChosen(field, choice.id)" @change="toggleChoice(field, choice.id, $event)">
-                                                        <span class="form-check-label" x-text="choice.label"></span>
-                                                    </label>
-                                                </template>
-                                            </div>
-                                        </template>
-
-                                        <template x-if="control(field) === 'tags'">
-                                            <div>
-                                                <div class="d-flex flex-wrap gap-1 mb-2">
-                                                    <template x-for="tag in tagsOf(field)" :key="tag">
-                                                        <span class="badge bg-secondary-lt d-inline-flex align-items-center gap-1">
-                                                            <span x-text="tag"></span>
-                                                            <button type="button" class="btn-close" :aria-label="removeTagLabel(tag)" @click="removeTag(field, tag)"></button>
-                                                        </span>
-                                                    </template>
-                                                </div>
-                                                <input
-                                                    :id="controlId(field)"
-                                                    type="text"
-                                                    class="form-control"
-                                                    maxlength="50"
-                                                    autocomplete="off"
-                                                    placeholder="{{ __('Type a tag, then press Enter') }}"
-                                                    :value="draftOf(field)"
-                                                    @input="onDraft(field, $event)"
-                                                    @keydown.enter.prevent="commitTag(field)"
-                                                    @keydown.comma.prevent="commitTag(field)"
-                                                    @blur="commitTag(field)"
-                                                >
-                                            </div>
-                                        </template>
-
-                                        <template x-if="control(field) === 'rating'">
-                                            <div class="d-flex gap-1" role="group" :aria-label="field.name">
-                                                <template x-for="grade in scale(field)" :key="grade">
-                                                    <button
-                                                        type="button"
-                                                        :class="starClass(field, grade)"
-                                                        :aria-pressed="isRated(field, grade) ? 'true' : 'false'"
-                                                        :aria-label="starLabel(field, grade)"
-                                                        @click="setRating(field, grade)"
-                                                        x-text="starGlyph(field, grade)"
-                                                    ></button>
-                                                </template>
-                                            </div>
-                                        </template>
-
-                                        {{-- A color picker cannot be empty and fires no event for the color it opens on, so a field without a
-                                             color shows "Set a color" (which gives it black, to move on from) instead of a picker. --}}
-                                        <template x-if="control(field) === 'color'">
-                                            <div class="d-flex align-items-center gap-2">
-                                                <span class="text-secondary" x-show="!hasText(field)">{{ __('Not set') }}</span>
-                                                <button type="button" class="btn btn-sm" :id="controlId(field)" x-show="!hasText(field)" @click="chooseColor(field)">{{ __('Set a color') }}</button>
-                                                <input
-                                                    :id="controlId(field) + '-picker'"
-                                                    type="color"
-                                                    class="form-control form-control-color"
-                                                    x-show="hasText(field)"
-                                                    :value="inputValue(field)"
-                                                    :aria-label="field.name"
-                                                    @input="onInput(field, $event)"
-                                                >
-                                                <span class="font-monospace text-secondary" x-show="hasText(field)" x-text="inputValue(field)"></span>
-                                                <button type="button" class="btn btn-sm" x-show="hasText(field)" @click="clearValue(field)">{{ __('Clear') }}</button>
-                                            </div>
-                                        </template>
-
-                                        <div class="text-danger small mt-1" x-show="errorOf(field)" x-text="errorOf(field)"></div>
-                                    </div>
-                                </template>
-                            </div>
+                        <template x-if="isRemoving">
+                            <p class="m-0 text-break" role="alert" x-text="removeText"></p>
                         </template>
 
-                        <template x-if="!isForm">
-                            <dl class="m-0">
-                                <template x-for="cell in details" :key="cell.key">
-                                    <div class="mb-3">
-                                        <dt class="text-secondary fw-normal small" x-text="cell.name"></dt>
-                                        <dd class="m-0">
-                                            @include('partials.field-value')
-                                        </dd>
-                                    </div>
-                                </template>
-                            </dl>
+                        <template x-if="!asking">
+                            <div>
+                                <div id="item-panel-details" :role="panelRole" :aria-labelledby="panelLabel('details')" :tabindex="panelTabIndex" x-show="onDetails">
+                                    <template x-if="isForm">
+                                        <div>
+                                            <template x-for="field in fields" :key="field.id">
+                                                <div class="mb-3" :data-field="field.id">
+                                                    <label class="form-label" :class="{ required: field.required }" :id="labelId(field)" :for="labelTarget(field)" x-text="field.name"></label>
+
+                                                    <template x-if="control(field) === 'input'">
+                                                        <input
+                                                            :id="controlId(field)"
+                                                            :type="inputType(field)"
+                                                            :inputmode="inputMode(field)"
+                                                            :maxlength="maxLength(field)"
+                                                            :class="controlClass(field)"
+                                                            :value="inputValue(field)"
+                                                            @input="onInput(field, $event)"
+                                                            autocomplete="off"
+                                                        >
+                                                    </template>
+
+                                                    <template x-if="control(field) === 'textarea'">
+                                                        <textarea
+                                                            :id="controlId(field)"
+                                                            :class="controlClass(field)"
+                                                            :value="inputValue(field)"
+                                                            @input="onInput(field, $event)"
+                                                            maxlength="10000"
+                                                            rows="4"
+                                                        ></textarea>
+                                                    </template>
+
+                                                    <template x-if="control(field) === 'select'">
+                                                        <select :id="controlId(field)" :class="selectClass(field)" @change="onInput(field, $event)">
+                                                            <template x-for="option in selectOptions(field)" :key="option.value">
+                                                                <option :value="option.value" :selected="isSelected(field, option.value)" x-text="option.label"></option>
+                                                            </template>
+                                                        </select>
+                                                    </template>
+
+                                                    <template x-if="control(field) === 'checks'">
+                                                        <div role="group" :aria-label="field.name">
+                                                            <template x-for="choice in choices(field)" :key="choice.id">
+                                                                <label class="form-check">
+                                                                    <input class="form-check-input" type="checkbox" :checked="isChosen(field, choice.id)" @change="toggleChoice(field, choice.id, $event)">
+                                                                    <span class="form-check-label" x-text="choice.label"></span>
+                                                                </label>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+
+                                                    <template x-if="control(field) === 'tags'">
+                                                        <div>
+                                                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                                                <template x-for="tag in tagsOf(field)" :key="tag">
+                                                                    <span class="badge bg-secondary-lt d-inline-flex align-items-center gap-1">
+                                                                        <span x-text="tag"></span>
+                                                                        <button type="button" class="btn-close" :aria-label="removeTagLabel(tag)" @click="removeTag(field, tag)"></button>
+                                                                    </span>
+                                                                </template>
+                                                            </div>
+                                                            <input
+                                                                :id="controlId(field)"
+                                                                type="text"
+                                                                class="form-control"
+                                                                maxlength="50"
+                                                                autocomplete="off"
+                                                                placeholder="{{ __('Type a tag, then press Enter') }}"
+                                                                :value="draftOf(field)"
+                                                                @input="onDraft(field, $event)"
+                                                                @keydown.enter.prevent="commitTag(field)"
+                                                                @keydown.comma.prevent="commitTag(field)"
+                                                                @blur="commitTag(field)"
+                                                            >
+                                                        </div>
+                                                    </template>
+
+                                                    <template x-if="control(field) === 'rating'">
+                                                        <div class="d-flex gap-1" role="group" :aria-label="field.name">
+                                                            <template x-for="grade in scale(field)" :key="grade">
+                                                                <button
+                                                                    type="button"
+                                                                    :class="starClass(field, grade)"
+                                                                    :aria-pressed="isRated(field, grade) ? 'true' : 'false'"
+                                                                    :aria-label="starLabel(field, grade)"
+                                                                    @click="setRating(field, grade)"
+                                                                    x-text="starGlyph(field, grade)"
+                                                                ></button>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+
+                                                    {{-- A color picker cannot be empty and fires no event for the color it opens on, so a field without a
+                                                         color shows "Set a color" (which gives it black, to move on from) instead of a picker. --}}
+                                                    <template x-if="control(field) === 'color'">
+                                                        <div class="d-flex align-items-center gap-2">
+                                                            <span class="text-secondary" x-show="!hasText(field)">{{ __('Not set') }}</span>
+                                                            <button type="button" class="btn btn-sm" :id="controlId(field)" x-show="!hasText(field)" @click="chooseColor(field)">{{ __('Set a color') }}</button>
+                                                            <input
+                                                                :id="controlId(field) + '-picker'"
+                                                                type="color"
+                                                                class="form-control form-control-color"
+                                                                x-show="hasText(field)"
+                                                                :value="inputValue(field)"
+                                                                :aria-label="field.name"
+                                                                @input="onInput(field, $event)"
+                                                            >
+                                                            <span class="font-monospace text-secondary" x-show="hasText(field)" x-text="inputValue(field)"></span>
+                                                            <button type="button" class="btn btn-sm" x-show="hasText(field)" @click="clearValue(field)">{{ __('Clear') }}</button>
+                                                        </div>
+                                                    </template>
+
+                                                    @include('partials.item-file-field')
+
+                                                    <div class="text-danger small mt-1" x-show="errorOf(field)" x-text="errorOf(field)"></div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+
+                                    <template x-if="!isForm">
+                                        <dl class="m-0">
+                                            <template x-for="cell in details" :key="cell.key">
+                                                <div class="mb-3">
+                                                    <dt class="text-secondary fw-normal small" x-text="cell.name"></dt>
+                                                    <dd class="m-0">
+                                                        @include('partials.field-value')
+                                                    </dd>
+                                                </div>
+                                            </template>
+                                        </dl>
+                                    </template>
+                                </div>
+
+                                <div id="item-panel-files" :role="panelRole" :aria-labelledby="panelLabel('files')" :tabindex="panelTabIndex" x-show="onFiles">
+                                    @include('partials.item-attachments')
+                                </div>
+
+                                <div id="item-panel-history" :role="panelRole" :aria-labelledby="panelLabel('history')" :tabindex="panelTabIndex" x-show="onHistory">
+                                    @include('partials.item-history')
+                                </div>
+                            </div>
                         </template>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-outline-danger me-auto" x-show="canDeleteItem" @click="askDelete" :disabled="busy">{{ __('Delete') }}</button>
-                        <button type="button" class="btn" x-show="isForm && !confirming" data-bs-dismiss="modal">{{ __('Cancel') }}</button>
+                        <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal" :disabled="busy">{{ __('Cancel') }}</button>
                         <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
-                        <button type="submit" class="btn btn-primary" x-show="isForm && !confirming" :disabled="busy">{{ __('Save') }}</button>
+                        <button type="submit" class="btn btn-primary" x-show="isForm && !asking" :disabled="busy || uploading">{{ __('Save') }}</button>
                         {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor
                              is put on the confirming button the moment the question is asked. --}}
                         <template x-if="confirming">
@@ -386,7 +430,18 @@
                         <template x-if="confirming">
                             <button type="button" class="btn btn-danger" x-ref="confirmDelete" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
                         </template>
+                        <template x-if="isRemoving">
+                            <button type="button" class="btn" @click="cancelRemove" :disabled="busy">{{ __('Cancel') }}</button>
+                        </template>
+                        <template x-if="isRemoving">
+                            <button type="button" class="btn btn-danger" x-ref="confirmRemove" @click="confirmRemove" :disabled="busy">{{ __('Delete the file') }}</button>
+                        </template>
                     </div>
+
+                    {{-- The file chooser of the browser, opened by the buttons that add a file (resources/js/item/files.js). --}}
+                    <template x-if="canEdit">
+                        <input type="file" hidden tabindex="-1" x-ref="picker" @change="onPicked($event)">
+                    </template>
                 </form>
             </div>
         </div>

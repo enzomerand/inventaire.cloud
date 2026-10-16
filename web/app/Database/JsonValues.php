@@ -57,6 +57,13 @@ use WeakMap;
  *
  * The SQL is handed to the builder as {@see RawSql}. {@see ItemQuery} builds the sorts, filters and totals of the list of
  * items from these methods and writes none itself.
+ *
+ * It also edits the JSON object of a column in bulk, for every row a query matches, so that nothing has to be read into PHP
+ * and written back row by row ({@see self::whereHolds()}, {@see self::whereHoldsOnly()}, {@see self::withoutKey()} and
+ * {@see self::withKeyNull()}): the history of the items uses it to forget a deleted field. Those take the column and the key
+ * they edit, both checked (a lowercase name made of letters, digits and underscores: the ULID of a field, or a fixed name),
+ * since they end up in the SQL. The columns are `json` (the history keeps them whole, never searched), which PostgreSQL edits
+ * as `jsonb` and assigns back: the result of the edit is `jsonb`, which a `json` column takes on assignment.
  */
 final class JsonValues
 {
@@ -65,6 +72,9 @@ final class JsonValues
 
     /** What a key looks like: the lowercase ULID of a field (26 characters of the alphabet of ULIDs, lowercase). */
     private const KEY_PATTERN = '/^[0-9a-z]{26}$/D';
+
+    /** What the name of a column or of a key looks like when a JSON object is edited in bulk: lowercase letters, digits and underscores. */
+    private const NAME_PATTERN = '/^[0-9a-z_]{1,64}$/D';
 
     /** The comparisons {@see self::whereNumber()} and {@see self::whereText()} accept. */
     private const OPERATORS = ['=', '>=', '<='];
@@ -330,6 +340,70 @@ final class JsonValues
     }
 
     /**
+     * Keeps the rows whose JSON object, in the column, holds the key.
+     *
+     * @param  QueryBuilder  $query  A query on the table that has the column.
+     *
+     * @throws InvalidArgumentException When the column or the key is not a lowercase name.
+     */
+    public function whereHolds(QueryBuilder $query, string $column, string $key): void
+    {
+        $this->driver();
+
+        $query->whereJsonContainsKey($this->name($column).'->'.$this->name($key));
+    }
+
+    /**
+     * Keeps the rows whose JSON object, in the column, holds the key and nothing else: the ones that taking the key out
+     * leaves empty (an object that was empty already is not one of them).
+     *
+     * @param  QueryBuilder  $query  A query on the table that has the column.
+     *
+     * @throws InvalidArgumentException When the column or the key is not a lowercase name.
+     */
+    public function whereHoldsOnly(QueryBuilder $query, string $column, string $key): void
+    {
+        $this->whereHolds($query, $column, $key);
+
+        $wrapped = $this->connection->getQueryGrammar()->wrap($this->name($column));
+
+        // JSON is not comparable on PostgreSQL, JSONB is; MySQL and MariaDB count the keys.
+        $query->whereRaw(new RawSql($this->driver() === 'pgsql'
+            ? "({$wrapped}::jsonb - '{$this->name($key)}'::text) = '{}'::jsonb"
+            : "json_length({$wrapped}) = 1"));
+    }
+
+    /**
+     * The SQL of the JSON object of the column without the key, to assign to the column of the rows
+     * {@see self::whereHolds()} keeps: `("changes"::jsonb - 'key'::text)` on PostgreSQL, ``json_remove(`changes`, '$."key"')``
+     * on MySQL and MariaDB.
+     *
+     * @throws InvalidArgumentException When the column or the key is not a lowercase name.
+     */
+    public function withoutKey(string $column, string $key): RawSql
+    {
+        $wrapped = $this->connection->getQueryGrammar()->wrap($this->name($column));
+        $name = $this->name($key);
+
+        return new RawSql($this->driver() === 'pgsql' ? "({$wrapped}::jsonb - '{$name}'::text)" : "json_remove({$wrapped}, '$.\"{$name}\"')");
+    }
+
+    /**
+     * The SQL of the JSON object of the column with the key set to JSON `null`, to assign to the column of the rows that
+     * hold it: ``jsonb_set("changes"::jsonb, '{"key"}', 'null'::jsonb)`` on PostgreSQL, ``json_set(`changes`, '$."key"', null)``
+     * on MySQL and MariaDB (a null given to it is the JSON `null`, not the removal of the key).
+     *
+     * @throws InvalidArgumentException When the column or the key is not a lowercase name.
+     */
+    public function withKeyNull(string $column, string $key): RawSql
+    {
+        $wrapped = $this->connection->getQueryGrammar()->wrap($this->name($column));
+        $name = $this->name($key);
+
+        return new RawSql($this->driver() === 'pgsql' ? "jsonb_set({$wrapped}::jsonb, '{\"{$name}\"}', 'null'::jsonb)" : "json_set({$wrapped}, '$.\"{$name}\"', null)");
+    }
+
+    /**
      * Whether the PostgreSQL connection has the ICU collation, asked to the database the first time and kept for the
      * connection after that.
      */
@@ -366,6 +440,16 @@ final class JsonValues
     private function checked(string $key): string
     {
         return preg_match(self::KEY_PATTERN, $key) === 1 ? $key : throw new InvalidArgumentException('A JSON key must be the lowercase ULID of a field.');
+    }
+
+    /**
+     * A name of a column or of a key, once it is known to be a lowercase one.
+     *
+     * @throws InvalidArgumentException When it is not.
+     */
+    private function name(string $name): string
+    {
+        return preg_match(self::NAME_PATTERN, $name) === 1 ? $name : throw new InvalidArgumentException('A column and a JSON key must be lowercase names.');
     }
 
     /**

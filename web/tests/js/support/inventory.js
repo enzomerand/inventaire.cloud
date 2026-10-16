@@ -29,6 +29,8 @@ const QUERY_KINDS = {
     phone: ['text', false],
     color: ['text', false],
     barcode: ['text', false],
+    file: ['files', false],
+    photo: ['files', false],
 };
 
 /**
@@ -111,6 +113,25 @@ export function item(id, values = {}) {
     return { id, values, created_at: '2026-10-15T10:00:00Z', updated_at: '2026-10-15T10:00:00Z' };
 }
 
+/** An attachment as `ItemResource` describes it: a JPEG with a thumbnail, unless the test says otherwise. */
+export function attachment(id, fieldId = null, extra = {}) {
+    return {
+        id,
+        field: fieldId,
+        name: id + '.jpg',
+        mime: 'image/jpeg',
+        size: 2048,
+        width: 640,
+        height: 480,
+        has_thumbnail: true,
+        uploaded_at: '2026-10-15T11:30:00Z',
+        uploaded_by: null,
+        url: `/api/v1/attachments/${id}`,
+        thumbnail_url: `/api/v1/attachments/${id}/thumbnail`,
+        ...extra,
+    };
+}
+
 /** What `GET /api/v1/inventories/{inventory}` answers. */
 export function inventoryAnswer(fields = FIELDS, itemsCount = undefined) {
     return { data: { id: 'tools', name: 'Tools', items_count: itemsCount, fields } };
@@ -136,10 +157,13 @@ export function page(
  * runs at once.
  *
  * @param {() => Record<string, any>} factory The component function.
- * @param {{ canEdit?: boolean }} [options]
+ * @param {{ canEdit?: boolean, maxAttachmentSize?: number, laterTick?: boolean }} [options] `maxAttachmentSize`: the largest
+ *   file the page says the server takes, in bytes (the page says nothing when not given). `laterTick`: `$nextTick` runs the
+ *   function after the code that asked is done, as Alpine's does, instead of at once (which hides the bugs of what is
+ *   assumed to have happened by the time the function runs).
  * @returns {Record<string, any>}
  */
-export function mountComponent(factory, { canEdit = true } = {}) {
+export function mountComponent(factory, { canEdit = true, maxAttachmentSize = undefined, laterTick = false } = {}) {
     const component = factory();
 
     const root = document.createElement('div');
@@ -152,13 +176,19 @@ export function mountComponent(factory, { canEdit = true } = {}) {
         canEdit: canEdit ? '1' : '0',
         canManageFields: '1',
     });
+
+    if (maxAttachmentSize !== undefined) {
+        root.dataset.maxAttachmentSize = String(maxAttachmentSize);
+    }
+
     component.$root = root;
     component.$refs = {
         modal: document.createElement('div'),
         filters: document.createElement('div'),
         search: document.createElement('input'),
+        picker: document.createElement('input'),
     };
-    component.$nextTick = (callback) => callback();
+    component.$nextTick = laterTick ? (callback) => void queueMicrotask(callback) : (callback) => callback();
     document.documentElement.lang = 'en';
     // The component keeps its search, sort and filters in the address: every test starts from a clean one.
     window.history.replaceState(null, '', '/');

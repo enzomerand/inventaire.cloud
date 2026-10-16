@@ -26,6 +26,8 @@ describe('how the list sorts and filters each type of field', function (): void 
             'select' => QueryKind::Choice,
             'multiselect' => QueryKind::Choices,
             'tags' => QueryKind::Tags,
+            'file' => QueryKind::Files,
+            'photo' => QueryKind::Files,
         ];
         $kinds = [];
 
@@ -48,7 +50,7 @@ describe('how the list sorts and filters each type of field', function (): void 
         expect($summable)->toBe(['number', 'money']);
     });
 
-    it('cannot sort what holds several values', function (): void {
+    it('cannot sort what holds several values, or files', function (): void {
         $sortable = array_map(fn (QueryKind $kind): bool => $kind->sortable(), QueryKind::cases());
 
         expect(array_combine(array_column(QueryKind::cases(), 'value'), $sortable))->toBe([
@@ -59,6 +61,7 @@ describe('how the list sorts and filters each type of field', function (): void 
             'choice' => true,
             'choices' => false,
             'tags' => false,
+            'files' => false,
         ]);
     });
 });

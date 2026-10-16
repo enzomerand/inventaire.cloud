@@ -63,8 +63,14 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  *
  * Creating an inventory locks its workspace (3) to count the workspace's inventories, and nothing below. An item
  * write locks the account of the person who writes it (2: the item's author columns are foreign keys, which lock that
- * row when the item is saved; see `Items`), then the inventory, then, for an update, which merges into what is stored,
- * the item. Deleting a workspace or an account reaches the inventories, fields and items through the foreign keys'
+ * row when the item is saved; see {@see self::author()}), then the inventory, then, for an update, which merges into
+ * what is stored, the item.
+ *
+ * The files of the items count against the storage of their workspace, a counter kept on the workspace's row
+ * (`storage_used`). Whatever adds or removes a file, or removes what holds files (an item, a file or photo field, an
+ * inventory), therefore locks the workspace (3) *before* the inventory (5) and the item (6), after the account (2): it
+ * is the same order, with one more level taken, and it makes the check of the quota and the counter one decision under
+ * one lock. Writes that cannot touch a file (a text field, an item with nothing attached) do not take the workspace. Deleting a workspace or an account reaches the inventories, fields and items through the foreign keys'
  * cascade, after its own locks, which is the order above; it removes everything the workspace holds in the one
  * transaction (an inventory at its quota of items makes it a long one: accepted, since deleting a workspace is rare and
  * the writers it waits for are waiting for the same inventory rows).
@@ -192,6 +198,17 @@ final class Locks
     }
 
     /**
+     * Locks one workspace and returns it, or fails the way a route binding does when it is gone (a 404): a request that
+     * waited for the lock of a workspace that was deleted meanwhile finds nothing to write to.
+     *
+     * @throws ModelNotFoundException When the workspace no longer exists.
+     */
+    public function workspace(int|string $id): Workspace
+    {
+        return $this->workspaces([$id])->first() ?? throw (new ModelNotFoundException)->setModel(Workspace::class, [$id]);
+    }
+
+    /**
      * Locks inventories and returns the ones that exist, by id. Ids of inventories that are gone are skipped.
      *
      * Every write to an inventory or to what it holds starts here (see the order in the class), so writes to one
@@ -237,6 +254,42 @@ final class Locks
         $items = $ids === [] ? new Collection : Item::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
         return $items;
+    }
+
+    /**
+     * Locks the account of the person who writes to the content of a workspace, before anything else of that write.
+     *
+     * An item records who wrote it (`created_by`, `updated_by`: foreign keys to the accounts), and so does a file
+     * (`uploaded_by`) and an entry of the history (`user_id`): the database takes a shared lock on that account's row when
+     * the row is saved. Taken after the inventory's, it would go back up the order above (accounts come first): deleting
+     * that account holds its row and then needs the inventory to delete what is in it, while this holds the inventory
+     * and waits for the row. Taking the row first keeps the order, and an account deleted meanwhile is found out here,
+     * not by a failing foreign key.
+     *
+     * @throws ModelNotFoundException When the account was deleted in the meantime.
+     */
+    public function author(User $author): void
+    {
+        if ($this->users([$author->getKey()])->isEmpty()) {
+            throw (new ModelNotFoundException)->setModel(User::class, [$author->getKey()]);
+        }
+    }
+
+    /**
+     * Locks an item and returns it as it is now, found in the inventory it must belong to (an inventory that is locked
+     * already: the item is the last level of the order above).
+     *
+     * @throws ModelNotFoundException When the item was deleted meanwhile, or is not in that inventory.
+     */
+    public function itemOf(Inventory $inventory, Item $item): Item
+    {
+        $locked = $this->items([$item->getKey()])->first();
+
+        if ($locked === null || (int) $locked->inventory_id !== (int) $inventory->getKey()) {
+            throw (new ModelNotFoundException)->setModel(Item::class, [$item->getKey()]);
+        }
+
+        return $locked;
     }
 
     /**

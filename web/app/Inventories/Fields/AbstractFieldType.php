@@ -108,6 +108,14 @@ abstract class AbstractFieldType implements FieldType
     }
 
     /**
+     * Sent with the item, unless the type says otherwise.
+     */
+    public function filledByUpload(): bool
+    {
+        return false;
+    }
+
+    /**
      * What a type that is stored as a plain string gives to the search: the string.
      */
     protected function stringSearchText(mixed $stored): ?string

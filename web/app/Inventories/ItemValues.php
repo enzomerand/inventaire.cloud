@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories;
 
+use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
 use App\Models\InventoryField;
 use Illuminate\Support\Collection;
@@ -20,6 +21,8 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  * - a key that is not a field of the inventory is refused (`values.<key>`), never ignored; the ULID of a field is found
  *   whatever its case, as it is in a URL (ULIDs are case-insensitive and stored in lowercase);
  * - an empty value (null, an empty text, an empty list) clears the field: the key is removed, nothing empty is stored;
+ * - a key that is a file or photo field is refused whatever it holds (`values.<key>`): the files of such a field are added by
+ *   uploading them, which keeps its value (see {@see FieldType::filledByUpload()}); an update leaves that value alone;
  * - a field that is required must have a value when the item is created, and cannot be cleared when the key is sent
  *   (an update that does not mention it leaves it alone, whatever the item held);
  * - the other values go through the rules of the type of their field, which name the field in their messages, and are
@@ -66,6 +69,7 @@ final class ItemValues
         $sent = [];
         $unknown = [];
         $repeated = [];
+        $uploaded = [];
 
         foreach ($input as $key => $value) {
             $ulid = strtolower((string) $key);
@@ -76,6 +80,10 @@ final class ItemValues
                 $repeated[] = (string) $key;
             } else {
                 $sent[$ulid] = $value;
+
+                if ($this->types->get($writable[$ulid]->type)->filledByUpload()) {
+                    $uploaded[] = (string) $key;
+                }
             }
         }
 
@@ -92,6 +100,12 @@ final class ItemValues
             }
 
             $type = $this->types->get($field->type);
+
+            // Never judged as a value: refused below when it was sent, left alone otherwise.
+            if ($type->filledByUpload()) {
+                continue;
+            }
+
             $value = $given ? $type->prepare($sent[$ulid], $field) : null;
 
             $empty = $type->isEmpty($value);
@@ -109,13 +123,17 @@ final class ItemValues
         }
 
         $validator = Validator::make(['values' => $prepared], $rules, [], $names);
-        $validator->after(function (ValidatorInstance $validator) use ($unknown, $repeated): void {
+        $validator->after(function (ValidatorInstance $validator) use ($unknown, $repeated, $uploaded): void {
             foreach (array_slice($unknown, 0, self::MAX_UNKNOWN_REPORTED) as $key) {
                 $validator->errors()->add("values.{$key}", __('This field does not exist in this inventory.'));
             }
 
             foreach (array_slice($repeated, 0, self::MAX_UNKNOWN_REPORTED) as $key) {
                 $validator->errors()->add("values.{$key}", __('This field is given more than once.'));
+            }
+
+            foreach (array_slice($uploaded, 0, self::MAX_UNKNOWN_REPORTED) as $key) {
+                $validator->errors()->add("values.{$key}", __('This field is filled by uploading files.'));
             }
         });
         $validator->validate();

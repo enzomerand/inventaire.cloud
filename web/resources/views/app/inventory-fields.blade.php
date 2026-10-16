@@ -152,7 +152,8 @@
                             <div class="text-danger small mt-1" x-show="errorOf('type')" x-text="errorOf('type')"></div>
                         </div>
 
-                        <div class="mb-3">
+                        {{-- The photo and file fields are filled by uploading files, which an item can be saved without: never required. --}}
+                        <div class="mb-3" x-show="canRequire">
                             <label class="form-check">
                                 <input class="form-check-input" type="checkbox" x-model="form.required">
                                 <span class="form-check-label">{{ __('Required') }}</span>
@@ -223,6 +224,19 @@
                                     </template>
                                 </select>
                                 <div class="text-danger small mt-1" x-show="errorOf('options.max')" x-text="errorOf('options.max')"></div>
+                            </div>
+                        </template>
+
+                        <template x-if="hasOption('max_files')">
+                            <div class="mb-3">
+                                <label class="form-label" for="field-max-files">{{ __('Files allowed') }}</label>
+                                <select id="field-max-files" :class="selectClass('options.max_files')" @change="pick(form.options, 'max_files', $event)">
+                                    <template x-for="count in fileMaxima" :key="count">
+                                        <option :value="count" :selected="form.options.max_files === count" x-text="count"></option>
+                                    </template>
+                                </select>
+                                <div class="form-hint">{{ __('How many files an item can hold in this field, from 1 to 10. Lowering it keeps the files already added.') }}</div>
+                                <div class="text-danger small mt-1" x-show="errorOf('options.max_files')" x-text="errorOf('options.max_files')"></div>
                             </div>
                         </template>
 

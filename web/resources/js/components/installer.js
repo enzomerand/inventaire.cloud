@@ -275,19 +275,30 @@ export default function installer() {
         },
 
         /**
-         * @param {{ ok: boolean }} item A requirement.
+         * The word on the badge of a requirement: met, met in a degraded way (a warning, which never stops the installation),
+         * or not met.
+         *
+         * @param {{ ok: boolean, warning?: boolean }} item A requirement.
          * @returns {string}
          */
         requirementLabel(item) {
-            return t(item.ok ? 'install.requirement.ok' : 'install.requirement.missing');
+            if (!item.ok) {
+                return t('install.requirement.missing');
+            }
+
+            return t(item.warning === true ? 'install.requirement.warning' : 'install.requirement.ok');
         },
 
         /**
-         * @param {{ ok: boolean }} item A requirement.
+         * @param {{ ok: boolean, warning?: boolean }} item A requirement.
          * @returns {string}
          */
         requirementClass(item) {
-            return item.ok ? 'bg-green-lt' : 'bg-red-lt';
+            if (!item.ok) {
+                return 'bg-red-lt';
+            }
+
+            return item.warning === true ? 'bg-yellow-lt' : 'bg-green-lt';
         },
 
         /**

@@ -9,6 +9,7 @@ use App\Http\Requests\Inventories\ListItemsRequest;
 use App\Http\Requests\Inventories\SaveItemRequest;
 use App\Http\Resources\ItemResource;
 use App\Http\Responses\ApiError;
+use App\Inventories\Attachments\Attachments;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Inventories\ItemQuery;
 use App\Inventories\Items;
@@ -50,22 +51,25 @@ final class ItemController extends Controller
      * `meta.totals` then holds the sum of each over all the items that match (not only the page), keyed by the ULID of
      * the field. Totals are opt-in because they cost a pass over the values of every item for each field: without
      * `totals`, `meta` has no `totals` and the query is not run. `422` (`totals.<position>`) for a name that is no field
-     * of the inventory or a field that does not add up.
+     * of the inventory or a field that does not add up. Each item comes with its files (`attachments`). `meta.limits` tells
+     * what a file may weigh (`attachment_size`, bytes) and how many one item may hold (`attachments_per_item`).
      */
     public function index(ListItemsRequest $request, Inventory $inventory): AnonymousResourceCollection
     {
         $fields = $inventory->fields()->get();
-        $items = $inventory->items();
+        // The files of the page's items, and the names of those who uploaded them, come in two more queries, not two per item.
+        $items = $inventory->items()->with('attachments.uploader:id,name');
         $this->search->restrict($items, (string) $request->validated('q', ''));
         $totalled = $this->query->apply($items, $fields, $request->validated());
         $page = $items->paginate(Items::PER_PAGE, Items::LIST_COLUMNS)->withQueryString();
-        $list = ItemResource::collection($page->through(fn (Item $item): ItemResource => new ItemResource($item, $fields)));
+        $list = ItemResource::collection($page->through(fn (Item $item): ItemResource => new ItemResource($item, $fields, $inventory)));
+        $meta = ['limits' => Attachments::limits()];
 
         if ($totalled !== []) {
-            $list->additional(['meta' => ['totals' => $this->query->totals($items, $fields, $totalled)]]);
+            $meta['totals'] = $this->query->totals($items, $fields, $totalled);
         }
 
-        return $list;
+        return $list->additional(['meta' => $meta]);
     }
 
     /**
@@ -123,6 +127,6 @@ final class ItemController extends Controller
      */
     private function describe(Inventory $inventory, Item $item): ItemResource
     {
-        return new ItemResource($item, $inventory->fields()->get());
+        return new ItemResource($item, $inventory->fields()->get(), $inventory);
     }
 }

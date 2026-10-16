@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
 
 describe('the tables', function (): void {
     it('have the columns the application relies on', function (): void {
-        expect(Schema::getColumnListing('workspaces'))->toEqualCanonicalizing(['id', 'ulid', 'name', 'created_at', 'updated_at'])
+        expect(Schema::getColumnListing('workspaces'))->toEqualCanonicalizing(['id', 'ulid', 'name', 'storage_used', 'created_at', 'updated_at'])
             ->and(Schema::getColumnListing('workspace_user'))->toEqualCanonicalizing(['id', 'workspace_id', 'user_id', 'role', 'created_at', 'updated_at'])
             ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeTrue();
     });
@@ -64,7 +64,13 @@ describe('the migrations', function (): void {
         $deletionCodes = require database_path('migrations/2026_10_15_300000_create_account_deletion_codes_table.php');
         // Inventories hang from workspaces: they go first on the way down and come last on the way up.
         $inventories = require database_path('migrations/2026_10_20_100000_create_inventories_tables.php');
+        // The history and the files hang from items, and the storage counter from workspaces: they go first as well.
+        $revisions = require database_path('migrations/2026_10_22_000000_create_item_revisions_table.php');
+        $attachments = require database_path('migrations/2026_10_22_000100_create_attachments_table.php');
+        $storage = require database_path('migrations/2026_10_22_000200_add_storage_used_to_workspaces.php');
 
+        $attachments->down();
+        $revisions->down();
         $inventories->down();
         $deletionCodes->down();
         $workspaces->down();
@@ -77,8 +83,11 @@ describe('the migrations', function (): void {
                 ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeFalse();
         } finally {
             $workspaces->up();
+            $storage->up();
             $deletionCodes->up();
             $inventories->up();
+            $revisions->up();
+            $attachments->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\AccountDeletionController;
 use App\Http\Controllers\Api\V1\AccountExportController;
 use App\Http\Controllers\Api\V1\Admin\SettingsController as AdminSettingsController;
 use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Api\V1\AttachmentController;
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Api\V1\FieldTypeController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryFieldController;
 use App\Http\Controllers\Api\V1\ItemController;
+use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
@@ -74,6 +76,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::get('/inventories/{inventory}/items/{item}', [ItemController::class, 'show'])->name('inventories.items.show');
             Route::patch('/inventories/{inventory}/items/{item}', [ItemController::class, 'update'])->name('inventories.items.update');
             Route::delete('/inventories/{inventory}/items/{item}', [ItemController::class, 'destroy'])->name('inventories.items.destroy');
+            Route::get('/inventories/{inventory}/items/{item}/revisions', [ItemRevisionController::class, 'index'])->name('inventories.items.revisions.index');
+
+            Route::post('/inventories/{inventory}/items/{item}/attachments', [AttachmentController::class, 'store'])->middleware('throttle:attachment-upload')->name('inventories.items.attachments.store');
+            Route::get('/inventories/{inventory}/items/{item}/attachments/{attachment}', [AttachmentController::class, 'show'])->name('inventories.items.attachments.show');
+            Route::get('/inventories/{inventory}/items/{item}/attachments/{attachment}/thumbnail', [AttachmentController::class, 'thumbnail'])->name('inventories.items.attachments.thumbnail');
+            Route::delete('/inventories/{inventory}/items/{item}/attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('inventories.items.attachments.destroy');
         });
 
         // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a

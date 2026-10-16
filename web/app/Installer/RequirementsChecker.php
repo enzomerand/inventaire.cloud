@@ -16,8 +16,8 @@ use Illuminate\Foundation\Application;
  */
 final class RequirementsChecker
 {
-    /** Extensions the application cannot run without. */
-    private const EXTENSIONS = ['mbstring', 'openssl', 'tokenizer', 'xml', 'ctype', 'json', 'bcmath', 'fileinfo', 'intl', 'zip', 'curl'];
+    /** Extensions the application cannot run without. GD is the only image library it uses (thumbnails): Imagick does not stand in for it. */
+    private const EXTENSIONS = ['mbstring', 'openssl', 'tokenizer', 'xml', 'ctype', 'json', 'bcmath', 'fileinfo', 'intl', 'zip', 'curl', 'gd'];
 
     /** @var Closure(string): bool */
     private readonly Closure $extensionLoaded;
@@ -56,7 +56,8 @@ final class RequirementsChecker
             $requirements[] = $this->extension($extension);
         }
 
-        $requirements[] = $this->anyOf('image-library', __('Image library: GD (gd) or Imagick (imagick)'), ['gd', 'imagick']);
+        // Optional: without it the application runs, but the thumbnails of photos taken sideways are not turned upright.
+        $requirements[] = $this->recommendedExtension('exif', __('Recommended: without the :name extension, the thumbnails of photos taken sideways are not turned upright.', ['name' => 'exif']));
 
         $requirements[] = $this->writable('storage', __('Writable folder: :path', ['path' => 'storage/']), $this->app->storagePath(), is_dir($this->app->storagePath()) && is_writable($this->app->storagePath()));
 
@@ -130,6 +131,22 @@ final class RequirementsChecker
         }
 
         return new Requirement('ext-'.$name, $label, false, __('Install or enable the :name extension.', ['name' => $name]));
+    }
+
+    /**
+     * An extension the application can run without: met either way, with a warning when it is missing.
+     *
+     * @param  string  $consequence  Translated: what is lost without it.
+     */
+    private function recommendedExtension(string $name, string $consequence): Requirement
+    {
+        $label = __('PHP extension: :name', ['name' => $name]);
+
+        if (($this->extensionLoaded)($name)) {
+            return new Requirement('ext-'.$name, $label, true);
+        }
+
+        return new Requirement('ext-'.$name, $label, true, $consequence, warning: true);
     }
 
     /**

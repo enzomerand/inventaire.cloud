@@ -176,3 +176,76 @@
     outline: 2px solid var(--tblr-primary);
     outline-offset: 1px;
 }
+
+/*
+ * Files. The thumbnail of a photo (small in a cell, larger in the dialog of an item), the box that stands for a file with
+ * no thumbnail, the picture on top of a card of the gallery, and the tile of a photo in a form, which carries the button
+ * that removes it. Blade Tabler icons must not receive a class attribute: the box that holds one sizes it.
+ */
+.app-thumb,
+.app-thumb-lg {
+    display: inline-block;
+    flex: none;
+    width: 2rem;
+    height: 2rem;
+    object-fit: cover;
+    border: 1px solid var(--tblr-border-color);
+    border-radius: var(--tblr-border-radius);
+    background: var(--tblr-bg-surface-secondary);
+    vertical-align: middle;
+}
+
+.app-thumb-lg {
+    width: 4.5rem;
+    height: 4.5rem;
+}
+
+/* The box that stands for a file with no thumbnail centers its icon. */
+.app-thumb.app-file-icon,
+.app-thumb-lg.app-file-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.app-file-icon svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.app-thumb-lg.app-file-icon svg {
+    width: 2rem;
+    height: 2rem;
+}
+
+.app-cover {
+    width: 100%;
+    height: 10rem;
+    object-fit: cover;
+}
+
+.app-photo-tile {
+    position: relative;
+}
+
+/*
+ * The remove button of a photo tile. .btn-close draws its cross with a mask of 0.75 em, so the mark stays compact, while the
+ * box that takes the click is 1.5 rem square (24 CSS pixels, the minimum of WCAG 2.5.8) in the corner of the tile.
+ */
+.app-tile-remove {
+    position: absolute;
+    top: 0;
+    inset-inline-end: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border-radius: 50%;
+    background-color: var(--tblr-bg-surface);
+    background-size: 0.625rem;
+}
+
+/* A flexible column next to an icon or a button: it shrinks, and a long name wraps instead of widening the dialog. */
+.app-grow {
+    flex: 1 1 auto;
+    min-width: 0;
+}

@@ -30,6 +30,12 @@ use stdClass;
  * inventories are those of every workspace the person belongs to, whatever their role in it: they see them in the
  * application.
  *
+ * What the person wrote in a workspace is counted there, since the history of an item and its files are data about them
+ * (right of access) that the items' export does not carry: `revisions_written` is the number of lines of the history of
+ * items that they authored (the oldest ones of an item are deleted when it has more than the history keeps), and
+ * `files_uploaded` the `count` and the total size in `bytes` of the files they uploaded and that are still attached. Both
+ * are zero in a workspace where they wrote nothing. They are an addition to the document, which keeps its version.
+ *
  * Besides the profile and the workspaces it holds what the application keeps about the account's access: the
  * sessions it has in the database (network address, browser and last activity, never the session id, which is a
  * credential) and the metadata of its API tokens (name, abilities, dates, never the token or its hash).
@@ -80,14 +86,18 @@ final class AccountExport
     {
         $memberships = $this->workspaces->memberships($user);
 
+        $workspaceIds = array_map(fn (Membership $membership): int => $membership->workspace->getKey(), $memberships);
+
         // Two queries for all the workspaces (the inventories, which carry the number of their items, then their fields), not
-        // two per workspace.
+        // two per workspace; and one more for each of the things the person wrote.
         $inventories = Inventory::query()
-            ->whereIn('workspace_id', array_map(fn (Membership $membership): int => $membership->workspace->getKey(), $memberships))
+            ->whereIn('workspace_id', $workspaceIds)
             ->with('fields')
             ->orderBy('id')
             ->get()
             ->groupBy('workspace_id');
+        $revisions = $this->revisionsWritten($user, $workspaceIds);
+        $files = $this->filesUploaded($user, $workspaceIds);
 
         return array_map(fn (Membership $membership): array => [
             'id' => $membership->workspace->ulid,
@@ -96,8 +106,60 @@ final class AccountExport
             'is_current' => $membership->current,
             'created_at' => $membership->workspace->created_at?->toIso8601String(),
             'updated_at' => $membership->workspace->updated_at?->toIso8601String(),
+            'revisions_written' => $revisions[$membership->workspace->getKey()] ?? 0,
+            'files_uploaded' => $files[$membership->workspace->getKey()] ?? ['count' => 0, 'bytes' => 0],
             'inventories' => $this->inventories($inventories->get($membership->workspace->getKey(), new Collection)),
         ], $memberships);
+    }
+
+    /**
+     * How many lines of the history of items the person wrote, by workspace (one query).
+     *
+     * @param  list<int>  $workspaceIds
+     * @return array<int, int> Only the workspaces where they wrote some.
+     */
+    private function revisionsWritten(User $user, array $workspaceIds): array
+    {
+        $counts = [];
+
+        $rows = DB::table('item_revisions')
+            ->join('inventories', 'inventories.id', '=', 'item_revisions.inventory_id')
+            ->where('item_revisions.user_id', $user->getKey())
+            ->whereIn('inventories.workspace_id', $workspaceIds)
+            ->groupBy('inventories.workspace_id')
+            ->selectRaw('inventories.workspace_id as workspace_id, count(*) as total')
+            ->get();
+
+        foreach ($rows as $row) {
+            $counts[(int) $row->workspace_id] = (int) $row->total;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * How many files the person uploaded and what they weigh, by workspace (one query).
+     *
+     * @param  list<int>  $workspaceIds
+     * @return array<int, array{count: int, bytes: int}> Only the workspaces where they uploaded some.
+     */
+    private function filesUploaded(User $user, array $workspaceIds): array
+    {
+        $totals = [];
+
+        $rows = DB::table('attachments')
+            ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
+            ->where('attachments.uploaded_by', $user->getKey())
+            ->whereIn('inventories.workspace_id', $workspaceIds)
+            ->groupBy('inventories.workspace_id')
+            ->selectRaw('inventories.workspace_id as workspace_id, count(*) as total, sum(attachments.size) as bytes')
+            ->get();
+
+        foreach ($rows as $row) {
+            $totals[(int) $row->workspace_id] = ['count' => (int) $row->total, 'bytes' => (int) $row->bytes];
+        }
+
+        return $totals;
     }
 
     /**

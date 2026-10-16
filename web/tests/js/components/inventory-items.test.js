@@ -570,6 +570,7 @@ describe('the items of an inventory', () => {
             const link = document.createElement('a');
             const button = document.createElement('button');
             const inner = document.createElement('span');
+            link.href = '/somewhere';
             button.append(inner);
             cell.append(link, button);
 
@@ -579,6 +580,18 @@ describe('the items of an inventory', () => {
             expect(showModal).not.toHaveBeenCalled();
 
             component.openFromRow({ id: 'i1' }, { target: cell });
+
+            expect(showModal).toHaveBeenCalledTimes(1);
+        });
+
+        it('opens the item when the click was on an anchor that is no link, as the thumbnails of the files in the table are', () => {
+            const cell = document.createElement('td');
+            const thumbnail = document.createElement('a');
+            const picture = document.createElement('img');
+            thumbnail.append(picture);
+            cell.append(thumbnail);
+
+            component.openFromRow({ id: 'i1' }, { target: picture, composedPath: () => [picture, thumbnail, cell] });
 
             expect(showModal).toHaveBeenCalledTimes(1);
         });

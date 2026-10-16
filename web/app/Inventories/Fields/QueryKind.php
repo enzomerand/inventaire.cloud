@@ -58,10 +58,16 @@ enum QueryKind: string
     case Tags = 'tags';
 
     /**
+     * Files attached to the item (the list of the ULIDs of its attachments). Not sorted. A filter can only ask whether the
+     * field is empty, that is whether the item has a file in it.
+     */
+    case Files = 'files';
+
+    /**
      * Whether the values of this kind can be sorted: an item with several values has no place in an order.
      */
     public function sortable(): bool
     {
-        return $this !== self::Choices && $this !== self::Tags;
+        return $this !== self::Choices && $this !== self::Tags && $this !== self::Files;
     }
 }

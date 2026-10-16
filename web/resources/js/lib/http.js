@@ -22,6 +22,29 @@ import { redirectTo, reloadPage } from './page.js';
 /** Time after which a request is abandoned (covers connecting and reading the body). */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** The least time an upload is given before it is abandoned: a file of several megabytes on a slow connection takes longer than other requests. */
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** The time an upload is given on top of the time each 50 KB takes: the connection and the server's work on the file. */
+const UPLOAD_BASE_MS = 60_000;
+
+/** How much of a file goes up in a second, at the speed an upload is expected to have at least (50 KB/s). */
+const UPLOAD_BYTES_PER_SECOND = 50 * 1024;
+
+/**
+ * The time an upload of a file is given before it is abandoned: a minute, plus a second for each 50 KB, and never less than
+ * {@link UPLOAD_TIMEOUT_MS}. The largest file the server takes (20 MiB) is given about eight minutes, a photo of a few
+ * megabytes the two minutes of the minimum.
+ *
+ * @param {number} bytes The size of the file.
+ * @returns {number} Milliseconds.
+ */
+export function uploadTimeoutFor(bytes) {
+    const size = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+
+    return Math.max(UPLOAD_TIMEOUT_MS, UPLOAD_BASE_MS + Math.ceil(size / UPLOAD_BYTES_PER_SECOND) * 1000);
+}
+
 /** Time a feedback toast stays readable before the page reloads or redirects. */
 const NAVIGATION_DELAY_MS = 1500;
 

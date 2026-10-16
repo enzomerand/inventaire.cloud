@@ -30,8 +30,9 @@ use Throwable;
  *    serving the previous version;
  * 4. brings the derived data right ({@see DerivedData}): the text the items are
  *    searched by is built again when the way it is made changed (or for the
- *    items that have none), and the counters of items are counted again (a
- *    failure here is reported but does not fail the upgrade);
+ *    items that have none), and the counters of items and the storage counters
+ *    of workspaces are counted again (a failure here is reported but does not
+ *    fail the upgrade);
  * 5. with `--optimize`, rebuilds the caches.
  *
  * It can be run as often as needed. The exit code is 0 when the instance is up
@@ -140,7 +141,8 @@ final class UpgradeCommand extends Command
     }
 
     /**
-     * Builds again the search text of the items when it must be, and counts the items of every inventory. It runs with
+     * Builds again the search text of the items when it must be, counts the items of every inventory and adds up the files of
+     * every workspace. It runs with
      * the code and the schema of the version just installed, which the migrations cannot (they must not call the
      * application). What it did is reported, and a counter that was wrong as a warning: the cause is worth looking for.
      *
@@ -164,6 +166,12 @@ final class UpgradeCommand extends Command
 
             if ($wrong > 0) {
                 $this->components->warn(trans_choice('The item counter of :count inventory was wrong and was corrected (see the log).|The item counter of :count inventories was wrong and was corrected (see the log).', $wrong));
+            }
+
+            $wrongStorage = $derived->recountStorage();
+
+            if ($wrongStorage > 0) {
+                $this->components->warn(trans_choice('The storage counter of :count workspace was wrong and was corrected (see the log).|The storage counter of :count workspaces was wrong and was corrected (see the log).', $wrongStorage));
             }
         } catch (Throwable $exception) {
             Log::error('The derived data could not be brought right by the upgrade.', ['exception' => $exception]);

@@ -329,6 +329,7 @@ describe('the gallery of the items of an inventory', () => {
             await open([HAMMER]);
             const card = document.createElement('div');
             const link = document.createElement('a');
+            link.href = '/somewhere';
             card.append(link);
 
             component.openFromRow(component.cards[0], { target: link, composedPath: () => [link, card] });
