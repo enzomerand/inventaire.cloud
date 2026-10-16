@@ -3,10 +3,11 @@
 declare(strict_types=1);
 
 use App\Auth\AccountExport;
+use App\Inventories\Items;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-require_once __DIR__.'/../../Support/inventories.php';
+require_once __DIR__.'/../../Support/attachments.php';
 
 uses(RefreshDatabase::class);
 
@@ -140,6 +141,60 @@ describe('the inventories in the export of the account', function (): void {
 
         expect($export['version'])->toBe(AccountExport::VERSION)
             ->and(array_keys($export))->toBe(['format', 'version', 'exported_at', 'user', 'workspaces', 'sessions', 'tokens'])
-            ->and(array_keys($export['workspaces'][0]))->toBe(['id', 'name', 'role', 'is_current', 'created_at', 'updated_at', 'inventories']);
+            ->and(array_keys($export['workspaces'][0]))->toBe(['id', 'name', 'role', 'is_current', 'created_at', 'updated_at', 'revisions_written', 'files_uploaded', 'inventories']);
+    });
+});
+
+describe('what the account wrote, in the export of the account', function (): void {
+    it('counts, in each workspace, the revisions the person wrote and the files they uploaded with their weight, and nobody else\'s', function (): void {
+        attachmentDisk();
+        $team = inventoryTeam();
+        $personal = $team['editor']->workspaces()->orderBy('workspace_user.id')->firstOrFail();
+        $shop = inventoryIn($team['workspace'], 'Tools');
+        $mine = inventoryIn($personal, 'Mine');
+        $name = fieldIn($shop, 'text', 'Name');
+        $hammer = itemIn($shop, [$name->ulid => 'Hammer'], $team['editor']);
+        app(Items::class)->update($shop, $hammer, [$name->ulid => 'Sledgehammer'], $team['editor']);
+        app(Items::class)->update($shop, $hammer, [$name->ulid => 'Saw'], $team['owner']);
+        itemIn($mine, [], $team['editor']);
+        $first = attachmentTo($shop, $hammer, attachmentPdf('a.pdf'), $team['editor']);
+        $second = attachmentTo($shop, $hammer, attachmentUploadedAs('b.txt', str_repeat('b', 100)), $team['editor']);
+        attachmentTo($shop, $hammer, attachmentPdf('theirs.pdf'), $team['owner']);
+
+        $workspaces = collect(inventoryCall($this, $team['editor'], 'GET', '/api/v1/me/export')->assertOk()->json('workspaces'))->keyBy('id');
+
+        // In the shop: the creation and one change (the owner's change is not hers), then two of the three files, and the file of the owner stays out.
+        // In the personal workspace: the creation of an item, no file.
+        expect($workspaces[$team['workspace']->ulid]['revisions_written'])->toBe(2 + 2)
+            ->and($workspaces[$team['workspace']->ulid]['files_uploaded'])->toBe(['count' => 2, 'bytes' => $first->size + $second->size])
+            ->and($workspaces[$personal->ulid]['revisions_written'])->toBe(1)
+            ->and($workspaces[$personal->ulid]['files_uploaded'])->toBe(['count' => 0, 'bytes' => 0]);
+    });
+
+    it('counts nothing for a person who wrote nothing, and nothing in a workspace they are not in', function (): void {
+        attachmentDisk();
+        $team = inventoryTeam();
+        $shop = inventoryIn($team['workspace'], 'Tools');
+        attachmentTo($shop, itemIn($shop, [], $team['owner']), attachmentPdf(), $team['owner']);
+        $elsewhere = inventoryIn($team['stranger']->workspaces()->sole(), 'Hers');
+        attachmentTo($elsewhere, itemIn($elsewhere, [], $team['stranger']), attachmentPdf(), $team['stranger']);
+
+        $workspaces = inventoryCall($this, $team['viewer'], 'GET', '/api/v1/me/export')->assertOk()->json('workspaces');
+
+        expect(array_column($workspaces, 'revisions_written'))->toBe([0, 0])
+            ->and(array_column($workspaces, 'files_uploaded'))->toBe([['count' => 0, 'bytes' => 0], ['count' => 0, 'bytes' => 0]]);
+    });
+
+    it('cost the same number of queries however many workspaces there are', function (): void {
+        $person = inventoryPerson('Ada');
+        $count = fn (): int => count(statementsOf(fn () => app(AccountExport::class)->for($person)));
+        itemIn(inventoryIn($person->workspaces()->sole()), [], $person);
+        $before = $count();
+
+        foreach (range(1, 4) as $number) {
+            itemIn(inventoryIn(app(Workspaces::class)->create($person, "Shop {$number}")), [], $person);
+        }
+
+        expect($count())->toBe($before);
     });
 });
