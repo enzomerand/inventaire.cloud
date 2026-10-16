@@ -139,6 +139,8 @@ final class Imports
         try {
             $this->files->store($disk, $path, $local);
             Import::query()->whereKey($import->getKey())->update(['path' => $path]);
+            $import->setAttribute('path', $path);
+            $import->syncOriginalAttribute('path');
         } catch (Throwable $failure) {
             // The row goes first, so that nothing says there is a file; then the file, which may have been half written.
             try {
@@ -152,7 +154,7 @@ final class Imports
             throw $failure;
         }
 
-        return $import->refresh();
+        return $import;
     }
 
     /**

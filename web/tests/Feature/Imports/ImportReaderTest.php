@@ -339,7 +339,7 @@ describe('a spreadsheet', function (): void {
 });
 
 describe('a worksheet of a workbook that announces a width no sheet has', function (): void {
-    it('is refused before the sheet is filled to that width', function (string $from, string $to): void {
+    it('is refused before the sheet is filled to that width', function (string|array $from, string|array $to): void {
         $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace($from, $to, $xml));
 
         expect(fn () => importRead($path, ImportFormat::Xlsx))
@@ -348,6 +348,8 @@ describe('a worksheet of a workbook that announces a width no sheet has', functi
         'a dimension' => ['<dimension ref="A1:B1"/>', '<dimension ref="A1:ZZZZZZ1"/>'],
         'a dimension past the last column' => ['<dimension ref="A1:B1"/>', '<dimension ref="A1:XFE1"/>'],
         'the spans of a row' => ['spans="1:2"', 'spans="1:50000000"'],
+        // The only one the library does not check itself: with no dimension it fills each row to its spans, fifty million cells.
+        'the spans of a row, in a sheet with no dimension' => [['<dimension ref="A1:B1"/>', 'spans="1:2"'], ['', 'spans="1:50000000"']],
         'a cell far to the right' => ['<c r="B1"', '<c r="ZZZZZZ1"'],
         'a cell past the last column' => ['<c r="B1"', '<c r="XFE1"'],
     ]);
