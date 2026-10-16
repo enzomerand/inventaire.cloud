@@ -64,6 +64,58 @@ final class AttachmentCleanup
     }
 
     /**
+     * Counts the files of an inventory that is about to be deleted out of the storage of its workspace. Their rows go with
+     * the inventory (the foreign key cascades) and their deletion from the disk is queued by {@see self::forgetInventory()},
+     * which the `deleting` event of the inventory calls.
+     *
+     * @param  Workspace  $workspace  The workspace of the inventory, locked.
+     */
+    public function releaseInventory(Workspace $workspace, Inventory $inventory): void
+    {
+        $this->usage->move($workspace, -(int) $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->sum('size'));
+    }
+
+    /**
+     * Queues the deletion of the folder of an inventory that is being deleted, on every disk its files were written to, to be
+     * run once the transaction that deletes it is committed. Called by the `deleting` event of {@see Inventory}, so that
+     * every way of deleting an inventory through its model does it. Does nothing for an inventory that holds no file.
+     */
+    public function forgetInventory(Inventory $inventory): void
+    {
+        $disks = $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all();
+
+        if ($disks === []) {
+            return;
+        }
+
+        $workspace = (string) $this->db->table('workspaces')->where('id', $inventory->workspace_id)->value('ulid');
+
+        foreach ($disks as $disk) {
+            $this->storage->purgeAfterCommit((string) $disk, [], [AttachmentStorage::inventoryDirectory($workspace, $inventory->ulid)]);
+        }
+    }
+
+    /**
+     * Queues the deletion of the folder of a workspace that is being deleted, on every disk the files of its inventories were
+     * written to, to be run once the transaction that deletes it is committed. Called by the `deleting` event of
+     * {@see Workspace}, so that deleting a workspace, an account that owned one alone, or an account through the
+     * administration all do it. The rows go with the workspace (the foreign keys cascade); there is no counter to move.
+     */
+    public function forgetWorkspace(Workspace $workspace): void
+    {
+        $disks = $this->db->table('attachments')
+            ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
+            ->where('inventories.workspace_id', $workspace->getKey())
+            ->distinct()
+            ->pluck('attachments.disk')
+            ->all();
+
+        foreach ($disks as $disk) {
+            $this->storage->purgeAfterCommit((string) $disk, [], [AttachmentStorage::workspaceDirectory($workspace->ulid)]);
+        }
+    }
+
+    /**
      * Counts the files of a file or photo field out of the storage of its workspace, deletes their rows and queues the
      * deletion of the files and their thumbnails, to be run once the transaction that deletes the field is committed. Does
      * nothing for a field that holds no file.

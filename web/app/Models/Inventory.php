@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Items;
 use App\Models\Concerns\HasUlidRouteKey;
 use App\Policies\InventoryPolicy;
@@ -39,6 +40,17 @@ final class Inventory extends Model
 {
     /** @use HasFactory<InventoryFactory> */
     use HasFactory, HasUlidRouteKey;
+
+    /**
+     * Has the files of the inventory deleted from the disk once its deletion is committed, whichever way the model is
+     * deleted (the database cascades the rows, and fires no event for them: see {@see AttachmentCleanup}).
+     */
+    protected static function booted(): void
+    {
+        self::deleting(function (self $inventory): void {
+            app(AttachmentCleanup::class)->forgetInventory($inventory);
+        });
+    }
 
     /**
      * The attributes a new inventory starts with: no item, as the column does.

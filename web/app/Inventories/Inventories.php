@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
+use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
 use App\Models\Inventory;
 use App\Models\Workspace;
@@ -33,6 +34,7 @@ final class Inventories
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
+        private readonly AttachmentCleanup $files,
     ) {}
 
     /**
@@ -109,17 +111,22 @@ final class Inventories
     }
 
     /**
-     * Deletes an inventory, and its fields and items with it (the foreign keys cascade).
+     * Deletes an inventory, and its fields, items, history and files with it (the foreign keys cascade).
      *
-     * It goes through the model's own `delete()`, so that its events fire (what is stored for an inventory, the files of
-     * its items from lot 4c on, is purged there).
+     * The workspace is locked first (see {@see Locks}): the files of the inventory are counted out of its storage in this
+     * transaction. The inventory goes through the model's own `delete()`, so that its events fire: the `deleting` event
+     * queues the deletion of the inventory's folder on the disk, to be run once the transaction is committed.
      *
-     * @throws ModelNotFoundException When the inventory was deleted in the meantime.
+     * @throws ModelNotFoundException When the workspace or the inventory was deleted in the meantime.
      */
     public function delete(Inventory $inventory): void
     {
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($inventory): void {
-            $this->locks->inventory($inventory->getKey())->delete();
+            $workspace = $this->locks->workspace($inventory->workspace_id);
+            $locked = $this->locks->inventory($inventory->getKey());
+
+            $this->files->releaseInventory($workspace, $locked);
+            $locked->delete();
         }));
     }
 }

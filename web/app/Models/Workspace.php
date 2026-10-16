@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Attachments\WorkspaceStorage;
 use App\Models\Concerns\HasUlidRouteKey;
 use Database\Factories\WorkspaceFactory;
@@ -36,6 +37,18 @@ final class Workspace extends Model
 {
     /** @use HasFactory<WorkspaceFactory> */
     use HasFactory, HasUlidRouteKey;
+
+    /**
+     * Has the files of the workspace deleted from the disk once its deletion is committed, whichever way the model is
+     * deleted (the owner deleting it, an account that owned it alone being deleted, an administrator deleting that
+     * account): the database cascades the rows, and fires no event for them (see {@see AttachmentCleanup}).
+     */
+    protected static function booted(): void
+    {
+        self::deleting(function (self $workspace): void {
+            app(AttachmentCleanup::class)->forgetWorkspace($workspace);
+        });
+    }
 
     /**
      * The attributes a new workspace starts with: no file, as the column does.

@@ -17,7 +17,7 @@ use Throwable;
 
 /**
  * Brings right the data that is derived from other data, which `inventaire:upgrade` ({@see UpgradeCommand}) does after
- * the migrations: the text the items are searched by and the counters of items.
+ * the migrations: the text the items are searched by, the counters of items and the storage counters of workspaces.
  *
  * Both are written with the data they come from, in the same transaction, so they are right as long as the code that wrote
  * them was. They are not after an update that changes how they are made (the form of the search text, {@see SearchText::VERSION}),
@@ -121,6 +121,63 @@ final class DerivedData
         }
 
         return $corrected;
+    }
+
+    /**
+     * Adds up the sizes of the files of every workspace and corrects the storage counter of those where it differs, saying
+     * so in the log (a counter is only moved with the files, so a difference is a fault to know about, not a routine).
+     *
+     * Each workspace is one transaction under the lock of its row, which every upload and every removal of a file takes
+     * before anything else, so that neither the counter nor the files can change meanwhile. Only the rows that differ are
+     * written, with the query builder: the workspace did not change, its counter did.
+     *
+     * @return int The number of workspaces whose counter was wrong.
+     */
+    public function recountStorage(): int
+    {
+        $corrected = 0;
+
+        foreach ($this->workspaceIds() as $id) {
+            // Logged here, not in the transaction: a transaction that is run again after a deadlock must not say it twice.
+            $drift = DeadlockRetries::run(fn (): ?array => $this->db->transaction(function () use ($id): ?array {
+                $workspace = $this->locks->workspaces([$id])->first();
+
+                if ($workspace === null) {
+                    return null;
+                }
+
+                $counted = (int) $this->db->table('attachments')
+                    ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
+                    ->where('inventories.workspace_id', $id)
+                    ->sum('attachments.size');
+
+                if ($workspace->storage_used === $counted) {
+                    return null;
+                }
+
+                $this->db->table('workspaces')->where('id', $id)->update(['storage_used' => $counted]);
+
+                return ['workspace_id' => $id, 'workspace' => $workspace->ulid, 'stored' => $workspace->storage_used, 'counted' => $counted];
+            }));
+
+            if ($drift !== null) {
+                $corrected++;
+
+                Log::warning('The storage counter of a workspace was wrong: it was added up again.', $drift);
+            }
+        }
+
+        return $corrected;
+    }
+
+    /**
+     * The ids of the workspaces that exist, lowest first, read a chunk at a time.
+     *
+     * @return LazyCollection<int, int>
+     */
+    private function workspaceIds(): LazyCollection
+    {
+        return $this->db->table('workspaces')->select('id')->lazyById(self::CHUNK)->map(fn (object $row): int => (int) $row->id);
     }
 
     /**
