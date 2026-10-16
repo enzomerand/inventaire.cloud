@@ -9,7 +9,7 @@
 
     Do not put a display utility (d-flex...) on an element that carries x-show or :hidden: the utility wins and it never hides.
 --}}
-<div class="offcanvas offcanvas-end" tabindex="-1" x-ref="filters" role="dialog" aria-labelledby="item-filters-title" aria-hidden="true">
+<div class="offcanvas offcanvas-end" tabindex="-1" x-ref="filters" role="dialog" aria-labelledby="item-filters-title">
     <div class="offcanvas-header">
         <h2 class="offcanvas-title" id="item-filters-title">{{ __('Filters') }}</h2>
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="{{ __('Close') }}"></button>
