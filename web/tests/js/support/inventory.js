@@ -1,6 +1,7 @@
 /**
  * Builders for the tests of the items of an inventory: fields, items, and what the API answers for them.
  */
+import { useMemoryStorage } from './storage.js';
 
 export const INVENTORY = '/api/v1/inventories/tools';
 export const ITEMS = INVENTORY + '/items';
@@ -101,6 +102,7 @@ export function mountComponent(factory, { canEdit = true } = {}) {
     document.documentElement.lang = 'en';
     // The component keeps its search, sort and filters in the address: every test starts from a clean one.
     window.history.replaceState(null, '', '/');
+    useMemoryStorage();
 
     return component;
 }

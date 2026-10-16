@@ -19,6 +19,7 @@ import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
 import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
+import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -158,7 +159,7 @@ function render(path) {
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
         // table of the items are parts of the page of an inventory.
         .replace(
-            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-cell-editor)'\)/g,
+            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-gallery|items-cell-editor)'\)/g,
             (_match, name) => render(`partials/${name}.blade.php`),
         )
         // The tabs of the administration are not under test.
@@ -370,8 +371,10 @@ describe('the pages under the real Alpine CSP build', () => {
 
     beforeEach(() => {
         Alpine.store('workspaces').replace([]);
-        // The page of an inventory keeps its search, sort and filters in the address: every test starts from a clean one.
+        // The page of an inventory keeps its search, sort and filters in the address, and the view in the browser: every
+        // test starts from a clean one.
         window.history.replaceState(null, '', '/');
+        useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
     });
@@ -2435,6 +2438,205 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(document.querySelector('#item-inline-editor')).toBeNull();
                 expect(showModal.mock.calls[0][1].focus[0]).toContain('[data-field="notes"]');
                 expect(itemDialog().querySelector('[data-field="notes"] textarea')).not.toBeNull();
+            });
+        });
+
+        describe('the gallery', () => {
+            const cards = () => [...document.querySelectorAll('.row-cards > div > .card')];
+            const galleryBody = () => document.querySelector('.row-cards').closest('.card-body');
+            const viewButton = (label) => document.querySelector(`.btn-group button[aria-label="${label}"]`);
+            const titleOf = (card) => card.querySelector('.card-title button');
+
+            beforeEach(async () => {
+                await open({ items: [HAMMER, TRICKY], meta: { totals: { qty: '1.50', price: '19.90' } } });
+            });
+
+            it('offers the table and the gallery as two buttons, the table being pressed on a wide screen', () => {
+                expect(viewButton('Table').getAttribute('aria-pressed')).toBe('true');
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('false');
+                expect(viewButton('Table').classList.contains('active')).toBe(true);
+                expect(document.querySelector('.btn-group').getAttribute('aria-label')).toBe('View');
+                expect(visible(document.querySelector('.table-responsive'))).toBe(true);
+                expect(visible(galleryBody())).toBe(false);
+            });
+
+            it('swaps the table for responsive cards, one per item, when the gallery is chosen', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+                expect(viewButton('Table').getAttribute('aria-pressed')).toBe('false');
+                expect(visible(document.querySelector('.table-responsive'))).toBe(false);
+                expect(visible(galleryBody())).toBe(true);
+                expect(cards()).toHaveLength(2);
+                expect(cards()[0].parentElement.className).toBe('col-12 col-sm-6 col-lg-4 col-xl-3');
+            });
+
+            it('calls a card by the first text the item holds, and says "Untitled item" when it holds none', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(titleOf(cards()[0]).textContent).toBe('Hammer');
+                expect(titleOf(cards()[0]).tagName).toBe('BUTTON');
+                expect(titleOf(cards()[0]).getAttribute('aria-label')).toBe('Edit the item: Hammer');
+
+                await open({ items: [{ id: 'i9', values: { qty: '2.00' } }] });
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(titleOf(cards()[0]).textContent).toBe('Untitled item');
+            });
+
+            it('shows five other values with their labels, as the table shows them', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                const labels = [...cards()[0].querySelectorAll('dt')].map((label) => label.textContent);
+                const values = [...cards()[0].querySelectorAll('dd')].map((value) => value.textContent.trim());
+
+                expect(labels).toEqual(['Weight', 'Price', 'State', 'Parts', 'Fragile']);
+                expect(values[0]).toBe('1.50 kg');
+                expect(values[1]).toBe('€19.90');
+                expect(cards()[0].querySelector('dd .badge').textContent).toBe('New');
+            });
+
+            it('shows what was typed as text, never as markup', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(document.querySelector('.row-cards img')).toBeNull();
+                expect(window.pwned).toBeUndefined();
+                expect(titleOf(cards()[1]).textContent).toBe('<img src=x onerror="window.pwned = true">');
+            });
+
+            it('opens the form of the item when the name or the rest of the card is pressed', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                titleOf(cards()[0]).click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledTimes(1);
+                expect(showModal).toHaveBeenLastCalledWith(itemDialog());
+                expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('Edit the item');
+                expect(control('name').value).toBe('Hammer');
+
+                cards()[1].querySelector('.card-body').click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledTimes(2);
+                expect(control('name').value).toBe('<img src=x onerror="window.pwned = true">');
+            });
+
+            it('does not open the form when a link of the card is clicked', async () => {
+                const fields = [FIELDS[0], FIELDS[7]];
+                await open({ fields, items: [{ id: 'i5', values: { name: 'Saw', site: 'https://example.com/saw' } }] });
+                viewButton('Gallery').click();
+                await flush();
+
+                const link = cards()[0].querySelector('dd a');
+
+                expect(link.getAttribute('href')).toBe('https://example.com/saw');
+                expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+
+                link.click();
+                await flush();
+
+                expect(showModal).not.toHaveBeenCalled();
+            });
+
+            it('shows the totals as a line above the cards', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                const line = galleryBody().querySelector('.mb-3');
+
+                expect(visible(line)).toBe(true);
+                expect(line.textContent.replace(/\s+/g, ' ').trim()).toBe('Total Weight 1.50 kg Price €19.90');
+            });
+
+            it('keeps the toolbar, with the sort select and its direction on show, and the count and the pagination', async () => {
+                const sort = document.querySelector('#item-sort').closest('.col-12');
+
+                expect(sort.className).toContain('d-sm-none');
+
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(sort.className).not.toContain('d-sm-none');
+                expect(visible(document.querySelector('input[type="search"]'))).toBe(true);
+                expect(document.body.textContent).toContain('2 items');
+                expect(visible(document.querySelector('.card-footer'))).toBe(true);
+            });
+
+            it('keeps the choice for the inventory and writes it in the address', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(window.localStorage.getItem('inventaire.items.view:/api/v1/inventories/tools')).toBe('gallery');
+                expect(window.location.search).toBe('?view=gallery');
+
+                viewButton('Table').click();
+                await flush();
+
+                expect(visible(document.querySelector('.table-responsive'))).toBe(true);
+                expect(window.location.search).toBe('?view=table');
+            });
+
+            it('opens in the gallery when the address says so, or the choice made last, or the screen is a phone', async () => {
+                window.history.replaceState(null, '', '/?view=gallery');
+                await open({ items: [HAMMER] });
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+
+                window.history.replaceState(null, '', '/');
+                window.localStorage.setItem('inventaire.items.view:/api/v1/inventories/tools', 'gallery');
+                await open({ items: [HAMMER] });
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+
+                window.localStorage.clear();
+                window.matchMedia = () => ({ matches: true });
+                await open({ items: [HAMMER] });
+                delete window.matchMedia;
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+                expect(visible(galleryBody())).toBe(true);
+            });
+
+            it('still works when the browser refuses to keep the choice', async () => {
+                useRefusingStorage();
+
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(visible(galleryBody())).toBe(true);
+            });
+
+            it('is the same page of the same items for a viewer, whose cards open the details', async () => {
+                PAGE.abilities = { edit_items: false };
+                await open({ items: [HAMMER] });
+                viewButton('Gallery').click();
+                await flush();
+
+                titleOf(cards()[0]).click();
+                await flush();
+
+                expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('Item');
+                expect(itemDialog().querySelector('dl')).not.toBeNull();
+            });
+
+            it('is reached with the keyboard: the name of a card is a button that opens the item', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                titleOf(cards()[0]).focus();
+
+                expect(document.activeElement).toBe(titleOf(cards()[0]));
+                expect(titleOf(cards()[0]).type).toBe('button');
+
+                // A button is pressed by Enter and Space: the browser turns either into a click.
+                titleOf(cards()[0]).click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledTimes(1);
             });
         });
 

@@ -5,12 +5,14 @@
  * the parameters of `GET /api/v1/inventories/{inventory}/items` ({@link toParams}); and it is written in the address of the
  * page ({@link toSearch}) and read back from it ({@link fromSearch}), so that a reload, or the Back button, brings the
  * same view back. The address uses the very names of the API (`q`, `sort`, `direction`, `filter[<field>][<condition>]`)
- * plus `page`, so there is one format to know.
+ * plus `page` and `view`, so there is one format to know.
  *
  * Values are the canonical ones of the API (`"89.90"`, `"2026-10-15"`, `"2026-10-15T12:30:00Z"`); what a person types in a
  * box is converted to them by `filters.js`. Nothing here talks to the server: whether a field still exists, or can be sorted,
  * is for the server to say (it answers `422`), and the component starts again from {@link emptyQuery}.
  */
+
+import { parseView } from './view.js';
 
 /** Longest search the API takes (`ListItemsRequest::SEARCH_MAX_LENGTH`). */
 export const SEARCH_MAX_LENGTH = 200;
@@ -126,17 +128,21 @@ export function toParams(query, { page = null } = {}) {
 }
 
 /**
- * The query string that writes a view in the address of the page: the parameters of the API, and the page unless it is
- * the first one.
+ * The query string that writes a view in the address of the page: the parameters of the API, the page unless it is the
+ * first one, and the way the items are laid out when the person chose one.
  *
  * @param {Query} query
- * @param {{ page?: number }} [options]
+ * @param {{ page?: number, view?: import('./view.js').View | null }} [options]
  * @returns {string} Without the leading `?`; empty for the default view.
  */
-export function toSearch(query, { page = 1 } = {}) {
-    return new URLSearchParams(
-        /** @type {Record<string, string>} */ (toParams(query, { page: page > 1 ? page : null })),
-    ).toString();
+export function toSearch(query, { page = 1, view = null } = {}) {
+    const params = /** @type {Record<string, string>} */ (toParams(query, { page: page > 1 ? page : null }));
+
+    if (view !== null) {
+        params.view = view;
+    }
+
+    return new URLSearchParams(params).toString();
 }
 
 /**
@@ -145,7 +151,8 @@ export function toSearch(query, { page = 1 } = {}) {
  * address never breaks the page; whether the fields and the values it mentions are right is for the server to say.
  *
  * @param {string} search The query string, with or without its leading `?`.
- * @returns {{ query: Query, page: number }}
+ * @returns {{ query: Query, page: number, view: import('./view.js').View | null }} The way to lay the items out is null
+ *   when the address does not say.
  */
 export function fromSearch(search) {
     const params = new URLSearchParams(search);
@@ -165,7 +172,11 @@ export function fromSearch(search) {
 
     const page = Number.parseInt(params.get('page') ?? '', 10);
 
-    return { query, page: Number.isInteger(page) && page >= 1 ? Math.min(page, MAX_PAGE) : 1 };
+    return {
+        query,
+        page: Number.isInteger(page) && page >= 1 ? Math.min(page, MAX_PAGE) : 1,
+        view: parseView(params.get('view')),
+    };
 }
 
 /**

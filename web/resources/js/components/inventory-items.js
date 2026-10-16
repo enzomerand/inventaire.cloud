@@ -21,7 +21,8 @@
  * What narrows and orders the list (the search, the filters, the sort, and the address of the page that remembers them)
  * is `../grid/criteria.js`, merged into this component: the page asked for is always read with the criteria in force, an
  * older answer never replaces a newer one, and the totals of the numbers and amounts come with each page. Editing a value
- * in its cell, without the dialog, is `../grid/inline.js`.
+ * in its cell, without the dialog, is `../grid/inline.js`; laying the items out as a table or as cards is
+ * `../grid/gallery.js`.
  */
 import {
     choicesOf,
@@ -44,6 +45,7 @@ import { redirectTo } from '../lib/page.js';
 import { compose } from '../lib/compose.js';
 import gridCriteria from '../grid/criteria.js';
 import gridInline from '../grid/inline.js';
+import gridView from '../grid/gallery.js';
 import { isEmptyQuery } from '../grid/query.js';
 import { fieldFocusSelectors, momentText } from '../grid/rows.js';
 import { hasTotals, totalCells } from '../grid/totals.js';
@@ -66,7 +68,7 @@ const VALUES_PREFIX = 'values.';
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return compose(gridCriteria(), gridInline(), {
+    return compose(gridCriteria(), gridInline(), gridView(), {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -315,6 +317,8 @@ export default function inventoryItems() {
 
             const page = this.restoreQuery();
 
+            this.pickView();
+
             await Promise.all([this.loadInventory(), this.loadItems(page)]);
         },
 
@@ -460,6 +464,7 @@ export default function inventoryItems() {
                 updated: momentText(item.updated_at),
             }));
             this.totalRow = totalCells(this.fields, this.totals);
+            this.buildCards();
         },
 
         /**

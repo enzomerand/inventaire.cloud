@@ -1,5 +1,5 @@
 {{--
-    The items of an inventory as a table: one column for each field, the dates the item was added and last changed, and
+    The items of an inventory as a table (the gallery, partials/items-gallery, is the other way to lay them out): one column for each field, the dates the item was added and last changed, and
     the totals of the columns that add up (numbers and amounts) in the foot.
 
     Included in the items card of the page of an inventory (app/inventory.blade.php), so it reads the inventoryItems
@@ -11,7 +11,7 @@
     ancestor it would sit outside the scrolling area, making the whole page scroll sideways on a phone.
     Do not put a display utility (d-flex...) on an element that carries x-show or :hidden: the utility wins and it never hides.
 --}}
-<div class="table-responsive position-relative" :hidden="!hasTable" :class="tableClass" :aria-busy="busyAttribute">
+<div class="table-responsive position-relative" :hidden="!showTable" :class="tableClass" :aria-busy="busyAttribute">
     <table class="table table-vcenter card-table table-hover">
         <thead>
             <tr>

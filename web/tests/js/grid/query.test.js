@@ -82,8 +82,8 @@ describe('the query of the list of items', () => {
         it('comes back as it was written, nested filters and page included', () => {
             const query = fullQuery();
 
-            expect(fromSearch('?' + toSearch(query, { page: 4 }))).toEqual({ query, page: 4 });
-            expect(fromSearch(toSearch(query))).toEqual({ query, page: 1 });
+            expect(fromSearch('?' + toSearch(query, { page: 4 }))).toEqual({ query, page: 4, view: null });
+            expect(fromSearch(toSearch(query))).toEqual({ query, page: 1, view: null });
         });
 
         it('keeps what is typed in the search whole, whatever the characters', () => {
@@ -115,6 +115,25 @@ describe('the query of the list of items', () => {
 
         it('ignores a direction when nothing is sorted', () => {
             expect(fromSearch('direction=desc').query.direction).toBe('asc');
+        });
+
+        it('carries the way the items are laid out when the person chose one, and nothing when not', () => {
+            expect(toSearch(emptyQuery(), { view: 'gallery' })).toBe('view=gallery');
+            expect(toSearch({ ...emptyQuery(), q: 'saw' }, { page: 2, view: 'table' })).toBe('page=2&q=saw&view=table');
+            expect(toSearch(emptyQuery(), { view: null })).toBe('');
+            expect(fromSearch('view=gallery').view).toBe('gallery');
+            expect(fromSearch('q=saw&view=table').view).toBe('table');
+            expect(fromSearch('').view).toBeNull();
+        });
+
+        it('leaves the way the items are laid out out of what is asked of the API', () => {
+            expect(toParams(emptyQuery(), { page: 1 })).toEqual({ page: 1 });
+            expect(fromSearch('view=gallery').query).toEqual(emptyQuery());
+        });
+
+        it('ignores a view nobody knows', () => {
+            expect(fromSearch('view=carousel').view).toBeNull();
+            expect(fromSearch('view=').view).toBeNull();
         });
 
         it('takes the page as a positive whole number, and no more than the API takes', () => {

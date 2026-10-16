@@ -5,6 +5,7 @@ import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
+import { useMemoryStorage } from '../support/storage.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -109,6 +110,7 @@ describe('the items of an inventory', () => {
         document.documentElement.lang = 'en';
         // The component keeps its search, sort and filters in the address: every test starts from a clean one.
         window.history.replaceState(null, '', '/');
+        useMemoryStorage();
     });
 
     afterEach(() => {

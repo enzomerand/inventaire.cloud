@@ -1,7 +1,7 @@
 {{--
     The page of an inventory: its name and description with what may be done with it, and its items in a table with one
-    column per field (searched, filtered, sorted and totalled: partials/items-toolbar, items-filters and items-table), plus
-    the dialog that adds, changes, shows or deletes an item.
+    column per field or as cards (searched, filtered, sorted and totalled: partials/items-toolbar, items-filters,
+    items-table and items-gallery), plus the dialog that adds, changes, shows or deletes an item.
 
     Alpine runs in its CSP build: two components share the page, each referenced by name and fed by the data-* attributes
     of its root. "inventoryHeader" (resources/js/components/inventory-header.js) owns the name, the description and their
@@ -214,6 +214,8 @@
             </div>
 
             @include('partials.items-table')
+
+            @include('partials.items-gallery')
 
             <div class="card-footer" :hidden="!hasTable">
                 <div class="d-flex align-items-center gap-2">

@@ -1,6 +1,7 @@
 {{--
-    What narrows and orders the items of an inventory: the search box, the filters button (with how many filters are in
-    force), the sort, the filters as removable chips, and how many items match.
+    What narrows, orders and lays out the items of an inventory: the search box, the filters button (with how many filters
+    are in force), the choice between the table and the gallery, the sort, the filters as removable chips, and how many
+    items match.
 
     Included in the items card of the page of an inventory (app/inventory.blade.php), so it reads the inventoryItems
     component (resources/js/components/inventory-items.js, with resources/js/grid/criteria.js). The sort select and its
@@ -37,6 +38,16 @@
                 {{ __('Filters') }}
                 <span class="badge bg-primary ms-2" :hidden="filterCount === 0" x-text="filterCount"></span>
             </button>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group" role="group" aria-label="{{ __('View') }}">
+                <button type="button" class="btn btn-icon" :class="tableButtonClass" :aria-pressed="tablePressed" aria-label="{{ __('Table') }}" title="{{ __('Table') }}" @click="showAsTable">
+                    <x-tabler-table aria-hidden="true" />
+                </button>
+                <button type="button" class="btn btn-icon" :class="galleryButtonClass" :aria-pressed="galleryPressed" aria-label="{{ __('Gallery') }}" title="{{ __('Gallery') }}" @click="showAsGallery">
+                    <x-tabler-layout-grid aria-hidden="true" />
+                </button>
+            </div>
         </div>
         <div class="col-12 col-sm-auto" :class="sortBarClass">
             <div class="input-group">

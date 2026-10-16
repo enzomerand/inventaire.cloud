@@ -51,6 +51,9 @@ export default function gridCriteria() {
         /** The timer of the pause that ends the typing, null when none is running. */
         searchTimer: null,
 
+        /** The way to lay the items out that the address asks for, or that the person chose: null for the default one. */
+        urlView: null,
+
         /** What the boxes of the filters panel hold, by field id. */
         filterDraft: {},
 
@@ -143,6 +146,7 @@ export default function gridCriteria() {
 
             this.query = restored.query;
             this.searchText = restored.query.q;
+            this.urlView = restored.view;
 
             return restored.page;
         },
@@ -158,13 +162,13 @@ export default function gridCriteria() {
         },
 
         /**
-         * Writes the criteria and the page in the address of the page.
+         * Writes the criteria, the page and the view in the address of the page.
          *
          * @param {number} page
          * @returns {void}
          */
         syncAddress(page) {
-            replaceSearch(toSearch(this.query, { page }));
+            replaceSearch(toSearch(this.query, { page, view: this.urlView }));
         },
 
         /**
