@@ -102,7 +102,8 @@ case "$role" in
         ;;
     worker)
         wait_until_installed
-        exec php artisan queue:work --tries=3 --max-time=3600
+        # `default` first: the short jobs (mails, file purges) pass between two exports, which go on their own queue.
+        exec php artisan queue:work --queue=default,exports --tries=3 --max-time=3600
         ;;
     scheduler)
         wait_until_installed

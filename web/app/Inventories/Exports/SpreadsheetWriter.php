@@ -29,6 +29,7 @@ use OpenSpout\Writer\XLSX\Entity\SheetView;
 use OpenSpout\Writer\XLSX\Options as XlsxOptions;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 use RuntimeException;
+use Throwable;
 
 /**
  * Writes the items as a workbook with one sheet, XLSX or ODS (the same cells, two containers).
@@ -88,6 +89,7 @@ final class SpreadsheetWriter implements ExportWriter
         // A number is written with the shortest text that gives it back exactly (the library writes a float as a string).
         $precision = ini_set('precision', '-1');
         $rows = 0;
+        $closed = false;
 
         try {
             $writer->openToFile($path);
@@ -117,8 +119,20 @@ final class SpreadsheetWriter implements ExportWriter
                 $sheet->setColumnWidth($this->width($index, $last, $header), $index + 1);
             }
 
+            // Not in the `finally`: a workbook that could not be completed is a failure to report, not one to tolerate.
+            $closed = true;
             $writer->close();
         } finally {
+            if (! $closed) {
+                // Something went wrong half way: release the file and the library's scratch files, whatever it says about it (the
+                // first error is the one that counts).
+                try {
+                    $writer->close();
+                } catch (Throwable) {
+                    // Nothing more can be done for a file that is going to be deleted.
+                }
+            }
+
             if ($precision !== false) {
                 ini_set('precision', $precision);
             }

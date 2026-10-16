@@ -8,6 +8,7 @@ use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Exports\ExportCleanup;
 use App\Inventories\Exports\ExportError;
 use App\Inventories\Exports\ExportFormat;
+use App\Inventories\Exports\Exports;
 use App\Inventories\Exports\ExportScope;
 use App\Inventories\Exports\ExportStatus;
 use App\Models\Concerns\HasUlidRouteKey;
@@ -30,7 +31,9 @@ use Illuminate\Support\Carbon;
  *
  * The file is stored with the other private files, under the folder of its inventory (see {@see AttachmentStorage}), so that
  * deleting the inventory or the workspace takes it away; deleting the row purges its folder once the deletion is committed
- * ({@see ExportCleanup}). Only the person who asked for an export can read it. `ulid` is the identifier the outside world uses
+ * ({@see ExportCleanup}). `size` is the weight of the file, once it is written; a zip holds an estimate from the request (the sum of
+ * the sizes of the files it will hold), which the real size replaces and which a failure takes back, so that it counts against the room
+ * the exports of its author may take ({@see Exports}). Only the person who asked for an export can read it. `ulid` is the identifier the outside world uses
  * ({@see HasUlidRouteKey}).
  *
  * @property int $id

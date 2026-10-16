@@ -59,11 +59,11 @@
                 <div class="mb-3" :hidden="!showDelimiter">
                     <label class="form-label" for="export-delimiter">{{ __('CSV separator') }}</label>
                     <select id="export-delimiter" class="form-select" aria-describedby="export-delimiter-hint" x-model="exportDelimiter">
-                        <option value="semicolon">{{ __('Semicolon (;)') }}</option>
-                        <option value="comma">{{ __('Comma (,)') }}</option>
-                        <option value="tab">{{ __('Tab') }}</option>
+                        <option value="semicolon">{{ __('Semicolon (Excel in French, decimals with a comma)') }}</option>
+                        <option value="comma">{{ __('Comma (decimals with a point)') }}</option>
+                        <option value="tab">{{ __('Tab (decimals with a point)') }}</option>
                     </select>
-                    <div class="form-hint" id="export-delimiter-hint">{{ __('Excel in French, like in many other languages, expects a semicolon.') }}</div>
+                    <div class="form-hint" id="export-delimiter-hint">{{ __('The separator also sets the decimal sign of the numbers: 12,5 with a semicolon, 12.5 with a comma or a tab.') }}</div>
                 </div>
 
                 <fieldset class="mb-3" :hidden="!showFiles">

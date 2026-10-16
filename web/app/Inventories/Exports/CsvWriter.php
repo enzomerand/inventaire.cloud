@@ -12,14 +12,17 @@ use OpenSpout\Common\Entity\Cell\StringCell;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\CSV\Options;
 use OpenSpout\Writer\CSV\Writer;
+use Throwable;
 
 /**
  * Writes the items as a CSV: UTF-8 with a byte order mark (the spreadsheets that open it by double-click read it right), the
  * identifier, the fields and the two dates, one item a line.
  *
  * The separator is the person's choice (`comma`, `semicolon` or `tab`), the semicolon by default in French and the comma in the
- * other languages, because a spreadsheet in French reads a semicolon: the decimals are then written with a comma, as it expects,
- * and with a point otherwise. Dates are ISO (`2026-10-15`, `2026-10-15 14:30`), a yes or no is "Yes" or "No" in the language of the
+ * other languages. **The separator also decides the decimal sign**, on purpose: a spreadsheet in French reads a semicolon file and
+ * expects a comma for its decimals (`12,5`), and a comma-separated file could not hold one at all without quoting every number,
+ * so the semicolon writes the decimals with a comma and the comma and the tab write them with a point (`12.5`). The dialog says
+ * so next to each separator, and an API client that wants a point with a semicolon must choose the comma or the tab. Dates are ISO (`2026-10-15`, `2026-10-15 14:30`), a yes or no is "Yes" or "No" in the language of the
  * export, a number has the decimals of its field and no thousands separator.
  *
  * A text that starts with one of `= + - @` or a tab or a carriage return is read as a formula by the spreadsheet that opens it,
@@ -53,26 +56,40 @@ final class CsvWriter implements ExportWriter
 
         $writer = new Writer(new Options(FIELD_DELIMITER: self::DELIMITERS[$name], EOL: "\r\n"));
         $writer->openToFile($path);
+        $closed = false;
 
-        $writer->addRow($this->row(array_map($this->safe(...), $context->table->headers())));
+        try {
+            $writer->addRow($this->row(array_map($this->safe(...), $context->table->headers())));
 
-        $rows = 0;
+            $rows = 0;
 
-        foreach ($context->items() as $item) {
-            $cells = [$item->ulid];
+            foreach ($context->items() as $item) {
+                $cells = [$item->ulid];
 
-            foreach ($context->table->row($item) as $value) {
-                $cells[] = $this->text($value, $decimal);
+                foreach ($context->table->row($item) as $value) {
+                    $cells[] = $this->text($value, $decimal);
+                }
+
+                $cells[] = $item->created_at === null ? '' : DisplayTime::of($item->created_at)->format('Y-m-d H:i');
+                $cells[] = $item->updated_at === null ? '' : DisplayTime::of($item->updated_at)->format('Y-m-d H:i');
+
+                $writer->addRow($this->row($cells));
+                $rows++;
             }
 
-            $cells[] = $item->created_at === null ? '' : DisplayTime::of($item->created_at)->format('Y-m-d H:i');
-            $cells[] = $item->updated_at === null ? '' : DisplayTime::of($item->updated_at)->format('Y-m-d H:i');
-
-            $writer->addRow($this->row($cells));
-            $rows++;
+            // Not in the `finally`: a file that could not be completed is a failure to report, not one to tolerate.
+            $closed = true;
+            $writer->close();
+        } finally {
+            if (! $closed) {
+                // Something went wrong half way: release the file, whatever it says about it (the first error is the one that counts).
+                try {
+                    $writer->close();
+                } catch (Throwable) {
+                    // Nothing more can be done for a file that is going to be deleted.
+                }
+            }
         }
-
-        $writer->close();
 
         return $rows;
     }

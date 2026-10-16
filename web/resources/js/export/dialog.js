@@ -26,8 +26,11 @@ import { onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { POLL_INTERVAL_MS, defaultDelimiter, formatChoices, isActive, requestBody, rowOf } from './exports.js';
 
-/** The code the API gives to the refusal of an export when the person already has too many. */
+/** The code the API gives to the refusal of an export when the person already has too many of this inventory. */
 const LIMIT_CODE = 'export_limit_reached';
+
+/** The code the API gives to the refusal of an export when the exports of the person would take too much room. */
+const STORAGE_CODE = 'export_storage_full';
 
 /**
  * @typedef {import('./exports.js').ExportRecord} ExportRecord
@@ -373,6 +376,8 @@ export default function exportDialog() {
 
             if (error.status === 409 && error.code === LIMIT_CODE) {
                 this.exportError = t('exports.error.limit');
+            } else if (error.status === 409 && error.code === STORAGE_CODE) {
+                this.exportError = t('exports.error.storage_full');
             } else if (error.status === 422) {
                 // The limits of the format come as the refusal of `format` (a PDF that is too big, a ZIP with no file...).
                 this.exportError = [...new Set(Object.values(firstMessages(error.errors)))].join(' ') || error.message;

@@ -5,7 +5,10 @@ declare(strict_types=1);
 use App\Inventories\Exports\ExportFormat;
 use App\Inventories\Exports\ExportStatus;
 use App\Models\Export;
+use App\Models\Item;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 require_once __DIR__.'/../../Support/exports.php';
@@ -282,4 +285,41 @@ it('is stored under the folder of its export, on the disk of the export', functi
     expect(Storage::disk(ATTACHMENT_TEST_DISK)->exists((string) $export->path))->toBeTrue()
         ->and($export->path)->toStartWith(exportFolder($export).'/')
         ->and($export->size)->toBe(strlen(exportBytes($export)));
+});
+
+describe('a CSV that cannot be completed', function (): void {
+    it('is failed, with the first error in the log, and the file is closed and deleted', function (): void {
+        $case = exportFixture();
+        $seen = 0;
+        Event::listen('eloquent.retrieved: '.Item::class, function () use (&$seen): void {
+            if (++$seen === 3) {
+                throw new RuntimeException('The disk is on fire.');
+            }
+        });
+        Log::spy();
+        $scratch = fn (): array => glob(storage_path('framework/exports/*')) ?: [];
+        $before = $scratch();
+
+        $export = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv));
+
+        expect($export->status)->toBe(ExportStatus::Failed)
+            ->and($export->path)->toBeNull()
+            ->and($scratch())->toBe($before);
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['exception']->getMessage() === 'The disk is on fire.')->once();
+    });
+});
+
+describe('the decimal sign', function (): void {
+    it('goes with the separator, whatever the language: a comma with the semicolon, a point with the comma or the tab', function (string $delimiter, string $expected): void {
+        $case = exportFixture();
+        $export = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv, ['locale' => 'en', 'options' => ['delimiter' => $delimiter]]));
+        $drill = collect(exportRecords($export))->firstWhere('Name', 'Drill 18V');
+
+        expect($drill['Quantity (kg)'])->toBe($expected);
+    })->with([
+        'semicolon' => ['semicolon', '2,50'],
+        'comma' => ['comma', '2.50'],
+        'tab' => ['tab', '2.50'],
+    ]);
 });

@@ -22,9 +22,14 @@ use ZipArchive;
  *
  * Every name is cleaned up ({@see ExportNames}) so that nothing can be unzipped outside the folder the person chose, and a name
  * already used in the folder of an item gets ` (2)`, ` (3)` before its extension. The files are stored as they are (`CM_STORE`):
- * photos are compressed already. A file that is on the local disk is added from where it is; one on another disk (S3) is copied
- * to a scratch file first, deleted once the zip is closed. A file that is gone from its disk is skipped and logged: the export of
- * the others goes on.
+ * photos are compressed already. A file that is on the local disk is added from where it is (the library reads it when the zip is
+ * closed); one on another disk (S3) is copied to a scratch file first, deleted once the zip is closed.
+ *
+ * Only a file that is **missing** from its disk is skipped and logged: the export of the others goes on. Any other problem (a
+ * file that exists but cannot be read, a copy that comes out short or cannot be written, a disk that does not answer) fails the
+ * whole export, which the person can ask for again: a zip that silently lacks files would be taken for a complete one. A file
+ * that disappears from the local disk between the moment it is added and the moment the zip is closed fails the export too, with
+ * a clear error.
  */
 final class ZipWriter implements ExportWriter
 {
@@ -57,6 +62,7 @@ final class ZipWriter implements ExportWriter
         $scratch = [];
         $items = 0;
         $entries = 0;
+        $closed = false;
 
         try {
             foreach ($context->items(withAttachments: true) as $item) {
@@ -89,20 +95,68 @@ final class ZipWriter implements ExportWriter
                 $items++;
             }
 
+            // The library reads the files, and writes the archive, only now. It is closed either way (a failure discards it).
+            $closed = true;
+
             // An archive without an entry is not written at all: leave the empty one a reader accepts (just its end marker).
             if ($entries === 0) {
                 $zip->close();
-                file_put_contents($path, "PK\x05\x06".str_repeat("\0", 18));
-            } elseif (! $zip->close()) {
-                throw new RuntimeException('The zip of the export could not be written.');
+                $this->writeEmpty($path);
+            } else {
+                $this->close($zip);
             }
         } finally {
+            if (! $closed) {
+                // Something went wrong half way: drop what was queued (nothing must be read or written for an export that failed),
+                // and release the archive, whatever it says about it (the first error is the one that counts).
+                try {
+                    $zip->unchangeAll();
+                    $zip->close();
+                } catch (Throwable) {
+                    // Nothing more can be done for a file that is going to be deleted.
+                }
+            }
+
             foreach ($scratch as $file) {
                 @unlink($file);
             }
         }
 
         return $items;
+    }
+
+    /**
+     * Closes the archive, which is when the library reads the files and writes the zip.
+     *
+     * @throws RuntimeException When it cannot be written, most likely because a file that was added is gone since.
+     */
+    private function close(ZipArchive $zip): void
+    {
+        try {
+            $closed = $zip->close();
+            $reason = $zip->getStatusString();
+        } catch (Throwable $exception) {
+            // The library warns when it cannot read a file or write the archive, and the application turns warnings into exceptions.
+            throw new RuntimeException('The zip of the export could not be written: a file may have been deleted while it was being added.', 0, $exception);
+        }
+
+        if (! $closed) {
+            throw new RuntimeException("The zip of the export could not be written ({$reason}).");
+        }
+    }
+
+    /**
+     * Writes the archive without any entry: only the end marker of the format.
+     *
+     * @throws RuntimeException When the file cannot be written.
+     */
+    private function writeEmpty(string $path): void
+    {
+        $marker = "PK\x05\x06".str_repeat("\0", 18);
+
+        if (file_put_contents($path, $marker) !== strlen($marker)) {
+            throw new RuntimeException('The empty zip of the export could not be written.');
+        }
     }
 
     /**
@@ -121,7 +175,7 @@ final class ZipWriter implements ExportWriter
             }
         }
 
-        return ExportNames::entry($label, __('Item')).' - '.$item->ulid;
+        return ExportNames::entry($label, __('Item'), ExportNames::FOLDER_LABEL_MAX_BYTES).' - '.$item->ulid;
     }
 
     /**
@@ -145,50 +199,64 @@ final class ZipWriter implements ExportWriter
     }
 
     /**
-     * A local path to read a file from: where it is when its disk is local, a scratch copy otherwise. Null when the file is not
-     * there (it is logged).
+     * A local path to read a file from: where it is when its disk is local, a scratch copy otherwise. Null when the file is
+     * missing from its disk (it is logged).
      *
      * @param  list<string>  $scratch  The scratch files made so far, which this adds to.
+     *
+     * @throws RuntimeException When the file is there but cannot be read, or its copy comes out short or cannot be written.
      */
     private function source(Attachment $file, array &$scratch): ?string
     {
-        try {
-            $disk = $this->storage->disk($file->disk);
+        $disk = $this->storage->disk($file->disk);
 
-            if (config("filesystems.disks.{$file->disk}.driver") === 'local') {
-                $local = $disk->path($file->path);
-
-                if (is_file($local)) {
-                    return $local;
-                }
-            }
-
-            $stream = $disk->readStream($file->path);
-
-            if (! is_resource($stream)) {
-                throw new RuntimeException('The file is not on its disk.');
-            }
-
-            $copy = ExportTemp::file();
-            $scratch[] = $copy;
-            $target = fopen($copy, 'wb');
-
-            if ($target === false) {
-                throw new RuntimeException('A scratch file could not be opened.');
-            }
-
-            try {
-                stream_copy_to_stream($stream, $target);
-            } finally {
-                fclose($stream);
-                fclose($target);
-            }
-
-            return $copy;
-        } catch (Throwable $exception) {
-            Log::warning('A file could not be read for a zip export: it is left out.', ['attachment' => $file->ulid, 'disk' => $file->disk, 'exception' => $exception]);
+        // A disk that cannot answer throws here, and that fails the export: only a file that is really not there is left out.
+        if (! $disk->exists($file->path)) {
+            Log::warning('A file could not be read for a zip export: it is missing from its disk and left out.', ['attachment' => $file->ulid, 'disk' => $file->disk, 'path' => $file->path]);
 
             return null;
         }
+
+        if (config("filesystems.disks.{$file->disk}.driver") === 'local') {
+            $local = $disk->path($file->path);
+
+            if (! is_file($local) || ! is_readable($local)) {
+                throw new RuntimeException("The file [{$file->ulid}] cannot be read from its disk.");
+            }
+
+            return $local;
+        }
+
+        $stream = $disk->readStream($file->path);
+
+        if (! is_resource($stream)) {
+            throw new RuntimeException("The file [{$file->ulid}] cannot be read from its disk.");
+        }
+
+        $copy = ExportTemp::file();
+        $scratch[] = $copy;
+        $target = fopen($copy, 'wb');
+
+        if ($target === false) {
+            fclose($stream);
+
+            throw new RuntimeException('A scratch file could not be opened.');
+        }
+
+        try {
+            $copied = stream_copy_to_stream($stream, $target);
+            $flushed = fflush($target);
+        } finally {
+            fclose($stream);
+            fclose($target);
+        }
+
+        // The count must be the one recorded when the file was uploaded: a short copy (a connection that dropped, a full disk)
+        // would put a truncated file in the zip without a word.
+        if ($copied === false || $copied !== $file->size || ! $flushed) {
+            throw new RuntimeException("The file [{$file->ulid}] was not copied whole (".(int) $copied." of {$file->size} bytes).");
+        }
+
+        return $copy;
     }
 }

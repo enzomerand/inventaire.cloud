@@ -52,7 +52,8 @@ final class ExportResource extends JsonResource
             // A code a later version wrote is told as the general failure.
             'error' => $export->status === ExportStatus::Failed ? ($export->failure() ?? ExportError::GenerationFailed)->message() : null,
             'file_name' => $export->file_name,
-            'size' => $export->size,
+            // Before the file is written the size of a zip is only an estimate, kept to count it against the room of the person.
+            'size' => $export->status === ExportStatus::Completed ? $export->size : null,
             'items_count' => $export->items_count,
             'created_at' => $export->created_at?->toIso8601String(),
             'completed_at' => $export->completed_at?->toIso8601String(),

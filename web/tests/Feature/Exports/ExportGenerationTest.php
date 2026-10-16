@@ -13,10 +13,14 @@ use App\Inventories\Items;
 use App\Jobs\GenerateExport;
 use App\Models\Export;
 use App\Models\Item;
+use Illuminate\Database\Connection;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -81,6 +85,20 @@ describe('a completed export', function (): void {
 
         // 23:30 UTC on the 31st is the 1st of January in Paris.
         expect($done->file_name)->toBe('Q1_ Shop_Tools_ - 2027-01-01.json');
+    });
+
+    it('names the file within 200 bytes, the day and the extension included, however the inventory is called', function (): void {
+        $case = exportFixture(str_repeat('日本語の在庫', 20));
+        $this->travelTo(Carbon::parse('2026-12-31 12:00:00', 'UTC'));
+        $done = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Xlsx));
+
+        // 3 bytes a character: the name is cut on a character, to leave room for " - 2026-12-31.xlsx" (18 bytes).
+        expect($done->status)->toBe(ExportStatus::Completed, (string) $done->error)
+            ->and(strlen((string) $done->file_name))->toBeLessThanOrEqual(200)
+            ->and(strlen((string) $done->file_name))->toBeGreaterThan(195)
+            ->and(mb_check_encoding((string) $done->file_name, 'UTF-8'))->toBeTrue()
+            ->and($done->file_name)->toStartWith('日本語の在庫日本語の在庫')
+            ->and($done->file_name)->toEndWith(' - 2026-12-31.xlsx');
     });
 
     it('is written in the language it was asked in, whatever the language of the worker', function (): void {
@@ -338,7 +356,156 @@ describe('a failed export', function (): void {
     });
 });
 
+describe('the end of an export', function (): void {
+    it('keeps the file of an export that completed when a failure is reported late, by the generator or by the queue', function (): void {
+        $case = exportFixture();
+        $done = exportStored(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv));
+
+        app(ExportGenerator::class)->fail($done, ExportError::GenerationFailed);
+        app(ExportGenerator::class)->fail($done, ExportError::GenerationFailed, $done->path);
+        (new GenerateExport($done))->failed(new RuntimeException('Timed out.'));
+
+        expect($done->fresh()->status)->toBe(ExportStatus::Completed)
+            ->and($done->fresh()->error)->toBeNull()
+            ->and($done->fresh()->isDownloadable())->toBeTrue()
+            ->and(exportFiles())->toBe([$done->path]);
+    });
+
+    it('gives up on one that has not ended, without a size, and clears its folder', function (): void {
+        $case = exportFixture();
+        $running = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Zip, ['status' => ExportStatus::Running, 'size' => 5000]);
+        Storage::disk(ATTACHMENT_TEST_DISK)->put(exportFolder($running).'/partial.zip', 'half');
+
+        app(ExportGenerator::class)->fail($running, ExportError::GenerationFailed);
+
+        expect($running->fresh()->status)->toBe(ExportStatus::Failed)
+            // A failed export holds nothing: what it was expected to weigh no longer counts against the room of the person.
+            ->and($running->fresh()->size)->toBeNull()
+            ->and(exportFiles())->toBe([]);
+    });
+
+    it('clears the folder of an export that is gone when its failure is reported', function (): void {
+        $case = exportFixture();
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv, ['status' => ExportStatus::Running]);
+        Storage::disk(ATTACHMENT_TEST_DISK)->put(exportFolder($export).'/partial.csv', 'half');
+        // Gone without the events that purge a folder (a cascade).
+        DB::table('exports')->where('id', $export->id)->delete();
+
+        app(ExportGenerator::class)->fail($export, ExportError::GenerationFailed);
+
+        expect(exportFiles())->toBe([]);
+    });
+
+    it('does not fail, nor leave a file, when the export is deleted between its claim and its reading', function (): void {
+        $case = exportFixture();
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv);
+        $done = false;
+        // Right after the worker claimed the export (pending to running), the person deletes it.
+        DB::listen(function (QueryExecuted $query) use (&$done, $export): void {
+            if (! $done && preg_match('/^update\s+[`"]exports[`"]/i', $query->sql) === 1) {
+                $done = true;
+                DB::table('exports')->where('id', $export->id)->delete();
+            }
+        });
+        Log::spy();
+
+        app(ExportGenerator::class)->run($export);
+
+        expect($done)->toBeTrue()
+            ->and(Export::query()->count())->toBe(0)
+            ->and(exportFiles())->toBe([]);
+
+        // The export is gone: that is not an error of the server.
+        Log::shouldNotHaveReceived('error');
+    });
+
+    it('purges the file it stored by its folder when the inventory is deleted while it was written, since the row it belonged to is gone', function (): void {
+        $case = exportFixture();
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv);
+        $inventory = $case['inventory']->id;
+        $armed = true;
+        // Right before the export is marked completed (the file is stored by then), the inventory goes, and its folder was purged
+        // before the file got there.
+        DB::beforeExecuting(function (string $sql, array $bindings, Connection $connection) use (&$armed, $inventory): void {
+            if ($armed && str_starts_with($sql, 'update') && str_contains($sql, 'exports') && in_array('completed', $bindings, true)) {
+                $armed = false;
+                DB::table('inventories')->where('id', $inventory)->delete();
+            }
+        });
+
+        app(ExportGenerator::class)->run($export);
+
+        expect($armed)->toBeFalse()
+            ->and(Export::query()->count())->toBe(0)
+            ->and(exportFiles())->toBe([]);
+    });
+
+    it('purges the file it was storing by its folder when storing fails and the inventory is gone', function (): void {
+        $case = exportFixture();
+        $disk = Storage::disk(ATTACHMENT_TEST_DISK);
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv);
+        $inventory = $case['inventory']->id;
+        attachmentDiskProxy()->shouldReceive('put')->once()->andReturnUsing(function (string $path) use ($disk, $inventory): bool {
+            $disk->put($path, 'the first bytes of it');
+            // The inventory is deleted while the file is half written: the export goes with it.
+            DB::table('inventories')->where('id', $inventory)->delete();
+
+            return false;
+        });
+
+        app(ExportGenerator::class)->run($export);
+
+        expect(Export::query()->count())->toBe(0)
+            ->and(exportFiles())->toBe([]);
+    });
+});
+
 describe('the job', function (): void {
+    it('goes on the queue of the exports, not on the default one, so that it does not hold up the short jobs', function (): void {
+        Queue::fake();
+        $case = exportFixture();
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Json);
+
+        GenerateExport::dispatch($export);
+
+        Queue::assertPushedOn('exports', GenerateExport::class);
+        expect(GenerateExport::QUEUE)->toBe('exports');
+    });
+
+    it('is listened to by the worker of the image and by `composer dev`, the default queue first, so that short jobs pass between exports', function (): void {
+        $worker = (string) file_get_contents(base_path('docker/entrypoint.sh'));
+        $dev = collect(DevCommands::commands())->firstWhere('name', 'queue');
+
+        expect($worker)->toContain('php artisan queue:work --queue=default,exports ')
+            ->and($dev)->not->toBeNull()
+            ->and($dev['command'])->toContain('queue:listen')
+            ->and($dev['command'])->toContain('--queue=default,exports')
+            // One listener only: the framework\'s own, on the default queue alone, is replaced.
+            ->and(collect(DevCommands::commands())->where('name', 'queue')->count())->toBe(1);
+    });
+
+    it('is picked by a worker that listens to the default queue and the exports, and dropped, not failed, when its export was deleted before it runs', function (): void {
+        // A real queue, the database one: the worker pops the job, finds its export gone, and deletes the job without running it.
+        config(['queue.default' => 'database']);
+        $case = exportFixture();
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Json);
+        $kept = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Json);
+
+        GenerateExport::dispatch($export);
+        GenerateExport::dispatch($kept);
+        $export->delete();
+
+        expect(DB::table('jobs')->where('queue', 'exports')->count())->toBe(2);
+
+        // The memory of the worker is the one of the whole test run: the default limit of the command (128 MB) would stop it.
+        $this->artisan('queue:work', ['--queue' => 'default,exports', '--stop-when-empty' => true, '--memory' => 8192])->assertSuccessful();
+
+        expect(DB::table('jobs')->count())->toBe(0)
+            ->and(DB::table('failed_jobs')->count())->toBe(0)
+            // The one whose export was there was written.
+            ->and($kept->fresh()->status)->toBe(ExportStatus::Completed);
+    });
+
     it('writes the export when it runs', function (): void {
         $case = exportFixture();
         $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Json);
@@ -354,16 +521,23 @@ describe('the job', function (): void {
         expect($job->tries)->toBe(1)
             ->and($job->timeout)->toBe(900)
             ->and($job->deleteWhenMissingModels)->toBeTrue()
-            // The queue may hand a running job over after that: more than its timeout.
-            ->and(config('queue.connections.database.retry_after'))->toBeGreaterThan($job->timeout);
+            // The queue may hand a running job over after that: more than its timeout, whichever the queue is.
+            ->and(config('queue.connections.database.retry_after'))->toBe(960)
+            ->and(config('queue.connections.redis.retry_after'))->toBe(960)
+            ->and(config('queue.connections.beanstalkd.retry_after'))->toBe(960);
     });
 
-    it('goes through the queue, carrying the export and nothing else', function (): void {
+    it('goes through the queue, carrying the key of the export and nothing else, and reads it again when it runs', function (): void {
         $case = exportFixture();
         $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Json);
-        $restored = unserialize(serialize(new GenerateExport($export)));
+        $payload = serialize(new GenerateExport($export));
+        $export->forceFill(['status' => ExportStatus::Running])->save();
+        $restored = unserialize($payload);
 
-        expect($restored->export->is($export))->toBeTrue();
+        expect($restored->export->is($export))->toBeTrue()
+            // Not the snapshot taken when it was queued: the row as it is now.
+            ->and($restored->export->status)->toBe(ExportStatus::Running)
+            ->and(strlen($payload))->toBeLessThan(600);
     });
 
     it('records a failure the queue reports (a timeout) on a running export, and leaves a finished one alone', function (): void {
@@ -377,6 +551,8 @@ describe('the job', function (): void {
         expect($running->fresh()->status)->toBe(ExportStatus::Failed)
             ->and($running->fresh()->error)->toBe(ExportError::GenerationFailed->value)
             ->and($finished->fresh()->status)->toBe(ExportStatus::Completed)
-            ->and($finished->fresh()->error)->toBeNull();
+            ->and($finished->fresh()->error)->toBeNull()
+            // Its file is not deleted either.
+            ->and(exportFiles())->toBe([$finished->path]);
     });
 });

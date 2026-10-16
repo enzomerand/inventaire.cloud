@@ -11,4 +11,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 // The exports that expired are deleted with their files, and the ones whose worker was lost are given up on.
-Schedule::command('inventaire:prune-exports')->hourly()->withoutOverlapping();
+// The lock of a run that was killed is forgotten after 30 minutes (the default is 24 hours: no pruning for a day).
+Schedule::command('inventaire:prune-exports')->hourly()->withoutOverlapping(30);

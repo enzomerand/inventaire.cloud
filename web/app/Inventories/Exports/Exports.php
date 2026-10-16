@@ -8,6 +8,7 @@ use App\Database\DeadlockRetries;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Exceptions\ExportLimitReachedException;
 use App\Inventories\Exceptions\ExportRefusedException;
+use App\Inventories\Exceptions\ExportStorageFullException;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Fields\UploadedFilesType;
 use App\Jobs\GenerateExport;
@@ -25,13 +26,19 @@ use Illuminate\Validation\ValidationException;
  *
  * An export is **asked for** after three checks, in this order. The view it is made on must hold for the fields the inventory has
  * now (the mistakes are those of the list of items, under `query.`: a `ValidationException`). A PDF must not hold more items than the
- * library can lay out in memory, and a zip must have a file to hold ({@see ExportRefusedException}). The number of exports the person
- * has, not expired ones whatever their state, is then counted under the lock of their row: two requests at the same moment cannot
- * cross the limit together ({@see ExportLimitReachedException}). The row is created `pending` and the job that writes the file is
- * queued once the transaction is committed, so that no worker looks for a row that is not there yet.
+ * library can lay out in memory, and a zip must have a file to hold ({@see ExportRefusedException}). Two quotas are then counted
+ * under the lock of the row of the person, so that two requests at the same moment cannot cross them together: the number of
+ * exports the person has **of this inventory**, not expired ones whatever their state ({@see ExportLimitReachedException}), and the
+ * room their exports take **in all**, across their inventories ({@see ExportStorageFullException}). The room is the sum of the
+ * `size` of the exports that did not expire; an export still waiting or being written has none yet, except a zip, which is given
+ * the sum of the sizes of the files it will hold as soon as it is asked for (the real size replaces it when the file is written,
+ * and a failed export gives it back), so that a few zips of a big inventory asked for in a row cannot together fill the disk before
+ * any of them has run. The row is created `pending` and the job that writes the file is queued once the transaction is committed,
+ * so that no worker looks for a row that is not there yet.
  *
  * The checks of the first kind are made on what the inventory holds *now*; the job lists the items again when it runs. An inventory
- * that changes in between changes the file, not the checks: the PDF refuses at write time what it was allowed at request time.
+ * that changes in between changes the file, not the checks: the PDF refuses at write time what it was allowed at request time
+ * ({@see ExportError::PdfTooLarge}).
  */
 final class Exports
 {
@@ -53,20 +60,28 @@ final class Exports
      *
      * @throws ValidationException When the view does not hold for the fields of the inventory; the keys are under `query.`.
      * @throws ExportRefusedException For a PDF with too many items, or a zip with no file.
-     * @throws ExportLimitReachedException When the person has as many exports as they may.
+     * @throws ExportLimitReachedException When the person has as many exports of this inventory as they may.
+     * @throws ExportStorageFullException When their exports, and this one, would take more room than they may.
      */
     public function request(Inventory $inventory, User $user, ExportFormat $format, ExportScope $scope, array $options = []): Export
     {
-        $this->check($inventory, $format, $scope, $options);
+        $estimate = $this->check($inventory, $format, $scope, $options);
 
         $limit = config()->integer('inventories.max_active_exports');
+        $room = config()->integer('inventories.export_storage_per_user');
 
-        return DeadlockRetries::run(fn (): Export => $this->db->transaction(function () use ($inventory, $user, $format, $scope, $options, $limit): Export {
-            // The row of the person serialises their requests: the count below cannot be crossed by two at once.
+        return DeadlockRetries::run(fn (): Export => $this->db->transaction(function () use ($inventory, $user, $format, $scope, $options, $limit, $room, $estimate): Export {
+            // The row of the person serialises their requests: the counts below cannot be crossed by two at once.
             $this->locks->users([$user->getKey()]);
 
-            if (Export::query()->where('user_id', $user->getKey())->active()->count() >= $limit) {
+            $mine = Export::query()->where('user_id', $user->getKey())->active();
+
+            if ((clone $mine)->where('inventory_id', $inventory->getKey())->count() >= $limit) {
                 throw new ExportLimitReachedException($limit);
+            }
+
+            if ((int) (clone $mine)->sum('size') + $estimate > $room) {
+                throw new ExportStorageFullException($room);
             }
 
             $export = new Export;
@@ -76,6 +91,8 @@ final class Exports
                 'format' => $format,
                 'scope' => $scope,
                 'options' => $options,
+                // The weight of a zip is known before it is written: it counts against the room of the person from now on.
+                'size' => $estimate > 0 ? $estimate : null,
                 'locale' => mb_substr(app()->getLocale(), 0, 12),
                 'status' => ExportStatus::Pending,
                 'disk' => $this->storage->diskName(),
@@ -100,11 +117,12 @@ final class Exports
      * The checks that depend on what the inventory holds: the view, the size of a PDF, the files of a zip.
      *
      * @param  array<string, mixed>  $options
+     * @return int The bytes the file is expected to weigh when it is known beforehand: the files of a zip, stored as they are. 0 for the other formats.
      *
      * @throws ValidationException
      * @throws ExportRefusedException
      */
-    private function check(Inventory $inventory, ExportFormat $format, ExportScope $scope, array $options): void
+    private function check(Inventory $inventory, ExportFormat $format, ExportScope $scope, array $options): int
     {
         $fields = $inventory->fields()->get();
         $view = is_array($options['query'] ?? null) ? $options['query'] : [];
@@ -134,10 +152,16 @@ final class Exports
                 $files->whereIn('item_id', $this->items->subQuery($matching));
             }
 
-            if (! $files->exists()) {
+            $found = $files->selectRaw('count(*) as files, coalesce(sum(size), 0) as bytes')->first();
+
+            if ($found === null || (int) $found->files === 0) {
                 throw new ExportRefusedException(ExportRefusedException::NOTHING_TO_ZIP);
             }
+
+            return (int) $found->bytes;
         }
+
+        return 0;
     }
 
     /**

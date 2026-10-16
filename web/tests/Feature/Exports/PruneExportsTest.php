@@ -8,6 +8,7 @@ use App\Inventories\Exports\ExportGenerator;
 use App\Inventories\Exports\ExportPruner;
 use App\Inventories\Exports\ExportStatus;
 use App\Inventories\Exports\ExportTemp;
+use App\Jobs\GenerateExport;
 use App\Models\Export;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
@@ -19,6 +20,9 @@ require_once __DIR__.'/../../Support/exports.php';
 /*
  * `inventaire:prune-exports`, run every hour: the exports that expired go with their files, the ones whose worker was lost are given
  * up on, and the scratch files of a worker that was stopped are cleared.
+ *
+ * "Lost" is judged where the export is stuck: one that waits is judged on the day it was asked for, one that runs on the day it
+ * started, so that a backlog of the queue (an export that waited for hours, then started a minute ago) is not a failure.
  */
 
 uses(RefreshDatabase::class);
@@ -112,14 +116,73 @@ describe('the exports that never ended', function (): void {
             ->and($case['fresh']->fresh()->status)->toBe(ExportStatus::Completed);
     });
 
-    it('wait for the delay the configuration says', function (): void {
+    it('wait for the delay the configuration says, when they are waiting for a worker', function (): void {
         $case = pruneCase();
         config(['inventories.export_stale_minutes' => 5]);
 
         app(ExportPruner::class)->prune();
 
-        expect($case['young']->fresh()->status)->toBe(ExportStatus::Failed)
-            ->and($case['waiting']->fresh()->status)->toBe(ExportStatus::Failed);
+        expect($case['waiting']->fresh()->status)->toBe(ExportStatus::Failed)
+            // Running is judged on the time a job may run, not on that delay.
+            ->and($case['young']->fresh()->status)->toBe(ExportStatus::Running);
+    });
+
+    it('are judged on their start when they are running: one that waited in a backlog and just started is left to finish', function (): void {
+        $case = pruneCase();
+        $inventory = $case['inventory'];
+        $owner = $case['team']['owner'];
+        // Asked for three hours ago, started a minute ago: the queue was busy, nothing is wrong.
+        $backlog = exportRow($inventory, $owner, ['status' => ExportStatus::Running, 'created_at' => now()->subHours(3), 'started_at' => now()->subMinute()]);
+
+        app(ExportPruner::class)->prune();
+
+        expect($backlog->fresh()->status)->toBe(ExportStatus::Running)
+            ->and($backlog->fresh()->error)->toBeNull();
+    });
+
+    it('are given up on once running for longer than a job may run, with a margin', function (): void {
+        $case = pruneCase();
+        $inventory = $case['inventory'];
+        $owner = $case['team']['owner'];
+        $limit = GenerateExport::TIMEOUT + ExportPruner::RUNNING_MARGIN_SECONDS;
+        $this->travelTo(now()->startOfSecond());
+        $inTime = exportRow($inventory, $owner, ['status' => ExportStatus::Running, 'started_at' => now()->subSeconds($limit - 5)]);
+        $late = exportRow($inventory, $owner, ['status' => ExportStatus::Running, 'started_at' => now()->subSeconds($limit + 5)]);
+        // A row without its start (written by hand) is judged on the day it was asked for.
+        $unknownYoung = exportRow($inventory, $owner, ['status' => ExportStatus::Running, 'started_at' => null, 'created_at' => now()->subMinute()]);
+        $unknownOld = exportRow($inventory, $owner, ['status' => ExportStatus::Running, 'started_at' => null, 'created_at' => now()->subHours(2)]);
+
+        app(ExportPruner::class)->prune();
+
+        expect($limit)->toBe(1200)
+            ->and($inTime->fresh()->status)->toBe(ExportStatus::Running)
+            ->and($late->fresh()->status)->toBe(ExportStatus::Failed)
+            ->and($late->fresh()->error)->toBe(ExportError::Stale->value)
+            ->and($unknownYoung->fresh()->status)->toBe(ExportStatus::Running)
+            ->and($unknownOld->fresh()->status)->toBe(ExportStatus::Failed);
+    });
+
+    it('are given up on when pending for longer than the delay, however long ago the others started', function (): void {
+        $case = pruneCase();
+        $stuck = exportRow($case['inventory'], $case['team']['owner'], ['created_at' => now()->subHours(3)]);
+        // Something is running right now: the queue works, but this one has waited far too long all the same.
+        exportRow($case['inventory'], $case['team']['owner'], ['status' => ExportStatus::Running, 'started_at' => now()->subSeconds(30)]);
+
+        app(ExportPruner::class)->prune();
+
+        expect($stuck->fresh()->status)->toBe(ExportStatus::Failed);
+    });
+
+    it('do not take back the file of an export that completed while the pruner was reading it', function (): void {
+        $case = pruneCase();
+        $done = exportStored(exportRow($case['inventory'], $case['team']['owner'], ['status' => ExportStatus::Running, 'started_at' => now()->subHours(2)]), 'late.csv');
+
+        // The pruner read the row as running; the worker completed it before the pruner gave up on it.
+        app(ExportGenerator::class)->fail($done->forceFill(['status' => ExportStatus::Running]), ExportError::Stale);
+
+        expect($done->fresh()->status)->toBe(ExportStatus::Completed)
+            ->and($done->fresh()->error)->toBeNull()
+            ->and(storedFiles())->toContain($done->path);
     });
 
     it('are not undone by a worker that wakes up: the file it was writing is not kept', function (): void {
@@ -164,12 +227,14 @@ describe('the command', function (): void {
 
         expect($events)->toHaveCount(1)
             ->and($events->first()->expression)->toBe('0 * * * *')
-            ->and($events->first()->withoutOverlapping)->toBeTrue();
+            ->and($events->first()->withoutOverlapping)->toBeTrue()
+            // The lock of a run that was killed is forgotten after 30 minutes: the default is a day, a day without pruning.
+            ->and($events->first()->expiresAt)->toBe(30);
     });
 });
 
 describe('the scratch files', function (): void {
-    it('are deleted when a day old, the recent ones are not', function (): void {
+    it('are deleted when an hour old, the recent ones are not', function (): void {
         $directory = ExportTemp::directory();
         $old = $directory.'/export-prune-old';
         $recent = $directory.'/export-prune-recent';
@@ -189,6 +254,37 @@ describe('the scratch files', function (): void {
             ->and(file_exists($recent))->toBeTrue();
 
         unlink($recent);
+    });
+
+    it('are kept for an hour by default: more than an export may run, and no more', function (): void {
+        $directory = ExportTemp::directory();
+        $stale = $directory.'/export-prune-stale';
+        $running = $directory.'/export-prune-running';
+        file_put_contents($stale, 'x');
+        file_put_contents($running, 'x');
+        touch($stale, time() - 3700);
+        touch($running, time() - 3500);
+
+        ExportTemp::prune();
+
+        expect(file_exists($stale))->toBeFalse()
+            ->and(file_exists($running))->toBeTrue()
+            // Longer than the 15 minutes a job runs for.
+            ->and(3600)->toBeGreaterThan(GenerateExport::TIMEOUT);
+
+        unlink($running);
+    });
+
+    it('skip a file that vanished since the listing instead of failing', function (): void {
+        $directory = ExportTemp::directory();
+        $dangling = $directory.'/export-prune-dangling';
+        symlink($directory.'/nowhere', $dangling);
+
+        // No warning, so no exception: a link whose target is gone has no age.
+        expect(fn () => ExportTemp::prune())->not->toThrow(Throwable::class)
+            ->and(is_link($dangling))->toBeTrue();
+
+        unlink($dangling);
     });
 
     it('are cleared by the command too', function (): void {

@@ -12,6 +12,7 @@ use App\Http\Responses\StoredFileResponse;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Exceptions\ExportLimitReachedException;
 use App\Inventories\Exceptions\ExportRefusedException;
+use App\Inventories\Exceptions\ExportStorageFullException;
 use App\Inventories\Exports\Exports;
 use App\Inventories\Exports\ExportStatus;
 use App\Models\Export;
@@ -23,6 +24,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Number;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -68,8 +70,9 @@ final class ExportController extends Controller
      * Asks for an export (`202`, with the export `pending`: the file is written in the background).
      *
      * `422` for a mistake in the request (`format`, `delimiter`, `files`, `query.*`), for a PDF of more items than a PDF may hold
-     * and for a zip with no file to put in it (both on `format`, with a `code`); `409` (`export_limit_reached`) when the person
-     * already has as many exports as they may; `429` beyond the pace of requests.
+     * and for a zip with no file to put in it (both on `format`, with a `code`); `409` when the person already has as many
+     * exports of this inventory as they may (`export_limit_reached`) or when their exports, this one included, would take more
+     * room than they may (`export_storage_full`), both with the `limit`; `429` beyond the pace of requests.
      */
     public function store(StoreExportRequest $request, Inventory $inventory): JsonResponse
     {
@@ -77,9 +80,15 @@ final class ExportController extends Controller
             $export = $this->exports->request($inventory, $this->user($request), $request->exportFormat(), $request->exportScope(), $request->options());
         } catch (ExportLimitReachedException $limit) {
             return ApiError::conflict(
-                trans_choice('You can have :count export at a time: delete one, or wait for one to expire.|You can have :count exports at a time: delete one, or wait for one to expire.', $limit->limit),
+                trans_choice('You can have :count export of this inventory at a time: delete one, or wait for one to expire.|You can have :count exports of this inventory at a time: delete one, or wait for one to expire.', $limit->limit),
                 ExportLimitReachedException::CODE,
                 ['limit' => $limit->limit],
+            );
+        } catch (ExportStorageFullException $full) {
+            return ApiError::conflict(
+                __('Your exports take too much room: together, they cannot weigh more than :size. Delete some, or wait for them to expire.', ['size' => Number::fileSize($full->limit, maxPrecision: 1)]),
+                ExportStorageFullException::CODE,
+                ['limit' => $full->limit],
             );
         } catch (ExportRefusedException $refused) {
             return $refused->reason === ExportRefusedException::PDF_TOO_LARGE

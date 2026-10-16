@@ -442,9 +442,31 @@ describe('the export dialog', () => {
 
             await component.submitExport();
 
-            expect(component.exportError).toBe('You already have too many exports. Delete some, then try again.');
+            expect(component.exportError).toBe(
+                'You already have too many exports of this inventory. Delete some, then try again.',
+            );
             expect(component.exportList).toEqual([]);
             expect(component.exportBusy).toBe(false);
+        });
+
+        it('says the exports take too much room for the code the API gives, whatever it wrote itself', async () => {
+            http.post.mockRejectedValue(
+                new HttpError(409, 'The API wrote this in its own words.', { code: 'export_storage_full' }),
+            );
+
+            await component.submitExport();
+
+            expect(component.exportError).toBe('Your exports take too much room. Delete some, then try again.');
+            expect(component.exportList).toEqual([]);
+            expect(component.exportBusy).toBe(false);
+        });
+
+        it('tells another 409 in the words of the API', async () => {
+            http.post.mockRejectedValue(new HttpError(409, 'Something else.', { code: 'something_else' }));
+
+            await component.submitExport();
+
+            expect(component.exportError).toBe('Something else.');
         });
 
         it('says what the API objects to in the format (a PDF that is too big, a ZIP with no file)', async () => {

@@ -3609,6 +3609,12 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(visible(radio('files', 'photos'))).toBe(false);
                 expect(exportDialog().querySelector('label[for="export-delimiter"]').textContent).toBe('CSV separator');
                 expect([...separator().options].map((one) => one.value)).toEqual(['semicolon', 'comma', 'tab']);
+                // The separator also decides the decimal sign: each choice says which one it comes with.
+                expect([...separator().options].map((one) => one.textContent)).toEqual([
+                    'Semicolon (Excel in French, decimals with a comma)',
+                    'Comma (decimals with a point)',
+                    'Tab (decimals with a point)',
+                ]);
 
                 await tick(radio('format', 'zip'), true);
 
@@ -3813,7 +3819,7 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(visible(footerAlert())).toBe(true);
                 expect(footerAlert().textContent).toBe(
-                    'You already have too many exports. Delete some, then try again.',
+                    'You already have too many exports of this inventory. Delete some, then try again.',
                 );
                 expect(startButton().disabled).toBe(false);
             });

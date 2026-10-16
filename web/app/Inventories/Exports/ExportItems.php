@@ -21,9 +21,11 @@ use Illuminate\Validation\ValidationException;
  *
  * The scope `all` is the whole inventory in the order the grid shows it by default (newest first); the scope `view` is what the
  * grid showed when the export was asked for, the search words, the filters and the sort of the request of the list, applied by the
- * same code as the list ({@see ItemSearchText}, {@see ItemQuery}). The ids of the matching items are listed first, in a
- * deterministic order (every sort ends with the id of the item), and the items are then read a chunk of {@see self::CHUNK} at a
- * time: memory does not grow with the inventory, and the set of items does not move while the file is written.
+ * same code as the list ({@see ItemSearchText}, {@see ItemQuery}). The ids of the matching items are all loaded first, in a
+ * deterministic order (every sort ends with the id of the item): a list of integers, at most `inventories.max_items` of them, which
+ * is small next to the items themselves. The items are then streamed, read a chunk of {@see self::CHUNK} at a time: memory holds
+ * the ids and one chunk of rows, whatever the size of the inventory, and the set of items does not move while the file is written
+ * (an item added or deleted since is neither written nor missed by accident: it is simply not in the list, or skipped).
  */
 final class ExportItems
 {

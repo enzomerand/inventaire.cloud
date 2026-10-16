@@ -10,11 +10,13 @@ use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Templates\TemplateCatalogue;
+use App\Jobs\GenerateExport;
 use App\Models\User;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -55,6 +57,10 @@ class AppServiceProvider extends ServiceProvider
         // routes ask for `can:admin`. Judged on the account as stored, at every request, so promoting or demoting
         // someone takes effect at once.
         Gate::define('admin', fn (User $user): bool => $user->is_admin);
+
+        // `composer dev` (`artisan dev`) runs a queue listener; the framework's one only listens to `default`, and the exports are
+        // on their own queue (see GenerateExport). `default` first, as the worker of the Docker image does.
+        DevCommands::artisan('queue:listen --tries=1 --timeout=0 --queue=default,'.GenerateExport::QUEUE, 'queue');
 
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();

@@ -71,6 +71,15 @@ it('lists the extension that is missing', function (): void {
         ->and(RequirementsChecker::passed($requirements))->toBeFalse();
 });
 
+it('requires what the exports are written with: the XML extensions of the spreadsheet files and of the PDF', function (string $extension): void {
+    $requirements = checker($this, [$extension])->check();
+
+    expect(requirement($requirements, 'ext-'.$extension)->ok)->toBeFalse()
+        ->and(requirement($requirements, 'ext-'.$extension)->detail)->toContain($extension)
+        ->and(RequirementsChecker::passed($requirements))->toBeFalse()
+        ->and(requirement(checker($this)->check(), 'ext-'.$extension)->ok)->toBeTrue();
+})->with(['dom', 'xmlreader', 'libxml', 'filter']);
+
 it('accepts either database driver but needs one', function (): void {
     expect(requirement(checker($this, ['pdo_pgsql'])->check(), 'database-driver')->ok)->toBeTrue()
         ->and(requirement(checker($this, ['pdo_mysql'])->check(), 'database-driver')->ok)->toBeTrue()

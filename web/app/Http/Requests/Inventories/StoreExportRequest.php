@@ -37,6 +37,9 @@ final class StoreExportRequest extends FormRequest
      * `format` (required: xlsx, ods, csv, json, pdf or zip), `scope` (`all`, the default, or `view`), `query` (only with the scope
      * `view`), `delimiter` (comma, semicolon or tab, for a CSV) and `files` (photos or all, for a zip).
      *
+     * The `delimiter` also decides the decimal sign of the numbers in the file (see {@see CsvWriter}): a comma with the semicolon
+     * (`12,5`, what a spreadsheet in French expects), a point with the comma or the tab (`12.5`). It is not an option of its own.
+     *
      * @return array<string, list<mixed>>
      */
     public function rules(): array

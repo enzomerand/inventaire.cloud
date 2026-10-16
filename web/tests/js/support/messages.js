@@ -155,7 +155,8 @@ export const MESSAGES = {
     'exports.notice.ready': 'Export ready: :name',
     'exports.notice.failed': 'An export failed.',
     'exports.notice.deleted': 'Export deleted.',
-    'exports.error.limit': 'You already have too many exports. Delete some, then try again.',
+    'exports.error.limit': 'You already have too many exports of this inventory. Delete some, then try again.',
+    'exports.error.storage_full': 'Your exports take too much room. Delete some, then try again.',
 };
 
 /**

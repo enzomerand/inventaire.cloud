@@ -7,8 +7,8 @@ namespace App\Inventories\Exceptions;
 use RuntimeException;
 
 /**
- * A person already has as many exports as `inventories.max_active_exports` allows (those that did not expire count, whatever their
- * state): one has to be deleted, or to expire, before another can be asked for. The API answers it with a 409.
+ * A person already has as many exports of an inventory as `inventories.max_active_exports` allows (those that did not expire count,
+ * whatever their state): one has to be deleted, or to expire, before another can be asked for. The API answers it with a 409.
  */
 final class ExportLimitReachedException extends RuntimeException
 {
@@ -20,6 +20,6 @@ final class ExportLimitReachedException extends RuntimeException
      */
     public function __construct(public readonly int $limit)
     {
-        parent::__construct("A person cannot have more than {$limit} exports at once.");
+        parent::__construct("A person cannot have more than {$limit} exports of an inventory at once.");
     }
 }

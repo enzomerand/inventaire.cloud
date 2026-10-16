@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Inventories\Exports\ExportError;
 use App\Inventories\Exports\ExportFormat;
 use App\Inventories\Exports\ExportStatus;
 use App\Models\Export;
+use App\Models\Item;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../../Support/exports.php';
 
@@ -247,4 +251,30 @@ describe('the numbers and the dates a spreadsheet cannot keep', function (): voi
             ->and($small['Amount'])->toBe(0.001)
             ->and($small['Whole'])->toBe(-12);
     });
+});
+
+describe('a workbook that cannot be completed', function (): void {
+    it('is failed, with the first error in the log, and the library leaves no scratch file or open file behind', function (ExportFormat $format): void {
+        $case = exportFixture();
+        $scratch = fn (): array => glob(storage_path('framework/exports/*')) ?: [];
+        $before = $scratch();
+        $seen = 0;
+        // The library has opened its file, written the header and its scratch files when the third item cannot be read.
+        Event::listen('eloquent.retrieved: '.Item::class, function () use (&$seen): void {
+            if (++$seen === 3) {
+                throw new RuntimeException('The disk is on fire.');
+            }
+        });
+        Log::spy();
+
+        $export = exportRun(exportAsked($case['inventory'], $case['team']['owner'], $format));
+
+        expect($export->status)->toBe(ExportStatus::Failed)
+            ->and($export->error)->toBe(ExportError::GenerationFailed->value)
+            ->and($export->path)->toBeNull()
+            ->and($scratch())->toBe($before);
+
+        // The error that counts is the first, not what the library says when it is closed in a hurry.
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['exception']->getMessage() === 'The disk is on fire.')->once();
+    })->with([ExportFormat::Xlsx, ExportFormat::Ods]);
 });

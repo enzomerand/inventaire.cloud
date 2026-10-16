@@ -19,7 +19,7 @@ use NumberFormatter;
  * amount its currency (`1 234,50 €`), a percentage its sign, a number its unit, a rating its maximum (`3/5`); dates and moments are
  * written the way the language writes them, a moment in the timezone of the instance; yes and no are in the language. A number a
  * float could not keep whole (more than 15 significant digits) is written digit by digit with the decimal separator of the
- * language and no grouping, rather than rounded.
+ * language and no grouping, rather than rounded; an amount of that size keeps its currency, where the language puts it.
  */
 final class ExportFormatter
 {
@@ -84,6 +84,7 @@ final class ExportFormatter
 
         if ($value->significantDigits() > self::EXACT_DIGITS) {
             $text = str_replace('.', $this->decimalSeparator(), $digits);
+            $text = $value->currency === null ? $text : $this->withCurrency($text, $value->currency);
         } elseif ($value->currency !== null) {
             $text = (string) $this->amount($scale)->formatCurrency((float) $digits, $value->currency);
         } else {
@@ -95,6 +96,24 @@ final class ExportFormatter
             $value->unit !== null => $text.' '.$value->unit,
             default => $text,
         };
+    }
+
+    /**
+     * An amount written as it is (see {@see self::EXACT_DIGITS}), with its currency where the language puts it: `$` before in
+     * English, `€` after, a no-break space between, in French.
+     */
+    private function withCurrency(string $number, string $currency): string
+    {
+        $formatter = new NumberFormatter($this->locale, NumberFormatter::CURRENCY);
+        $formatter->setTextAttribute(NumberFormatter::CURRENCY_CODE, $currency);
+        $symbol = (string) $formatter->getSymbol(NumberFormatter::CURRENCY_SYMBOL);
+        $sign = str_starts_with($number, '-') ? '-' : '';
+        $number = ltrim($number, '-');
+
+        // The currency sign (U+00A4) of the pattern marks where the language writes it.
+        return str_starts_with((string) $formatter->getPattern(), "\u{00A4}")
+            ? $sign.$symbol.$number
+            : $sign.$number."\u{00A0}".$symbol;
     }
 
     /**

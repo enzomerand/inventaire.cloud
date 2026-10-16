@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Inventories\Exports;
 
 use App\Inventories\Attachments\AttachmentStorage;
+use App\Inventories\Exceptions\PdfTooLargeException;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\ItemValues;
 use App\Jobs\GenerateExport;
 use App\Models\Export;
 use App\Models\Inventory;
 use App\Support\DisplayTime;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -24,10 +26,12 @@ use Throwable;
  * handed again) cannot both write it; the one that loses simply stops. The ids of the items are listed, the writer of the format
  * writes a local scratch file, the file is stored under the folder of its export, and the export is then marked `completed` with
  * its size, the number of items and the end of its life, again in one conditional update: if the row is gone by then (the person
- * deleted the export while it was being written) or was given up on, the file just stored is purged instead.
+ * deleted the export while it was being written, or its inventory or workspace was deleted) or was given up on, the file just
+ * stored is purged instead, by the folder it was written to: the row it belongs to is no longer there to find it from.
  *
  * Anything that goes wrong marks the export `failed` with a code ({@see ExportError}) and deletes what was written: a view that
- * no longer holds (a field it filters on was deleted) is `invalid_query`, anything else is `generation_failed`, with the cause in
+ * no longer holds (a field it filters on was deleted) is `invalid_query`, a PDF the library cannot lay out (the inventory has
+ * grown since it was asked for, or its texts are long) is `pdf_too_large`, anything else is `generation_failed`, with the cause in
  * the log. A failed export is kept as long as a completed one, so that the person sees it, and can delete it, before it goes away.
  * The file is written in the language of the export, whatever the language of the worker.
  */
@@ -59,19 +63,29 @@ final class ExportGenerator
             return;
         }
 
-        $export->refresh();
         $locale = App::getLocale();
         $scratch = null;
+        $path = null;
 
         try {
+            // Read inside the try: the row may have been deleted since it was claimed.
+            $export->refresh();
             App::setLocale($export->locale);
             $scratch = ExportTemp::file();
-            $this->generate($export, $scratch);
+            $this->generate($export, $scratch, $path);
+        } catch (ModelNotFoundException) {
+            // The export, its inventory or its workspace was deleted while the file was written: nothing to report, only what was stored to purge.
+            $this->fail($export, ExportError::GenerationFailed, $path);
         } catch (ValidationException) {
-            $this->fail($export, ExportError::InvalidQuery);
+            $this->fail($export, ExportError::InvalidQuery, $path);
+        } catch (PdfTooLargeException $exception) {
+            // What the inventory held when it was asked for was fine: it has grown since, or its texts are long. The person can
+            // narrow the view; nothing is wrong with the server, so it is not an error of the log.
+            Log::warning('A PDF export was too large for the library.', ['export' => $export->ulid, 'message' => $exception->getMessage()]);
+            $this->fail($export, ExportError::PdfTooLarge, $path);
         } catch (Throwable $exception) {
             Log::error('An export could not be generated.', ['export' => $export->ulid, 'format' => $export->format->value, 'exception' => $exception]);
-            $this->fail($export, ExportError::GenerationFailed);
+            $this->fail($export, ExportError::GenerationFailed, $path);
         } finally {
             if ($scratch !== null) {
                 @unlink($scratch);
@@ -82,10 +96,16 @@ final class ExportGenerator
     }
 
     /**
-     * Gives up on an export that has not ended: `failed` with the code, its folder purged. An export that has ended, or is gone, is
-     * left as it is (the folder is purged all the same: nothing of a failed attempt may stay).
+     * Gives up on an export that has not ended: `failed` with the code, without a size (a failed export holds nothing), its
+     * folder purged. An export that has completed in the meantime is left as it is, file included: a late call (a job reported
+     * failed after it ended, the pruner acting on a row it read before it completed) must never delete a file somebody can
+     * download. For an export that is gone, or already failed, the folder is purged all the same: nothing of a failed attempt may
+     * stay.
+     *
+     * @param  string|null  $path  The file this attempt stored, when it got that far: its folder is purged by that path, which still
+     *                             works when the inventory (and so the export) is gone. Otherwise the folder is worked out from the row.
      */
-    public function fail(Export $export, ExportError $error): void
+    public function fail(Export $export, ExportError $error, ?string $path = null): void
     {
         Export::query()
             ->whereKey($export->getKey())
@@ -93,12 +113,22 @@ final class ExportGenerator
             ->update([
                 'status' => ExportStatus::Failed->value,
                 'error' => $error->value,
+                'size' => null,
                 'completed_at' => now(),
                 'expires_at' => now()->addHours(config()->integer('inventories.export_ttl_hours')),
                 'updated_at' => now(),
             ]);
 
-        $this->cleanup->purge($export);
+        // Whatever the update did, the row is now completed (it won the race: keep its file), failed or gone (purge).
+        if (Export::query()->whereKey($export->getKey())->where('status', ExportStatus::Completed->value)->exists()) {
+            return;
+        }
+
+        if ($path === null) {
+            $this->cleanup->purge($export);
+        } else {
+            $this->purgeFolderOf($export->disk, $path);
+        }
     }
 
     /**
@@ -121,9 +151,14 @@ final class ExportGenerator
     /**
      * Lists the items, writes the file in `$scratch`, stores it and completes the export.
      *
+     * @param  string|null  $path  Set to where the file is stored as soon as that is known, before it is written to the disk: if
+     *                             storing it fails half way, the caller still knows which folder to purge.
+     *
+     * @param-out string $path
+     *
      * @throws ValidationException When the view of the export does not hold any more.
      */
-    private function generate(Export $export, string $scratch): void
+    private function generate(Export $export, string $scratch, ?string &$path): void
     {
         $context = $this->context($export);
         $inventory = $context->inventory;
@@ -149,9 +184,19 @@ final class ExportGenerator
             ]);
 
         if ($completed !== 1) {
-            // Deleted, or given up on, while it was being written: nobody will ever ask for this file.
-            $this->cleanup->purge($export);
+            // Deleted, or given up on, while it was being written: nobody will ever ask for this file. Purged by its folder, not
+            // through the row: the inventory or the workspace may have been deleted too (and its own purge may have run before
+            // the file was stored), and the row that says where the folder is is gone with it.
+            $this->purgeFolderOf($export->disk, $path);
         }
+    }
+
+    /**
+     * Has the folder of a stored export file purged once the transaction in progress is committed (at once when there is none).
+     */
+    private function purgeFolderOf(string $disk, string $path): void
+    {
+        $this->storage->purgeAfterCommit($disk, [], [dirname($path)]);
     }
 
     /**
@@ -169,11 +214,14 @@ final class ExportGenerator
     }
 
     /**
-     * The name the file is downloaded as: the name of the inventory and the day, in the timezone of the instance.
+     * The name the file is downloaded as: the name of the inventory and the day, in the timezone of the instance. The whole name,
+     * day and extension included, is at most {@see ExportNames::FILE_MAX_BYTES} bytes.
      */
     private function fileName(Inventory $inventory, ExportFormat $format): string
     {
-        return ExportNames::entry($inventory->name, __('Items'), 80).' - '.DisplayTime::of(now())->format('Y-m-d').'.'.$format->extension();
+        $suffix = ' - '.DisplayTime::of(now())->format('Y-m-d').'.'.$format->extension();
+
+        return ExportNames::entry($inventory->name, __('Items'), ExportNames::FILE_MAX_BYTES - strlen($suffix)).$suffix;
     }
 
     /**

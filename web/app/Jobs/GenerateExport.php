@@ -9,6 +9,7 @@ use App\Inventories\Exports\ExportGenerator;
 use App\Models\Export;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 /**
@@ -16,28 +17,43 @@ use Throwable;
  * request may take ({@see ExportGenerator}).
  *
  * It is tried once: the generator records a failure on the export itself, and writing a file again from the start is for the person
- * to ask (a new export), not for the queue to repeat in silence. It may run for 15 minutes; the queue connection must wait longer
- * than that before it hands a running job to another worker (`retry_after` of `config/queue.php`). An export deleted before the job
- * runs is no failure: the job is dropped. One that was killed (a timeout, a worker stopped) is recorded as failed; one that was
- * lost altogether is given up on by `inventaire:prune-exports`.
+ * to ask (a new export), not for the queue to repeat in silence. It may run for 15 minutes ({@see self::TIMEOUT}); the queue
+ * connection must wait longer than that before it hands a running job to another worker (`retry_after` of `config/queue.php`,
+ * 960 seconds).
+ *
+ * The job goes on its own queue, `exports` ({@see self::QUEUE}), so that a long export does not hold up the short jobs (mails,
+ * file purges) behind it: a worker listens to `default` first, then `exports` (`queue:work --queue=default,exports`).
+ *
+ * The export is serialized by its key, not as a snapshot (`SerializesModels`) and read again when the job runs: one deleted before
+ * that is no failure, the job is dropped (`deleteWhenMissingModels`). One that was killed (a timeout, a worker stopped) is recorded
+ * as failed; one that was lost altogether is given up on by `inventaire:prune-exports`.
  */
 final class GenerateExport implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, SerializesModels;
+
+    /** The queue the jobs are put on. */
+    public const QUEUE = 'exports';
+
+    /** The seconds the job may run. */
+    public const TIMEOUT = 900;
 
     /** The job is tried once. */
     public int $tries = 1;
 
     /** The seconds the job may run. */
-    public int $timeout = 900;
+    public int $timeout = self::TIMEOUT;
 
     /** An export that is deleted before its job runs is not an error. */
     public bool $deleteWhenMissingModels = true;
 
     /**
-     * Remembers which export to write.
+     * Remembers which export to write, and puts the job on its queue.
      */
-    public function __construct(public readonly Export $export) {}
+    public function __construct(public readonly Export $export)
+    {
+        $this->onQueue(self::QUEUE);
+    }
 
     /**
      * Writes the export.

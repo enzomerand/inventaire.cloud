@@ -50,17 +50,20 @@ final class ExportTemp
     }
 
     /**
-     * Deletes the scratch files and folders left in the folder of the exports for longer than this many seconds: the leftovers of a worker that
-     * was stopped while it wrote one.
+     * Deletes the scratch files and folders left in the folder of the exports for longer than this many seconds (an hour by default,
+     * more than an export may run): the leftovers of a worker that was stopped while it wrote one.
      *
      * @return int How many files and folders were deleted.
      */
-    public static function prune(int $olderThan = 86400): int
+    public static function prune(int $olderThan = 3600): int
     {
         $deleted = 0;
 
         foreach (glob(self::directory().'/*') ?: [] as $path) {
-            if (filemtime($path) >= time() - $olderThan) {
+            // A file that vanished since the listing (another worker is done with it) has no age: it is not ours to delete.
+            $modified = @filemtime($path);
+
+            if ($modified === false || $modified >= time() - $olderThan) {
                 continue;
             }
 

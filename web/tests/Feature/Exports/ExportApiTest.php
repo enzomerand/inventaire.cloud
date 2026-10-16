@@ -104,6 +104,8 @@ describe('asking for an export', function (): void {
 
         Queue::assertPushed(GenerateExport::class, fn (GenerateExport $job): bool => $job->export->is($export));
         Queue::assertPushed(GenerateExport::class, 1);
+        // On the queue of the exports: a worker listens to it after the default one.
+        Queue::assertPushedOn('exports', GenerateExport::class);
     });
 
     it('is open to every member, a viewer too, and to nobody else', function (): void {
@@ -353,6 +355,156 @@ describe('a zip', function (): void {
     });
 });
 
+/**
+ * An inventory with two photos on two items, of known sizes, for the exports that weigh something before they are written.
+ *
+ * @return array<string, mixed>
+ */
+function roomCase(): array
+{
+    $case = exportFixture();
+    $owner = $case['team']['owner'];
+    $case['drillFile'] = attachmentTo($case['inventory'], $case['items']['drill'], attachmentImage('front.png'), $owner, $case['fields']['photos']);
+    $case['formulasFile'] = attachmentTo($case['inventory'], $case['items']['formulas'], attachmentImage('back.png', 'png', 60, 30), $owner, $case['fields']['photos']);
+    $case['manual'] = attachmentTo($case['inventory'], $case['items']['drill'], attachmentPdf('manual.pdf'), $owner, $case['fields']['docs']);
+
+    return $case;
+}
+
+describe('the room the exports of a person take', function (): void {
+    it('is 2 GB by default, from the megabytes the configuration says', function (): void {
+        expect(config('inventories.export_storage_per_user'))->toBe(2048 * 1048576);
+
+        config(['inventories.export_storage_per_user' => (int) round(1.5 * 1048576)]);
+
+        expect(config('inventories.export_storage_per_user'))->toBe(1572864);
+    });
+
+    it('refuses an export, 409 with its code, when the exports the person has already weigh more than the limit', function (): void {
+        Queue::fake();
+        config(['inventories.export_storage_per_user' => 2048]);
+        $case = exportFixture();
+        $owner = $case['team']['owner'];
+        exportStored(exportRow($case['inventory'], $owner), 'a.csv', str_repeat('x', 1500));
+        exportPost($this, $owner, $case['inventory'])->assertStatus(202);
+
+        exportStored(exportRow($case['inventory'], $owner), 'b.csv', str_repeat('x', 1000));
+        $refused = exportPost($this, $owner, $case['inventory'])->assertStatus(409);
+
+        expect($refused->json('code'))->toBe('export_storage_full')
+            ->and($refused->json('limit'))->toBe(2048)
+            ->and($refused->json('message'))->toBe('Your exports take too much room: together, they cannot weigh more than 2 KB. Delete some, or wait for them to expire.')
+            ->and(Export::query()->count())->toBe(3);
+        Queue::assertPushed(GenerateExport::class, 1);
+    });
+
+    it('counts the exports of every inventory of the person, and nobody else\'s', function (): void {
+        Queue::fake();
+        config(['inventories.export_storage_per_user' => 2048]);
+        $case = exportFixture();
+        $second = inventoryIn($case['team']['workspace'], 'Second');
+        $owner = $case['team']['owner'];
+        exportStored(exportRow($second, $owner), 'other-inventory.csv', str_repeat('x', 2500));
+
+        exportPost($this, $owner, $case['inventory'])->assertStatus(409)->assertJsonPath('code', 'export_storage_full');
+        // Somebody else's exports are theirs: the editor has room.
+        exportStored(exportRow($case['inventory'], $case['team']['editor']), 'editor.csv', str_repeat('x', 100));
+        exportPost($this, $case['team']['editor'], $case['inventory'])->assertStatus(202);
+    });
+
+    it('is lifted by deleting an export, or when one expires, and does not count one that failed', function (): void {
+        Queue::fake();
+        config(['inventories.export_storage_per_user' => 2048]);
+        $case = exportFixture();
+        $owner = $case['team']['owner'];
+        $big = exportStored(exportRow($case['inventory'], $owner), 'big.csv', str_repeat('x', 3000));
+        $failed = exportRow($case['inventory'], $owner, ['status' => ExportStatus::Failed, 'error' => ExportError::GenerationFailed->value, 'expires_at' => now()->addHour()]);
+
+        exportPost($this, $owner, $case['inventory'])->assertStatus(409);
+
+        $big->forceFill(['expires_at' => now()->subSecond()])->save();
+        exportPost($this, $owner, $case['inventory'])->assertStatus(202);
+
+        $big->forceFill(['expires_at' => now()->addHour()])->save();
+        exportPost($this, $owner, $case['inventory'])->assertStatus(409);
+        inventoryCall($this, $owner, 'DELETE', exportUri($case['inventory'], $big))->assertNoContent();
+        exportPost($this, $owner, $case['inventory'])->assertStatus(202);
+
+        expect($failed->fresh()->size)->toBeNull();
+    });
+
+    it('lets the export in that reaches the limit exactly, and refuses one more byte', function (): void {
+        Queue::fake();
+        $case = roomCase();
+        $owner = $case['team']['owner'];
+        $weight = $case['drillFile']->size;
+        config(['inventories.export_storage_per_user' => $weight + 100]);
+        exportStored(exportRow($case['inventory'], $owner), 'a.csv', str_repeat('x', 100));
+
+        exportPost($this, $owner, $case['inventory'], ['format' => 'zip', 'scope' => 'view', 'query' => ['q' => 'drill']])->assertStatus(202);
+
+        config(['inventories.export_storage_per_user' => $weight + 99]);
+        // Another export is waiting to be written, a zip of the same files: the room is taken before it is written.
+        exportPost($this, $owner, $case['inventory'], ['format' => 'csv'])->assertStatus(409)->assertJsonPath('code', 'export_storage_full');
+    });
+
+    it('is taken by a zip as soon as it is asked for, for the sum of the files it will hold', function (): void {
+        Queue::fake();
+        $case = roomCase();
+        $owner = $case['team']['owner'];
+        $photos = $case['drillFile']->size + $case['formulasFile']->size;
+
+        exportPost($this, $owner, $case['inventory'], ['format' => 'zip'])->assertStatus(202)->assertJsonPath('data.size', null);
+        $everything = exportPost($this, $owner, $case['inventory'], ['format' => 'zip', 'files' => 'all'])->assertStatus(202);
+        $view = exportPost($this, $owner, $case['inventory'], ['format' => 'zip', 'scope' => 'view', 'query' => ['q' => 'drill']])->assertStatus(202);
+        $csv = exportPost($this, $owner, $case['inventory'], ['format' => 'csv'])->assertStatus(202);
+
+        expect(Export::query()->orderBy('id')->get()->map(fn (Export $export): ?int => $export->size)->all())->toBe([
+            // The photos, the photos and the manual, the photos of the item of the view only, and nothing known for a CSV.
+            $photos,
+            $photos + $case['manual']->size,
+            $case['drillFile']->size,
+            null,
+        ])->and($everything->json('data.size'))->toBeNull()
+            ->and($view->json('data.size'))->toBeNull()
+            ->and($csv->json('data.size'))->toBeNull();
+    });
+
+    it('refuses a zip that alone would be more than the limit', function (): void {
+        Queue::fake();
+        $case = roomCase();
+        config(['inventories.export_storage_per_user' => $case['drillFile']->size + $case['formulasFile']->size - 1]);
+
+        exportPost($this, $case['team']['owner'], $case['inventory'], ['format' => 'zip'])->assertStatus(409)->assertJsonPath('code', 'export_storage_full');
+        // One photo is under the limit.
+        exportPost($this, $case['team']['owner'], $case['inventory'], ['format' => 'zip', 'scope' => 'view', 'query' => ['q' => 'drill']])->assertStatus(202);
+
+        expect(Export::query()->count())->toBe(1);
+    });
+
+    it('is the real size once the zip is written, which replaces the estimate, and the API gives it only then', function (): void {
+        $case = roomCase();
+        $owner = $case['team']['owner'];
+
+        $created = exportPost($this, $owner, $case['inventory'], ['format' => 'zip'])->assertStatus(202);
+        $export = Export::query()->sole();
+
+        // The queue of the tests is synchronous: written by now, with its own size (the zip adds its headers to the photos).
+        expect($export->status)->toBe(ExportStatus::Completed)
+            ->and($export->size)->toBe(strlen((string) file_get_contents(exportLocalPath($export))))
+            ->and($created->json('data.size'))->toBeNull()
+            ->and(inventoryCall($this, $owner, 'GET', exportUri($case['inventory'], $export))->assertOk()->json('data.size'))->toBe($export->size);
+    });
+
+    it('does not give the estimate of a zip in the list while it is not written', function (): void {
+        $case = roomCase();
+        $export = exportRow($case['inventory'], $case['team']['owner'], ['format' => ExportFormat::Zip, 'size' => 123456]);
+
+        expect(inventoryCall($this, $case['team']['owner'], 'GET', exportUri($case['inventory']))->assertOk()->json('data.0.size'))->toBeNull()
+            ->and($export->fresh()->size)->toBe(123456);
+    });
+});
+
 describe('the limit of exports', function (): void {
     it('is 409 with its code when the person has as many as they may', function (): void {
         Queue::fake();
@@ -368,12 +520,12 @@ describe('the limit of exports', function (): void {
 
         expect($refused->json('code'))->toBe('export_limit_reached')
             ->and($refused->json('limit'))->toBe(3)
-            ->and($refused->json('message'))->toBe('You can have 3 exports at a time: delete one, or wait for one to expire.')
+            ->and($refused->json('message'))->toBe('You can have 3 exports of this inventory at a time: delete one, or wait for one to expire.')
             ->and(Export::query()->count())->toBe(3);
         Queue::assertPushed(GenerateExport::class, 3);
     });
 
-    it('is the person\'s own, across all their inventories, and not the others\'', function (): void {
+    it('is the person\'s own, for each of their inventories, and not the others\'', function (): void {
         Queue::fake();
         config(['inventories.max_active_exports' => 2]);
         $case = exportFixture();
@@ -381,9 +533,12 @@ describe('the limit of exports', function (): void {
         $owner = $case['team']['owner'];
 
         exportPost($this, $owner, $case['inventory'])->assertStatus(202);
-        exportPost($this, $owner, $second)->assertStatus(202);
+        exportPost($this, $owner, $case['inventory'])->assertStatus(202);
 
-        exportPost($this, $owner, $case['inventory'])->assertStatus(409);
+        // The inventory is full; another one is not: a person with a lot of exports of one inventory can still export the others.
+        exportPost($this, $owner, $case['inventory'])->assertStatus(409)->assertJsonPath('code', 'export_limit_reached');
+        exportPost($this, $owner, $second)->assertStatus(202);
+        exportPost($this, $owner, $second)->assertStatus(202);
         exportPost($this, $owner, $second)->assertStatus(409);
         exportPost($this, $case['team']['editor'], $case['inventory'])->assertStatus(202);
     });

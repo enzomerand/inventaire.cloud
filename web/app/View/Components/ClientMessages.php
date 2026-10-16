@@ -234,7 +234,8 @@ class ClientMessages extends Component
             'exports.notice.ready' => __('Export ready: :name'),
             'exports.notice.failed' => __('An export failed.'),
             'exports.notice.deleted' => __('Export deleted.'),
-            'exports.error.limit' => __('You already have too many exports. Delete some, then try again.'),
+            'exports.error.limit' => __('You already have too many exports of this inventory. Delete some, then try again.'),
+            'exports.error.storage_full' => __('Your exports take too much room. Delete some, then try again.'),
         ];
     }
 
