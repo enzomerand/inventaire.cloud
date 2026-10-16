@@ -34,11 +34,17 @@ final class ImportCleanup
 
     /**
      * Queues the purge of the folder of an import that has just been deleted, to be run once the transaction that deletes it is
-     * committed (at once when there is none). Nothing is queued when its inventory is gone too: the folder of the inventory is
-     * purged with it.
+     * committed (at once when there is none). Nothing is queued when its inventory is gone too (the folder of the inventory is
+     * purged with it), nor for an import that is over and has no `path` any more: its source was deleted when it ended, or that
+     * deletion was queued if the disk failed, and a job for each of the reports the pruner clears would only ask the disk to delete
+     * what is not there.
      */
     public function purge(Import $import): void
     {
+        if ($import->path === null && $import->status->isFinal()) {
+            return;
+        }
+
         $workspace = $this->db->table('inventories')
             ->join('workspaces', 'workspaces.id', '=', 'inventories.workspace_id')
             ->where('inventories.id', $import->inventory_id)

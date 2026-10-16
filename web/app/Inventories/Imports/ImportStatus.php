@@ -15,4 +15,12 @@ enum ImportStatus: string
     case Running = 'running';
     case Completed = 'completed';
     case Failed = 'failed';
+
+    /**
+     * Whether the import is over: it is a report now, and keeps no source file.
+     */
+    public function isFinal(): bool
+    {
+        return $this === self::Completed || $this === self::Failed;
+    }
 }

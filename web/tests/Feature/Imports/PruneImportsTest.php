@@ -8,11 +8,13 @@ use App\Inventories\Imports\ImportPruner;
 use App\Inventories\Imports\ImportRunner;
 use App\Inventories\Imports\ImportStatus;
 use App\Jobs\GenerateExport;
+use App\Jobs\PurgeStoredFiles;
 use App\Models\Import;
 use App\Models\Item;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
 require_once __DIR__.'/../../Support/imports.php';
@@ -75,6 +77,33 @@ describe('the imports that expired', function (): void {
             ->and(Import::query()->whereKey($case['fresh']->id)->exists())->toBeTrue()
             ->and(collect(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->contains($case['expiredFile']->path))->toBeFalse()
             ->and(collect(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->contains($case['fresh']->path))->toBeTrue();
+    });
+
+    it('queue the deletion of a folder only for the imports that may still have a file', function (): void {
+        Queue::fake([PurgeStoredFiles::class]);
+        $case = importCase();
+        $withFile = pruneImport($case, ['expires_at' => now()->subMinute()]);
+        pruneImport($case, ['status' => ImportStatus::Completed, 'expires_at' => now()->subMinute()])->forceFill(['path' => null])->save();
+        pruneImport($case, ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subMinute()])->forceFill(['path' => null])->save();
+
+        $result = app(ImportPruner::class)->prune();
+
+        expect($result['expired'])->toBe(3);
+        // Only the upload that was never started: the reports kept no file, they have nothing to purge.
+        Queue::assertPushed(PurgeStoredFiles::class, 1);
+        Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->directories === [dirname((string) $withFile->path)]);
+    });
+
+    it('purge the folder of an upload whose row never got its path, found by the identifier of the import', function (): void {
+        $case = importCase();
+        // The process died after the row and before the path was recorded: the file may be on the disk, and the row does not say where.
+        $import = pruneImport($case, ['expires_at' => now()->subMinute()]);
+        $import->forceFill(['path' => null])->save();
+
+        app(ImportPruner::class)->prune();
+
+        expect(Import::query()->whereKey($import->id)->exists())->toBeFalse()
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toBe([]);
     });
 
     it('go as soon as their time is up, not before', function (): void {

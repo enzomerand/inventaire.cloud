@@ -952,7 +952,7 @@
     "The file holds more rows than an import may take.": "Le fichier contient plus de lignes qu'un import n'en accepte.",
     "A column you made a choice field of holds too many different values for a list of choices.": "Une colonne dont vous avez fait un champ à choix contient trop de valeurs différentes pour une liste de choix.",
     "A column you made a choice field of holds no value, so the field would have no choice.": "Une colonne dont vous avez fait un champ à choix ne contient aucune valeur : le champ n'aurait aucun choix.",
-    "The fields of the inventory changed while the import was waiting, so nothing was imported. Start the import again.": "Les champs de l'inventaire ont changé pendant l'attente de l'import, donc rien n'a été importé. Relancez l'import.",
+    "The fields of the inventory changed while the import was waiting, so nothing was imported. The file was deleted: send it again to start a new import.": "Les champs de l'inventaire ont changé pendant l'attente de l'import, donc rien n'a été importé. Le fichier a été supprimé : envoyez-le de nouveau pour lancer un nouvel import.",
     "The import would take the inventory past the number of items it may hold, so nothing was imported.": "L'import dépasserait le nombre d'articles que l'inventaire peut contenir, donc rien n'a été importé.",
     "The import would take the inventory past the number of fields it may have, so nothing was imported.": "L'import dépasserait le nombre de champs que l'inventaire peut avoir, donc rien n'a été importé.",
     "You are no longer allowed to change the items of this inventory, so nothing was imported.": "Vous n'avez plus le droit de modifier les articles de cet inventaire, donc rien n'a été importé.",

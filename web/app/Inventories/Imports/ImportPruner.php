@@ -20,8 +20,9 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * - `pending` is stale when it was **started** more than `inventories.import_stale_minutes` ago: it is marked failed even though its
  *   job may still be queued behind a long backlog. That job then exits without doing anything, because the import is no longer pending
- *   ({@see ImportRunner::run()}). The time counts from the day the person started it, not from the day they sent the file, which may be
- *   a day earlier;
+ *   ({@see ImportRunner::run()}). The time counts from the day the person started it (`started_at`), not from the day they sent the
+ *   file (`created_at`, which the first design counted from): a file may be sent, left for hours, then started, and an import that was
+ *   started a minute ago must not be given up on because its file is old. A row with no `started_at` is judged on `created_at`;
  * - `running` is stale when it began more than the time a job may run ({@see GenerateExport::TIMEOUT}) plus a margin ago.
  *
  * The scratch files of the imports that were being read when a worker died are deleted when an hour old.

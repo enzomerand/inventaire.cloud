@@ -52,7 +52,7 @@ enum ImportError: string
             self::TooManyRows => __('The file holds more rows than an import may take.'),
             self::TooManyChoices => __('A column you made a choice field of holds too many different values for a list of choices.'),
             self::NoChoices => __('A column you made a choice field of holds no value, so the field would have no choice.'),
-            self::FieldsChanged => __('The fields of the inventory changed while the import was waiting, so nothing was imported. Start the import again.'),
+            self::FieldsChanged => __('The fields of the inventory changed while the import was waiting, so nothing was imported. The file was deleted: send it again to start a new import.'),
             self::ItemLimitReached => __('The import would take the inventory past the number of items it may hold, so nothing was imported.'),
             self::FieldLimitReached => __('The import would take the inventory past the number of fields it may have, so nothing was imported.'),
             self::NotAllowed => __('You are no longer allowed to change the items of this inventory, so nothing was imported.'),

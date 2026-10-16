@@ -33,13 +33,18 @@ use Throwable;
  * read), and the person must not have as many unfinished imports of this inventory as they may ({@see ImportLimitReachedException}),
  * counted under the lock of the row of the person so that two files sent at the same moment cannot cross the quota together, and once
  * before the file is read, so that a person at the limit does not make the server read it. The file is read once to detect how it is
- * written and to propose a mapping ({@see ImportAnalyzer}): the answer comes with the request, not from a queue. It is written to the
- * disk before the row that records it, like the files of items, and deleted again if the row cannot be written.
+ * written and to propose a mapping ({@see ImportAnalyzer}): the answer comes with the request, not from a queue. The row that records
+ * it is written first, without a `path`, and the file after it, which then gets its `path` set: a process that dies between the two leaves
+ * a row that expires and is pruned together with the folder of the file (the folder is named after the row, whatever `path` says),
+ * where a file written first would be left on the disk with nothing that points to it. If the file cannot be written the row is deleted
+ * again.
  *
  * Until it is started an import can be **read again** with other options (the first row is not a header, the file is in another
  * encoding, the separator is another one): the columns and the proposal are made anew. **Starting** it checks the mapping against the
- * fields the inventory has now ({@see ImportMapping::assertValid()}), and moves it from `uploaded` to `pending` in one conditional
- * update, so that two requests cannot start it twice and a deletion cannot be undone; the job is queued once that is committed.
+ * fields the inventory has now ({@see ImportMapping::assertValid()}) and the columns of the copy that was loaded, then locks the row,
+ * reads it again and refuses to go on if it changed since (read again with other options, started, deleted), and moves it from
+ * `uploaded` to `pending` in one conditional update, so that two requests cannot start it twice and a deletion cannot be undone; the
+ * job is queued once that is committed.
  */
 final class Imports
 {
@@ -106,7 +111,7 @@ final class Imports
             'format' => $format,
             'status' => ImportStatus::Uploaded,
             'disk' => $disk,
-            'path' => $path,
+            'path' => null,
             'file_name' => $name,
             'size' => (int) $file->getSize(),
             'locale' => $locale,
@@ -116,28 +121,38 @@ final class Imports
             'expires_at' => now()->addHours(config()->integer('inventories.import_ttl_hours')),
         ];
 
+        $import = DeadlockRetries::run(fn (): Import => $this->db->transaction(function () use ($inventory, $user, $limit, $attributes): Import {
+            // The row of the person serialises their files: the count below cannot be crossed by two at once.
+            $this->locks->users([$user->getKey()]);
+
+            if ($this->activeCount($inventory, $user) >= $limit) {
+                throw new ImportLimitReachedException($limit);
+            }
+
+            // A fresh instance each time the transaction is tried: one that was saved by a try that was rolled back is not new.
+            $import = new Import;
+            $import->forceFill($attributes)->save();
+
+            return $import;
+        }));
+
         try {
             $this->files->store($disk, $path, $local);
-
-            return DeadlockRetries::run(fn (): Import => $this->db->transaction(function () use ($inventory, $user, $limit, $attributes): Import {
-                // The row of the person serialises their files: the count below cannot be crossed by two at once.
-                $this->locks->users([$user->getKey()]);
-
-                if ($this->activeCount($inventory, $user) >= $limit) {
-                    throw new ImportLimitReachedException($limit);
-                }
-
-                // A fresh instance each time the transaction is tried: one that was saved by a try that was rolled back is not new.
-                $import = new Import;
-                $import->forceFill($attributes)->save();
-
-                return $import;
-            }));
+            Import::query()->whereKey($import->getKey())->update(['path' => $path]);
         } catch (Throwable $failure) {
+            // The row goes first, so that nothing says there is a file; then the file, which may have been half written.
+            try {
+                $import->delete();
+            } catch (Throwable $deletion) {
+                report($deletion);
+            }
+
             $this->storage->forgetNow($disk, [$path]);
 
             throw $failure;
         }
+
+        return $import->refresh();
     }
 
     /**
@@ -216,6 +231,15 @@ final class Imports
         $options = $import->settings()->with(Arr::only($settings, ['decimal', 'date_order', 'on_error']));
 
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($import, $entries, $options): void {
+            // The row is locked and read again: the mapping was checked against the columns of the copy loaded with the request, and
+            // another request may have read the file again since (other columns, other options) or started it. Only the import as it
+            // was loaded can be started.
+            $current = Import::query()->whereKey($import->getKey())->lockForUpdate()->first();
+
+            if ($current === null || $current->status !== ImportStatus::Uploaded || $current->isExpired() || $current->columns !== $import->columns || $current->options !== $import->options) {
+                throw new ImportNotEditableException;
+            }
+
             $claimed = Import::query()
                 ->whereKey($import->getKey())
                 ->where('status', ImportStatus::Uploaded->value)

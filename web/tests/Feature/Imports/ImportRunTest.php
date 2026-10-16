@@ -578,7 +578,9 @@ describe('what changes while the import waits', function (): void {
 
         $import = importDone($import);
 
-        expect($import->error)->toBe('fields_changed')->and(Item::query()->count())->toBe(0)->and($import->path)->toBeNull();
+        expect($import->error)->toBe('fields_changed')->and(Item::query()->count())->toBe(0)->and($import->path)->toBeNull()
+            // The file is gone: starting again means sending it again.
+            ->and($import->failure()?->message())->toBe('The fields of the inventory changed while the import was waiting, so nothing was imported. The file was deleted: send it again to start a new import.');
     });
 
     it('fails when a field to create was created by someone else meanwhile', function (): void {

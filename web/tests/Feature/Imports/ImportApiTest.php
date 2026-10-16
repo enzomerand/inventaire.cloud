@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Inventories\Attachments\AttachmentStorage;
+use App\Inventories\Exceptions\ImportNotEditableException;
+use App\Inventories\Imports\Imports;
 use App\Inventories\Imports\ImportStatus;
 use App\Jobs\ImportItems;
 use App\Jobs\PurgeStoredFiles;
@@ -10,6 +12,7 @@ use App\Models\Import;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -244,6 +247,25 @@ describe('sending a file', function (): void {
         importPost($this, $case['team']['owner'], $case['inventory'], $case['csv'])->assertStatus(409);
 
         expect(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toHaveCount(1);
+    });
+
+    it('writes the row before the file, and takes the row back when the file cannot be written', function (): void {
+        $case = importFixture();
+        $seen = null;
+        // The disk refuses the file; what the table holds at that moment is what a crash would leave behind.
+        attachmentDiskProxy()->shouldReceive('put')->andReturnUsing(function () use (&$seen): bool {
+            $seen = Import::query()->get(['status', 'path'])->map(fn (Import $import): array => [$import->status->value, $import->path])->all();
+
+            return false;
+        });
+
+        expect(fn () => app(Imports::class)->upload($case['inventory'], $case['team']['owner'], importUploaded($case['csv'], 'stock.csv'), [], true))
+            ->toThrow(RuntimeException::class);
+
+        // The row was there without a path (so the pruner finds the folder of a file that was half written), then it went.
+        expect($seen)->toBe([['uploaded', null]])
+            ->and(Import::query()->count())->toBe(0)
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toBe([]);
     });
 
     it('is paced: the files one person sends in a minute are limited', function (): void {
@@ -514,6 +536,22 @@ describe('starting an import', function (): void {
         Queue::assertNothingPushed();
     });
 
+    it('is refused when the file was read again after the copy that is started was loaded', function (): void {
+        Queue::fake();
+        $case = importFixture();
+        $sent = importPost($this, $case['team']['owner'], $case['inventory'], $case['csv'])->assertCreated();
+        $imports = app(Imports::class);
+        // A request loads the import, another one reads the file again with other options, then the first goes on with the columns it saw.
+        $stale = Import::query()->sole();
+        $imports->reanalyze(Import::query()->sole(), $case['inventory'], ['has_header' => false], true);
+
+        expect(fn () => $imports->start($stale, $case['inventory'], $sent->json('data.mapping'), [], true))
+            ->toThrow(ImportNotEditableException::class)
+            ->and(Import::query()->sole()->status)->toBe(ImportStatus::Uploaded);
+
+        Queue::assertNotPushed(ImportItems::class);
+    });
+
     it('cannot start twice', function (): void {
         Queue::fake();
         $case = importFixture();
@@ -549,6 +587,28 @@ describe('deleting an import', function (): void {
         inventoryCall($this, $case['team']['owner'], 'DELETE', importUri($case['inventory'], $import))->assertStatus(409)->assertJsonPath('code', 'import_running');
 
         expect(Import::query()->count())->toBe(1);
+    });
+
+    it('is refused when the job claimed the import after it was loaded: the deletion wants it not to be running', function (): void {
+        $case = importFixture();
+        $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'status' => ImportStatus::Pending]);
+        // The import is read as pending, and the worker claims it before the deletion is made.
+        importAfterStatement('/^select .* from [`"]imports[`"]/i', fn () => DB::table('imports')->where('id', $import->id)->update(['status' => 'running']));
+
+        inventoryCall($this, $case['team']['owner'], 'DELETE', importUri($case['inventory'], $import))->assertStatus(409)->assertJsonPath('code', 'import_running');
+
+        expect(Import::query()->sole()->status)->toBe(ImportStatus::Running);
+    });
+
+    it('does not queue the deletion of a folder for a report that has no file any more', function (): void {
+        Queue::fake([PurgeStoredFiles::class]);
+        $case = importFixture();
+        $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'status' => ImportStatus::Completed, 'path' => null]);
+
+        inventoryCall($this, $case['team']['owner'], 'DELETE', importUri($case['inventory'], $import))->assertNoContent();
+
+        expect(Import::query()->count())->toBe(0);
+        Queue::assertNotPushed(PurgeStoredFiles::class);
     });
 
     it('takes the file off the disk', function (): void {

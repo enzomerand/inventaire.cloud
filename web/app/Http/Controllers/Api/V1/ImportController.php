@@ -15,6 +15,7 @@ use App\Inventories\Exceptions\ImportFileException;
 use App\Inventories\Exceptions\ImportLimitReachedException;
 use App\Inventories\Exceptions\ImportNotEditableException;
 use App\Inventories\Exceptions\InvalidImportMapping;
+use App\Inventories\Imports\ImportCleanup;
 use App\Inventories\Imports\Imports;
 use App\Inventories\Imports\ImportStatus;
 use App\Models\Import;
@@ -142,17 +143,25 @@ final class ImportController extends Controller
 
     /**
      * Cancels an import or clears its report, and deletes its file (`204`). `409` (`import_running`) while the job is working on it.
+     *
+     * The row is deleted by one conditional statement that wants it not to be running, and not after a look at its status: the job may
+     * claim it between the look and the deletion, and an import that is deleted while it writes would lose its report (the job takes
+     * its own writes back when it finds the import gone, but the person would have been told it was cancelled). The file goes through
+     * {@see ImportCleanup}, once the deletion is committed, as when the model is deleted.
      */
-    public function destroy(Request $request, Inventory $inventory, Import $import): Response|JsonResponse
+    public function destroy(Request $request, Inventory $inventory, Import $import, ImportCleanup $cleanup): Response|JsonResponse
     {
         $import = $this->owned($request, $inventory, $import);
 
-        if ($import->status === ImportStatus::Running) {
+        $deleted = Import::query()->whereKey($import->getKey())->where('status', '<>', ImportStatus::Running->value)->delete();
+
+        if ($deleted === 1) {
+            $cleanup->purge($import);
+        } elseif (Import::query()->whereKey($import->getKey())->exists()) {
             return ApiError::conflict(__('This import is running: wait for it to end.'), 'import_running');
         }
 
-        $import->delete();
-
+        // An import that is gone by now (the pruner took it, another request deleted it) is what the person asked for.
         return response()->noContent();
     }
 
