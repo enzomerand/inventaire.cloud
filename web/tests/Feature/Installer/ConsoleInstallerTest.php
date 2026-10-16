@@ -10,7 +10,11 @@ use App\Installer\InstallStep;
 use App\Installer\Mail\MailAttemptStore;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\MailProbe;
+use App\Inventories\DerivedData;
+use App\Inventories\SearchText;
+use App\Settings\InstanceSettings;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
@@ -230,6 +234,19 @@ describe('--from-env', function (): void {
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()
             ->and(Schema::hasTable('users'))->toBeTrue()
             ->and(file_get_contents($this->sandbox->envPath()))->toBe($before);
+    });
+
+    it('records the version of the search text, so that the first upgrade has nothing to build again', function (): void {
+        configuredEnvironment($this);
+        Mail::fake();
+        Artisan::call('db:wipe', ['--force' => true]);
+        app()['env'] = 'local';
+
+        $this->artisan('inventaire:install', ['--from-env' => true])->assertSuccessful();
+
+        // The upgrade that follows (a container starts with it) finds nothing to build again.
+        expect(DB::table('settings')->where('key', InstanceSettings::SEARCH_TEXT_VERSION)->value('value'))->toBe((string) SearchText::VERSION)
+            ->and(app(DerivedData::class)->rebuildSearchText()->everything)->toBeFalse();
     });
 
     it('fails when the configuration does not work', function (): void {

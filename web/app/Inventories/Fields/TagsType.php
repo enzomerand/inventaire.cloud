@@ -39,6 +39,14 @@ final class TagsType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (free labels, not sorted).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Tags;
+    }
+
+    /**
      * Trims every tag, drops the empty ones and the repeats. Anything that is not a list of texts is left for the rules.
      */
     public function prepare(mixed $value, InventoryField $field): mixed
@@ -102,5 +110,19 @@ final class TagsType extends AbstractFieldType
                 }
             }
         }];
+    }
+
+    /**
+     * The tags, one after the other.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        if (! is_array($stored)) {
+            return null;
+        }
+
+        $tags = array_filter($stored, is_string(...));
+
+        return $tags === [] ? null : implode(' ', $tags);
     }
 }

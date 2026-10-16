@@ -29,6 +29,14 @@ final class DateType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (fixed-width text, sorted in the order of time).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Temporal;
+    }
+
+    /**
      * A calendar day written YYYY-MM-DD.
      *
      * @return list<mixed>

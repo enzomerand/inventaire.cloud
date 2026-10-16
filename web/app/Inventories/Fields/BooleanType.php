@@ -31,6 +31,14 @@ final class BooleanType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (a yes or no).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Boolean;
+    }
+
+    /**
      * A boolean, or 1 or 0.
      *
      * @return list<mixed>

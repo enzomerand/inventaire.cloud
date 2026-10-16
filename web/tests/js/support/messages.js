@@ -24,6 +24,32 @@ export const MESSAGES = {
     'inventories.item.show': 'Show the details of the item',
     'inventories.item.none': 'Not set',
     'inventories.item.remove_tag': 'Remove the tag :name',
+    'grid.results.one': ':count result out of :total',
+    'grid.results.other': ':count results out of :total',
+    'grid.sort.default': 'Newest first',
+    'grid.sort.created': 'Date added',
+    'grid.sort.updated': 'Last modified',
+    'grid.sort.ascending': 'Ascending order',
+    'grid.sort.descending': 'Descending order',
+    'grid.totals.all': 'Total',
+    'grid.totals.selection': 'Selection total',
+    'grid.notice.dropped': 'Some of the search options no longer apply: they were removed.',
+    'grid.notice.fields_changed': 'The fields of this inventory have changed: the list was loaded again.',
+    'grid.notice.not_saved': 'The new value of :field was not saved: :reason',
+    'grid.filter.invalid_number': 'Enter a number with at most 6 decimals.',
+    'grid.filter.too_large': 'Enter a number with at most 15 digits before the decimal sign.',
+    'grid.filter.invalid_value': 'This value is not valid.',
+    'grid.card.untitled': 'Untitled item',
+    'grid.cell.edit': 'Edit :field: :value',
+    'grid.cell.open_link': 'Open the link of :field',
+    'grid.chip.remove': 'Remove the filter :label',
+    'grid.chip.empty': ':name: empty',
+    'grid.chip.not_empty': ':name: not empty',
+    'grid.chip.between': ':name: :min – :max',
+    'grid.chip.min': ':name: from :value',
+    'grid.chip.max': ':name: up to :value',
+    'grid.chip.value': ':name: :value',
+    'grid.chip.deleted_choice': 'Deleted choice',
     'fields.boolean.yes': 'Yes',
     'fields.boolean.no': 'No',
     'fields.rating': ':value out of :max',
@@ -70,9 +96,9 @@ export const MESSAGES = {
  * @returns {string}
  */
 export function t(key, replacements = {}) {
-    return Object.entries(replacements).reduce(
-        (text, [name, value]) => text.replaceAll(':' + name, String(value)),
-        MESSAGES[key] ?? key,
+    // One pass over the message, as the real `t()` does: what a value holds is never read as a placeholder.
+    return (MESSAGES[key] ?? key).replace(/:(\w+)/g, (placeholder, name) =>
+        Object.hasOwn(replacements, name) ? String(replacements[name]) : placeholder,
     );
 }
 

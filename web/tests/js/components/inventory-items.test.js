@@ -5,6 +5,7 @@ import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
+import { useMemoryStorage } from '../support/storage.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -18,6 +19,7 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
     hideModal: vi.fn(),
     onModalHidden: vi.fn(),
 }));
+vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
 vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/messages.js'));
 
 const INVENTORY = '/api/v1/inventories/tools';
@@ -103,9 +105,12 @@ describe('the items of an inventory', () => {
                 canManageFields: '1',
             },
         };
-        component.$refs = { modal };
+        component.$refs = { modal, filters: document.createElement('div'), search: document.createElement('input') };
         component.$nextTick = (callback) => callback();
         document.documentElement.lang = 'en';
+        // The component keeps its search, sort and filters in the address: every test starts from a clean one.
+        window.history.replaceState(null, '', '/');
+        useMemoryStorage();
     });
 
     afterEach(() => {
@@ -574,6 +579,27 @@ describe('the items of an inventory', () => {
             expect(showModal).not.toHaveBeenCalled();
 
             component.openFromRow({ id: 'i1' }, { target: cell });
+
+            expect(showModal).toHaveBeenCalledTimes(1);
+        });
+
+        it('reads what was clicked from the path of the click, since a cell that turns into its control is gone by the time the click reaches the row', async () => {
+            answer([item('i1', { name: 'Hammer' })]);
+            await component.init();
+            const row = document.createElement('tr');
+            const button = document.createElement('button');
+            const inner = document.createElement('span');
+            button.append(inner);
+            row.append(button);
+            // The button has been taken out of the row since: from the span, `closest` no longer reaches anything useful.
+            button.remove();
+            inner.remove();
+
+            component.openFromRow({ id: 'i1' }, { target: inner, composedPath: () => [inner, button, row] });
+
+            expect(showModal).not.toHaveBeenCalled();
+
+            component.openFromRow({ id: 'i1' }, { target: row, composedPath: () => [row] });
 
             expect(showModal).toHaveBeenCalledTimes(1);
         });

@@ -41,20 +41,21 @@ function loadMessages() {
  * did not provide it (makes a missing translation visible instead of blank).
  *
  * A message may hold placeholders written `:name`, like the server's own
- * translations; they are replaced by the matching entry of `replacements`.
+ * translations; they are replaced by the matching entry of `replacements`. The
+ * message is read once, from left to right: what a value holds (a field named
+ * `:value`, a `$&`) is never taken for a placeholder of its own, and a
+ * placeholder nobody gave a value for is left as it is.
  *
  * @param {string} key Message identifier, e.g. "error.generic".
  * @param {Record<string, string | number>} [replacements] Values for the placeholders of the message.
  * @returns {string}
  */
 export function t(key, replacements = {}) {
-    let message = loadMessages()[key] ?? key;
+    const message = loadMessages()[key] ?? key;
 
-    for (const [name, value] of Object.entries(replacements)) {
-        message = message.replaceAll(':' + name, String(value));
-    }
-
-    return message;
+    return message.replace(/:(\w+)/g, (placeholder, name) =>
+        Object.hasOwn(replacements, name) ? String(replacements[name]) : placeholder,
+    );
 }
 
 /**

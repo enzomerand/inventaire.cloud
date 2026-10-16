@@ -41,6 +41,14 @@ final class DateTimeType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (fixed-width text, sorted in the order of time).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Temporal;
+    }
+
+    /**
      * A moment written in ISO 8601 to the second, with its offset from UTC.
      *
      * @return list<mixed>

@@ -11,9 +11,15 @@ use App\Installer\InstallationState;
 use App\Installer\InstallerSettings;
 use App\Installer\InstallStep;
 use App\Installer\PostMigrationHook;
+use App\Installer\RecordSearchTextVersion;
 use App\Installer\SetupToken;
+use App\Inventories\SearchText;
+use App\Settings\InstanceSettings;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+
+require_once __DIR__.'/../../Support/inventories.php';
 
 /**
  * Prepares a fresh instance whose wizard steps are all done, pointing at the test database.
@@ -95,6 +101,26 @@ it('creates the tables, marks the instance installed and removes the token and p
         ->and($state->isInstalled())->toBeTrue()
         ->and(is_file($token->path()))->toBeFalse()
         ->and(is_file($state->path('progress.json')))->toBeFalse();
+});
+
+it('records the version of the search text on a fresh installation, so that the first upgrade has nothing to build again', function (): void {
+    readyInstance($this);
+    wipeTestDatabase();
+
+    app(InstallationFinalizer::class)->finalize();
+
+    expect(DB::table('settings')->where('key', InstanceSettings::SEARCH_TEXT_VERSION)->value('value'))->toBe((string) SearchText::VERSION)
+        ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
+});
+
+it('does not vouch for the search text of items it did not see written: a database that already holds items is left for the upgrade', function (): void {
+    readyInstance($this);
+    itemIn(inventoryIn(inventoryTeam()['workspace']));
+
+    app(InstallationFinalizer::class)->finalize();
+
+    expect(DB::table('settings')->where('key', InstanceSettings::SEARCH_TEXT_VERSION)->count())->toBe(0)
+        ->and(app(InstanceSettings::class)->searchTextVersion())->toBeNull();
 });
 
 it('runs on a connection of its own and leaves none behind', function (): void {
@@ -302,10 +328,11 @@ describe('the order of the finalization', function (): void {
 
         $registered = iterator_to_array($hooks, false);
 
-        // The installer's own hook comes first, the one registered by the test after it.
-        expect($registered)->toHaveCount(2)
+        // The installer's own hooks come first, the one registered by the test after them.
+        expect($registered)->toHaveCount(3)
             ->and($registered[0])->toBeInstanceOf(CreateAdministrator::class)
-            ->and($registered[1])->toBe($hook);
+            ->and($registered[1])->toBeInstanceOf(RecordSearchTextVersion::class)
+            ->and($registered[2])->toBe($hook);
     });
 
     it('stays uninstalled when a hook aborts, and can be run again', function (): void {
@@ -333,6 +360,31 @@ describe('the order of the finalization', function (): void {
         finalizerWith([$hook])->finalize();
 
         expect(app(InstallationState::class)->isInstalled())->toBeTrue()->and($attempts)->toBe(2);
+    });
+
+    it('records the version of the search text again without harm when the installation is run again after a failure', function (): void {
+        readyInstance($this);
+        wipeTestDatabase();
+        $attempts = 0;
+        $failing = new class($attempts) implements PostMigrationHook
+        {
+            public function __construct(private int &$attempts) {}
+
+            public function run(): void
+            {
+                if (++$this->attempts === 1) {
+                    throw new InstallationException('The administrator account could not be created.');
+                }
+            }
+        };
+        $hooks = [app(RecordSearchTextVersion::class), $failing];
+
+        expect(fn () => finalizerWith($hooks)->finalize())->toThrow(InstallationException::class);
+
+        finalizerWith($hooks)->finalize();
+
+        expect(DB::table('settings')->where('key', InstanceSettings::SEARCH_TEXT_VERSION)->count())->toBe(1)
+            ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
     });
 
     it('clears the cached configuration the application is pointed at, never the real one', function (): void {

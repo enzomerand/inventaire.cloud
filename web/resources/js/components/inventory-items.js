@@ -17,6 +17,13 @@
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the input they are about, in the dialog, or as a toast.
+ *
+ * What narrows and orders the list (the search, the filters, the sort, and the address of the page that remembers them)
+ * is `../grid/criteria.js`, merged into this component: the page asked for is always read with the criteria in force, an
+ * older answer never replaces a newer one. The totals of the numbers and amounts cost the server a pass over every item, so
+ * they are asked for only when they can have changed: the first time, with a new search or new filters, and after an item
+ * is added, changed or deleted; a page or a sort keeps the totals it has. Editing a value in its cell, without the
+ * dialog, is `../grid/inline.js`; laying the items out as a table or as cards is `../grid/gallery.js`.
  */
 import {
     choicesOf,
@@ -26,6 +33,7 @@ import {
     fromInput,
     inputModeOf,
     inputTypeOf,
+    isSummable,
     maxLengthOf,
     selectOptionsOf,
     toInput,
@@ -36,12 +44,32 @@ import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
+import { compose } from '../lib/compose.js';
+import gridCriteria from '../grid/criteria.js';
+import gridInline from '../grid/inline.js';
+import gridView from '../grid/gallery.js';
+import { totalsKeyOf } from '../grid/query.js';
+import { fieldFocusSelectors, momentText } from '../grid/rows.js';
+import { hasTotals, totalCells } from '../grid/totals.js';
 
 /** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
 const FIRST_COLOR = '#000000';
 
 /** The prefix of the names the API gives the errors of the values of an item (`values.<field ULID>`). */
 const VALUES_PREFIX = 'values.';
+
+/**
+ * The fields the totals add up, as one text to tell whether they are the same ones.
+ *
+ * @param {import('../fields/types.js').Field[]} fields
+ * @returns {string}
+ */
+function summedIds(fields) {
+    return fields
+        .filter(isSummable)
+        .map((field) => field.id)
+        .join();
+}
 
 /**
  * @typedef {import('../fields/types.js').Field} Field
@@ -55,7 +83,7 @@ const VALUES_PREFIX = 'values.';
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return {
+    return compose(gridCriteria(), gridInline(), gridView(), {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -86,8 +114,29 @@ export default function inventoryItems() {
         /** Number of the last page. */
         lastPage: 1,
 
-        /** Items in the inventory, all pages together. */
+        /** Items that match the search and the filters, all pages together (all the items of the inventory when nothing narrows the list down). */
         total: 0,
+
+        /** Items in the whole inventory: what the inventory said, kept up to date as items come and go (null while unknown). */
+        itemsCount: null,
+
+        /** The sums of the numbers and amounts of the items that match, by field id (`meta.totals`). */
+        totals: {},
+
+        /**
+         * The search and the filters (see `totalsKeyOf`) that `totals` were read for, null when they are not known to be right:
+         * before the first reading, and after an item came, changed or went.
+         */
+        totalsFor: null,
+
+        /** Ticket of the last reading of the totals alone (see `refreshTotals` in `../grid/inline.js`): an older answer is dropped. */
+        totalsTicket: 0,
+
+        /** The foot of each column of the table (see `../grid/totals.js`). */
+        totalRow: [],
+
+        /** True once a page of items has been read: from then on a new reading refreshes the list instead of replacing it by a spinner. */
+        loadedOnce: false,
 
         /** Position of the first and of the last item of the page among all of them (0 when there are none). */
         from: 0,
@@ -126,34 +175,47 @@ export default function inventoryItems() {
         /** True while the dialog asks to confirm the deletion of the item. */
         confirming: false,
 
+        /** The element the component is set on, kept when the page opens (see `rootElement`); null until then. */
+        rootNode: null,
+
+        /**
+         * The element the component is set on, which carries the endpoints and the abilities (`data-*`). Taken when the page
+         * opens rather than asked of Alpine each time: Alpine stops answering `$root` to a call made from the scope of an
+         * element that has been taken out of the page since (the close button of a chip that was removed, the button of a
+         * cell that turned into its control), and the reading of the list that such a call starts still needs them.
+         */
+        get rootElement() {
+            return this.rootNode ?? this.$root;
+        },
+
         /** Endpoint of the inventory (GET), from `data-url` on the component root. */
         get url() {
-            return this.$root.dataset.url;
+            return this.rootElement.dataset.url;
         },
 
         /** Endpoint of the items (GET, POST), from `data-items-url` on the component root. */
         get itemsUrl() {
-            return this.$root.dataset.itemsUrl;
+            return this.rootElement.dataset.itemsUrl;
         },
 
         /** Endpoint of one item, with `__id__` where its ULID goes, from `data-item-url` on the component root. */
         get itemUrl() {
-            return this.$root.dataset.itemUrl;
+            return this.rootElement.dataset.itemUrl;
         },
 
         /** Page of the workspace the inventory belongs to, where the person goes if it was deleted, from `data-workspace-page`. */
         get workspacePage() {
-            return this.$root.dataset.workspacePage;
+            return this.rootElement.dataset.workspacePage;
         },
 
         /** Whether the person may add, change and delete items, from `data-can-edit` on the component root. */
         get canEdit() {
-            return this.$root.dataset.canEdit === '1';
+            return this.rootElement.dataset.canEdit === '1';
         },
 
         /** Whether the person is offered the link to the field editor, from `data-can-manage-fields` on the root. */
         get canManageFields() {
-            return this.$root.dataset.canManageFields === '1';
+            return this.rootElement.dataset.canManageFields === '1';
         },
 
         /** Whether either the inventory or a page of items is being read. */
@@ -171,9 +233,67 @@ export default function inventoryItems() {
             return !this.loadingInventory && !this.inventoryFailed && this.fields.length === 0;
         },
 
+        /** Whether the first reading is under way, which the page shows as a spinner in place of the list. */
+        get initialLoading() {
+            return this.loadingInventory || (this.loadingItems && !this.loadedOnce);
+        },
+
+        /** Whether a page is being read again while the previous one is still shown (a search, a sort, a page). */
+        get refreshing() {
+            return this.loadedOnce && this.loadingItems;
+        },
+
+        /** The value of `aria-busy` for the list: "true" while it is being read again. */
+        get busyAttribute() {
+            return this.refreshing ? 'true' : 'false';
+        },
+
+        /** The classes the list gets while it is being read again: faded, not wiped. */
+        get tableClass() {
+            return this.refreshing ? 'opacity-75' : '';
+        },
+
         /** Whether the inventory has fields and is known to hold no item (not when the items could not be read). */
         get noItems() {
-            return !this.loading && !this.loadFailed && this.fields.length > 0 && this.items.length === 0;
+            return (
+                this.loadedOnce &&
+                !this.loadFailed &&
+                this.fields.length > 0 &&
+                this.items.length === 0 &&
+                (!this.hasCriteria || this.itemsCount === 0)
+            );
+        },
+
+        /** Whether the search or the filters leave no item of an inventory that holds some. */
+        get noMatch() {
+            return (
+                this.loadedOnce &&
+                !this.loadFailed &&
+                this.fields.length > 0 &&
+                this.items.length === 0 &&
+                this.hasCriteria &&
+                this.itemsCount !== 0
+            );
+        },
+
+        /** Whether the search, the filters and the sort are offered: once there is something to narrow down. */
+        get showToolbar() {
+            return (
+                this.loadedOnce &&
+                !this.loadFailed &&
+                this.fields.length > 0 &&
+                (this.hasCriteria || this.itemsCount !== 0)
+            );
+        },
+
+        /** Whether the foot of the table shows totals: some column adds up, and there are rows. */
+        get showTotals() {
+            return this.hasTable && hasTotals(this.totalRow);
+        },
+
+        /** The word in front of the totals: they are those of the selection when the list is narrowed down. */
+        get totalsLabel() {
+            return t(this.hasCriteria ? 'grid.totals.selection' : 'grid.totals.all');
         },
 
         /** Whether there is a table to show. */
@@ -224,15 +344,34 @@ export default function inventoryItems() {
         },
 
         /**
-         * Reads the inventory and the first page of items when the page opens, and forgets the form whenever the dialog is
-         * closed.
+         * Reads the inventory and the first page of items when the page opens (the one the address asks for, with the search,
+         * the sort and the filters it holds), and forgets the form whenever the dialog is closed.
+         *
+         * The inventory comes first: its fields say which of them the totals add up, and the page asks for the totals along
+         * with the items (a second reading just for them would run the page twice).
          *
          * @returns {Promise<void>}
          */
         async init() {
+            this.rootNode = this.$root;
             this.$nextTick(() => onModalHidden(this.$refs.modal, () => this.resetDialog()));
 
-            await Promise.all([this.loadInventory(), this.loadItems(1)]);
+            const page = this.restoreQuery();
+
+            this.pickView();
+
+            await this.loadInventory();
+            await this.loadItems(page);
+        },
+
+        /**
+         * Stops the pause that waits for the end of the typing, when the page is taken apart (Alpine calls `destroy()` when
+         * the element of the component is removed from the page, as it calls `init()` when it is set up).
+         *
+         * @returns {void}
+         */
+        destroy() {
+            this.stopSearchTimer();
         },
 
         /**
@@ -245,7 +384,18 @@ export default function inventoryItems() {
             this.inventoryFailed = false;
 
             try {
-                this.fields = (await http.get(this.url)).data.fields ?? [];
+                const inventory = (await http.get(this.url)).data;
+
+                const summed = summedIds(this.fields);
+
+                this.fields = inventory.fields ?? [];
+                this.itemsCount = inventory.items_count ?? this.itemsCount;
+
+                // Other fields add up now: the totals shown are not the ones of the page the next reading asks for.
+                if (summedIds(this.fields) !== summed) {
+                    this.totalsFor = null;
+                }
+
                 this.rebuild();
             } catch (error) {
                 this.inventoryFailed = true;
@@ -259,29 +409,54 @@ export default function inventoryItems() {
         },
 
         /**
-         * Reads a page of items from the API. A failure is remembered (`itemsFailed`) until the next reading, so that the
-         * page does not claim the inventory holds no item.
+         * Reads a page of items from the API, narrowed and ordered as the search, the filters and the sort ask, and writes
+         * them in the address of the page. A failure is remembered (`itemsFailed`) until the next reading, so that the page
+         * does not claim the inventory holds no item.
+         *
+         * The totals ride along only when they are not known to be right: they depend on the search and the filters alone,
+         * so a page or a sort keeps the ones the list has. A reading whose answer is dropped (a newer one took over) leaves
+         * them unknown, and the newer one asks for them.
+         *
+         * When the server refuses criteria (a field that was deleted since the address was shared), only the criteria it
+         * names are taken out, with a toast, and the list is read again, once. The fields the server refuses to total are
+         * a sign that the fields of the page are out of date: they are read again too.
+         *
+         * Only the latest reading counts: the answer to an older one (a search typed over, a page clicked past) is dropped,
+         * whenever it comes.
          *
          * @param {number} page Number of the page to read.
+         * @param {boolean} [recovered] Whether this reading is the one that follows a refusal, which is not recovered from again.
          * @returns {Promise<void>}
          */
-        async loadItems(page) {
+        async loadItems(page, recovered = false) {
             const ticket = ++this.ticket;
             this.loadingItems = true;
             this.itemsFailed = false;
             this.wantedPage = page;
+            this.syncAddress(page);
+
+            const totalsKey = totalsKeyOf(this.query);
+            const withTotals = this.totalsFor !== totalsKey && this.fields.some(isSummable);
 
             try {
-                const answer = await http.get(this.itemsUrl, { params: { page } });
+                const answer = await http.get(this.itemsUrl, {
+                    params: this.queryParams(page, { totals: withTotals }),
+                });
 
                 if (ticket !== this.ticket) {
                     return;
                 }
 
+                // Kept even when the page is read again just below: they do not depend on the page.
+                if (withTotals) {
+                    this.totals = answer.meta.totals ?? {};
+                    this.totalsFor = totalsKey;
+                }
+
                 // Items were deleted since the page was shown and it is past the end now: the last one it is.
                 if (answer.data.length === 0 && page > answer.meta.last_page) {
                     this.loadingItems = false;
-                    await this.loadItems(answer.meta.last_page);
+                    await this.loadItems(answer.meta.last_page, recovered);
 
                     return;
                 }
@@ -292,8 +467,24 @@ export default function inventoryItems() {
                 this.total = answer.meta.total;
                 this.from = answer.meta.from ?? 0;
                 this.to = answer.meta.to ?? 0;
+                this.loadedOnce = true;
+
+                // The row being edited is not on this page.
+                if (this.inlineRow !== null && !this.items.some((one) => one.id === this.inlineRow)) {
+                    this.closeInline(false);
+                }
+
+                // Nothing narrows the list down: it holds the whole inventory.
+                if (!this.hasCriteria) {
+                    this.itemsCount = answer.meta.total;
+                }
+
                 this.rebuild();
             } catch (error) {
+                if (ticket === this.ticket && !recovered && (await this.recoverFromRefusal(error, page))) {
+                    return;
+                }
+
                 if (ticket === this.ticket) {
                     this.itemsFailed = true;
 
@@ -309,19 +500,54 @@ export default function inventoryItems() {
         },
 
         /**
+         * Gets over the server refusing the criteria of a reading (a `422`): takes out the criteria it names and no others,
+         * reads the fields again when it refused to total one, tells the person, and reads the list again.
+         *
+         * @param {unknown} error
+         * @param {number} page The page that was asked for.
+         * @returns {Promise<boolean>} Whether the list was read again; false when the refusal names nothing that can be taken out.
+         */
+        async recoverFromRefusal(error, page) {
+            if (!(error instanceof HttpError) || error.status !== 422) {
+                return false;
+            }
+
+            const { dropped, staleFields } = this.dropRefused(error.errors ?? {});
+
+            if (!dropped && !staleFields) {
+                return false;
+            }
+
+            if (staleFields) {
+                await this.loadInventory();
+            }
+
+            this.totalsFor = null;
+            notify('warning', t(dropped ? 'grid.notice.dropped' : 'grid.notice.fields_changed'));
+            await this.loadItems(dropped ? 1 : page, true);
+
+            return true;
+        },
+
+        /**
          * Reads again what could not be read: the inventory, and the page of items that was asked for.
          *
          * @returns {Promise<void>}
          */
         async retry() {
-            await Promise.all([
-                this.inventoryFailed ? this.loadInventory() : Promise.resolve(),
-                this.loadItems(this.wantedPage),
-            ]);
+            // The alert goes while the page is read again, as the readings below would take it away one after the other.
+            this.itemsFailed = false;
+
+            // In this order, for the reason `init` gives.
+            if (this.inventoryFailed) {
+                await this.loadInventory();
+            }
+
+            await this.loadItems(this.wantedPage);
         },
 
         /**
-         * Works out the cells of the table from the fields and the items.
+         * Works out the cells of the table from the fields and the items, and the foot of its columns from the totals.
          *
          * @returns {void}
          */
@@ -329,7 +555,11 @@ export default function inventoryItems() {
             this.rows = this.items.map((item) => ({
                 id: item.id,
                 cells: this.cellsOf(item),
+                created: momentText(item.created_at),
+                updated: momentText(item.updated_at),
             }));
+            this.totalRow = totalCells(this.fields, this.totals);
+            this.buildCards();
         },
 
         /**
@@ -343,6 +573,8 @@ export default function inventoryItems() {
             return this.fields.map((field) => ({
                 key: field.id,
                 name: field.name,
+                // The cell of a person who edits is a button, which cannot hold a link: the table puts one beside it.
+                plain: this.canEdit && !full,
                 ...describeValue(field, item.values?.[field.id], { full }),
             }));
         },
@@ -388,19 +620,29 @@ export default function inventoryItems() {
         },
 
         /**
-         * Opens the dialog on the item of a row that was clicked, unless the click was on a link or a button of the row
-         * (a click on the address of an item is for the address).
+         * Opens the dialog on the item of a row that was clicked, unless the click was on a link, a button or a control of the
+         * row (a click on the address of an item is for the address, one on a cell is for the cell).
+         *
+         * What was clicked is read from the path the event took when it was dispatched, not from where its target is now:
+         * a cell that turns into its control at that very click is gone from the page by the time the click reaches the row.
          *
          * @param {{ id: string }} row
          * @param {Event} event
          * @returns {void}
          */
         openFromRow(row, event) {
-            if (!(event.target instanceof Element) || event.target.closest('a, button') !== null) {
+            if (!(event.target instanceof Element)) {
                 return;
             }
 
-            this.open(row);
+            const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+            const onControl = [...path, event.target].some(
+                (node) => node instanceof Element && node.matches('a, button, input, select, textarea'),
+            );
+
+            if (!onControl && event.target.closest('a, button') === null) {
+                this.open(row);
+            }
         },
 
         /**
@@ -422,9 +664,10 @@ export default function inventoryItems() {
          *
          * @param {'create' | 'edit' | 'view'} mode
          * @param {Item | null} item The item, null to add one.
+         * @param {string | null} [focusField] The id of the field the cursor goes to (the first control otherwise).
          * @returns {void}
          */
-        begin(mode, item) {
+        begin(mode, item, focusField = null) {
             this.resetDialog();
             this.mode = mode;
             this.itemId = item === null ? null : item.id;
@@ -436,7 +679,12 @@ export default function inventoryItems() {
             );
             this.original = JSON.parse(JSON.stringify(this.values));
             this.details = item === null ? [] : this.cellsOf(item, true);
-            showModal(this.$refs.modal);
+
+            if (focusField === null) {
+                showModal(this.$refs.modal);
+            } else {
+                showModal(this.$refs.modal, { focus: fieldFocusSelectors(focusField) });
+            }
         },
 
         /**
@@ -822,12 +1070,31 @@ export default function inventoryItems() {
 
                 hideModal(this.$refs.modal);
                 notify('success', t(creating ? 'inventories.notice.item_added' : 'inventories.notice.item_saved'));
-                // Newest first: a new item is at the top of the first page.
+
+                if (creating) {
+                    this.countItems(1);
+                }
+
+                // Newest first: a new item is at the top of the first page. What the columns add up to has changed.
+                this.totalsFor = null;
                 await this.loadItems(creating ? 1 : this.page);
             } catch (error) {
                 this.failChange(error);
             } finally {
                 this.busy = false;
+            }
+        },
+
+        /**
+         * Keeps the count of the items of the inventory right as one is added or deleted, before the list is read again (it
+         * says the count of the whole inventory itself when nothing narrows it down, but not when a search or filters do).
+         *
+         * @param {number} change +1 for an item added, -1 for one deleted.
+         * @returns {void}
+         */
+        countItems(change) {
+            if (this.itemsCount !== null) {
+                this.itemsCount = Math.max(0, this.itemsCount + change);
             }
         },
 
@@ -867,6 +1134,8 @@ export default function inventoryItems() {
                 await http.delete(fillUrl(this.itemUrl, this.itemId));
                 hideModal(this.$refs.modal);
                 notify('success', t('inventories.notice.item_deleted'));
+                this.countItems(-1);
+                this.totalsFor = null;
                 await this.loadItems(this.page);
             } catch (error) {
                 this.failChange(error);
@@ -912,7 +1181,9 @@ export default function inventoryItems() {
                     this.leaveIfGone(error);
                 } else {
                     hideModal(this.$refs.modal);
-                    // If it is the inventory that is gone, this reading finds out and takes the person away.
+                    // If it is the inventory that is gone, this reading finds out and takes the person away. The item is gone:
+                    // so is what it added to the totals.
+                    this.totalsFor = null;
                     this.loadItems(this.page);
                 }
 
@@ -952,5 +1223,5 @@ export default function inventoryItems() {
                 this.loadInventory();
             }
         },
-    };
+    });
 }

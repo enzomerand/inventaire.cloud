@@ -32,6 +32,14 @@ final class UrlType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * A web address of at most 2048 characters, `http` or `https`.
      *
      * @return list<mixed>
@@ -39,5 +47,13 @@ final class UrlType extends AbstractFieldType
     public function valueRules(InventoryField $field): array
     {
         return ['string', 'max:'.self::MAX_LENGTH, 'url:http,https'];
+    }
+
+    /**
+     * The address.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
     }
 }

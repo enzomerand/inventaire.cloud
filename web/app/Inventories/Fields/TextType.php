@@ -35,6 +35,14 @@ final class TextType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * The longest text the field accepts.
      *
      * @param  array<string, mixed>|null  $previous
@@ -67,5 +75,13 @@ final class TextType extends AbstractFieldType
     public function valueRules(InventoryField $field): array
     {
         return ['string', 'max:'.(int) $field->option('max_length', self::DEFAULT_MAX_LENGTH), new SingleLineText];
+    }
+
+    /**
+     * The text.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
     }
 }

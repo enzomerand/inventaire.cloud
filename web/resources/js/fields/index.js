@@ -28,6 +28,52 @@ export function typeOf(field) {
 }
 
 /**
+ * How the server sorts and filters a field (see `QueryKind` in `types.js`): what the API says of it (`query_kind`), so that
+ * the interface never has to know the types the server has. Null for a field the server cannot query (a type it does not
+ * know, after a rollback): the interface still shows it, as a text, but neither sorts nor filters it, which it would be
+ * guessing at.
+ *
+ * @param {Field} field
+ * @returns {import('./types.js').QueryKind | null}
+ */
+export function queryKindOf(field) {
+    return field.query_kind ?? null;
+}
+
+/**
+ * Whether the list can be sorted by a field: all but the ones that hold several values (several choices, tags) and the ones
+ * the server cannot query.
+ *
+ * @param {Field} field
+ * @returns {boolean}
+ */
+export function isSortable(field) {
+    const kind = queryKindOf(field);
+
+    return kind !== null && kind !== 'choices' && kind !== 'tags';
+}
+
+/**
+ * Whether the list can be filtered by a field: all but the ones the server cannot query.
+ *
+ * @param {Field} field
+ * @returns {boolean}
+ */
+export function isFilterable(field) {
+    return queryKindOf(field) !== null;
+}
+
+/**
+ * Whether the totals of a list add the values of a field up (numbers and amounts): what the API says of it (`summable`).
+ *
+ * @param {Field} field
+ * @returns {boolean}
+ */
+export function isSummable(field) {
+    return field.summable === true;
+}
+
+/**
  * Which control the form shows for a field.
  *
  * @param {Field} field

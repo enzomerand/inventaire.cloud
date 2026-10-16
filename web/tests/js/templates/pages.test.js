@@ -16,8 +16,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { HttpError, http, scheduleNavigation } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
+import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
+import { queryFacts, ulid, withUlids } from '../support/inventory.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
+import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -35,6 +38,7 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
     hideModal: vi.fn(),
     onModalHidden: vi.fn(),
 }));
+vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
 
 const VIEWS = join(import.meta.dirname, '../../../resources/views');
 
@@ -153,8 +157,12 @@ function render(path) {
         .replace(/\{\{--[\s\S]*?--\}\}/g, '')
         .replace(/@php[\s\S]*?@endphp/g, '')
         .replace(/@extends\([^)]*\)/g, '')
-        // The way a value is shown is shared by the table and the details of an item.
-        .replace(/@include\('partials\.field-value'\)/g, () => render('partials/field-value.blade.php'))
+        // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
+        // table of the items are parts of the page of an inventory.
+        .replace(
+            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-gallery|items-cell-editor)'\)/g,
+            (_match, name) => render(`partials/${name}.blade.php`),
+        )
         // The tabs of the administration are not under test.
         .replace(/@include\([^\n]*\)\n/g, '')
         .replace(/@inject\([^\n]*\)\n/g, '')
@@ -364,6 +372,10 @@ describe('the pages under the real Alpine CSP build', () => {
 
     beforeEach(() => {
         Alpine.store('workspaces').replace([]);
+        // The page of an inventory keeps its search, sort and filters in the address, and the view in the browser: every
+        // test starts from a clean one.
+        window.history.replaceState(null, '', '/');
+        useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
     });
@@ -1213,7 +1225,7 @@ describe('the pages under the real Alpine CSP build', () => {
             { id: 'labels', name: 'Labels', type: 'tags', options: {}, required: false, position: 8 },
             { id: 'grade', name: 'Grade', type: 'rating', options: { max: 5 }, required: false, position: 9 },
             { id: 'tint', name: 'Tint', type: 'color', options: {}, required: false, position: 10 },
-        ];
+        ].map((one) => ({ ...one, ...queryFacts(one.type) }));
         const HAMMER = {
             id: 'i1',
             values: {
@@ -1236,8 +1248,11 @@ describe('the pages under the real Alpine CSP build', () => {
         };
 
         /** What `GET /api/v1/inventories/tools/items` answers. */
-        function itemsPage(items, { current = 1, last = 1, total = items.length, from = 1, to = items.length } = {}) {
-            return { data: items, meta: { current_page: current, last_page: last, total, from, to } };
+        function itemsPage(
+            items,
+            { current = 1, last = 1, total = items.length, from = 1, to = items.length, totals = {} } = {},
+        ) {
+            return { data: items, meta: { current_page: current, last_page: last, total, from, to, totals } };
         }
 
         /** Opens the page of the inventory `tools`. */
@@ -1374,6 +1389,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect([...document.querySelectorAll('thead th')].map((cell) => cell.textContent.trim())).toEqual([
                     ...FIELDS.map((field) => field.name),
+                    'Date added',
+                    'Last modified',
                     'Actions',
                 ]);
                 expect(bodyRows()).toHaveLength(2);
@@ -1494,6 +1511,512 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(empty).toHaveLength(1);
                 expect(empty[0].textContent).toContain('No item yet');
                 expect(buttons('Add item', empty[0])).toHaveLength(1);
+            });
+        });
+
+        describe('searching, filtering, sorting and totalling the items', () => {
+            const STORED = {
+                id: 'i3',
+                values: { name: 'Saw', qty: '2.50', price: '10.00' },
+                created_at: '2026-10-15T10:00:00Z',
+                updated_at: '2026-10-16T08:30:00Z',
+            };
+            const TOTALS = { qty: '4.00', price: '29.90' };
+            const searchBox = () => document.querySelector('input[type="search"]');
+            const headers = () => [...document.querySelectorAll('thead th')];
+            const headerOf = (name) => headers().find((cell) => cell.textContent.trim() === name);
+            const panel = () => document.querySelector('#item-filters-title').closest('.offcanvas');
+            const lastParams = () => http.get.mock.lastCall[1].params;
+            /** What a reading that asks for the totals adds to its parameters: the fields of the fixture that add up. */
+            const ASK_TOTALS = { 'totals[0]': 'qty', 'totals[1]': 'price' };
+            const filtersButton = () => document.querySelector('button[aria-haspopup="dialog"]');
+
+            it('shows a search box, the filters button and the number of items, and none of it while nothing was read', async () => {
+                http.get.mockReturnValue(new Promise(() => {}));
+                await mount('app/inventory.blade.php');
+
+                expect(visible(searchBox())).toBe(false);
+
+                await open({ items: [HAMMER, TRICKY] });
+
+                expect(visible(searchBox())).toBe(true);
+                expect(searchBox().getAttribute('aria-label')).toBe('Search');
+                expect(visible(filtersButton())).toBe(true);
+                expect(filtersButton().textContent).toContain('Filters');
+                expect(document.body.textContent).toContain('2 items');
+            });
+
+            it('hides them in an inventory that holds no item', async () => {
+                await open({ items: [] });
+
+                expect(visible(searchBox())).toBe(false);
+            });
+
+            it('has a title the cursor can be put on when the controls it was on are gone (the last chip of an empty inventory)', async () => {
+                await open({ items: [] });
+
+                const title = document.querySelector('.card-title');
+
+                expect(title.textContent).toBe('Items');
+                expect(title.getAttribute('tabindex')).toBe('-1');
+
+                title.focus();
+
+                expect(document.activeElement).toBe(title);
+            });
+
+            it('searches once typing pauses, from the first page, and keeps the words in the address', async () => {
+                await open({ items: [HAMMER], meta: { current: 1, last: 3, total: 120, from: 1, to: 50 } });
+                http.get.mockClear();
+
+                await type(searchBox(), 'ham');
+                await type(searchBox(), 'hamm');
+                expect(http.get).not.toHaveBeenCalled();
+                await new Promise((resolve) => setTimeout(resolve, 400));
+                await flush();
+
+                expect(http.get).toHaveBeenCalledTimes(1);
+                expect(lastParams()).toEqual({ page: 1, q: 'hamm', ...ASK_TOTALS });
+                expect(window.location.search).toBe('?q=hamm');
+            });
+
+            it('stops waiting for the end of the typing when the page is taken apart (Alpine calls destroy())', async () => {
+                await open({ items: [HAMMER] });
+                http.get.mockClear();
+
+                await type(searchBox(), 'ham');
+                document.body.replaceChildren();
+                await flush();
+                await new Promise((resolve) => setTimeout(resolve, 400));
+
+                expect(http.get).not.toHaveBeenCalled();
+            });
+
+            it('searches at once on Enter, and clears the search with its button', async () => {
+                await open({ items: [HAMMER] });
+
+                await type(searchBox(), 'ham');
+                searchBox().dispatchEvent(
+                    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+                );
+                await flush();
+
+                expect(lastParams()).toEqual({ page: 1, q: 'ham', ...ASK_TOTALS });
+
+                await press('Clear the search');
+
+                expect(searchBox().value).toBe('');
+                expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
+                expect(buttons('Clear the search')).toHaveLength(0);
+            });
+
+            it('keeps the table on screen while it reads again, with a spinner in the toolbar instead of a full-page one', async () => {
+                await open({ items: [HAMMER] });
+                const slow = { resolve: null };
+                http.get.mockImplementation(
+                    () =>
+                        new Promise((resolve) => {
+                            slow.resolve = () => resolve(itemsPage([HAMMER]));
+                        }),
+                );
+
+                await type(searchBox(), 'ham');
+                searchBox().dispatchEvent(
+                    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+                );
+                await flush();
+
+                const table = document.querySelector('.table-responsive');
+
+                expect(visible(table)).toBe(true);
+                expect(bodyRows()).toHaveLength(1);
+                expect(table.getAttribute('aria-busy')).toBe('true');
+                expect(table.className).toContain('opacity-75');
+                expect(
+                    visible(document.querySelector('.card-toolbar .spinner-border, .border-bottom .spinner-border')),
+                ).toBe(true);
+                expect(visible(document.querySelector('.card-body[role="status"]'))).toBe(false);
+
+                slow.resolve();
+                await flush();
+
+                expect(table.getAttribute('aria-busy')).toBe('false');
+            });
+
+            it('shows how many items match out of how many the inventory holds', async () => {
+                window.history.replaceState(null, '', '/?q=saw');
+                await open({ items: [STORED], itemsCount: 120, meta: { total: 1 } });
+
+                expect(document.body.textContent).toContain('1 result out of 120');
+            });
+
+            it('makes the header of each field that can be sorted a button, and the others plain text', async () => {
+                await open();
+
+                expect(headerOf('Price').querySelector('button')).not.toBeNull();
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('none');
+                expect(headerOf('Date added').querySelector('button')).not.toBeNull();
+                expect(headerOf('Parts').querySelector('button')).toBeNull();
+                expect(headerOf('Parts').hasAttribute('aria-sort')).toBe(false);
+                expect(headerOf('Labels').querySelector('button')).toBeNull();
+            });
+
+            it('sorts ascending, then descending, then back to the newest first, as a header is clicked', async () => {
+                await open();
+                const price = () => headerOf('Price').querySelector('button');
+
+                price().click();
+                await flush();
+                expect(lastParams()).toEqual({ page: 1, sort: 'price' });
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('ascending');
+                expect(price().classList.contains('asc')).toBe(true);
+
+                price().click();
+                await flush();
+                expect(lastParams()).toEqual({ page: 1, sort: 'price', direction: 'desc' });
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('descending');
+                expect(price().classList.contains('desc')).toBe(true);
+
+                price().click();
+                await flush();
+                expect(lastParams()).toEqual({ page: 1 });
+                expect(headerOf('Price').getAttribute('aria-sort')).toBe('none');
+            });
+
+            it('sorts by the date an item was added or changed, from the headers or from the select', async () => {
+                await open();
+
+                headerOf('Last modified').querySelector('button').click();
+                await flush();
+
+                expect(lastParams()).toEqual({ page: 1, sort: 'updated_at' });
+
+                const select = document.querySelector('#item-sort');
+
+                expect([...select.options].map((option) => option.textContent).slice(0, 4)).toEqual([
+                    'Newest first',
+                    'Date added',
+                    'Last modified',
+                    'Name',
+                ]);
+                expect(select.value).toBe('updated_at');
+
+                await choose(select, 'price');
+                expect(lastParams()).toEqual({ page: 1, sort: 'price' });
+
+                await press('Ascending order');
+                expect(lastParams()).toEqual({ page: 1, sort: 'price', direction: 'desc' });
+                expect(buttons('Descending order')).toHaveLength(1);
+            });
+
+            it('shows the dates an item was added and last changed', async () => {
+                await open({ items: [STORED] });
+
+                const [added, changed] = [...bodyRows()[0].querySelectorAll('td.text-secondary')];
+
+                expect(added.textContent).toMatch(/Oct 15, 2026/);
+                expect(changed.textContent).toMatch(/Oct 16, 2026/);
+            });
+
+            it('shows the totals of the numbers and the amounts under their columns', async () => {
+                await open({ items: [STORED], meta: { totals: TOTALS } });
+
+                const foot = document.querySelector('tfoot');
+                const cells = [...foot.querySelectorAll('td')];
+
+                expect(visible(foot)).toBe(true);
+                expect(cells[0].textContent.replace(/\s+/g, ' ').trim()).toBe('Total');
+                expect(cells[1].textContent.trim()).toBe('4.00 kg');
+                expect(cells[2].textContent.trim()).toBe('€29.90');
+                expect(cells[3].textContent.trim()).toBe('');
+                expect(cells[0].textContent).not.toContain('kg');
+            });
+
+            it('calls them the total of the selection when the list is narrowed down, and keeps them right as items come and go', async () => {
+                window.history.replaceState(null, '', '/?q=saw');
+                await open({ items: [STORED], itemsCount: 3, meta: { totals: TOTALS } });
+
+                expect(document.querySelector('tfoot td').textContent.replace(/\s+/g, ' ').trim()).toBe(
+                    'Selection total',
+                );
+
+                http.delete.mockResolvedValue(null);
+                http.get.mockImplementation(async (url) =>
+                    url === '/api/v1/inventories/tools'
+                        ? { data: { id: 'tools', name: 'Tools', items_count: 2, fields: FIELDS } }
+                        : itemsPage([STORED], { totals: { qty: '1.00', price: '5.00' } }),
+                );
+                bodyRows()[0].querySelector('td').click();
+                await flush();
+                await press('Delete', itemDialog().querySelector('.modal-footer'));
+                await press('Delete the item');
+
+                expect([...document.querySelectorAll('tfoot td')][2].textContent.trim()).toBe('€5.00');
+            });
+
+            it('leaves the foot out when no column adds up', async () => {
+                await open({ fields: [FIELDS[0], FIELDS[3]], items: [STORED] });
+
+                expect(visible(document.querySelector('tfoot'))).toBe(false);
+            });
+
+            describe('the filters', () => {
+                beforeEach(async () => {
+                    await open({ items: [STORED], itemsCount: 3 });
+                    await openPanel();
+                });
+
+                /** Opens the panel with the button of the toolbar. */
+                async function openPanel() {
+                    filtersButton().click();
+                    await flush();
+                }
+
+                const row = (name) =>
+                    [...panel().querySelectorAll('fieldset')].find(
+                        (one) => one.querySelector('legend').textContent === name,
+                    );
+
+                it('opens a panel with a row for each field, whose controls follow its kind', () => {
+                    expect(showOffcanvas).toHaveBeenCalledWith(panel());
+                    expect([...panel().querySelectorAll('legend')].map((legend) => legend.textContent)).toEqual(
+                        FIELDS.map((field) => field.name),
+                    );
+                    // A number: a lowest and a highest value.
+                    expect(row('Price').querySelectorAll('input').length).toBe(2);
+                    expect(row('Price').querySelector('input').getAttribute('inputmode')).toBe('decimal');
+                    expect(row('Bought').querySelector('input').getAttribute('type')).toBe('date');
+                    // A yes / no: an answer. A choice: the choices to tick. Text: only whether it holds a value.
+                    expect([...row('Fragile').querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+                        'Any',
+                        'Yes',
+                        'No',
+                        'Any value',
+                        'Empty',
+                        'Not empty',
+                    ]);
+                    expect(
+                        [...row('State').querySelectorAll('.form-check-label')].map((label) => label.textContent),
+                    ).toEqual(['New', 'Used']);
+                    expect([...row('Parts').querySelectorAll('.form-check-label')]).toHaveLength(2);
+                    expect(row('Name').querySelectorAll('input')).toHaveLength(0);
+                    expect([...row('Name').querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+                        'Any value',
+                        'Empty',
+                        'Not empty',
+                    ]);
+                });
+
+                it('applies what was typed, shows each filter as a chip with a count on the button, and closes the panel', async () => {
+                    const [min, max] = row('Price').querySelectorAll('input');
+
+                    await type(min, '89,90');
+                    await type(max, '120');
+                    await tick(row('State').querySelector('input[type="checkbox"]'), true);
+                    await submit(panel().querySelector('form'));
+
+                    expect(lastParams()).toEqual({
+                        page: 1,
+                        'filter[price][min]': '89.90',
+                        'filter[price][max]': '120',
+                        'filter[state][in][0]': 'aaaaaaaa',
+                        ...ASK_TOTALS,
+                    });
+                    expect(hideOffcanvas).toHaveBeenCalledWith(panel());
+
+                    const chips = [...document.querySelectorAll('.badge .btn-close')].map((close) =>
+                        close.parentElement.textContent.trim(),
+                    );
+
+                    expect(chips).toEqual(['Price: €89.90 – €120.00', 'State: New']);
+                    expect(document.querySelector('button[aria-haspopup="dialog"] .badge').textContent).toBe('2');
+                    expect(visible(document.querySelector('button[aria-haspopup="dialog"] .badge'))).toBe(true);
+                });
+
+                it('says what is wrong with a box, under it, and applies nothing', async () => {
+                    http.get.mockClear();
+                    const [min] = row('Price').querySelectorAll('input');
+
+                    await type(min, 'cheap');
+                    await submit(panel().querySelector('form'));
+
+                    expect(http.get).not.toHaveBeenCalled();
+                    expect(hideOffcanvas).not.toHaveBeenCalled();
+                    expect(min.classList.contains('is-invalid')).toBe(true);
+                    expect(min.parentElement.querySelector('.invalid-feedback').textContent).toBe(
+                        'Enter a number with at most 6 decimals.',
+                    );
+                });
+
+                it('links the message under a refused box to the box, and takes the link away once it is typed again', async () => {
+                    const [min, max] = row('Price').querySelectorAll('input');
+
+                    await type(min, '1000000000000000');
+                    await submit(panel().querySelector('form'));
+
+                    const feedback = min.parentElement.querySelector('.invalid-feedback');
+
+                    expect(feedback.id).not.toBe('');
+                    expect(min.getAttribute('aria-invalid')).toBe('true');
+                    expect(min.getAttribute('aria-describedby')).toBe(feedback.id);
+                    expect(document.getElementById(feedback.id).textContent).toBe(
+                        'Enter a number with at most 15 digits before the decimal sign.',
+                    );
+                    expect(max.hasAttribute('aria-invalid')).toBe(false);
+                    expect(max.hasAttribute('aria-describedby')).toBe(false);
+
+                    await type(min, '5');
+
+                    expect(min.hasAttribute('aria-invalid')).toBe(false);
+                    expect(min.hasAttribute('aria-describedby')).toBe(false);
+                });
+
+                it('disables the boxes of a value for a field that is asked to hold none', async () => {
+                    const [min, max] = row('Price').querySelectorAll('input');
+
+                    await choose(row('Price').querySelector('select'), 'empty');
+
+                    expect(min.disabled).toBe(true);
+                    expect(max.disabled).toBe(true);
+
+                    await submit(panel().querySelector('form'));
+
+                    expect(lastParams()).toEqual({ page: 1, 'filter[price][empty]': 'true', ...ASK_TOTALS });
+                });
+
+                it('removes a filter with the close button of its chip, or all of them with Reset', async () => {
+                    await choose(row('Fragile').querySelector('select'), 'true');
+                    await choose(row('Name').querySelector('select'), 'filled');
+                    await submit(panel().querySelector('form'));
+
+                    expect(lastParams()).toEqual({
+                        page: 1,
+                        'filter[name][empty]': 'false',
+                        'filter[fragile][is]': 'true',
+                        ...ASK_TOTALS,
+                    });
+
+                    await press('Remove the filter Name: not empty');
+
+                    expect(lastParams()).toEqual({ page: 1, 'filter[fragile][is]': 'true', ...ASK_TOTALS });
+
+                    await openPanel();
+                    await press('Reset');
+
+                    expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
+                    expect(document.querySelectorAll('.badge .btn-close')).toHaveLength(0);
+                });
+
+                it('puts the cursor on the next chip when one is removed, and on the button of the filters after the last', async () => {
+                    await choose(row('Fragile').querySelector('select'), 'true');
+                    await choose(row('Name').querySelector('select'), 'filled');
+                    await submit(panel().querySelector('form'));
+                    const closer = (label) => document.querySelector(`.badge .btn-close[aria-label="${label}"]`);
+
+                    await press('Remove the filter Name: not empty');
+
+                    // The list was read again after the chip it came from was taken out of the page, and shown.
+                    expect(visible(closer('Remove the filter Fragile: Yes'))).toBe(true);
+                    expect(bodyRows()).toHaveLength(1);
+                    expect(document.activeElement).toBe(closer('Remove the filter Fragile: Yes'));
+
+                    await press('Remove the filter Fragile: Yes');
+
+                    expect(visible(filtersButton())).toBe(true);
+                    expect(bodyRows()).toHaveLength(1);
+                    expect(document.activeElement).toBe(filtersButton());
+                });
+
+                it('lets a chip wrap, so that a long name never pushes the page sideways, and keeps its close button whole', async () => {
+                    await choose(row('Fragile').querySelector('select'), 'true');
+                    await submit(panel().querySelector('form'));
+
+                    const chip = document.querySelector('.badge .btn-close').parentElement;
+
+                    expect(chip.classList.contains('text-wrap')).toBe(true);
+                    expect(chip.classList.contains('text-break')).toBe(true);
+                    expect(chip.classList.contains('mw-100')).toBe(true);
+                    expect(document.querySelector('.badge .btn-close').classList.contains('flex-shrink-0')).toBe(true);
+                });
+
+                it('brings the filters of the address back into the boxes of the panel', async () => {
+                    window.history.replaceState(
+                        null,
+                        '',
+                        `/?filter[${ulid('price')}][min]=89.90&filter[${ulid('state')}][in][]=bbbbbbbb`,
+                    );
+                    await open({ fields: withUlids(['price', 'state'], FIELDS), items: [STORED], itemsCount: 3 });
+                    await openPanel();
+
+                    expect(row('Price').querySelector('input').value).toBe('89.90');
+                    expect(row('State').querySelectorAll('input[type="checkbox"]')[1].checked).toBe(true);
+                    expect(row('State').querySelectorAll('input[type="checkbox"]')[0].checked).toBe(false);
+                });
+            });
+
+            describe('when nothing matches', () => {
+                beforeEach(async () => {
+                    window.history.replaceState(null, '', `/?q=zzz&filter[${ulid('price')}][min]=5`);
+                    await open({
+                        fields: withUlids(['price'], FIELDS),
+                        items: [],
+                        itemsCount: 3,
+                        meta: { total: 0, from: null, to: null },
+                    });
+                });
+
+                it('says so, apart from an empty inventory, and offers to clear the search and the filters', async () => {
+                    const empty = [...document.querySelectorAll('.empty')].filter((element) => visible(element));
+
+                    expect(empty).toHaveLength(1);
+                    expect(empty[0].textContent).toContain('No result');
+                    expect(empty[0].textContent).not.toContain('No item yet');
+                    expect(visible(document.querySelector('table').parentElement)).toBe(false);
+                    expect(visible(searchBox())).toBe(true);
+                    expect(searchBox().value).toBe('zzz');
+
+                    http.get.mockImplementation(async (url) =>
+                        url === '/api/v1/inventories/tools'
+                            ? { data: { id: 'tools', name: 'Tools', items_count: 3, fields: FIELDS } }
+                            : itemsPage([STORED]),
+                    );
+                    expect(document.querySelector('.badge .btn-close')).not.toBeNull();
+                    await press('Clear the search and the filters');
+
+                    expect(lastParams()).toEqual({ page: 1, 'totals[0]': 'qty', 'totals[1]': ulid('price') });
+                    expect(searchBox().value).toBe('');
+                    // The button that was pressed went away with the message: the cursor is in the search box.
+                    expect(document.activeElement).toBe(searchBox());
+                    expect(bodyRows()).toHaveLength(1);
+                    expect([...document.querySelectorAll('.empty')].filter((element) => visible(element))).toHaveLength(
+                        0,
+                    );
+                    expect(window.location.search).toBe('');
+                });
+            });
+
+            it('takes out of the view what the address asks for and the server refuses, and keeps the rest', async () => {
+                window.history.replaceState(null, '', '/?sort=gone&q=saw');
+                http.get.mockImplementation(async (url, options) => {
+                    if (url === '/api/v1/inventories/tools') {
+                        return { data: { id: 'tools', name: 'Tools', items_count: 1, fields: FIELDS } };
+                    }
+
+                    if (options.params.sort === 'gone') {
+                        throw new HttpError(422, 'Invalid', { errors: { sort: ['This field does not exist.'] } });
+                    }
+
+                    return itemsPage([STORED]);
+                });
+                await mount('app/inventory.blade.php');
+
+                expect(notify).toHaveBeenCalledWith(
+                    'warning',
+                    'Some of the search options no longer apply: they were removed.',
+                );
+                expect(bodyRows()).toHaveLength(1);
+                expect(searchBox().value).toBe('saw');
+                expect(window.location.search).toBe('?q=saw');
             });
         });
 
@@ -1733,6 +2256,491 @@ describe('the pages under the real Alpine CSP build', () => {
             });
         });
 
+        describe('editing a cell in place', () => {
+            const cellButton = (rowIndex, columnIndex) =>
+                cellsOf(bodyRows()[rowIndex])[columnIndex].querySelector('button.app-cell-button');
+            const editor = () => document.querySelector('#item-inline-editor');
+            const PRICE = 2;
+            const NAME = 0;
+            const STATE = 3;
+            const key = (name, eventKey) =>
+                name.dispatchEvent(new KeyboardEvent('keydown', { key: eventKey, bubbles: true, cancelable: true }));
+
+            beforeEach(async () => {
+                await open({ items: [HAMMER, TRICKY] });
+            });
+
+            it('gives each cell of an editor a button that says what it edits and what it holds', () => {
+                expect(cellButton(0, NAME).getAttribute('aria-label')).toBe('Edit Name: Hammer');
+                expect(cellButton(0, PRICE).getAttribute('aria-label')).toBe('Edit Price: €19.90');
+                expect(cellButton(0, STATE).getAttribute('aria-label')).toBe('Edit State: New');
+                expect(cellButton(1, 1).getAttribute('aria-label')).toBe('Edit Weight: Not set');
+                expect(cellButton(0, NAME).type).toBe('button');
+                expect(cellButton(0, NAME).textContent.trim()).toBe('Hammer');
+            });
+
+            it('puts the web address beside the button of its cell, never inside it', () => {
+                const site = cellsOf(bodyRows()[0])[7];
+
+                expect(site.querySelector('button a')).toBeNull();
+                expect(site.querySelector('button').textContent.trim()).toBe('https://example.com/hammer');
+
+                const link = site.querySelector('a');
+
+                expect(link.getAttribute('href')).toBe('https://example.com/hammer');
+                expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+                expect(link.getAttribute('aria-label')).toBe('Open the link of Site');
+                expect(cellsOf(bodyRows()[1])[7].querySelector('a')).toBeNull();
+            });
+
+            it('turns the cell into a box with the cursor in it, holding the value, when its button is pressed', async () => {
+                cellButton(0, PRICE).click();
+                await flush();
+
+                expect(editor().tagName).toBe('INPUT');
+                expect(editor().value).toBe('19.90');
+                expect(editor().getAttribute('aria-label')).toBe('Price');
+                expect(editor().getAttribute('inputmode')).toBe('decimal');
+                expect(document.activeElement).toBe(editor());
+                expect(cellButton(0, PRICE)).toBeNull();
+                expect(showModal).not.toHaveBeenCalled();
+            });
+
+            it('saves the value on Enter, shows the item as the answer has it, and puts the cursor back on the cell', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, price: '25.50' } } });
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '25,50');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledTimes(1);
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { price: '25.50' },
+                });
+                expect(editor()).toBeNull();
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('€25.50');
+                expect(document.activeElement).toBe(cellButton(0, PRICE));
+            });
+
+            it('gives up on Escape: nothing is sent, the value is as it was, the cursor is back on the cell', async () => {
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '99');
+                key(editor(), 'Escape');
+                await flush();
+
+                expect(http.patch).not.toHaveBeenCalled();
+                expect(editor()).toBeNull();
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('€19.90');
+                expect(document.activeElement).toBe(cellButton(0, PRICE));
+            });
+
+            it('saves when the cursor leaves the box, and leaves the cursor where the person put it', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, name: 'Big hammer' } } });
+                cellButton(0, NAME).click();
+                await flush();
+
+                await type(editor(), 'Big hammer');
+                // Tab: the browser moves the cursor to the next control, which blurs the box.
+                cellButton(0, PRICE).focus();
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { name: 'Big hammer' },
+                });
+                expect(editor()).toBeNull();
+                expect(cellButton(0, NAME).textContent.trim()).toBe('Big hammer');
+                expect(document.activeElement).toBe(cellButton(0, PRICE));
+            });
+
+            it('sends nothing when the cursor leaves a box that was not changed', async () => {
+                cellButton(0, NAME).click();
+                await flush();
+
+                cellButton(0, PRICE).focus();
+                await flush();
+
+                expect(http.patch).not.toHaveBeenCalled();
+                expect(editor()).toBeNull();
+            });
+
+            it('clears a value that is emptied', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, price: undefined } } });
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { price: null },
+                });
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('—');
+            });
+
+            it('edits a choice and a yes / no in a select', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, state: 'bbbbbbbb' } } });
+                cellButton(0, STATE).click();
+                await flush();
+
+                expect(editor().tagName).toBe('SELECT');
+                expect([...editor().options].map((option) => option.textContent)).toEqual(['Not set', 'New', 'Used']);
+                expect(editor().value).toBe('aaaaaaaa');
+
+                await choose(editor(), 'bbbbbbbb');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { state: 'bbbbbbbb' },
+                });
+                expect(cellButton(0, STATE).textContent.trim()).toBe('Used');
+            });
+
+            it('shows what the server refuses under the box, which stays for the value to be fixed', async () => {
+                http.patch.mockRejectedValueOnce(
+                    new HttpError(422, 'Invalid', { errors: { 'values.price': ['The price must be a number.'] } }),
+                );
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), 'abc');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(editor().classList.contains('is-invalid')).toBe(true);
+                expect(editor().getAttribute('aria-invalid')).toBe('true');
+                expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
+                expect(document.getElementById('item-inline-error').textContent).toBe('The price must be a number.');
+                expect(editor().disabled).toBe(false);
+                expect(editor().closest('td').querySelector('.text-danger').textContent).toBe(
+                    'The price must be a number.',
+                );
+                expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
+                expect(document.activeElement).toBe(editor());
+
+                http.patch.mockResolvedValueOnce({ data: { ...HAMMER, values: { ...HAMMER.values, price: '12.00' } } });
+                await type(editor(), '12');
+
+                expect(editor().classList.contains('is-invalid')).toBe(false);
+                expect(editor().hasAttribute('aria-describedby')).toBe(false);
+
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(editor()).toBeNull();
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('€12.00');
+            });
+
+            it('says an item is gone with a toast, and reads the list again', async () => {
+                http.patch.mockRejectedValueOnce(new HttpError(404, 'This item no longer exists.'));
+                http.get.mockClear();
+                cellButton(0, NAME).click();
+                await flush();
+
+                await type(editor(), 'Big hammer');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(notify).toHaveBeenCalledWith('warning', 'This item no longer exists.');
+                expect(editor()).toBeNull();
+                expect(http.get).toHaveBeenCalledWith('/api/v1/inventories/tools/items', { params: { page: 1 } });
+            });
+
+            it('reads the totals again when an amount is changed, without replacing the rows', async () => {
+                await open({ items: [HAMMER, TRICKY], meta: { totals: { qty: '1.50', price: '19.90' } } });
+                const rowsBefore = bodyRows();
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, price: '30.00' } } });
+                http.get.mockClear();
+                http.get.mockResolvedValue(itemsPage([TRICKY, HAMMER], { totals: { qty: '1.50', price: '30.00' } }));
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '30');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.get).toHaveBeenCalledTimes(1);
+                expect(document.querySelector('tfoot').textContent).toContain('€30.00');
+                // The row of the item that was changed is still the first, whatever order the list is in now.
+                expect(cellButton(0, NAME).textContent.trim()).toBe('Hammer');
+                expect(bodyRows()).toHaveLength(rowsBefore.length);
+            });
+
+            it('edits one cell at a time', async () => {
+                cellButton(0, NAME).click();
+                await flush();
+                cellButton(0, PRICE).click();
+                await flush();
+
+                expect(document.querySelectorAll('#item-inline-editor')).toHaveLength(1);
+                expect(editor().value).toBe('19.90');
+                expect(cellButton(0, NAME)).not.toBeNull();
+            });
+
+            it('does not open the dialog when a cell is pressed, nor when its editor is clicked', async () => {
+                cellButton(0, NAME).click();
+                await flush();
+                editor().click();
+                await flush();
+
+                expect(showModal).not.toHaveBeenCalled();
+            });
+
+            it('still opens the dialog from the padding of the row and from the button of the row', async () => {
+                bodyRows()[0].querySelector('td').click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledWith(itemDialog());
+            });
+
+            it.each([
+                ['labels', 8, 'tags'],
+                ['parts', 4, 'several choices'],
+                ['grade', 9, 'a rating'],
+                ['tint', 10, 'a color'],
+            ])(
+                'opens the dialog with the cursor on the field for %s (%s), which a cell cannot hold',
+                async (id, column) => {
+                    cellButton(0, column).click();
+                    await flush();
+
+                    expect(editor()).toBeNull();
+                    expect(showModal).toHaveBeenCalledTimes(1);
+                    expect(showModal.mock.calls[0][0]).toBe(itemDialog());
+                    expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('Edit the item');
+
+                    const [first, second] = showModal.mock.calls[0][1].focus;
+                    const wanted = itemDialog().querySelector(first) ?? itemDialog().querySelector(second);
+
+                    expect(wanted).not.toBeNull();
+                    expect(wanted.closest('[data-field]').getAttribute('data-field')).toBe(id);
+                },
+            );
+
+            it('opens the dialog on the text of a long note too', async () => {
+                const notes = {
+                    id: 'notes',
+                    name: 'Notes',
+                    type: 'textarea',
+                    options: {},
+                    required: false,
+                    position: 0,
+                };
+                await open({ fields: [notes], items: [{ id: 'i7', values: { notes: 'Line one\nLine two' } }] });
+
+                cellsOf(bodyRows()[0])[0].querySelector('button').click();
+                await flush();
+
+                expect(document.querySelector('#item-inline-editor')).toBeNull();
+                expect(showModal.mock.calls[0][1].focus[0]).toContain('[data-field="notes"]');
+                expect(itemDialog().querySelector('[data-field="notes"] textarea')).not.toBeNull();
+            });
+        });
+
+        describe('the gallery', () => {
+            const cards = () => [...document.querySelectorAll('.row-cards > div > .card')];
+            const galleryBody = () => document.querySelector('.row-cards').closest('.card-body');
+            const viewButton = (label) => document.querySelector(`.btn-group button[aria-label="${label}"]`);
+            const titleOf = (card) => card.querySelector('.card-title button');
+
+            beforeEach(async () => {
+                await open({ items: [HAMMER, TRICKY], meta: { totals: { qty: '1.50', price: '19.90' } } });
+            });
+
+            it('offers the table and the gallery as two buttons, the table being pressed on a wide screen', () => {
+                expect(viewButton('Table').getAttribute('aria-pressed')).toBe('true');
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('false');
+                expect(viewButton('Table').classList.contains('active')).toBe(true);
+                expect(document.querySelector('.btn-group').getAttribute('aria-label')).toBe('View');
+                expect(visible(document.querySelector('.table-responsive'))).toBe(true);
+                expect(visible(galleryBody())).toBe(false);
+            });
+
+            it('swaps the table for responsive cards, one per item, when the gallery is chosen', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+                expect(viewButton('Table').getAttribute('aria-pressed')).toBe('false');
+                expect(visible(document.querySelector('.table-responsive'))).toBe(false);
+                expect(visible(galleryBody())).toBe(true);
+                expect(cards()).toHaveLength(2);
+                expect(cards()[0].parentElement.className).toBe('col-12 col-sm-6 col-lg-4 col-xl-3');
+            });
+
+            it('calls a card by the first text the item holds, and says "Untitled item" when it holds none', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(titleOf(cards()[0]).textContent).toBe('Hammer');
+                expect(titleOf(cards()[0]).tagName).toBe('BUTTON');
+                expect(titleOf(cards()[0]).getAttribute('aria-label')).toBe('Edit the item: Hammer');
+
+                await open({ items: [{ id: 'i9', values: { qty: '2.00' } }] });
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(titleOf(cards()[0]).textContent).toBe('Untitled item');
+            });
+
+            it('shows five other values with their labels, as the table shows them', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                const labels = [...cards()[0].querySelectorAll('dt')].map((label) => label.textContent);
+                const values = [...cards()[0].querySelectorAll('dd')].map((value) => value.textContent.trim());
+
+                expect(labels).toEqual(['Weight', 'Price', 'State', 'Parts', 'Fragile']);
+                expect(values[0]).toBe('1.50 kg');
+                expect(values[1]).toBe('€19.90');
+                expect(cards()[0].querySelector('dd .badge').textContent).toBe('New');
+            });
+
+            it('shows what was typed as text, never as markup', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(document.querySelector('.row-cards img')).toBeNull();
+                expect(window.pwned).toBeUndefined();
+                expect(titleOf(cards()[1]).textContent).toBe('<img src=x onerror="window.pwned = true">');
+            });
+
+            it('opens the form of the item when the name or the rest of the card is pressed', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                titleOf(cards()[0]).click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledTimes(1);
+                expect(showModal).toHaveBeenLastCalledWith(itemDialog());
+                expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('Edit the item');
+                expect(control('name').value).toBe('Hammer');
+
+                cards()[1].querySelector('.card-body').click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledTimes(2);
+                expect(control('name').value).toBe('<img src=x onerror="window.pwned = true">');
+            });
+
+            it('does not open the form when a link of the card is clicked', async () => {
+                const fields = [FIELDS[0], FIELDS[7]];
+                await open({ fields, items: [{ id: 'i5', values: { name: 'Saw', site: 'https://example.com/saw' } }] });
+                viewButton('Gallery').click();
+                await flush();
+
+                const link = cards()[0].querySelector('dd a');
+
+                expect(link.getAttribute('href')).toBe('https://example.com/saw');
+                expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+
+                link.click();
+                await flush();
+
+                expect(showModal).not.toHaveBeenCalled();
+            });
+
+            it('shows the totals as a line above the cards', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                const line = galleryBody().querySelector('.mb-3');
+
+                expect(visible(line)).toBe(true);
+                expect(line.textContent.replace(/\s+/g, ' ').trim()).toBe('Total Weight 1.50 kg Price €19.90');
+            });
+
+            it('keeps the toolbar, with the sort select and its direction on show, and the count and the pagination', async () => {
+                const sort = document.querySelector('#item-sort').closest('.col-12');
+
+                expect(sort.className).toContain('d-sm-none');
+
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(sort.className).not.toContain('d-sm-none');
+                expect(visible(document.querySelector('input[type="search"]'))).toBe(true);
+                expect(document.body.textContent).toContain('2 items');
+                expect(visible(document.querySelector('.card-footer'))).toBe(true);
+            });
+
+            it('keeps the choice for the inventory and writes it in the address', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(window.localStorage.getItem('inventaire.items.view:/api/v1/inventories/tools')).toBe('gallery');
+                expect(window.location.search).toBe('?view=gallery');
+
+                viewButton('Table').click();
+                await flush();
+
+                expect(visible(document.querySelector('.table-responsive'))).toBe(true);
+                expect(window.location.search).toBe('?view=table');
+            });
+
+            it('opens in the gallery when the address says so, or the choice made last, or the screen is a phone', async () => {
+                window.history.replaceState(null, '', '/?view=gallery');
+                await open({ items: [HAMMER] });
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+
+                window.history.replaceState(null, '', '/');
+                window.localStorage.setItem('inventaire.items.view:/api/v1/inventories/tools', 'gallery');
+                await open({ items: [HAMMER] });
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+
+                window.localStorage.clear();
+                window.matchMedia = () => ({ matches: true });
+                await open({ items: [HAMMER] });
+                delete window.matchMedia;
+                expect(viewButton('Gallery').getAttribute('aria-pressed')).toBe('true');
+                expect(visible(galleryBody())).toBe(true);
+            });
+
+            it('still works when the browser refuses to keep the choice', async () => {
+                useRefusingStorage();
+
+                viewButton('Gallery').click();
+                await flush();
+
+                expect(visible(galleryBody())).toBe(true);
+            });
+
+            it('is the same page of the same items for a viewer, whose cards open the details', async () => {
+                PAGE.abilities = { edit_items: false };
+                await open({ items: [HAMMER] });
+                viewButton('Gallery').click();
+                await flush();
+
+                titleOf(cards()[0]).click();
+                await flush();
+
+                expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('Item');
+                expect(itemDialog().querySelector('dl')).not.toBeNull();
+            });
+
+            it('is reached with the keyboard: the name of a card is a button that opens the item', async () => {
+                viewButton('Gallery').click();
+                await flush();
+
+                titleOf(cards()[0]).focus();
+
+                expect(document.activeElement).toBe(titleOf(cards()[0]));
+                expect(titleOf(cards()[0]).type).toBe('button');
+
+                // A button is pressed by Enter and Space: the browser turns either into a click.
+                titleOf(cards()[0]).click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledTimes(1);
+            });
+        });
+
         describe('reading an item as a viewer', () => {
             beforeEach(async () => {
                 PAGE.abilities = { edit_items: false };
@@ -1763,6 +2771,17 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(detail.textContent).toBe(long);
                 expect(detail.classList.contains('app-multiline')).toBe(true);
+            });
+
+            it('gives no button, no box and no link beside the value to a person who may not edit', async () => {
+                expect(bodyRows()[0].querySelectorAll('button.app-cell-button')).toHaveLength(0);
+                expect(bodyRows()[0].querySelectorAll('td.app-cell button')).toHaveLength(0);
+
+                const site = cellsOf(bodyRows()[0])[7];
+
+                // The address is a link of its own, as it always was.
+                expect(site.querySelector('a').getAttribute('href')).toBe('https://example.com/hammer');
+                expect(site.querySelector('a').getAttribute('aria-label')).toBeNull();
             });
 
             it('shows the details of the item, read only', async () => {

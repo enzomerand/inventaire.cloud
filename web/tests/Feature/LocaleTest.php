@@ -132,8 +132,8 @@ describe('locale configuration', function (): void {
         app()->setLocale('fr');
         $french = $messages->messages();
 
-        // Words French spells like English (the names of two colors of the palette).
-        $spelledAlike = ['Orange', 'Indigo'];
+        // Words French spells like English (the names of two colors of the palette, the word on the foot of a column).
+        $spelledAlike = ['Orange', 'Indigo', 'Total'];
 
         foreach ($english as $key => $text) {
             if (in_array($text, $spelledAlike, true)) {

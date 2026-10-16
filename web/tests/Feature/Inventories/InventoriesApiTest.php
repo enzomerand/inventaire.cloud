@@ -263,9 +263,12 @@ describe('reading an inventory', function (): void {
             // MySQL keeps the keys of a JSON object in an order of its own: the options are compared as a set.
             ->and($response->json('data.fields.0'))->toEqual([
                 'id' => $second->ulid, 'name' => 'Weight', 'type' => 'number', 'options' => ['decimals' => 1, 'unit' => 'kg'], 'required' => false, 'position' => 0,
+                'query_kind' => 'number', 'summable' => true,
                 'created_at' => $second->created_at->toIso8601String(), 'updated_at' => $second->updated_at->toIso8601String(),
             ])
-            ->and($response->json('data.fields.1.required'))->toBeTrue();
+            ->and($response->json('data.fields.1.required'))->toBeTrue()
+            ->and($response->json('data.fields.1.query_kind'))->toBe('text')
+            ->and($response->json('data.fields.1.summable'))->toBeFalse();
     })->with([
         'an owner' => ['owner', true],
         'an editor' => ['editor', true],

@@ -67,7 +67,7 @@ final class InventoryController extends Controller
             );
         }
 
-        $inventory->loadCount(['fields', 'items']);
+        $inventory->loadCount('fields');
 
         return (new InventoryResource($inventory, $this->roleIn($request, $workspace->getKey()), $workspace->ulid))->response()->setStatusCode(201);
     }
@@ -109,7 +109,7 @@ final class InventoryController extends Controller
      */
     private function describe(Request $request, Inventory $inventory): InventoryResource
     {
-        $inventory->load(['workspace', 'fields'])->loadCount(['fields', 'items']);
+        $inventory->load(['workspace', 'fields'])->loadCount('fields');
 
         return new InventoryResource($inventory, $this->roleIn($request, $inventory->workspace_id));
     }

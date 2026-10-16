@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Inventories\Items;
 use App\Models\Concerns\HasUlidRouteKey;
 use App\Policies\InventoryPolicy;
 use Database\Factories\InventoryFactory;
@@ -21,11 +22,15 @@ use Illuminate\Support\Carbon;
  * Its fields say what an item can hold ({@see InventoryField}) and its items hold it ({@see Item}); both are deleted
  * with it by the database. `ulid` is the identifier the outside world uses ({@see HasUlidRouteKey}).
  *
+ * `items_count` is the number of its items, kept on the row so that nothing has to count them: it is moved only by
+ * {@see Items}, with the inventory locked, in the transaction that adds or deletes the item.
+ *
  * @property int $id
  * @property string $ulid
  * @property int $workspace_id
  * @property string $name
  * @property string|null $description
+ * @property int $items_count
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -34,6 +39,25 @@ final class Inventory extends Model
 {
     /** @use HasFactory<InventoryFactory> */
     use HasFactory, HasUlidRouteKey;
+
+    /**
+     * The attributes a new inventory starts with: no item, as the column does.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = ['items_count' => 0];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, mixed>
+     */
+    protected function casts(): array
+    {
+        return [
+            'items_count' => 'integer',
+        ];
+    }
 
     /**
      * The workspace the inventory belongs to.

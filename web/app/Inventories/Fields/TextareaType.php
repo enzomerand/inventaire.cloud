@@ -35,6 +35,14 @@ final class TextareaType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * Writes every line break as "\n" (so the length is the same whatever system the text comes from), then trims.
      */
     public function prepare(mixed $value, InventoryField $field): mixed
@@ -50,5 +58,13 @@ final class TextareaType extends AbstractFieldType
     public function valueRules(InventoryField $field): array
     {
         return ['string', 'max:'.self::MAX_LENGTH, new MultiLineText];
+    }
+
+    /**
+     * The text, line breaks included (they are white space to the search).
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
     }
 }

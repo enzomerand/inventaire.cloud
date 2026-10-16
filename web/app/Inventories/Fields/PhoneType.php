@@ -37,6 +37,14 @@ final class PhoneType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * A text of at most 32 characters that is a phone number, with at least 3 digits.
      *
      * @return list<mixed>
@@ -50,5 +58,13 @@ final class PhoneType extends AbstractFieldType
                 $fail(__('The :attribute must be a phone number: digits, spaces and the characters + ( ) . -, with at least 3 digits.'));
             }
         }];
+    }
+
+    /**
+     * The number as it was written.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
     }
 }

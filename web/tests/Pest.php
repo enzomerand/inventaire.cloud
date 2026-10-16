@@ -50,6 +50,11 @@ pest()->in('Feature/Installer')
         if ($connection->getSchemaBuilder()->hasTable('users')) {
             $connection->table('users')->delete();
         }
+
+        // `inventaire:upgrade` records the version of the search text there: the next test starts as a fresh instance.
+        if ($connection->getSchemaBuilder()->hasTable('settings')) {
+            $connection->table('settings')->delete();
+        }
     });
 
 /**

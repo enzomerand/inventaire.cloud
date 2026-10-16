@@ -12,6 +12,9 @@
  * - `describe(value, field, options)` is the {@link Cell} that shows a stored value; with `{ full: true }` (the details of an
  *   item) a long text is shown whole, with its line breaks, instead of cut to one line for a table cell.
  *
+ * How the server sorts, filters and adds up a type (`query_kind`, `summable`) is not here: the API says it for each field
+ * (see `index.js`), so that there is one place that knows.
+ *
  * Everything shown is data for `x-text` and attribute bindings, never markup.
  */
 import { cell, emptyCell } from './cell.js';
@@ -25,6 +28,10 @@ import { t } from '../lib/i18n.js';
  * The control of a form: a one-line `<input>` (text, number, date...), a `<textarea>`, a `<select>`, a list of check
  * boxes, a box of tags, a row of stars, a color picker.
  *
+ * @typedef {'text' | 'number' | 'temporal' | 'boolean' | 'choice' | 'choices' | 'tags'} QueryKind
+ * How the server sorts and filters a type (`query_kind` of a field): text by collation, numbers as numbers, dates, moments
+ * and times in their stored form, a yes / no, one choice, several choices (cannot be sorted), tags (cannot be sorted).
+ *
  * @typedef {object} Choice
  * @property {string} id
  * @property {string} label
@@ -37,6 +44,8 @@ import { t } from '../lib/i18n.js';
  * @property {Record<string, any>} options
  * @property {boolean} required
  * @property {number} position
+ * @property {QueryKind | null} [query_kind] How the list sorts and filters the field; null for a type the server does not know.
+ * @property {boolean} [summable] Whether the totals of the list can add the values of the field up.
  *
  * @typedef {object} DescribeOptions
  * @property {boolean} [full] Whether to show the whole value (the details of an item) rather than what fits a table cell.

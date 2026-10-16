@@ -45,6 +45,14 @@ final class RatingType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (a number, sorted and compared as one).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Number;
+    }
+
+    /**
      * The highest grade.
      *
      * @param  array<string, mixed>|null  $previous

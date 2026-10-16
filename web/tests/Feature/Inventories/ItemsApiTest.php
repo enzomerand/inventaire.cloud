@@ -111,6 +111,26 @@ describe('adding an item', function (): void {
         expect(Item::query()->count())->toBe(0);
     });
 
+    it('refuses a null character in a value (422): PostgreSQL could not read the item back, nor sort the list', function (string $type): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, $type, 'Contact');
+        $uri = "/api/v1/inventories/{$inventory->ulid}/items";
+
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [$field->ulid => "ab\0cd@example.com"]])
+            ->assertUnprocessable()->assertJsonValidationErrors("values.{$field->ulid}");
+
+        $item = itemIn($inventory, [$field->ulid => 'ab@example.com']);
+
+        inventoryCall($this, $team['owner'], 'PATCH', "{$uri}/{$item->ulid}", ['values' => [$field->ulid => "ab\0cd@example.com"]])
+            ->assertUnprocessable()->assertJsonValidationErrors("values.{$field->ulid}");
+
+        expect(Item::query()->count())->toBe(1)
+            ->and($item->fresh()->values)->toBe([$field->ulid => 'ab@example.com']);
+
+        inventoryCall($this, $team['owner'], 'GET', "{$uri}?sort={$field->ulid}")->assertOk();
+    })->with(['text', 'textarea', 'email']);
+
     it('may have no value at all, and then holds an empty object, not an empty list', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);

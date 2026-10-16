@@ -12,8 +12,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * How the API describes an inventory to a member of its workspace: the ULID that identifies it, its name and
- * description, the number of its fields and items when they were counted (`withCount`), its fields in order when they
- * were loaded, and what the member may do with it, so the interface offers only that.
+ * description, the number of its items (the counter the inventory keeps) and of its fields when they were counted
+ * (`withCount`), its fields in order when they were loaded, and what the member may do with it, so the interface offers only that.
  *
  * Never the numeric keys: the workspace is named by its ULID.
  *
@@ -48,7 +48,7 @@ final class InventoryResource extends JsonResource
             'name' => $this->name,
             'description' => $this->description,
             'fields_count' => $this->whenCounted('fields'),
-            'items_count' => $this->whenCounted('items'),
+            'items_count' => $this->items_count,
             'fields' => InventoryFieldResource::collection($this->whenLoaded('fields')),
             'abilities' => [
                 'update' => $abilities['update'],

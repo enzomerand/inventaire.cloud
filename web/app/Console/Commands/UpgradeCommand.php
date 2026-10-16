@@ -8,10 +8,13 @@ use App\Console\ArtisanRunner;
 use App\Installer\DatabaseMigrator;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\InstallationState;
+use App\Inventories\DerivedData;
 use Illuminate\Console\Command;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Foundation\Bootstrap\LoadEnvironmentVariables;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
+use Throwable;
 
 /**
  * Brings an installed instance up to date after its code was updated.
@@ -25,12 +28,19 @@ use Illuminate\Support\ServiceProvider;
  *    running, this one waits for it and then finds nothing to do;
  * 3. clears the route, view, event and package caches, which could keep
  *    serving the previous version;
- * 4. with `--optimize`, rebuilds the caches.
+ * 4. brings the derived data right ({@see DerivedData}): the text the items are
+ *    searched by is built again when the way it is made changed (or for the
+ *    items that have none), and the counters of items are counted again (a
+ *    failure here is reported but does not fail the upgrade);
+ * 5. with `--optimize`, rebuilds the caches.
  *
  * It can be run as often as needed. The exit code is 0 when the instance is up
  * to date, so a container entrypoint or a deployment script can rely on it. A
  * cache that cannot be rebuilt does not make the upgrade fail (the application
- * simply runs without that cache): it is reported as a warning.
+ * simply runs without that cache), and neither does derived data that cannot be
+ * brought right (the next upgrade tries again): both are reported as warnings.
+ * A container that restarts on a failing upgrade would otherwise never start for
+ * a fault that stops nothing from working.
  */
 final class UpgradeCommand extends Command
 {
@@ -66,6 +76,8 @@ final class UpgradeCommand extends Command
         if (! $this->clearCaches()) {
             return self::FAILURE;
         }
+
+        $this->deriveData();
 
         if ($this->option('optimize')) {
             $this->optimize();
@@ -125,6 +137,40 @@ final class UpgradeCommand extends Command
         $this->components->info(__('The caches were cleared.'));
 
         return true;
+    }
+
+    /**
+     * Builds again the search text of the items when it must be, and counts the items of every inventory. It runs with
+     * the code and the schema of the version just installed, which the migrations cannot (they must not call the
+     * application). What it did is reported, and a counter that was wrong as a warning: the cause is worth looking for.
+     *
+     * It never makes the upgrade fail, like the caches: the migrations are done and the application works without this
+     * (searching may miss items, a counter may be off) until the next upgrade, so a failure is logged and reported as a
+     * warning, and the rest of the upgrade goes on.
+     */
+    private function deriveData(): void
+    {
+        try {
+            $derived = $this->laravel->make(DerivedData::class);
+            $rebuild = $derived->rebuildSearchText();
+
+            if ($rebuild->failed > 0) {
+                $this->components->warn(trans_choice('The search text of the items of :count inventory could not be built (see the log): searching may miss some of them until the next upgrade.|The search text of the items of :count inventories could not be built (see the log): searching may miss some of them until the next upgrade.', $rebuild->failed));
+            } elseif ($rebuild->everything) {
+                $this->components->info(__('The text the items are searched by was built again.'));
+            }
+
+            $wrong = $derived->recountItems();
+
+            if ($wrong > 0) {
+                $this->components->warn(trans_choice('The item counter of :count inventory was wrong and was corrected (see the log).|The item counter of :count inventories was wrong and was corrected (see the log).', $wrong));
+            }
+        } catch (Throwable $exception) {
+            Log::error('The derived data could not be brought right by the upgrade.', ['exception' => $exception]);
+
+            // The class only: the message of a database error can quote the data it was writing.
+            $this->components->warn(__('The search text and the item counters could not be brought right (:error, see the log): the instance works, but searching may miss items and a counter may be off. Fix the cause and run inventaire:upgrade again.', ['error' => $exception::class]));
+        }
     }
 
     /**

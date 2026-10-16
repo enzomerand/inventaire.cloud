@@ -40,6 +40,14 @@ final class BarcodeType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
      * The format the codes are limited to.
      *
      * @param  array<string, mixed>|null  $previous
@@ -163,5 +171,13 @@ final class BarcodeType extends AbstractFieldType
         }
 
         return $sum % 11 === 0;
+    }
+
+    /**
+     * The code.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
     }
 }

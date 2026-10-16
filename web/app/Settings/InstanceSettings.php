@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Settings;
 
+use App\Inventories\SearchText;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
 
@@ -25,11 +26,20 @@ use Illuminate\Support\Facades\Log;
  *
  * Each setting has a typed getter and a name here: nothing else knows how it is stored. The statements
  * are plain SQL builder calls that PostgreSQL, MySQL and MariaDB all run.
+ *
+ * One setting is not a choice: the version of the search text the items were built with, which `inventaire:upgrade`
+ * keeps (see {@see self::searchTextVersion()}). It is stored the same way and is not among the settings the API shows.
  */
 final class InstanceSettings
 {
     /** Whether anybody can create an account by signing in with a new address. */
     public const REGISTRATION_OPEN = 'registration_open';
+
+    /**
+     * The version ({@see SearchText::VERSION}) the stored search texts of the items were built with (a bookkeeping value of
+     * `inventaire:upgrade`, not a choice of the administrator: it is not among {@see self::all()}).
+     */
+    public const SEARCH_TEXT_VERSION = 'search_text_version';
 
     /** @var array<string, mixed>|null The stored values by key, or null until they are read. An unreadable one is null. */
     private ?array $stored = null;
@@ -67,12 +77,53 @@ final class InstanceSettings
     }
 
     /**
+     * The version of the search text the items were last built with, or null when it was never recorded (or the row is
+     * unusable: the texts are then built again, which is the safe thing to do).
+     */
+    public function searchTextVersion(): ?int
+    {
+        $this->stored ??= $this->load();
+
+        if (! array_key_exists(self::SEARCH_TEXT_VERSION, $this->stored)) {
+            return null;
+        }
+
+        $value = $this->stored[self::SEARCH_TEXT_VERSION];
+
+        if (is_int($value)) {
+            return $value;
+        }
+
+        $this->reportUnusable(self::SEARCH_TEXT_VERSION);
+
+        return null;
+    }
+
+    /**
+     * Records the version of the search text the items were built with.
+     */
+    public function recordSearchTextVersion(int $version): void
+    {
+        $this->write([self::SEARCH_TEXT_VERSION => $version]);
+    }
+
+    /**
      * Changes the settings that are given, and only those, in one statement. A setting that is not in `$changes` keeps
      * what it holds.
      *
      * @param  array{registration_open?: bool}  $changes  The new values by name.
      */
     public function update(array $changes): void
+    {
+        $this->write($changes);
+    }
+
+    /**
+     * Writes the values of the given settings, one row each, in one statement, and forgets what was read.
+     *
+     * @param  array<string, bool|int>  $changes  The new values by name.
+     */
+    private function write(array $changes): void
     {
         $now = now();
         $rows = [];

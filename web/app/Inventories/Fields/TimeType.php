@@ -29,6 +29,14 @@ final class TimeType extends AbstractFieldType
     }
 
     /**
+     * How the list sorts and filters the values (fixed-width text, sorted in the order of time).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Temporal;
+    }
+
+    /**
      * A time of day written HH:MM on 24 hours.
      *
      * @return list<mixed>

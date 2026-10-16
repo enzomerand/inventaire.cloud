@@ -19,7 +19,15 @@ abstract class DecimalType extends AbstractFieldType
     /**
      * How many decimals the values of the field have.
      */
-    abstract protected function decimals(InventoryField $field): int;
+    abstract public function decimals(InventoryField $field): int;
+
+    /**
+     * A number, sorted and compared as one.
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Number;
+    }
 
     /**
      * A decimal number with at most the decimals of the field, within its bounds if it has any.

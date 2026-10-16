@@ -47,6 +47,32 @@ describe('t()', () => {
 
         expect(t('twice', { n: 2 })).toBe('2 and 2 and :other');
     });
+
+    it('never reads what a value holds as a placeholder, whatever the order of the replacements', async () => {
+        const { t } = await loadI18n({ chip: ':name: from :value' });
+
+        expect(t('chip', { name: ':value', value: '1' })).toBe(':value: from 1');
+        expect(t('chip', { value: '1', name: ':value' })).toBe(':value: from 1');
+        expect(t('chip', { name: ':name', value: ':name' })).toBe(':name: from :name');
+    });
+
+    it('puts a value in as it is, without the special meaning some characters have in a replacement', async () => {
+        const { t } = await loadI18n({ chip: 'Remove :label' });
+
+        expect(t('chip', { label: "$& $1 $$ $' $`" })).toBe("Remove $& $1 $$ $' $`");
+    });
+
+    it('leaves a placeholder alone when nothing was given for it, even when its name is one an object has', async () => {
+        const { t } = await loadI18n({ odd: ':constructor, :toString, :__proto__ and 10:30' });
+
+        expect(t('odd', { other: 1 })).toBe(':constructor, :toString, :__proto__ and 10:30');
+    });
+
+    it('fills a placeholder that is followed by punctuation, and a number given as a number', async () => {
+        const { t } = await loadI18n({ range: ':first–:last of :total.' });
+
+        expect(t('range', { first: 1, last: 50, total: 120 })).toBe('1–50 of 120.');
+    });
 });
 
 describe('tn()', () => {

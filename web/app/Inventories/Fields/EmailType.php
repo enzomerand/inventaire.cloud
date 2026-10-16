@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories\Fields;
 
 use App\Models\InventoryField;
+use App\Rules\SingleLineText;
 
 /**
  * An email address of a contact or a supplier, kept as it was written (trimmed). At most 254 characters, the longest
@@ -35,12 +36,30 @@ final class EmailType extends AbstractFieldType
     }
 
     /**
-     * A text of at most 254 characters that is an email address.
+     * How the list sorts and filters the values (text: sorted as text, filtered on being empty).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Text;
+    }
+
+    /**
+     * A text of at most 254 characters that is an email address, with no control character in it: the `email` rule lets
+     * some through (a null character, which PostgreSQL cannot read back out of a JSON value, so that every list sorted or
+     * filtered on the items would fail).
      *
      * @return list<mixed>
      */
     public function valueRules(InventoryField $field): array
     {
-        return ['string', 'max:'.self::MAX_LENGTH, 'email'];
+        return ['string', 'max:'.self::MAX_LENGTH, 'email', new SingleLineText];
+    }
+
+    /**
+     * The address.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return $this->stringSearchText($stored);
     }
 }

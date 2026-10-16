@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
+use App\Http\Resources\ItemResource;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Models\Inventory;
 use App\Models\Item;
@@ -12,6 +13,7 @@ use App\Models\User;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -20,12 +22,15 @@ use Illuminate\Validation\ValidationException;
  * Every write that depends on the fields starts by locking the inventory, then reads the fields while it holds that lock
  * (a plain read: the fields have no locks of their own, see {@see Locks}), so that:
  *
- * - the quota (`inventories.max_items`) is counted with nobody else adding an item: two requests for the last place
- *   cannot both get it;
+ * - the quota (`inventories.max_items`) is judged with nobody else adding an item: two requests for the last place
+ *   cannot both get it. The number of items is the counter kept on the inventory row (`items_count`), which the lock
+ *   protects and which this class alone moves, in the transaction of the item it adds or deletes;
  * - the values are validated against the fields as they are *now*, and rebuilt from them: a field deleted at the same
  *   moment either took the value with it before this runs, or is not deleted until this has finished, and no value
  *   is left behind that points to a field that is gone;
- * - an update merges into what the item holds now (the copy the request read may be older), one update after the other.
+ * - an update merges into what the item holds now (the copy the request read may be older), one update after the other;
+ * - the text the item is searched by ({@see ItemSearchText}) is built from the values and the fields read under that
+ *   same lock, and written with them.
  *
  * The account of the person who writes is locked first (see {@see self::lockAuthor()}). Each write is one transaction,
  * retried when the database picks it as the loser of a deadlock.
@@ -36,12 +41,21 @@ final class Items
     public const PER_PAGE = 50;
 
     /**
-     * Gets what the rules of items need: the database, the locks and the checks of values.
+     * The columns the list reads: what an item is described with ({@see ItemResource}). Not the text the item is searched
+     * by (`search_text`, which can be as long as its values and is never given out), nor its authors.
+     *
+     * @var list<string>
+     */
+    public const LIST_COLUMNS = ['items.id', 'items.ulid', 'items.inventory_id', 'items.values', 'items.created_at', 'items.updated_at'];
+
+    /**
+     * Gets what the rules of items need: the database, the locks, the checks of values and the search text.
      */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
         private readonly ItemValues $values,
+        private readonly ItemSearchText $searchText,
     ) {}
 
     /**
@@ -63,16 +77,19 @@ final class Items
 
             $limit = config()->integer('inventories.max_items');
 
-            if (Item::query()->where('inventory_id', $locked->getKey())->count() >= $limit) {
+            if ($locked->items_count >= $limit) {
                 throw new ItemLimitReachedException($limit);
             }
 
             $item = new Item;
             $item->inventory_id = $locked->getKey();
-            $item->values = $this->values->apply($fields, $values, [], true);
+            $stored = $this->values->apply($fields, $values, [], true);
+            $item->values = $stored;
+            $item->search_text = $this->searchText->build($fields, $stored);
             $item->created_by = $author->getKey();
             $item->updated_by = $author->getKey();
             $item->save();
+            $this->moveCount($locked, $inventory, 1);
 
             return $item;
         }));
@@ -101,6 +118,7 @@ final class Items
 
             if (! $this->same($merged, $current->values)) {
                 $current->values = $merged;
+                $current->search_text = $this->searchText->build($fields, $merged);
                 $current->updated_by = $editor->getKey();
                 $current->save();
             }
@@ -120,7 +138,42 @@ final class Items
             $locked = $this->locks->inventory($inventory->getKey());
 
             $this->lockedItem($locked, $item)->delete();
+            $this->moveCount($locked, $inventory, -1);
         }));
+    }
+
+    /**
+     * Moves the counter of items of the inventory by the number of items just added or deleted.
+     *
+     * The inventory is locked by the caller, so the counter read with it is the one to move. It is written with the query
+     * builder, which does not touch `updated_at` (adding an item is not a change of the inventory). Both copies of the
+     * inventory in memory, the locked one and the one the caller holds (the request's, which a resource may describe
+     * afterwards), get the new value; it is set from the locked row, not added to the caller's copy, which may be older.
+     * The counter never goes below zero: the column is unsigned on MySQL and MariaDB, which refuse a negative value with an
+     * error (an unsigned underflow) instead of clamping it, so a counter that was already off (it should not be) must not
+     * turn a deletion into a failure. It is a fault all the same, so it is written in the log (`inventaire:upgrade` counts
+     * the items again and corrects the counters, see {@see DerivedData}).
+     *
+     * @param  Inventory  $locked  The inventory as just read under the lock.
+     * @param  Inventory  $given  The copy the caller holds.
+     * @param  int  $by  1 for an item added, -1 for one deleted.
+     */
+    private function moveCount(Inventory $locked, Inventory $given, int $by): void
+    {
+        $count = $locked->items_count + $by;
+
+        if ($count < 0) {
+            Log::warning('The item counter of an inventory would have gone below zero: it was kept at zero.', ['inventory_id' => $locked->getKey(), 'stored' => $locked->items_count, 'by' => $by]);
+
+            $count = 0;
+        }
+
+        $this->db->table('inventories')->where('id', $locked->getKey())->update(['items_count' => $count]);
+
+        foreach ([$locked, $given] as $inventory) {
+            $inventory->setAttribute('items_count', $count);
+            $inventory->syncOriginalAttribute('items_count');
+        }
     }
 
     /**

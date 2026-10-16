@@ -42,6 +42,14 @@ final class MoneyType extends DecimalType
     }
 
     /**
+     * Amounts are added up.
+     */
+    public function summable(): bool
+    {
+        return true;
+    }
+
+    /**
      * The currency: the code of one in use somewhere, or the one the field already has.
      *
      * @param  array<string, mixed>|null  $previous
@@ -81,7 +89,7 @@ final class MoneyType extends DecimalType
     /**
      * The decimals stored with the field; ICU's for the currency only when the field has none stored.
      */
-    protected function decimals(InventoryField $field): int
+    public function decimals(InventoryField $field): int
     {
         $stored = $field->option('decimals');
 

@@ -29,6 +29,14 @@ final class SelectType extends ChoiceType
     }
 
     /**
+     * How the list sorts and filters the values (one choice, sorted in the order of the choices of the field).
+     */
+    public function queryKind(): QueryKind
+    {
+        return QueryKind::Choice;
+    }
+
+    /**
      * A text that is the id of one of the choices the field offers.
      *
      * @return list<mixed>
@@ -44,5 +52,13 @@ final class SelectType extends ChoiceType
     public function present(mixed $stored, InventoryField $field): mixed
     {
         return is_string($stored) && in_array($stored, $this->ids($field), true) ? $stored : null;
+    }
+
+    /**
+     * The label of the choice (the value holds its id), or nothing when the choice was deleted from the field.
+     */
+    public function searchText(mixed $stored, InventoryField $field): ?string
+    {
+        return is_string($stored) ? $this->labelsText([$stored], $field) : null;
     }
 }

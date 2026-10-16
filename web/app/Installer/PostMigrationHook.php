@@ -13,7 +13,8 @@ namespace App\Installer;
  * only then writes the "installed" marker. A feature that needs the database
  * during the installation plugs in here: {@see CreateAdministrator} creates the
  * first administrator from the values collected by the "administrator" step,
- * which need the `users` table.
+ * which need the `users` table, and {@see RecordSearchTextVersion} records the version of the search text, which needs the
+ * `settings` table.
  *
  * Register a hook from a service provider by tagging it:
  *
