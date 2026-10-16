@@ -115,10 +115,15 @@ final readonly class ImportCell
     }
 
     /**
-     * A date as `YYYY-MM-DD`, followed by the time when it is not midnight.
+     * A date as `YYYY-MM-DD`, followed by the time when it is not midnight; a time of the day alone, as `HH:MM`.
      */
     private function moment(DateTimeImmutable $moment): string
     {
+        // A spreadsheet gives a time of the day without a date the first days of its calendar (1899 or 1900).
+        if ((int) $moment->format('Y') <= 1900) {
+            return $moment->format('H:i');
+        }
+
         $time = $moment->format('H:i:s');
 
         return $moment->format('Y-m-d').($time === '00:00:00' ? '' : ' '.($moment->format('s') === '00' ? $moment->format('H:i') : $time));

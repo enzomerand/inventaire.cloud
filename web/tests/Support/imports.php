@@ -6,17 +6,24 @@ declare(strict_types=1);
 // start with "import" so that they never collide with the helpers of tests/Pest.php or of other test files.
 
 use App\Inventories\Attachments\AttachmentStorage;
+use App\Inventories\Fields\ChoiceType;
 use App\Inventories\Fields\FieldTypes;
+use App\Inventories\Imports\ImportAnalysis;
+use App\Inventories\Imports\ImportAnalyzer;
 use App\Inventories\Imports\ImportCell;
 use App\Inventories\Imports\ImportContext;
 use App\Inventories\Imports\ImportFormat;
+use App\Inventories\Imports\ImportOptions;
 use App\Inventories\Imports\ImportReader;
+use App\Inventories\Imports\ImportRunner;
 use App\Inventories\Imports\ImportStatus;
 use App\Models\Import;
 use App\Models\Inventory;
 use App\Models\InventoryField;
+use App\Models\Item;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -161,10 +168,11 @@ function importUri(Inventory $inventory, ?Import $import = null, string $suffix 
  * Sends a file the way the web front does.
  *
  * @param  array<string, mixed>  $data  More fields of the form.
+ * @param  array<string, string>  $headers
  */
-function importPost(object $test, ?User $as, Inventory $inventory, string $path, array $data = [], ?string $name = null): TestResponse
+function importPost(object $test, ?User $as, Inventory $inventory, string $path, array $data = [], ?string $name = null, array $headers = []): TestResponse
 {
-    return inventoryCall($test, $as, 'POST', importUri($inventory), ['file' => importUploaded($path, $name)] + $data);
+    return attachmentUpload($test, $as, importUri($inventory), importUploaded($path, $name), $data, $headers);
 }
 
 /**
@@ -227,4 +235,113 @@ function importConvert(InventoryField|string $field, mixed $value, string $decim
     $value = is_string($value) && str_starts_with($value, '@') ? new DateTimeImmutable(substr($value, 1), new DateTimeZone('UTC')) : $value;
 
     return FieldTypes::standard()->get($field->type)->importValue(new ImportCell($value, is_string($value)), $field, $context);
+}
+
+/**
+ * What the analysis says about a file: the columns, the proposal and the options.
+ *
+ * @param  list<InventoryField>  $fields
+ * @param  array<string, mixed>  $options  Over the defaults of the options (`has_header`, `delimiter`, `encoding`, `decimal`, `date_order`).
+ * @param  list<string>  $detect
+ */
+function importAnalyze(string $path, ImportFormat $format = ImportFormat::Csv, array $fields = [], array $options = [], bool $canManageFields = true, string $locale = 'en', array $detect = ['decimal', 'date_order']): ImportAnalysis
+{
+    $rows = app(ImportReader::class)->open($path, $format);
+    $settings = ImportOptions::fromArray([...$options, 'delimiter' => $rows->delimiter, 'encoding' => $rows->encoding], $locale);
+
+    try {
+        return app(ImportAnalyzer::class)->analyze($rows, $settings, collect($fields), $canManageFields, $locale, $detect);
+    } finally {
+        $rows->close();
+    }
+}
+
+/**
+ * Sends a file and starts its import the way the web front does, with the queue faked so that nothing runs: the import is `pending`.
+ *
+ * @param  array<string, mixed>  $case  As {@see importCase()} gives it.
+ * @param  list<array<string, mixed>>|null  $mapping  Where the columns go; null keeps the proposal of the analysis.
+ * @param  array<string, mixed>  $settings  More of the request to start: `decimal`, `date_order`, `on_error`.
+ * @param  array<string, mixed>  $upload  More of the request to send the file: `has_header`, `delimiter`, `encoding`.
+ * @param  array<string, string>  $headers  Headers of both requests (`Accept-Language`).
+ */
+function importAsked(object $test, array $case, string $path, ?array $mapping = null, array $settings = [], ?User $as = null, ?string $name = null, array $upload = [], array $headers = []): Import
+{
+    Queue::fake();
+    $as ??= $case['team']['owner'];
+
+    $sent = importPost($test, $as, $case['inventory'], $path, $upload, $name, $headers)->assertCreated();
+    $import = Import::query()->where('ulid', $sent->json('data.id'))->firstOrFail();
+
+    inventoryCall($test, $as, 'POST', importUri($case['inventory'], $import, '/start'), ['mapping' => $mapping ?? $sent->json('data.mapping')] + $settings, $headers)->assertStatus(202);
+
+    return $import->refresh();
+}
+
+/**
+ * Does the work of the job for an import that is pending, and reads the import again.
+ */
+function importDone(Import $import): Import
+{
+    app(ImportRunner::class)->run($import);
+
+    return $import->refresh();
+}
+
+/**
+ * The items of an inventory as plain values by the name of their field (the labels of the choices instead of their ids), in the order they
+ * were added.
+ *
+ * @return list<array<string, mixed>>
+ */
+function importItemsOf(Inventory $inventory): array
+{
+    $fields = $inventory->fields()->get();
+    $byUlid = $fields->keyBy('ulid');
+    $items = [];
+
+    foreach (Item::query()->where('inventory_id', $inventory->id)->orderBy('id')->get() as $item) {
+        $values = [];
+
+        foreach ($item->values as $ulid => $value) {
+            $field = $byUlid[$ulid];
+            $labels = array_column(ChoiceType::choicesOf($field->options), 'label', 'id');
+            $values[$field->name] = match ($field->type) {
+                'select' => $labels[$value],
+                'multiselect' => array_map(fn (string $id): string => $labels[$id], $value),
+                default => $value,
+            };
+        }
+
+        ksort($values);
+        $items[] = $values;
+    }
+
+    return $items;
+}
+
+/**
+ * A pending import of a CSV of one column, with its file stored on the local disk (the disk the processes of a concurrency test share).
+ *
+ * @param  array<string, mixed>  $case  As {@see importCase()} gives it.
+ * @param  list<array<string, mixed>>  $mapping
+ * @param  list<string>  $values  The values of the column, under the header.
+ */
+function importPendingOn(array $case, array $mapping, array $values, string $header = 'Name'): Import
+{
+    $import = Import::factory()->create([
+        'inventory_id' => $case['inventory']->id,
+        'user_id' => $case['team']['owner']->id,
+        'status' => ImportStatus::Pending,
+        'disk' => 'local',
+        'columns' => [['index' => 0, 'header' => $header, 'samples' => array_slice($values, 0, 3), 'guess' => 'text']],
+        'mapping' => $mapping,
+        'expires_at' => null,
+    ]);
+    $inventory = $case['inventory'];
+    $path = AttachmentStorage::importDirectory($case['team']['workspace']->ulid, $inventory->ulid, $import->ulid).'/source.csv';
+    Storage::disk('local')->put($path, importCsv([[$header], ...array_map(fn (string $value): array => [$value], $values)]));
+    $import->forceFill(['path' => $path])->save();
+
+    return $import;
 }
