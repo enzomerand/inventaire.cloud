@@ -251,18 +251,13 @@ final class ImportCsv
                 throw new ImportFileException(ImportFileException::UNREADABLE);
             }
 
-            if ($encoding === 'utf-16') {
-                // Two bytes a character, four for some: converted whole (an import is at most a few megabytes).
-                $raw = (string) stream_get_contents($source);
-                $bigEndian = str_starts_with($raw, "\xFE\xFF");
-                $raw = str_starts_with($raw, "\xFF\xFE") || $bigEndian ? substr($raw, 2) : $raw;
+            self::transcode($source, $target, $encoding);
 
-                fwrite($target, mb_convert_encoding($raw, 'UTF-8', $bigEndian ? 'UTF-16BE' : 'UTF-16LE'));
-            } else {
-                // One byte a character: any cut between two chunks is clean.
-                while (! feof($source)) {
-                    fwrite($target, mb_convert_encoding((string) fread($source, self::CHUNK_BYTES), 'UTF-8', 'Windows-1252'));
-                }
+            // The last bytes are written when the file is closed: a disk that fills up says so here.
+            $closed = fclose($target);
+
+            if (! $closed) {
+                throw new ImportFileException(ImportFileException::UNREADABLE);
             }
 
             return $copy;
@@ -278,6 +273,63 @@ final class ImportCsv
             if (is_resource($target)) {
                 fclose($target);
             }
+        }
+    }
+
+    /**
+     * Writes a text that is in another encoding as UTF-8 into another stream, the byte order mark left out. A read or a write that fails
+     * (a disk that is full, a file that cannot be read to the end) fails the conversion: a copy that stopped short would be read as
+     * a file that ends there.
+     *
+     * @param  resource  $source
+     * @param  resource  $target
+     * @param  string  $encoding  `utf-16` or `windows-1252`.
+     *
+     * @throws ImportFileException When the text cannot be read to its end or the copy cannot be written whole.
+     */
+    public static function transcode($source, $target, string $encoding): void
+    {
+        if ($encoding === 'utf-16') {
+            // Two bytes a character, four for some: converted whole (an import is at most a few megabytes).
+            $raw = stream_get_contents($source);
+
+            // A read that fails gives what came before it, not an error: the end of the file tells whether it was reached.
+            if ($raw === false || ! feof($source)) {
+                throw new ImportFileException(ImportFileException::UNREADABLE);
+            }
+
+            $bigEndian = str_starts_with($raw, "\xFE\xFF");
+            $raw = str_starts_with($raw, "\xFF\xFE") || $bigEndian ? substr($raw, 2) : $raw;
+
+            self::put($target, mb_convert_encoding($raw, 'UTF-8', $bigEndian ? 'UTF-16BE' : 'UTF-16LE'));
+
+            return;
+        }
+
+        // One byte a character: any cut between two chunks is clean.
+        while (! feof($source)) {
+            $chunk = fread($source, self::CHUNK_BYTES);
+
+            // A read that fails does not end the file: the loop would never stop.
+            if ($chunk === false) {
+                throw new ImportFileException(ImportFileException::UNREADABLE);
+            }
+
+            self::put($target, mb_convert_encoding($chunk, 'UTF-8', 'Windows-1252'));
+        }
+    }
+
+    /**
+     * Writes all of some bytes, or fails: `fwrite` gives back a count that is short (0 on a disk that is full) and not an error.
+     *
+     * @param  resource  $target
+     *
+     * @throws ImportFileException
+     */
+    private static function put($target, string $bytes): void
+    {
+        if ($bytes !== '' && fwrite($target, $bytes) !== strlen($bytes)) {
+            throw new ImportFileException(ImportFileException::UNREADABLE);
         }
     }
 

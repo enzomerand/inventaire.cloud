@@ -60,6 +60,8 @@ final class ImportFiles
         }
 
         $copy = ExportTemp::file('imports', 'import-');
+        $stream = null;
+        $target = null;
 
         try {
             $stream = $this->storage->disk($import->disk)->readStream($import->path);
@@ -69,11 +71,13 @@ final class ImportFiles
                 throw new ImportFileException(ImportFileException::UNREADABLE);
             }
 
-            try {
-                stream_copy_to_stream($stream, $target);
-            } finally {
-                fclose($stream);
-                fclose($target);
+            self::copy($stream, $target);
+
+            // The last bytes are written when the file is closed: a disk that fills up says so here.
+            $closed = fclose($target);
+
+            if (! $closed) {
+                throw new ImportFileException(ImportFileException::UNREADABLE);
             }
 
             return $copy;
@@ -81,6 +85,30 @@ final class ImportFiles
             @unlink($copy);
 
             throw $failure instanceof ImportFileException ? $failure : new ImportFileException(ImportFileException::UNREADABLE, $failure);
+        } finally {
+            // Whichever of the two was opened, the other one failing or not.
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+
+            if (is_resource($target)) {
+                fclose($target);
+            }
+        }
+    }
+
+    /**
+     * Copies a stream into another to its end, or fails: a copy that stopped short would be read as a file that ends there.
+     *
+     * @param  resource  $from
+     * @param  resource  $to
+     *
+     * @throws ImportFileException When the source cannot be read to its end or the target cannot be written whole.
+     */
+    public static function copy($from, $to): void
+    {
+        if (stream_copy_to_stream($from, $to) === false) {
+            throw new ImportFileException(ImportFileException::UNREADABLE);
         }
     }
 
