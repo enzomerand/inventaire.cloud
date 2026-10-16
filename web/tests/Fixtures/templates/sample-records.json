@@ -10,14 +10,17 @@
         "fr": [
             "Pour les collectionneurs qui veulent savoir ce qu'ils possèdent, sans acheter deux fois le même disque."
         ],
-        "en": [
-            "For collectors who want to know what they own, without buying the same record twice."
-        ]
+        "en": ["For collectors who want to know what they own, without buying the same record twice."]
     },
     "fields": [
         { "key": "title", "type": "text", "required": true, "name": { "fr": "Titre", "en": "Title" } },
         { "key": "artist", "type": "text", "required": true, "name": { "fr": "Artiste", "en": "Artist" } },
-        { "key": "year", "type": "number", "name": { "fr": "Année", "en": "Year" }, "options": { "min": "1900", "max": "2100" } },
+        {
+            "key": "year",
+            "type": "number",
+            "name": { "fr": "Année", "en": "Year" },
+            "options": { "min": "1900", "max": "2100" }
+        },
         { "key": "bought_at", "type": "datetime", "name": { "fr": "Acheté le", "en": "Bought on" } },
         { "key": "colour", "type": "color", "name": { "fr": "Couleur du vinyle", "en": "Vinyl colour" } }
     ],

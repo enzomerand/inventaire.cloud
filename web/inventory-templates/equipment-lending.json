@@ -1,175 +1,175 @@
 {
-  "category": "association",
-  "icon": "heart-handshake",
-  "name": { "fr": "Prêt de matériel", "en": "Equipment lending" },
-  "summary": {
-    "fr": "Suivez le matériel que prête votre association ou votre collectif : statut, état, emprunteur, dates de prêt et de retour, caution, photos et notice.",
-    "en": "Track the equipment your club or community group lends out: status, condition, borrower, loan and return dates, deposit, photos and manual."
-  },
-  "description": {
-    "fr": [
-      "Ce modèle sert aux associations, comités des fêtes, maisons de quartier, clubs et collectifs qui prêtent du matériel à leurs membres ou à d'autres structures : sono, vidéoprojecteur, tentes, tables, vaisselle, jeux. Chaque équipement a un numéro d'inventaire, une catégorie, un statut, un état et les informations du prêt en cours.",
-      "Quand le matériel part, passez le statut à « Prêté », renseignez l'emprunteur, ses coordonnées, la date de prêt, la date de retour prévue et la caution. Joignez la convention de prêt signée dans le champ prévu et listez les accessoires fournis (câbles, housses, lests) pour que tout revienne.",
-      "Astuces : filtrez sur le statut « Prêté » pour voir tout ce qui est dehors, triez la colonne « Retour prévu le » pour savoir qui relancer, et prenez une photo de l'état du matériel au départ. À chaque retour, remettez le statut sur « Disponible » : l'historique garde la trace des prêts successifs."
+    "category": "association",
+    "icon": "heart-handshake",
+    "name": { "fr": "Prêt de matériel", "en": "Equipment lending" },
+    "summary": {
+        "fr": "Suivez le matériel que prête votre association ou votre collectif : statut, état, emprunteur, dates de prêt et de retour, caution, photos et notice.",
+        "en": "Track the equipment your club or community group lends out: status, condition, borrower, loan and return dates, deposit, photos and manual."
+    },
+    "description": {
+        "fr": [
+            "Ce modèle sert aux associations, comités des fêtes, maisons de quartier, clubs et collectifs qui prêtent du matériel à leurs membres ou à d'autres structures : sono, vidéoprojecteur, tentes, tables, vaisselle, jeux. Chaque équipement a un numéro d'inventaire, une catégorie, un statut, un état et les informations du prêt en cours.",
+            "Quand le matériel part, passez le statut à « Prêté », renseignez l'emprunteur, ses coordonnées, la date de prêt, la date de retour prévue et la caution. Joignez la convention de prêt signée dans le champ prévu et listez les accessoires fournis (câbles, housses, lests) pour que tout revienne.",
+            "Astuces : filtrez sur le statut « Prêté » pour voir tout ce qui est dehors, triez la colonne « Retour prévu le » pour savoir qui relancer, et prenez une photo de l'état du matériel au départ. À chaque retour, remettez le statut sur « Disponible » : l'historique garde la trace des prêts successifs."
+        ],
+        "en": [
+            "This template is for clubs, community groups, neighborhood centers and collectives that lend equipment to their members or to other organizations: sound systems, projectors, tents, tables, dishes, games. Each piece of equipment has an inventory number, a category, a status, a condition and the details of the current loan.",
+            "When equipment goes out, set the status to \"On loan\" and fill in the borrower, their contact details, the loan date, the expected return date and the deposit. Attach the signed loan agreement to the matching field and list the included accessories (cables, covers, weights) so that everything comes back.",
+            "Tips: filter on the \"On loan\" status to see everything that is out, sort the \"Due back on\" column to know who to follow up with, and take a photo of the equipment's condition when it leaves. At each return, set the status back to \"Available\": the history keeps track of successive loans."
+        ]
+    },
+    "fields": [
+        { "key": "name", "type": "text", "name": { "fr": "Matériel", "en": "Equipment" }, "required": true },
+        { "key": "reference", "type": "text", "name": { "fr": "Numéro d'inventaire", "en": "Inventory number" } },
+        {
+            "key": "category",
+            "type": "select",
+            "name": { "fr": "Catégorie", "en": "Category" },
+            "options": {
+                "choices": [
+                    { "key": "audio", "label": { "fr": "Sono et audio", "en": "Sound and audio" }, "color": "indigo" },
+                    {
+                        "key": "video",
+                        "label": { "fr": "Vidéo et projection", "en": "Video and projection" },
+                        "color": "purple"
+                    },
+                    { "key": "lighting", "label": { "fr": "Éclairage", "en": "Lighting" }, "color": "yellow" },
+                    {
+                        "key": "furniture",
+                        "label": { "fr": "Tables et chaises", "en": "Tables and chairs" },
+                        "color": "orange"
+                    },
+                    {
+                        "key": "tents",
+                        "label": { "fr": "Tentes et barnums", "en": "Tents and gazebos" },
+                        "color": "green"
+                    },
+                    { "key": "catering", "label": { "fr": "Cuisine et vaisselle", "en": "Catering" }, "color": "red" },
+                    {
+                        "key": "games",
+                        "label": { "fr": "Jeux et animations", "en": "Games and activities" },
+                        "color": "pink"
+                    },
+                    { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+                ]
+            }
+        },
+        {
+            "key": "status",
+            "type": "select",
+            "name": { "fr": "Statut", "en": "Status" },
+            "options": {
+                "choices": [
+                    { "key": "available", "label": { "fr": "Disponible", "en": "Available" }, "color": "green" },
+                    { "key": "loaned", "label": { "fr": "Prêté", "en": "On loan" }, "color": "orange" },
+                    { "key": "repair", "label": { "fr": "En réparation", "en": "In repair" }, "color": "red" },
+                    { "key": "retired", "label": { "fr": "Hors service", "en": "Out of service" }, "color": "gray" }
+                ]
+            }
+        },
+        {
+            "key": "condition",
+            "type": "select",
+            "name": { "fr": "État", "en": "Condition" },
+            "options": {
+                "choices": [
+                    { "key": "like_new", "label": { "fr": "Comme neuf", "en": "Like new" }, "color": "green" },
+                    { "key": "good", "label": { "fr": "Bon état", "en": "Good" }, "color": "teal" },
+                    { "key": "worn", "label": { "fr": "Usé", "en": "Worn" }, "color": "yellow" },
+                    { "key": "damaged", "label": { "fr": "Abîmé", "en": "Damaged" }, "color": "red" }
+                ]
+            }
+        },
+        { "key": "borrower", "type": "text", "name": { "fr": "Emprunteur", "en": "Borrower" } },
+        { "key": "contact", "type": "text", "name": { "fr": "Contact de l'emprunteur", "en": "Borrower contact" } },
+        { "key": "loan_date", "type": "date", "name": { "fr": "Date de prêt", "en": "Loan date" } },
+        { "key": "due_date", "type": "date", "name": { "fr": "Retour prévu le", "en": "Due back on" } },
+        {
+            "key": "deposit",
+            "type": "money",
+            "name": { "fr": "Caution", "en": "Deposit" },
+            "options": { "currency": "EUR" }
+        },
+        {
+            "key": "accessories",
+            "type": "tags",
+            "name": { "fr": "Accessoires fournis", "en": "Included accessories" }
+        },
+        {
+            "key": "photos",
+            "type": "photo",
+            "name": { "fr": "Photos", "en": "Photos" },
+            "options": { "max_files": 3 }
+        },
+        {
+            "key": "documents",
+            "type": "file",
+            "name": { "fr": "Notice et convention de prêt", "en": "Manual and loan agreement" },
+            "options": { "max_files": 3 }
+        }
     ],
-    "en": [
-      "This template is for clubs, community groups, neighborhood centers and collectives that lend equipment to their members or to other organizations: sound systems, projectors, tents, tables, dishes, games. Each piece of equipment has an inventory number, a category, a status, a condition and the details of the current loan.",
-      "When equipment goes out, set the status to \"On loan\" and fill in the borrower, their contact details, the loan date, the expected return date and the deposit. Attach the signed loan agreement to the matching field and list the included accessories (cables, covers, weights) so that everything comes back.",
-      "Tips: filter on the \"On loan\" status to see everything that is out, sort the \"Due back on\" column to know who to follow up with, and take a photo of the equipment's condition when it leaves. At each return, set the status back to \"Available\": the history keeps track of successive loans."
-    ]
-  },
-  "fields": [
-    { "key": "name", "type": "text", "name": { "fr": "Matériel", "en": "Equipment" }, "required": true },
-    { "key": "reference", "type": "text", "name": { "fr": "Numéro d'inventaire", "en": "Inventory number" } },
-    {
-      "key": "category",
-      "type": "select",
-      "name": { "fr": "Catégorie", "en": "Category" },
-      "options": {
-        "choices": [
-          { "key": "audio", "label": { "fr": "Sono et audio", "en": "Sound and audio" }, "color": "indigo" },
-          {
-            "key": "video",
-            "label": { "fr": "Vidéo et projection", "en": "Video and projection" },
-            "color": "purple"
-          },
-          { "key": "lighting", "label": { "fr": "Éclairage", "en": "Lighting" }, "color": "yellow" },
-          {
-            "key": "furniture",
-            "label": { "fr": "Tables et chaises", "en": "Tables and chairs" },
-            "color": "orange"
-          },
-          {
-            "key": "tents",
-            "label": { "fr": "Tentes et barnums", "en": "Tents and gazebos" },
-            "color": "green"
-          },
-          { "key": "catering", "label": { "fr": "Cuisine et vaisselle", "en": "Catering" }, "color": "red" },
-          {
-            "key": "games",
-            "label": { "fr": "Jeux et animations", "en": "Games and activities" },
-            "color": "pink"
-          },
-          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+    "examples": {
+        "fr": [
+            {
+                "name": "Enceinte de sonorisation 500 W",
+                "reference": "SONO-01",
+                "category": "audio",
+                "status": "loaned",
+                "condition": "good",
+                "borrower": "Comité des fêtes de Saint-Aubin",
+                "contact": "secretariat@example.org",
+                "loan_date": "2026-10-10",
+                "due_date": "2026-10-17",
+                "deposit": "100.00",
+                "accessories": ["Pied d'enceinte", "Câble XLR 5 m", "Housse"]
+            },
+            {
+                "name": "Vidéoprojecteur Full HD",
+                "reference": "VIDEO-02",
+                "category": "video",
+                "status": "available",
+                "condition": "like_new",
+                "accessories": ["Câble HDMI", "Télécommande", "Mallette"]
+            },
+            {
+                "name": "Barnum pliant 3 × 6 m",
+                "reference": "TENTE-01",
+                "category": "tents",
+                "status": "repair",
+                "condition": "worn",
+                "accessories": ["4 lests", "Sac de transport"]
+            }
+        ],
+        "en": [
+            {
+                "name": "500 W PA speaker",
+                "reference": "AUDIO-01",
+                "category": "audio",
+                "status": "loaned",
+                "condition": "good",
+                "borrower": "Saint-Aubin Fair Committee",
+                "contact": "office@example.org",
+                "loan_date": "2026-10-10",
+                "due_date": "2026-10-17",
+                "deposit": "100.00",
+                "accessories": ["Speaker stand", "5 m XLR cable", "Cover"]
+            },
+            {
+                "name": "Full HD projector",
+                "reference": "VIDEO-02",
+                "category": "video",
+                "status": "available",
+                "condition": "like_new",
+                "accessories": ["HDMI cable", "Remote control", "Carry case"]
+            },
+            {
+                "name": "3 × 6 m folding gazebo",
+                "reference": "TENT-01",
+                "category": "tents",
+                "status": "repair",
+                "condition": "worn",
+                "accessories": ["4 weights", "Carry bag"]
+            }
         ]
-      }
-    },
-    {
-      "key": "status",
-      "type": "select",
-      "name": { "fr": "Statut", "en": "Status" },
-      "options": {
-        "choices": [
-          { "key": "available", "label": { "fr": "Disponible", "en": "Available" }, "color": "green" },
-          { "key": "loaned", "label": { "fr": "Prêté", "en": "On loan" }, "color": "orange" },
-          { "key": "repair", "label": { "fr": "En réparation", "en": "In repair" }, "color": "red" },
-          { "key": "retired", "label": { "fr": "Hors service", "en": "Out of service" }, "color": "gray" }
-        ]
-      }
-    },
-    {
-      "key": "condition",
-      "type": "select",
-      "name": { "fr": "État", "en": "Condition" },
-      "options": {
-        "choices": [
-          { "key": "like_new", "label": { "fr": "Comme neuf", "en": "Like new" }, "color": "green" },
-          { "key": "good", "label": { "fr": "Bon état", "en": "Good" }, "color": "teal" },
-          { "key": "worn", "label": { "fr": "Usé", "en": "Worn" }, "color": "yellow" },
-          { "key": "damaged", "label": { "fr": "Abîmé", "en": "Damaged" }, "color": "red" }
-        ]
-      }
-    },
-    { "key": "borrower", "type": "text", "name": { "fr": "Emprunteur", "en": "Borrower" } },
-    { "key": "contact", "type": "text", "name": { "fr": "Contact de l'emprunteur", "en": "Borrower contact" } },
-    { "key": "loan_date", "type": "date", "name": { "fr": "Date de prêt", "en": "Loan date" } },
-    { "key": "due_date", "type": "date", "name": { "fr": "Retour prévu le", "en": "Due back on" } },
-    {
-      "key": "deposit",
-      "type": "money",
-      "name": { "fr": "Caution", "en": "Deposit" },
-      "options": { "currency": "EUR" }
-    },
-    {
-      "key": "accessories",
-      "type": "tags",
-      "name": { "fr": "Accessoires fournis", "en": "Included accessories" }
-    },
-    {
-      "key": "photos",
-      "type": "photo",
-      "name": { "fr": "Photos", "en": "Photos" },
-      "options": { "max_files": 3 }
-    },
-    {
-      "key": "documents",
-      "type": "file",
-      "name": { "fr": "Notice et convention de prêt", "en": "Manual and loan agreement" },
-      "options": { "max_files": 3 }
     }
-  ],
-  "examples": {
-    "fr": [
-      {
-        "name": "Enceinte de sonorisation 500 W",
-        "reference": "SONO-01",
-        "category": "audio",
-        "status": "loaned",
-        "condition": "good",
-        "borrower": "Comité des fêtes de Saint-Aubin",
-        "contact": "secretariat@example.org",
-        "loan_date": "2026-10-10",
-        "due_date": "2026-10-17",
-        "deposit": "100.00",
-        "accessories": ["Pied d'enceinte", "Câble XLR 5 m", "Housse"]
-      },
-      {
-        "name": "Vidéoprojecteur Full HD",
-        "reference": "VIDEO-02",
-        "category": "video",
-        "status": "available",
-        "condition": "like_new",
-        "accessories": ["Câble HDMI", "Télécommande", "Mallette"]
-      },
-      {
-        "name": "Barnum pliant 3 × 6 m",
-        "reference": "TENTE-01",
-        "category": "tents",
-        "status": "repair",
-        "condition": "worn",
-        "accessories": ["4 lests", "Sac de transport"]
-      }
-    ],
-    "en": [
-      {
-        "name": "500 W PA speaker",
-        "reference": "AUDIO-01",
-        "category": "audio",
-        "status": "loaned",
-        "condition": "good",
-        "borrower": "Saint-Aubin Fair Committee",
-        "contact": "office@example.org",
-        "loan_date": "2026-10-10",
-        "due_date": "2026-10-17",
-        "deposit": "100.00",
-        "accessories": ["Speaker stand", "5 m XLR cable", "Cover"]
-      },
-      {
-        "name": "Full HD projector",
-        "reference": "VIDEO-02",
-        "category": "video",
-        "status": "available",
-        "condition": "like_new",
-        "accessories": ["HDMI cable", "Remote control", "Carry case"]
-      },
-      {
-        "name": "3 × 6 m folding gazebo",
-        "reference": "TENT-01",
-        "category": "tents",
-        "status": "repair",
-        "condition": "worn",
-        "accessories": ["4 weights", "Carry bag"]
-      }
-    ]
-  }
 }

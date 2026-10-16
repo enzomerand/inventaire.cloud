@@ -1,184 +1,184 @@
 {
-  "category": "business",
-  "icon": "building-store",
-  "name": { "fr": "Stock de boutique", "en": "Shop stock" },
-  "summary": {
-    "fr": "Tenez le stock de votre boutique : références, codes-barres EAN, prix d'achat et de vente, TVA, quantités, fournisseurs et photos des produits.",
-    "en": "Keep your shop's stock in order: SKUs, EAN barcodes, cost and selling prices, VAT, quantities, suppliers and product photos."
-  },
-  "description": {
-    "fr": [
-      "Ce modèle s'adresse aux commerçants, artisans et créateurs qui vendent en boutique, sur les marchés ou en ligne et veulent un stock clair. Chaque produit a une référence, un code-barres EAN, une catégorie, un fournisseur, une quantité, un prix d'achat HT, un taux de TVA et un prix de vente TTC.",
-      "Ajoutez des photos des produits : la vue galerie affiche la première photo de chaque fiche et permet de parcourir le stock comme un catalogue. Le champ « Stock minimum » sert de repère pour vos réassorts : triez la colonne « Quantité en stock » de la plus petite à la plus grande pour voir ce qui manque.",
-      "Astuces : filtrez par fournisseur pour préparer une commande, ou par catégorie pour un comptage partiel, et affichez le total de la colonne « Quantité en stock » pour connaître le nombre de pièces. Lors d'un inventaire, corrigez les quantités directement dans le tableau ; l'historique conserve les valeurs précédentes."
-    ],
-    "en": [
-      "This template is for shopkeepers, craftspeople and makers who sell in a shop, at markets or online and want a clear view of their stock. Each product has a SKU, an EAN barcode, a category, a supplier, a quantity, a cost price excluding tax, a VAT rate and a selling price including tax.",
-      "Add product photos: the gallery view shows the first photo of each item, so you can browse your stock like a catalog. The \"Minimum stock\" field is a reference point for restocking: sort the \"Quantity in stock\" column from lowest to highest to see what is running short.",
-      "Tips: filter by supplier to prepare an order, or by category for a partial count, and show the total of the \"Quantity in stock\" column to know how many pieces you hold. During a stocktake, correct quantities straight in the table; the history keeps the previous values."
-    ]
-  },
-  "fields": [
-    { "key": "name", "type": "text", "name": { "fr": "Produit", "en": "Product" }, "required": true },
-    { "key": "sku", "type": "text", "name": { "fr": "Référence", "en": "SKU" } },
-    {
-      "key": "ean",
-      "type": "barcode",
-      "name": { "fr": "Code-barres EAN", "en": "EAN barcode" },
-      "options": { "format": "ean13" }
+    "category": "business",
+    "icon": "building-store",
+    "name": { "fr": "Stock de boutique", "en": "Shop stock" },
+    "summary": {
+        "fr": "Tenez le stock de votre boutique : références, codes-barres EAN, prix d'achat et de vente, TVA, quantités, fournisseurs et photos des produits.",
+        "en": "Keep your shop's stock in order: SKUs, EAN barcodes, cost and selling prices, VAT, quantities, suppliers and product photos."
     },
-    {
-      "key": "category",
-      "type": "select",
-      "name": { "fr": "Catégorie", "en": "Category" },
-      "options": {
-        "choices": [
-          { "key": "apparel", "label": { "fr": "Prêt-à-porter", "en": "Apparel" }, "color": "blue" },
-          { "key": "accessories", "label": { "fr": "Accessoires", "en": "Accessories" }, "color": "purple" },
-          { "key": "home", "label": { "fr": "Maison et déco", "en": "Home and decor" }, "color": "orange" },
-          { "key": "gourmet", "label": { "fr": "Épicerie fine", "en": "Gourmet food" }, "color": "green" },
-          {
-            "key": "beauty",
-            "label": { "fr": "Beauté et bien-être", "en": "Beauty and wellness" },
-            "color": "pink"
-          },
-          {
-            "key": "stationery",
-            "label": { "fr": "Papeterie et loisirs", "en": "Stationery and hobbies" },
-            "color": "teal"
-          },
-          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+    "description": {
+        "fr": [
+            "Ce modèle s'adresse aux commerçants, artisans et créateurs qui vendent en boutique, sur les marchés ou en ligne et veulent un stock clair. Chaque produit a une référence, un code-barres EAN, une catégorie, un fournisseur, une quantité, un prix d'achat HT, un taux de TVA et un prix de vente TTC.",
+            "Ajoutez des photos des produits : la vue galerie affiche la première photo de chaque fiche et permet de parcourir le stock comme un catalogue. Le champ « Stock minimum » sert de repère pour vos réassorts : triez la colonne « Quantité en stock » de la plus petite à la plus grande pour voir ce qui manque.",
+            "Astuces : filtrez par fournisseur pour préparer une commande, ou par catégorie pour un comptage partiel, et affichez le total de la colonne « Quantité en stock » pour connaître le nombre de pièces. Lors d'un inventaire, corrigez les quantités directement dans le tableau ; l'historique conserve les valeurs précédentes."
+        ],
+        "en": [
+            "This template is for shopkeepers, craftspeople and makers who sell in a shop, at markets or online and want a clear view of their stock. Each product has a SKU, an EAN barcode, a category, a supplier, a quantity, a cost price excluding tax, a VAT rate and a selling price including tax.",
+            "Add product photos: the gallery view shows the first photo of each item, so you can browse your stock like a catalog. The \"Minimum stock\" field is a reference point for restocking: sort the \"Quantity in stock\" column from lowest to highest to see what is running short.",
+            "Tips: filter by supplier to prepare an order, or by category for a partial count, and show the total of the \"Quantity in stock\" column to know how many pieces you hold. During a stocktake, correct quantities straight in the table; the history keeps the previous values."
         ]
-      }
     },
-    { "key": "supplier", "type": "text", "name": { "fr": "Fournisseur", "en": "Supplier" } },
-    {
-      "key": "quantity",
-      "type": "number",
-      "name": { "fr": "Quantité en stock", "en": "Quantity in stock" },
-      "options": { "decimals": 0, "min": "0" }
-    },
-    {
-      "key": "min_stock",
-      "type": "number",
-      "name": { "fr": "Stock minimum", "en": "Minimum stock" },
-      "options": { "decimals": 0, "min": "0" }
-    },
-    {
-      "key": "cost",
-      "type": "money",
-      "name": { "fr": "Prix d'achat HT", "en": "Cost price (excl. tax)" },
-      "options": { "currency": "EUR" }
-    },
-    {
-      "key": "vat",
-      "type": "percentage",
-      "name": { "fr": "Taux de TVA", "en": "VAT rate" },
-      "options": { "decimals": 1 }
-    },
-    {
-      "key": "price",
-      "type": "money",
-      "name": { "fr": "Prix de vente TTC", "en": "Selling price (incl. tax)" },
-      "options": { "currency": "EUR" }
-    },
-    { "key": "on_sale", "type": "boolean", "name": { "fr": "En vente", "en": "On sale" } },
-    { "key": "location", "type": "text", "name": { "fr": "Emplacement", "en": "Storage location" } },
-    {
-      "key": "photos",
-      "type": "photo",
-      "name": { "fr": "Photos", "en": "Photos" },
-      "options": { "max_files": 3 }
-    }
-  ],
-  "examples": {
-    "fr": [
-      {
-        "name": "T-shirt en coton bio, bleu marine, taille M",
-        "sku": "TS-BIO-BM-M",
-        "ean": "3760123450010",
-        "category": "apparel",
-        "supplier": "Atelier Lin et Coton",
-        "quantity": "24",
-        "min_stock": "6",
-        "cost": "9.80",
-        "vat": "20.0",
-        "price": "29.00",
-        "on_sale": true,
-        "location": "Réserve, étagère B2"
-      },
-      {
-        "name": "Bougie parfumée à la figue, 180 g",
-        "sku": "BOU-FIG-180",
-        "ean": "3760123450027",
-        "category": "home",
-        "supplier": "Bougies du Midi",
-        "quantity": "3",
-        "min_stock": "5",
-        "cost": "6.40",
-        "vat": "20.0",
-        "price": "18.50",
-        "on_sale": true,
-        "location": "Vitrine"
-      },
-      {
-        "name": "Miel de lavande, pot de 250 g",
-        "sku": "MIEL-LAV-250",
-        "ean": "3760123450034",
-        "category": "gourmet",
-        "supplier": "Rucher des Garrigues",
-        "quantity": "40",
-        "min_stock": "10",
-        "cost": "4.20",
-        "vat": "5.5",
-        "price": "9.90",
-        "on_sale": true,
-        "location": "Réserve, étagère A1"
-      }
+    "fields": [
+        { "key": "name", "type": "text", "name": { "fr": "Produit", "en": "Product" }, "required": true },
+        { "key": "sku", "type": "text", "name": { "fr": "Référence", "en": "SKU" } },
+        {
+            "key": "ean",
+            "type": "barcode",
+            "name": { "fr": "Code-barres EAN", "en": "EAN barcode" },
+            "options": { "format": "ean13" }
+        },
+        {
+            "key": "category",
+            "type": "select",
+            "name": { "fr": "Catégorie", "en": "Category" },
+            "options": {
+                "choices": [
+                    { "key": "apparel", "label": { "fr": "Prêt-à-porter", "en": "Apparel" }, "color": "blue" },
+                    { "key": "accessories", "label": { "fr": "Accessoires", "en": "Accessories" }, "color": "purple" },
+                    { "key": "home", "label": { "fr": "Maison et déco", "en": "Home and decor" }, "color": "orange" },
+                    { "key": "gourmet", "label": { "fr": "Épicerie fine", "en": "Gourmet food" }, "color": "green" },
+                    {
+                        "key": "beauty",
+                        "label": { "fr": "Beauté et bien-être", "en": "Beauty and wellness" },
+                        "color": "pink"
+                    },
+                    {
+                        "key": "stationery",
+                        "label": { "fr": "Papeterie et loisirs", "en": "Stationery and hobbies" },
+                        "color": "teal"
+                    },
+                    { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+                ]
+            }
+        },
+        { "key": "supplier", "type": "text", "name": { "fr": "Fournisseur", "en": "Supplier" } },
+        {
+            "key": "quantity",
+            "type": "number",
+            "name": { "fr": "Quantité en stock", "en": "Quantity in stock" },
+            "options": { "decimals": 0, "min": "0" }
+        },
+        {
+            "key": "min_stock",
+            "type": "number",
+            "name": { "fr": "Stock minimum", "en": "Minimum stock" },
+            "options": { "decimals": 0, "min": "0" }
+        },
+        {
+            "key": "cost",
+            "type": "money",
+            "name": { "fr": "Prix d'achat HT", "en": "Cost price (excl. tax)" },
+            "options": { "currency": "EUR" }
+        },
+        {
+            "key": "vat",
+            "type": "percentage",
+            "name": { "fr": "Taux de TVA", "en": "VAT rate" },
+            "options": { "decimals": 1 }
+        },
+        {
+            "key": "price",
+            "type": "money",
+            "name": { "fr": "Prix de vente TTC", "en": "Selling price (incl. tax)" },
+            "options": { "currency": "EUR" }
+        },
+        { "key": "on_sale", "type": "boolean", "name": { "fr": "En vente", "en": "On sale" } },
+        { "key": "location", "type": "text", "name": { "fr": "Emplacement", "en": "Storage location" } },
+        {
+            "key": "photos",
+            "type": "photo",
+            "name": { "fr": "Photos", "en": "Photos" },
+            "options": { "max_files": 3 }
+        }
     ],
-    "en": [
-      {
-        "name": "Organic cotton T-shirt, navy, size M",
-        "sku": "TS-BIO-BM-M",
-        "ean": "3760123450010",
-        "category": "apparel",
-        "supplier": "Atelier Lin et Coton",
-        "quantity": "24",
-        "min_stock": "6",
-        "cost": "9.80",
-        "vat": "20.0",
-        "price": "29.00",
-        "on_sale": true,
-        "location": "Back room, shelf B2"
-      },
-      {
-        "name": "Fig scented candle, 180 g",
-        "sku": "BOU-FIG-180",
-        "ean": "3760123450027",
-        "category": "home",
-        "supplier": "Bougies du Midi",
-        "quantity": "3",
-        "min_stock": "5",
-        "cost": "6.40",
-        "vat": "20.0",
-        "price": "18.50",
-        "on_sale": true,
-        "location": "Display case"
-      },
-      {
-        "name": "Lavender honey, 250 g jar",
-        "sku": "MIEL-LAV-250",
-        "ean": "3760123450034",
-        "category": "gourmet",
-        "supplier": "Rucher des Garrigues",
-        "quantity": "40",
-        "min_stock": "10",
-        "cost": "4.20",
-        "vat": "5.5",
-        "price": "9.90",
-        "on_sale": true,
-        "location": "Back room, shelf A1"
-      }
-    ]
-  }
+    "examples": {
+        "fr": [
+            {
+                "name": "T-shirt en coton bio, bleu marine, taille M",
+                "sku": "TS-BIO-BM-M",
+                "ean": "3760123450010",
+                "category": "apparel",
+                "supplier": "Atelier Lin et Coton",
+                "quantity": "24",
+                "min_stock": "6",
+                "cost": "9.80",
+                "vat": "20.0",
+                "price": "29.00",
+                "on_sale": true,
+                "location": "Réserve, étagère B2"
+            },
+            {
+                "name": "Bougie parfumée à la figue, 180 g",
+                "sku": "BOU-FIG-180",
+                "ean": "3760123450027",
+                "category": "home",
+                "supplier": "Bougies du Midi",
+                "quantity": "3",
+                "min_stock": "5",
+                "cost": "6.40",
+                "vat": "20.0",
+                "price": "18.50",
+                "on_sale": true,
+                "location": "Vitrine"
+            },
+            {
+                "name": "Miel de lavande, pot de 250 g",
+                "sku": "MIEL-LAV-250",
+                "ean": "3760123450034",
+                "category": "gourmet",
+                "supplier": "Rucher des Garrigues",
+                "quantity": "40",
+                "min_stock": "10",
+                "cost": "4.20",
+                "vat": "5.5",
+                "price": "9.90",
+                "on_sale": true,
+                "location": "Réserve, étagère A1"
+            }
+        ],
+        "en": [
+            {
+                "name": "Organic cotton T-shirt, navy, size M",
+                "sku": "TS-BIO-BM-M",
+                "ean": "3760123450010",
+                "category": "apparel",
+                "supplier": "Atelier Lin et Coton",
+                "quantity": "24",
+                "min_stock": "6",
+                "cost": "9.80",
+                "vat": "20.0",
+                "price": "29.00",
+                "on_sale": true,
+                "location": "Back room, shelf B2"
+            },
+            {
+                "name": "Fig scented candle, 180 g",
+                "sku": "BOU-FIG-180",
+                "ean": "3760123450027",
+                "category": "home",
+                "supplier": "Bougies du Midi",
+                "quantity": "3",
+                "min_stock": "5",
+                "cost": "6.40",
+                "vat": "20.0",
+                "price": "18.50",
+                "on_sale": true,
+                "location": "Display case"
+            },
+            {
+                "name": "Lavender honey, 250 g jar",
+                "sku": "MIEL-LAV-250",
+                "ean": "3760123450034",
+                "category": "gourmet",
+                "supplier": "Rucher des Garrigues",
+                "quantity": "40",
+                "min_stock": "10",
+                "cost": "4.20",
+                "vat": "5.5",
+                "price": "9.90",
+                "on_sale": true,
+                "location": "Back room, shelf A1"
+            }
+        ]
+    }
 }

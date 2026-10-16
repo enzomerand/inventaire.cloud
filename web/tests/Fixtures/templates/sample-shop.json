@@ -17,10 +17,26 @@
         ]
     },
     "fields": [
-        { "key": "barcode", "type": "barcode", "name": { "fr": "Code-barres", "en": "Barcode" }, "options": { "format": "ean13" } },
+        {
+            "key": "barcode",
+            "type": "barcode",
+            "name": { "fr": "Code-barres", "en": "Barcode" },
+            "options": { "format": "ean13" }
+        },
         { "key": "name", "type": "text", "required": true, "name": { "fr": "Produit", "en": "Product" } },
-        { "key": "quantity", "type": "number", "required": true, "name": { "fr": "Quantité", "en": "Quantity" }, "options": { "min": "0" } },
-        { "key": "price", "type": "money", "name": { "fr": "Prix de vente", "en": "Selling price" }, "options": { "currency": "EUR" } },
+        {
+            "key": "quantity",
+            "type": "number",
+            "required": true,
+            "name": { "fr": "Quantité", "en": "Quantity" },
+            "options": { "min": "0" }
+        },
+        {
+            "key": "price",
+            "type": "money",
+            "name": { "fr": "Prix de vente", "en": "Selling price" },
+            "options": { "currency": "EUR" }
+        },
         { "key": "vat", "type": "percentage", "name": { "fr": "TVA", "en": "VAT" }, "options": { "decimals": 1 } },
         {
             "key": "status",
@@ -39,13 +55,41 @@
     ],
     "examples": {
         "fr": [
-            { "barcode": "4006381333931", "name": "Cahier A5", "quantity": "42", "price": "3.50", "vat": "20.0", "status": "in_stock" },
-            { "name": "Stylo bille bleu", "quantity": "4", "price": "1.20", "vat": "20.0", "status": "low", "supplier_site": "https://example.com/stylos" },
+            {
+                "barcode": "4006381333931",
+                "name": "Cahier A5",
+                "quantity": "42",
+                "price": "3.50",
+                "vat": "20.0",
+                "status": "in_stock"
+            },
+            {
+                "name": "Stylo bille bleu",
+                "quantity": "4",
+                "price": "1.20",
+                "vat": "20.0",
+                "status": "low",
+                "supplier_site": "https://example.com/stylos"
+            },
             { "name": "Carnet de notes", "quantity": "0", "price": "6.90", "status": "out", "expires_on": "2027-01-31" }
         ],
         "en": [
-            { "barcode": "4006381333931", "name": "A5 notebook", "quantity": "42", "price": "3.50", "vat": "20.0", "status": "in_stock" },
-            { "name": "Blue ballpoint pen", "quantity": "4", "price": "1.20", "vat": "20.0", "status": "low", "supplier_site": "https://example.com/pens" },
+            {
+                "barcode": "4006381333931",
+                "name": "A5 notebook",
+                "quantity": "42",
+                "price": "3.50",
+                "vat": "20.0",
+                "status": "in_stock"
+            },
+            {
+                "name": "Blue ballpoint pen",
+                "quantity": "4",
+                "price": "1.20",
+                "vat": "20.0",
+                "status": "low",
+                "supplier_site": "https://example.com/pens"
+            },
             { "name": "Pocket notebook", "quantity": "0", "price": "6.90", "status": "out", "expires_on": "2027-01-31" }
         ]
     }

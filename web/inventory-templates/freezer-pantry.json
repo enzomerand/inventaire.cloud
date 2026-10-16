@@ -1,162 +1,166 @@
 {
-  "category": "food",
-  "icon": "fridge",
-  "name": { "fr": "Congélateur et garde-manger", "en": "Freezer and pantry" },
-  "summary": {
-    "fr": "Sachez ce qu'il y a dans votre congélateur et vos placards : produit, quantité, emplacement, dates de congélation et de péremption, pour limiter le gaspillage.",
-    "en": "Know what is in your freezer and cupboards: product, quantity, spot, freezing and use-by dates, to cut down on food waste."
-  },
-  "description": {
-    "fr": [
-      "Ce modèle aide les foyers, les familles nombreuses et celles et ceux qui cuisinent en grande quantité à savoir ce qui se trouve au congélateur, au réfrigérateur et dans les placards. Chaque produit a un lieu de stockage, une catégorie, une quantité, un poids, une date de congélation ou d'achat et une date limite de consommation.",
-      "Notez le tiroir ou l'étagère pour ne plus fouiller au fond du congélateur, et ajoutez une photo des bacs si vous le souhaitez. Cochez « Fait maison » pour distinguer vos préparations des produits du commerce, et ajoutez des étiquettes libres comme « repas de la semaine » ou « à finir vite ».",
-      "Astuces : triez la colonne « À consommer avant le » du plus proche au plus lointain pour cuisiner ce qui presse, filtrez sur le lieu « Congélateur » pour faire le point tiroir par tiroir, et mettez la quantité à jour quand vous sortez une portion. Le total de la colonne « Poids total » donne une idée du stock."
-    ],
-    "en": [
-      "This template helps households, large families and anyone who cooks in big batches know what is in the freezer, the fridge and the cupboards. Each product has a storage place, a category, a quantity, a weight, a freezing or purchase date and a use-by date.",
-      "Note the drawer or shelf so you no longer have to rummage at the bottom of the freezer, and add a photo of the bins if you like. Tick \"Homemade\" to tell your own preparations from store-bought products, and add free tags such as \"weekly meals\" or \"use soon\".",
-      "Tips: sort the \"Use by\" column from soonest to latest to cook what is pressing, filter on the \"Freezer\" storage place to check it drawer by drawer, and update the quantity whenever you take out a portion. The total of the \"Total weight\" column gives you an idea of your stock."
-    ]
-  },
-  "fields": [
-    { "key": "name", "type": "text", "name": { "fr": "Produit", "en": "Product" }, "required": true },
-    {
-      "key": "storage",
-      "type": "select",
-      "name": { "fr": "Lieu de stockage", "en": "Storage place" },
-      "options": {
-        "choices": [
-          { "key": "freezer", "label": { "fr": "Congélateur", "en": "Freezer" }, "color": "blue" },
-          { "key": "fridge", "label": { "fr": "Réfrigérateur", "en": "Fridge" }, "color": "teal" },
-          { "key": "pantry", "label": { "fr": "Placard", "en": "Pantry" }, "color": "orange" },
-          { "key": "storeroom", "label": { "fr": "Cellier", "en": "Storeroom" }, "color": "gray" }
+    "category": "food",
+    "icon": "fridge",
+    "name": { "fr": "Congélateur et garde-manger", "en": "Freezer and pantry" },
+    "summary": {
+        "fr": "Sachez ce qu'il y a dans votre congélateur et vos placards : produit, quantité, emplacement, dates de congélation et de péremption, pour limiter le gaspillage.",
+        "en": "Know what is in your freezer and cupboards: product, quantity, spot, freezing and use-by dates, to cut down on food waste."
+    },
+    "description": {
+        "fr": [
+            "Ce modèle aide les foyers, les familles nombreuses et celles et ceux qui cuisinent en grande quantité à savoir ce qui se trouve au congélateur, au réfrigérateur et dans les placards. Chaque produit a un lieu de stockage, une catégorie, une quantité, un poids, une date de congélation ou d'achat et une date limite de consommation.",
+            "Notez le tiroir ou l'étagère pour ne plus fouiller au fond du congélateur, et ajoutez une photo des bacs si vous le souhaitez. Cochez « Fait maison » pour distinguer vos préparations des produits du commerce, et ajoutez des étiquettes libres comme « repas de la semaine » ou « à finir vite ».",
+            "Astuces : triez la colonne « À consommer avant le » du plus proche au plus lointain pour cuisiner ce qui presse, filtrez sur le lieu « Congélateur » pour faire le point tiroir par tiroir, et mettez la quantité à jour quand vous sortez une portion. Le total de la colonne « Poids total » donne une idée du stock."
+        ],
+        "en": [
+            "This template helps households, large families and anyone who cooks in big batches know what is in the freezer, the fridge and the cupboards. Each product has a storage place, a category, a quantity, a weight, a freezing or purchase date and a use-by date.",
+            "Note the drawer or shelf so you no longer have to rummage at the bottom of the freezer, and add a photo of the bins if you like. Tick \"Homemade\" to tell your own preparations from store-bought products, and add free tags such as \"weekly meals\" or \"use soon\".",
+            "Tips: sort the \"Use by\" column from soonest to latest to cook what is pressing, filter on the \"Freezer\" storage place to check it drawer by drawer, and update the quantity whenever you take out a portion. The total of the \"Total weight\" column gives you an idea of your stock."
         ]
-      }
     },
-    {
-      "key": "category",
-      "type": "select",
-      "name": { "fr": "Catégorie", "en": "Category" },
-      "options": {
-        "choices": [
-          { "key": "meat", "label": { "fr": "Viande", "en": "Meat" }, "color": "red" },
-          {
-            "key": "fish",
-            "label": { "fr": "Poisson et fruits de mer", "en": "Fish and seafood" },
-            "color": "blue"
-          },
-          { "key": "vegetables", "label": { "fr": "Légumes", "en": "Vegetables" }, "color": "green" },
-          { "key": "fruit", "label": { "fr": "Fruits", "en": "Fruit" }, "color": "pink" },
-          { "key": "ready_meals", "label": { "fr": "Plats cuisinés", "en": "Ready meals" }, "color": "purple" },
-          {
-            "key": "bakery",
-            "label": { "fr": "Pain et pâtisserie", "en": "Bread and pastries" },
-            "color": "orange"
-          },
-          { "key": "dry_goods", "label": { "fr": "Épicerie sèche", "en": "Dry goods" }, "color": "yellow" },
-          { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
-        ]
-      }
-    },
-    {
-      "key": "quantity",
-      "type": "number",
-      "name": { "fr": "Quantité", "en": "Quantity" },
-      "options": { "decimals": 0, "min": "0" }
-    },
-    {
-      "key": "weight",
-      "type": "number",
-      "name": { "fr": "Poids total", "en": "Total weight" },
-      "options": { "decimals": 2, "min": "0", "unit": "kg" }
-    },
-    { "key": "location", "type": "text", "name": { "fr": "Tiroir ou étagère", "en": "Drawer or shelf" } },
-    {
-      "key": "stored_on",
-      "type": "date",
-      "name": { "fr": "Date de congélation ou d'achat", "en": "Frozen or bought on" }
-    },
-    { "key": "use_by", "type": "date", "name": { "fr": "À consommer avant le", "en": "Use by" } },
-    { "key": "homemade", "type": "boolean", "name": { "fr": "Fait maison", "en": "Homemade" } },
-    { "key": "tags", "type": "tags", "name": { "fr": "Étiquettes", "en": "Tags" } },
-    { "key": "photo", "type": "photo", "name": { "fr": "Photo", "en": "Photo" }, "options": { "max_files": 1 } }
-  ],
-  "examples": {
-    "fr": [
-      {
-        "name": "Lasagnes maison (portions)",
-        "storage": "freezer",
-        "category": "ready_meals",
-        "quantity": "6",
-        "weight": "2.40",
-        "location": "Tiroir 2",
-        "stored_on": "2026-09-14",
-        "use_by": "2027-03-14",
-        "homemade": true,
-        "tags": ["repas de la semaine"]
-      },
-      {
-        "name": "Pavés de saumon",
-        "storage": "freezer",
-        "category": "fish",
-        "quantity": "4",
-        "weight": "0.80",
-        "location": "Tiroir 1",
-        "stored_on": "2026-10-05",
-        "use_by": "2027-01-05",
-        "homemade": false,
-        "tags": ["promo"]
-      },
-      {
-        "name": "Sauce tomate maison (bocaux)",
-        "storage": "pantry",
-        "category": "dry_goods",
-        "quantity": "8",
-        "weight": "4.00",
-        "location": "Étagère du bas",
-        "stored_on": "2026-08-30",
-        "use_by": "2027-08-30",
-        "homemade": true,
-        "tags": ["conserves"]
-      }
+    "fields": [
+        { "key": "name", "type": "text", "name": { "fr": "Produit", "en": "Product" }, "required": true },
+        {
+            "key": "storage",
+            "type": "select",
+            "name": { "fr": "Lieu de stockage", "en": "Storage place" },
+            "options": {
+                "choices": [
+                    { "key": "freezer", "label": { "fr": "Congélateur", "en": "Freezer" }, "color": "blue" },
+                    { "key": "fridge", "label": { "fr": "Réfrigérateur", "en": "Fridge" }, "color": "teal" },
+                    { "key": "pantry", "label": { "fr": "Placard", "en": "Pantry" }, "color": "orange" },
+                    { "key": "storeroom", "label": { "fr": "Cellier", "en": "Storeroom" }, "color": "gray" }
+                ]
+            }
+        },
+        {
+            "key": "category",
+            "type": "select",
+            "name": { "fr": "Catégorie", "en": "Category" },
+            "options": {
+                "choices": [
+                    { "key": "meat", "label": { "fr": "Viande", "en": "Meat" }, "color": "red" },
+                    {
+                        "key": "fish",
+                        "label": { "fr": "Poisson et fruits de mer", "en": "Fish and seafood" },
+                        "color": "blue"
+                    },
+                    { "key": "vegetables", "label": { "fr": "Légumes", "en": "Vegetables" }, "color": "green" },
+                    { "key": "fruit", "label": { "fr": "Fruits", "en": "Fruit" }, "color": "pink" },
+                    {
+                        "key": "ready_meals",
+                        "label": { "fr": "Plats cuisinés", "en": "Ready meals" },
+                        "color": "purple"
+                    },
+                    {
+                        "key": "bakery",
+                        "label": { "fr": "Pain et pâtisserie", "en": "Bread and pastries" },
+                        "color": "orange"
+                    },
+                    { "key": "dry_goods", "label": { "fr": "Épicerie sèche", "en": "Dry goods" }, "color": "yellow" },
+                    { "key": "other", "label": { "fr": "Autre", "en": "Other" }, "color": "gray" }
+                ]
+            }
+        },
+        {
+            "key": "quantity",
+            "type": "number",
+            "name": { "fr": "Quantité", "en": "Quantity" },
+            "options": { "decimals": 0, "min": "0" }
+        },
+        {
+            "key": "weight",
+            "type": "number",
+            "name": { "fr": "Poids total", "en": "Total weight" },
+            "options": { "decimals": 2, "min": "0", "unit": "kg" }
+        },
+        { "key": "location", "type": "text", "name": { "fr": "Tiroir ou étagère", "en": "Drawer or shelf" } },
+        {
+            "key": "stored_on",
+            "type": "date",
+            "name": { "fr": "Date de congélation ou d'achat", "en": "Frozen or bought on" }
+        },
+        { "key": "use_by", "type": "date", "name": { "fr": "À consommer avant le", "en": "Use by" } },
+        { "key": "homemade", "type": "boolean", "name": { "fr": "Fait maison", "en": "Homemade" } },
+        { "key": "tags", "type": "tags", "name": { "fr": "Étiquettes", "en": "Tags" } },
+        { "key": "photo", "type": "photo", "name": { "fr": "Photo", "en": "Photo" }, "options": { "max_files": 1 } }
     ],
-    "en": [
-      {
-        "name": "Homemade lasagna (portions)",
-        "storage": "freezer",
-        "category": "ready_meals",
-        "quantity": "6",
-        "weight": "2.40",
-        "location": "Drawer 2",
-        "stored_on": "2026-09-14",
-        "use_by": "2027-03-14",
-        "homemade": true,
-        "tags": ["weekly meals"]
-      },
-      {
-        "name": "Salmon fillets",
-        "storage": "freezer",
-        "category": "fish",
-        "quantity": "4",
-        "weight": "0.80",
-        "location": "Drawer 1",
-        "stored_on": "2026-10-05",
-        "use_by": "2027-01-05",
-        "homemade": false,
-        "tags": ["on offer"]
-      },
-      {
-        "name": "Homemade tomato sauce (jars)",
-        "storage": "pantry",
-        "category": "dry_goods",
-        "quantity": "8",
-        "weight": "4.00",
-        "location": "Bottom shelf",
-        "stored_on": "2026-08-30",
-        "use_by": "2027-08-30",
-        "homemade": true,
-        "tags": ["preserves"]
-      }
-    ]
-  }
+    "examples": {
+        "fr": [
+            {
+                "name": "Lasagnes maison (portions)",
+                "storage": "freezer",
+                "category": "ready_meals",
+                "quantity": "6",
+                "weight": "2.40",
+                "location": "Tiroir 2",
+                "stored_on": "2026-09-14",
+                "use_by": "2027-03-14",
+                "homemade": true,
+                "tags": ["repas de la semaine"]
+            },
+            {
+                "name": "Pavés de saumon",
+                "storage": "freezer",
+                "category": "fish",
+                "quantity": "4",
+                "weight": "0.80",
+                "location": "Tiroir 1",
+                "stored_on": "2026-10-05",
+                "use_by": "2027-01-05",
+                "homemade": false,
+                "tags": ["promo"]
+            },
+            {
+                "name": "Sauce tomate maison (bocaux)",
+                "storage": "pantry",
+                "category": "dry_goods",
+                "quantity": "8",
+                "weight": "4.00",
+                "location": "Étagère du bas",
+                "stored_on": "2026-08-30",
+                "use_by": "2027-08-30",
+                "homemade": true,
+                "tags": ["conserves"]
+            }
+        ],
+        "en": [
+            {
+                "name": "Homemade lasagna (portions)",
+                "storage": "freezer",
+                "category": "ready_meals",
+                "quantity": "6",
+                "weight": "2.40",
+                "location": "Drawer 2",
+                "stored_on": "2026-09-14",
+                "use_by": "2027-03-14",
+                "homemade": true,
+                "tags": ["weekly meals"]
+            },
+            {
+                "name": "Salmon fillets",
+                "storage": "freezer",
+                "category": "fish",
+                "quantity": "4",
+                "weight": "0.80",
+                "location": "Drawer 1",
+                "stored_on": "2026-10-05",
+                "use_by": "2027-01-05",
+                "homemade": false,
+                "tags": ["on offer"]
+            },
+            {
+                "name": "Homemade tomato sauce (jars)",
+                "storage": "pantry",
+                "category": "dry_goods",
+                "quantity": "8",
+                "weight": "4.00",
+                "location": "Bottom shelf",
+                "stored_on": "2026-08-30",
+                "use_by": "2027-08-30",
+                "homemade": true,
+                "tags": ["preserves"]
+            }
+        ]
+    }
 }

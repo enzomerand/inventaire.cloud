@@ -1,182 +1,182 @@
 {
-  "category": "hobby",
-  "icon": "tool",
-  "name": { "fr": "Outillage d'atelier", "en": "Workshop tools" },
-  "summary": {
-    "fr": "Gardez la trace de votre outillage : marque, modèle, numéro de série, état, rangement, prix d'achat, facture et photos, et sachez qui a emprunté quoi.",
-    "en": "Keep track of your tools: brand, model, serial number, condition, storage spot, purchase price, invoice and photos, and know who borrowed what."
-  },
-  "description": {
-    "fr": [
-      "Ce modèle est fait pour les bricoleurs, les artisans et les ateliers partagés qui veulent savoir ce qu'ils possèdent et où c'est rangé. Chaque outil a une catégorie, une marque et un modèle, un numéro de série, un état, une alimentation et un rangement.",
-      "Gardez la facture et la notice au format PDF dans le champ prévu : c'est utile pour une réparation sous garantie ou pour commander une pièce détachée. Les photos aident à reconnaître un outil au premier coup d'œil, et à prouver son existence en cas de vol.",
-      "Astuces : renseignez « Prêté à » et « Prêté le » dès qu'un outil quitte l'atelier, puis filtrez la colonne « Prêté à » pour voir ce qui est dehors. Filtrez sur l'état « À réparer » avant une journée de travaux, et affichez le total de la colonne « Prix d'achat » pour savoir ce que représente votre équipement."
-    ],
-    "en": [
-      "This template is made for DIYers, craftspeople and shared workshops who want to know what they own and where it is stored. Each tool has a category, a brand and model, a serial number, a condition, a power source and a storage spot.",
-      "Keep the invoice and the manual as PDFs in the matching field: handy for a warranty repair or to order a spare part. Photos help you recognize a tool at a glance, and prove it exists if it is ever stolen.",
-      "Tips: fill in \"Lent to\" and \"Lent on\" as soon as a tool leaves the workshop, then filter the \"Lent to\" column to see what is out. Filter on the \"Needs repair\" condition before a day of work, and show the total of the \"Purchase price\" column to see what your equipment represents."
-    ]
-  },
-  "fields": [
-    { "key": "name", "type": "text", "name": { "fr": "Outil", "en": "Tool" }, "required": true },
-    {
-      "key": "category",
-      "type": "select",
-      "name": { "fr": "Catégorie", "en": "Category" },
-      "options": {
-        "choices": [
-          { "key": "hand", "label": { "fr": "Outils à main", "en": "Hand tools" }, "color": "orange" },
-          {
+    "category": "hobby",
+    "icon": "tool",
+    "name": { "fr": "Outillage d'atelier", "en": "Workshop tools" },
+    "summary": {
+        "fr": "Gardez la trace de votre outillage : marque, modèle, numéro de série, état, rangement, prix d'achat, facture et photos, et sachez qui a emprunté quoi.",
+        "en": "Keep track of your tools: brand, model, serial number, condition, storage spot, purchase price, invoice and photos, and know who borrowed what."
+    },
+    "description": {
+        "fr": [
+            "Ce modèle est fait pour les bricoleurs, les artisans et les ateliers partagés qui veulent savoir ce qu'ils possèdent et où c'est rangé. Chaque outil a une catégorie, une marque et un modèle, un numéro de série, un état, une alimentation et un rangement.",
+            "Gardez la facture et la notice au format PDF dans le champ prévu : c'est utile pour une réparation sous garantie ou pour commander une pièce détachée. Les photos aident à reconnaître un outil au premier coup d'œil, et à prouver son existence en cas de vol.",
+            "Astuces : renseignez « Prêté à » et « Prêté le » dès qu'un outil quitte l'atelier, puis filtrez la colonne « Prêté à » pour voir ce qui est dehors. Filtrez sur l'état « À réparer » avant une journée de travaux, et affichez le total de la colonne « Prix d'achat » pour savoir ce que représente votre équipement."
+        ],
+        "en": [
+            "This template is made for DIYers, craftspeople and shared workshops who want to know what they own and where it is stored. Each tool has a category, a brand and model, a serial number, a condition, a power source and a storage spot.",
+            "Keep the invoice and the manual as PDFs in the matching field: handy for a warranty repair or to order a spare part. Photos help you recognize a tool at a glance, and prove it exists if it is ever stolen.",
+            "Tips: fill in \"Lent to\" and \"Lent on\" as soon as a tool leaves the workshop, then filter the \"Lent to\" column to see what is out. Filter on the \"Needs repair\" condition before a day of work, and show the total of the \"Purchase price\" column to see what your equipment represents."
+        ]
+    },
+    "fields": [
+        { "key": "name", "type": "text", "name": { "fr": "Outil", "en": "Tool" }, "required": true },
+        {
+            "key": "category",
+            "type": "select",
+            "name": { "fr": "Catégorie", "en": "Category" },
+            "options": {
+                "choices": [
+                    { "key": "hand", "label": { "fr": "Outils à main", "en": "Hand tools" }, "color": "orange" },
+                    {
+                        "key": "power",
+                        "label": { "fr": "Outillage électroportatif", "en": "Power tools" },
+                        "color": "red"
+                    },
+                    {
+                        "key": "measuring",
+                        "label": { "fr": "Mesure et traçage", "en": "Measuring and marking" },
+                        "color": "blue"
+                    },
+                    {
+                        "key": "fastening",
+                        "label": { "fr": "Fixation et serrage", "en": "Fastening and clamping" },
+                        "color": "indigo"
+                    },
+                    { "key": "garden", "label": { "fr": "Jardin", "en": "Garden" }, "color": "green" },
+                    { "key": "safety", "label": { "fr": "Protection", "en": "Safety gear" }, "color": "yellow" },
+                    { "key": "consumables", "label": { "fr": "Consommables", "en": "Consumables" }, "color": "gray" }
+                ]
+            }
+        },
+        { "key": "brand_model", "type": "text", "name": { "fr": "Marque et modèle", "en": "Brand and model" } },
+        {
+            "key": "serial",
+            "type": "barcode",
+            "name": { "fr": "Numéro de série", "en": "Serial number" },
+            "options": { "format": "any" }
+        },
+        {
+            "key": "condition",
+            "type": "select",
+            "name": { "fr": "État", "en": "Condition" },
+            "options": {
+                "choices": [
+                    { "key": "new", "label": { "fr": "Neuf", "en": "New" }, "color": "green" },
+                    { "key": "good", "label": { "fr": "Bon état", "en": "Good" }, "color": "teal" },
+                    { "key": "worn", "label": { "fr": "Usé", "en": "Worn" }, "color": "yellow" },
+                    { "key": "repair", "label": { "fr": "À réparer", "en": "Needs repair" }, "color": "red" }
+                ]
+            }
+        },
+        {
             "key": "power",
-            "label": { "fr": "Outillage électroportatif", "en": "Power tools" },
-            "color": "red"
-          },
-          {
-            "key": "measuring",
-            "label": { "fr": "Mesure et traçage", "en": "Measuring and marking" },
-            "color": "blue"
-          },
-          {
-            "key": "fastening",
-            "label": { "fr": "Fixation et serrage", "en": "Fastening and clamping" },
-            "color": "indigo"
-          },
-          { "key": "garden", "label": { "fr": "Jardin", "en": "Garden" }, "color": "green" },
-          { "key": "safety", "label": { "fr": "Protection", "en": "Safety gear" }, "color": "yellow" },
-          { "key": "consumables", "label": { "fr": "Consommables", "en": "Consumables" }, "color": "gray" }
-        ]
-      }
-    },
-    { "key": "brand_model", "type": "text", "name": { "fr": "Marque et modèle", "en": "Brand and model" } },
-    {
-      "key": "serial",
-      "type": "barcode",
-      "name": { "fr": "Numéro de série", "en": "Serial number" },
-      "options": { "format": "any" }
-    },
-    {
-      "key": "condition",
-      "type": "select",
-      "name": { "fr": "État", "en": "Condition" },
-      "options": {
-        "choices": [
-          { "key": "new", "label": { "fr": "Neuf", "en": "New" }, "color": "green" },
-          { "key": "good", "label": { "fr": "Bon état", "en": "Good" }, "color": "teal" },
-          { "key": "worn", "label": { "fr": "Usé", "en": "Worn" }, "color": "yellow" },
-          { "key": "repair", "label": { "fr": "À réparer", "en": "Needs repair" }, "color": "red" }
-        ]
-      }
-    },
-    {
-      "key": "power",
-      "type": "select",
-      "name": { "fr": "Alimentation", "en": "Power source" },
-      "options": {
-        "choices": [
-          { "key": "manual", "label": { "fr": "Manuel", "en": "Manual" }, "color": "gray" },
-          { "key": "corded", "label": { "fr": "Filaire (secteur)", "en": "Corded" }, "color": "blue" },
-          { "key": "battery", "label": { "fr": "Sur batterie", "en": "Battery" }, "color": "green" },
-          { "key": "engine", "label": { "fr": "Thermique", "en": "Combustion engine" }, "color": "orange" },
-          { "key": "pneumatic", "label": { "fr": "Pneumatique", "en": "Pneumatic" }, "color": "purple" }
-        ]
-      }
-    },
-    { "key": "location", "type": "text", "name": { "fr": "Rangement", "en": "Storage spot" } },
-    { "key": "purchase_date", "type": "date", "name": { "fr": "Date d'achat", "en": "Purchase date" } },
-    {
-      "key": "price",
-      "type": "money",
-      "name": { "fr": "Prix d'achat", "en": "Purchase price" },
-      "options": { "currency": "EUR" }
-    },
-    { "key": "lent_to", "type": "text", "name": { "fr": "Prêté à", "en": "Lent to" } },
-    { "key": "lent_on", "type": "date", "name": { "fr": "Prêté le", "en": "Lent on" } },
-    {
-      "key": "photos",
-      "type": "photo",
-      "name": { "fr": "Photos", "en": "Photos" },
-      "options": { "max_files": 3 }
-    },
-    {
-      "key": "documents",
-      "type": "file",
-      "name": { "fr": "Facture et notice", "en": "Invoice and manual" },
-      "options": { "max_files": 3 }
-    }
-  ],
-  "examples": {
-    "fr": [
-      {
-        "name": "Perceuse-visseuse 18 V",
-        "category": "power",
-        "brand_model": "Makita DDF484",
-        "serial": "2412345",
-        "condition": "good",
-        "power": "battery",
-        "location": "Établi, tiroir 1",
-        "purchase_date": "2022-04-02",
-        "price": "139.00"
-      },
-      {
-        "name": "Scie circulaire plongeante",
-        "category": "power",
-        "brand_model": "Festool TS 55",
-        "serial": "571234567",
-        "condition": "good",
-        "power": "corded",
-        "location": "Étagère du fond",
-        "purchase_date": "2020-11-14",
-        "price": "479.00",
-        "lent_to": "Le voisin du dessus",
-        "lent_on": "2026-10-03"
-      },
-      {
-        "name": "Niveau à bulle 120 cm",
-        "category": "measuring",
-        "brand_model": "Stabila 70",
-        "condition": "worn",
-        "power": "manual",
-        "location": "Mur de l'atelier",
-        "purchase_date": "2018-06-21",
-        "price": "42.00"
-      }
+            "type": "select",
+            "name": { "fr": "Alimentation", "en": "Power source" },
+            "options": {
+                "choices": [
+                    { "key": "manual", "label": { "fr": "Manuel", "en": "Manual" }, "color": "gray" },
+                    { "key": "corded", "label": { "fr": "Filaire (secteur)", "en": "Corded" }, "color": "blue" },
+                    { "key": "battery", "label": { "fr": "Sur batterie", "en": "Battery" }, "color": "green" },
+                    { "key": "engine", "label": { "fr": "Thermique", "en": "Combustion engine" }, "color": "orange" },
+                    { "key": "pneumatic", "label": { "fr": "Pneumatique", "en": "Pneumatic" }, "color": "purple" }
+                ]
+            }
+        },
+        { "key": "location", "type": "text", "name": { "fr": "Rangement", "en": "Storage spot" } },
+        { "key": "purchase_date", "type": "date", "name": { "fr": "Date d'achat", "en": "Purchase date" } },
+        {
+            "key": "price",
+            "type": "money",
+            "name": { "fr": "Prix d'achat", "en": "Purchase price" },
+            "options": { "currency": "EUR" }
+        },
+        { "key": "lent_to", "type": "text", "name": { "fr": "Prêté à", "en": "Lent to" } },
+        { "key": "lent_on", "type": "date", "name": { "fr": "Prêté le", "en": "Lent on" } },
+        {
+            "key": "photos",
+            "type": "photo",
+            "name": { "fr": "Photos", "en": "Photos" },
+            "options": { "max_files": 3 }
+        },
+        {
+            "key": "documents",
+            "type": "file",
+            "name": { "fr": "Facture et notice", "en": "Invoice and manual" },
+            "options": { "max_files": 3 }
+        }
     ],
-    "en": [
-      {
-        "name": "18 V cordless drill",
-        "category": "power",
-        "brand_model": "Makita DDF484",
-        "serial": "2412345",
-        "condition": "good",
-        "power": "battery",
-        "location": "Workbench, drawer 1",
-        "purchase_date": "2022-04-02",
-        "price": "139.00"
-      },
-      {
-        "name": "Plunge-cut circular saw",
-        "category": "power",
-        "brand_model": "Festool TS 55",
-        "serial": "571234567",
-        "condition": "good",
-        "power": "corded",
-        "location": "Back shelf",
-        "purchase_date": "2020-11-14",
-        "price": "479.00",
-        "lent_to": "The neighbor upstairs",
-        "lent_on": "2026-10-03"
-      },
-      {
-        "name": "48-inch spirit level",
-        "category": "measuring",
-        "brand_model": "Stabila 70",
-        "condition": "worn",
-        "power": "manual",
-        "location": "Workshop wall",
-        "purchase_date": "2018-06-21",
-        "price": "42.00"
-      }
-    ]
-  }
+    "examples": {
+        "fr": [
+            {
+                "name": "Perceuse-visseuse 18 V",
+                "category": "power",
+                "brand_model": "Makita DDF484",
+                "serial": "2412345",
+                "condition": "good",
+                "power": "battery",
+                "location": "Établi, tiroir 1",
+                "purchase_date": "2022-04-02",
+                "price": "139.00"
+            },
+            {
+                "name": "Scie circulaire plongeante",
+                "category": "power",
+                "brand_model": "Festool TS 55",
+                "serial": "571234567",
+                "condition": "good",
+                "power": "corded",
+                "location": "Étagère du fond",
+                "purchase_date": "2020-11-14",
+                "price": "479.00",
+                "lent_to": "Le voisin du dessus",
+                "lent_on": "2026-10-03"
+            },
+            {
+                "name": "Niveau à bulle 120 cm",
+                "category": "measuring",
+                "brand_model": "Stabila 70",
+                "condition": "worn",
+                "power": "manual",
+                "location": "Mur de l'atelier",
+                "purchase_date": "2018-06-21",
+                "price": "42.00"
+            }
+        ],
+        "en": [
+            {
+                "name": "18 V cordless drill",
+                "category": "power",
+                "brand_model": "Makita DDF484",
+                "serial": "2412345",
+                "condition": "good",
+                "power": "battery",
+                "location": "Workbench, drawer 1",
+                "purchase_date": "2022-04-02",
+                "price": "139.00"
+            },
+            {
+                "name": "Plunge-cut circular saw",
+                "category": "power",
+                "brand_model": "Festool TS 55",
+                "serial": "571234567",
+                "condition": "good",
+                "power": "corded",
+                "location": "Back shelf",
+                "purchase_date": "2020-11-14",
+                "price": "479.00",
+                "lent_to": "The neighbor upstairs",
+                "lent_on": "2026-10-03"
+            },
+            {
+                "name": "48-inch spirit level",
+                "category": "measuring",
+                "brand_model": "Stabila 70",
+                "condition": "worn",
+                "power": "manual",
+                "location": "Workshop wall",
+                "purchase_date": "2018-06-21",
+                "price": "42.00"
+            }
+        ]
+    }
 }
