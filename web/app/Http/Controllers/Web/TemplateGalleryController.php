@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Middleware\UseUrlLocale;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Support\PublicUrls;
+use App\Support\Seo\PublicPageMeta;
 use Illuminate\Contracts\View\View;
 
 /**
@@ -18,9 +19,12 @@ use Illuminate\Contracts\View\View;
 final class TemplateGalleryController extends Controller
 {
     /**
-     * Gets the catalogue.
+     * Gets the catalogue and what the head of the page says to search engines.
      */
-    public function __construct(private readonly TemplateCatalogue $catalogue) {}
+    public function __construct(
+        private readonly TemplateCatalogue $catalogue,
+        private readonly PublicPageMeta $meta,
+    ) {}
 
     /**
      * Shows the templates, each category under its heading.
@@ -28,10 +32,12 @@ final class TemplateGalleryController extends Controller
     public function __invoke(): View
     {
         $locale = app()->getLocale();
+        $groups = $this->catalogue->grouped($locale);
 
         return view('templates.index', [
-            'groups' => $this->catalogue->grouped($locale),
+            'groups' => $groups,
             'locale' => $locale,
+            'seo' => $this->meta->gallery($groups, $locale),
             'localeAlternates' => PublicUrls::alternates(PublicUrls::templatesPath(...)),
         ]);
     }

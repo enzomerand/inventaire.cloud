@@ -9,7 +9,7 @@
 --}}
 @extends('layouts.app')
 
-@section('title', __('Free inventory templates'))
+@section('title', $seo->title)
 
 @section('heading', __('Inventory templates'))
 

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Inventories\Templates\TemplatePresenter;
 use App\Support\PublicUrls;
+use App\Support\Seo\PublicPageMeta;
 use Illuminate\Contracts\View\View;
 
 /**
@@ -19,11 +20,12 @@ use Illuminate\Contracts\View\View;
 final class TemplatePageController extends Controller
 {
     /**
-     * Gets the catalogue and what turns a template into something to read.
+     * Gets the catalogue, what turns a template into something to read and what the head of the page says to search engines.
      */
     public function __construct(
         private readonly TemplateCatalogue $catalogue,
         private readonly TemplatePresenter $presenter,
+        private readonly PublicPageMeta $meta,
     ) {}
 
     /**
@@ -37,6 +39,7 @@ final class TemplatePageController extends Controller
         return view('templates.show', [
             'template' => $template,
             'locale' => $locale,
+            'seo' => $this->meta->template($template, $locale),
             'fields' => $this->presenter->fields($template, $locale),
             'examples' => $this->presenter->examples($template, $locale),
             'localeAlternates' => PublicUrls::alternates(fn (string $alternate): string => PublicUrls::templatePath($template->slug, $alternate)),

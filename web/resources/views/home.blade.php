@@ -1,5 +1,7 @@
 @extends('layouts.app')
 
+@section('title', $seo->title)
+
 @section('content')
     <div class="card">
         <div class="card-body text-center py-5">

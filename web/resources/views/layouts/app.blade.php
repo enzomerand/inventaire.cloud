@@ -9,6 +9,9 @@
          visitor must pass `silent: true` and handle the error itself. --}}
     <meta name="login-url" content="{{ route('login', absolute: false) }}">
 
+    {{-- Robots and search engines: a public page passes `$seo` (see components/seo.blade.php); every other page asks not to be indexed. --}}
+    <x-seo :page="$seo ?? null" />
+
     <title>@hasSection('title')@yield('title') · @endif{{ config('app.name') }}</title>
 
     @vite(['resources/css/app.css', 'resources/js/app.js'])

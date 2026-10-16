@@ -7,6 +7,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Search Engine Indexing
+    |--------------------------------------------------------------------------
+    |
+    | Whether search engines may index the public pages (the home page and the
+    | templates). Off by default: a development or staging copy must not end up
+    | in a search engine. Off, /robots.txt disallows everything, every page asks
+    | not to be indexed (`noindex`) and /sitemap.xml does not exist. On,
+    | /robots.txt allows the public pages and keeps robots out of /app, /api,
+    | /install and /login, /sitemap.xml lists the public pages in every language,
+    | and the public pages ask to be indexed. The pages of the application itself
+    | (signing in, your space, the API) always ask not to be.
+    |
+    */
+
+    'indexable' => (bool) env('APP_INDEXABLE', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Name
     |--------------------------------------------------------------------------
     |

@@ -7,8 +7,11 @@ use App\Http\Controllers\Install\InstallController;
 use App\Http\Controllers\Install\InstallStepController;
 use App\Http\Controllers\Install\TokenController;
 use App\Http\Controllers\RefreshCsrfTokenController;
+use App\Http\Controllers\RobotsController;
+use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
+use App\Http\Controllers\Web\HomePageController;
 use App\Http\Controllers\Web\InventoryFieldsPageController;
 use App\Http\Controllers\Web\InventoryPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
@@ -20,9 +23,12 @@ use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
 use App\Installer\InstallStep;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
-Route::view('/', 'home')->name('home');
+Route::get('/', HomePageController::class)->name('home');
 
 // The public pages of the templates (the gallery and one page for each template), rendered by the server so that search
 // engines read them. They exist once per language, each with an address of its own: the language of the instance has no
@@ -39,6 +45,13 @@ Route::middleware(UseUrlLocale::class)->group(function () use ($localeCodes): vo
             Route::get('/templates', TemplateGalleryController::class)->name('index');
             Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
         });
+});
+
+// What robots read. Routes, not files of public/ (a web server would serve a file before the application, and the answer
+// depends on APP_INDEXABLE). Robots keep no session: nothing here starts one or sets a cookie.
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
+    Route::get('/robots.txt', RobotsController::class)->name('robots');
+    Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');
 });
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the

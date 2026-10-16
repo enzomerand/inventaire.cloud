@@ -864,5 +864,6 @@
     "These rows only show what the inventory could hold. They are not added to your inventory.": "Ces lignes montrent seulement ce que l'inventaire peut contenir. Elles ne sont pas ajoutées à votre inventaire.",
     ":grade out of :max": ":grade sur :max",
     "You need a workspace where you can add inventories to use a template.": "Il vous faut un espace de travail où vous pouvez ajouter des inventaires pour utiliser un modèle.",
-    "Browse the templates": "Parcourir les modèles"
+    "Browse the templates": "Parcourir les modèles",
+    "Free inventory templates for home, IT equipment, stock, collections and more. Pick one and start in a minute.": "Modèles d'inventaire gratuits : logement, parc informatique, stock, collections et plus encore. Choisissez-en un et démarrez en une minute."
 }

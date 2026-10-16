@@ -12,7 +12,7 @@
 --}}
 @extends('layouts.app')
 
-@section('title', __(':name: free inventory template', ['name' => $template->name($locale)]))
+@section('title', $seo->title)
 
 @section('heading', $template->name($locale))
 

@@ -257,6 +257,15 @@ The **choices** of a `select` or `multiselect` have ids made by the server (8 ra
 
 Answers are in the `data` envelope; ids are ULIDs and dates ISO 8601. Item, field and inventory ULIDs that belong to another inventory (or workspace) are a `404`, never a `403`.
 
+## Templates and public pages
+
+A template is a ready-made inventory: the fields of an inventory (types, options, colored choices), a description and a few example rows, written in French and English. They are the catalogue the gallery, the API and the "new inventory" dialog offer.
+
+- **Catalogue.** One JSON file per template in `inventory-templates/<slug>.json` (the folder is `inventories.templates_path`), the file name being the slug in the URLs. A contribution is a pull request on one file; there is no table and nothing to synchronize. `App\Inventories\Templates\TemplateValidator` documents the format and judges a file the way a real creation of fields does: the options of each field go through the rules and the normalization of its type, names are unique per language, texts are plain (no HTML, no Markdown), and the example rows are validated by `ItemValues` against the fields (a choice is named by its `key`, numbers are decimal texts, files have no example). A file that is not valid is **left out and logged as a warning**, never an error page, and `ShippedTemplatesTest` fails with a message for each problem of each shipped file. The catalogue is read once per process: restart the workers after changing a file.
+- **API.** `GET /api/v1/templates` and `GET /api/v1/templates/{slug}` are public, in the language of the request and limited to `INVENTORIES_TEMPLATES_PER_MINUTE` (60) requests per minute and network (`429`); an unknown slug is a `404` with `"code": "template_not_found"`. `POST /api/v1/workspaces/{workspace}/inventories` takes an optional `template` (a slug; `422` on `template` when unknown): the inventory and **all** its fields are made in one transaction (retried as a whole on a deadlock, nothing is left behind when a field fails), with the field names and choices in the language of the request. A template with more fields than `max_fields` is a `409` `field_limit_reached`. The example rows are never inserted.
+- **Pages.** `/templates` (the gallery, by category) and `/templates/{slug}` are drawn by the server. The language comes from the address alone: no prefix is the language of the instance (`APP_LOCALE`), `/en/templates` is English, the prefixed address of the language of the instance redirects (301) to the one without prefix, and the language cookie is neither read nor written there. "Use this template" leads to `/app/templates/{slug}`, which sends the person (after the login page if needed) to `/app/w/{workspace}?template={slug}`, a workspace where they may add inventories.
+- **Search engines.** `APP_INDEXABLE` (`false` by default) decides. Off: `/robots.txt` disallows everything, every page carries `noindex` and `/sitemap.xml` is a `404`. On: `/robots.txt` allows the public pages, keeps robots out of `/app`, `/api`, `/install` and `/login` and announces `/sitemap.xml` (the home page, the gallery and each template in every language, with `hreflang` alternates); the public pages carry a title, a description, the canonical address, `hreflang` alternates, Open Graph tags and JSON-LD; the pages of the application itself stay `noindex`. Every address in these tags and in the sitemap is built from `APP_URL`, never from the request, so set it to the public address. `robots.txt` is a route: no file of `public/` may stand in front of it.
+
 ## Administration
 
 The administrators of the instance (`users.is_admin`) have an "Administration" entry in the account menu, which opens `/app/admin/users` and `/app/admin/settings`. Everything is behind the `admin` gate (`Gate::define('admin')` in `AppServiceProvider`), judged on the account as stored at every request: promoting or demoting somebody takes effect at once. The pages need a signed-in session like the rest of the space and answer `403` to anybody who is not an administrator; the API (`/api/v1/admin/*`) answers `401` to a visitor, `403` to a non-administrator (whether the account in the path exists or not: the id is looked up after the gate, so nobody can count the accounts) and, like the other session actions, `403` with `"code": "not_stateful"` to a caller that has no session. A request that carries an API token (`Authorization: Bearer`) is refused with `403` and `"code": "session_required"` (`App\Http\Middleware\RefuseApiTokens`), even when it sends the `Origin` of the application, which makes Sanctum start a session and fall back to the token: a token, whatever its abilities, must not do what a person does to other people's accounts.
@@ -460,13 +469,14 @@ app/
   Http/
     Controllers/    Invokable or resourceful controllers (Install/ holds the wizard endpoints, Api/V1/ the JSON API)
     Middleware/     SetLocale (global): applies the language chosen by LocaleResolver;
+                    UseUrlLocale: the language of a public page comes from its address;
                     RedirectIfNotInstalled (global), AbortIfInstalled, AuthorizeSetupToken: the install gate;
                     RequireStatefulRequest: session endpoints are for the web front only;
                     AuthenticateSession (web, signed-in space) and AuthenticateApiSession (API): sign out the sessions of an account that signed out everywhere
     Requests/       Form requests (validation)
     Resources/      JSON resources of the API (UserResource, WorkspaceResource, AdminUserResource, InventoryResource, InventoryFieldResource, ItemResource, FieldTypeResource)
     Responses/      ApiError: the conflicts (409) and coded validation failures of the API
-  Inventories/      Inventories, InventoryFields, Items (the rules, under the locks), ItemValues (validates and presents the values of an item), the quota exceptions, and Fields/: one class per field type behind FieldType, with the FieldTypes registry
+  Inventories/      Inventories, InventoryFields, Items (the rules, under the locks), ItemValues (validates and presents the values of an item), the quota exceptions, Fields/: one class per field type behind FieldType, with the FieldTypes registry, and Templates/: the catalogue of inventory templates and its validator
   Installer/        Installation state, .env writer, setup token, probes, finalizer, migrator, post-migration hooks (see "Installing an instance")
   Mail/             LoginCodeMail, AccountDeletionCodeMail, WelcomeMail, and AfterResponse (sends a mail once the response has gone)
   Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember, Inventory, InventoryField, Item (Concerns/: HasUlidRouteKey; Casts/: JsonObject)
@@ -474,7 +484,7 @@ app/
   Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: the rate limiters (sign-in, account, workspace creation) and the "admin" gate
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   Settings/         InstanceSettings: the settings of the instance, kept in the settings table
-  Support/          DisplayTime: the timezone of the instance, for the dates the server writes for people (everything is stored in UTC)
+  Support/          DisplayTime: the timezone of the instance, for the dates the server writes for people (everything is stored in UTC); PublicUrls: the absolute addresses of the public pages (from APP_URL); Seo/: what the head of a public page says to search engines
   View/Components/  Blade component classes (ClientMessages, WorkspaceSwitcher)
   Workspaces/       Workspaces (the rules: create, delete, current workspace), Locks (the row locks every removal follows), WorkspaceRole, StoredRole (reads a stored role safely), Membership
 config/             Laravel configuration (app.php lists the supported locales)
@@ -490,6 +500,7 @@ resources/
     layouts/        app.blade.php, the Tabler page layout
     components/     Blade components (<x-toasts />, <x-locale-switcher />, <x-account-menu />, <x-workspace-switcher />)
     auth/, app/     The sign-in page and the signed-in user's pages (space, workspaces, account, and app/admin/ for administrators)
+inventory-templates/ The template files of the catalogue, one JSON file each
 routes/web.php      Web routes
 routes/api.php      JSON API, versioned in the path (/api/v1)
 tests/
