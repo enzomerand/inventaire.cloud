@@ -36,13 +36,30 @@ describe('the inventories of a workspace', () => {
         component = workspaceInventories();
         // Alpine injects $root (the element carrying x-data and the data-* attributes), $refs and $nextTick.
         component.$root = {
-            dataset: { url: URL, inventoryUrl: '/app/w/shop/inventories/__id__', canCreate: '1' },
+            dataset: {
+                url: URL,
+                inventoryUrl: '/app/w/shop/inventories/__id__',
+                canCreate: '1',
+                loadingLabel: 'Loading…',
+            },
         };
         component.$refs = { modal };
         component.$nextTick = (callback) => callback();
     });
 
     describe('reading the list', () => {
+        it('announces the reading to the screen readers, and nothing once it is over', async () => {
+            http.get.mockResolvedValue({ data: [inventory('a')] });
+
+            const reading = component.init();
+
+            expect(component.loadingAnnouncement).toBe('Loading…');
+
+            await reading;
+
+            expect(component.loadingAnnouncement).toBe('');
+        });
+
         it('reads the inventories when the page opens', async () => {
             http.get.mockResolvedValue({ data: [inventory('a'), inventory('b')] });
 

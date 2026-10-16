@@ -9,6 +9,7 @@ use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Inventories\Fields\FieldTypes;
+use App\Inventories\Templates\TemplateCatalogue;
 use App\Models\User;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
@@ -37,6 +38,9 @@ class AppServiceProvider extends ServiceProvider
 
         // The field types are stateless objects: one registry for the whole process.
         $this->app->singleton(FieldTypes::class, fn (): FieldTypes => FieldTypes::standard());
+
+        // The catalogue of inventory templates is read from its files once per process (see the class).
+        $this->app->singleton(TemplateCatalogue::class);
     }
 
     /**
@@ -61,12 +65,26 @@ class AppServiceProvider extends ServiceProvider
 
     /**
      * The rate limiter of the endpoint that uploads a file to an item (limit in config/inventories.php,
-     * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks.
+     * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the two
+     * of the catalogue of templates, keyed on the user when there is one, else on the network: the one of its API endpoints
+     * (`templates_per_minute`) and the one of its public pages and the sitemap (`public_pages_per_minute`), which do not
+     * share a count.
      */
     private function registerInventoryLimiters(): void
     {
         RateLimiter::for('attachment-upload', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.uploads_per_minute'))
             ->by('attachment-upload:'.$this->signedInKey($request)));
+
+        // The catalogue of templates is public: anybody may read it. A signed-in person is counted on their own (many people
+        // share a network, an office or a mobile operator, and one of them must not use the pace of the others); a visitor
+        // is counted on their network.
+        RateLimiter::for('templates', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.templates_per_minute'))
+            ->by('templates:'.$this->signedInKey($request)));
+
+        // The pages of the gallery and the sitemap are read by browsers and crawlers, which load many of them in a row: their
+        // limit is higher, and their count is not the one of the API (a crawler must not use up what a client of the API has).
+        RateLimiter::for('public-pages', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.public_pages_per_minute'))
+            ->by('public-pages:'.$this->signedInKey($request)));
     }
 
     /**

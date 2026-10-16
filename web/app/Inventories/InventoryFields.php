@@ -68,33 +68,58 @@ final class InventoryFields
      */
     public function create(Inventory $inventory, string $type, string $name, array $options = [], bool $required = false): InventoryField
     {
-        $handler = $this->types->get($type);
         $name = SingleLineText::normalize($name);
 
+        return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $type, $name, $options, $required): InventoryField {
+            $locked = $this->locks->inventory($inventory->getKey());
+
+            return $this->insert($locked, $locked->fields()->get(), $type, $name, $options, $required);
+        }));
+    }
+
+    /**
+     * Adds a field at the end of an inventory that the caller holds, inside the caller's transaction: the checks of
+     * {@see self::create()} (the quota of fields, the name, the options) and the insertion, without a transaction or a
+     * lock of its own. That is what lets an inventory and all of its fields be made in one transaction, which a nested one
+     * could not retry on a deadlock.
+     *
+     * The inventory is held when the caller locked it ({@see Locks::inventory()}), or when it was created in this very
+     * transaction, which nobody else can see before the commit. The new field is added to `$fields`, so that the next call
+     * sees it.
+     *
+     * @param  Collection<int, InventoryField>  $fields  The fields the inventory has now, read after the lock; none for an
+     *                                                   inventory that was just made.
+     * @param  string  $type  A key of the registry.
+     * @param  string  $name  Already validated and normalized ({@see SingleLineText::normalize()}).
+     * @param  array<string, mixed>  $options  As sent: the type fills in the defaults and puts them in canonical form.
+     *
+     * @throws FieldLimitReachedException When the inventory already has as many fields as allowed.
+     * @throws ValidationException When the name is taken, the options do not fit together, or the type is filled by uploading
+     *                             files and the field is required.
+     */
+    public function insert(Inventory $inventory, Collection $fields, string $type, string $name, array $options, bool $required): InventoryField
+    {
+        // Whoever adds a field, by hand or with the many of a template, a field that is filled by uploading files is not required.
         if ($required) {
-            $this->assertCanBeRequired($handler);
+            $this->assertCanBeRequired($this->types->get($type));
         }
 
-        return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $type, $name, $options, $required, $handler): InventoryField {
-            $locked = $this->locks->inventory($inventory->getKey());
-            $fields = $locked->fields()->get();
+        $limit = config()->integer('inventories.max_fields');
 
-            $limit = config()->integer('inventories.max_fields');
+        if ($fields->count() >= $limit) {
+            throw new FieldLimitReachedException($limit);
+        }
 
-            if ($fields->count() >= $limit) {
-                throw new FieldLimitReachedException($limit);
-            }
+        $this->assertNameFree($fields, $name, null);
 
-            $this->assertNameFree($fields, $name, null);
+        $normalized = $this->types->get($type)->normalizeOptions($options, null);
+        $field = new InventoryField(['name' => $name, 'type' => $type, 'options' => $normalized === [] ? null : $normalized, 'required' => $required]);
+        $field->inventory_id = $inventory->getKey();
+        $field->position = $fields->isEmpty() ? 0 : (int) $fields->max('position') + 1;
+        $field->save();
+        $fields->push($field);
 
-            $normalized = $handler->normalizeOptions($options, null);
-            $field = new InventoryField(['name' => $name, 'type' => $type, 'options' => $normalized === [] ? null : $normalized, 'required' => $required]);
-            $field->inventory_id = $locked->getKey();
-            $field->position = $fields->isEmpty() ? 0 : (int) $fields->max('position') + 1;
-            $field->save();
-
-            return $field;
-        }));
+        return $field;
     }
 
     /**

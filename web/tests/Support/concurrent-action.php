@@ -9,6 +9,7 @@
 //        php concurrent-action.php <go file> hold-admin-lock <user id>
 //        php concurrent-action.php <go file> insert-user
 //        php concurrent-action.php <go file> create-inventory <user id> <workspace id> <name>
+//        php concurrent-action.php <go file> post-inventory <user id> <workspace id> <name> [<template slug>]
 //        php concurrent-action.php <go file> create-field <inventory id> <name>
 //        php concurrent-action.php <go file> delete-field <inventory id> <field id>
 //        php concurrent-action.php <go file> create-item <user id> <inventory id> [<field ULID> <value>]
@@ -26,6 +27,9 @@
 // inventories answer {"result": "created"}, "deleted" or "updated" ("uploaded" and "removed" for a file), or {"result": "refused", "reason": "item_limit_reached"}
 // (the code of a quota) / {"result": "refused", "reason": "invalid:<key>"} (a 422: the first key of its errors) /
 // {"result": "refused", "reason": "gone"} (what it works on was deleted by the other process first).
+// post-inventory goes through the whole HTTP kernel, as a call of the API does (`POST /api/v1/workspaces/{workspace}/inventories`,
+// the person signed in, in English): {"result": "created"} for a 201, {"result": "refused", "reason": <the "code" of a 409>}, and
+// {"result": "error", "reason": "HTTP <status>: <body>"} for anything else.
 //
 // hold-admin-lock and insert-user go together (see AdminConcurrencyTest): the first locks the administrators and the
 // given account the way the administration does, says so (<go file>.locked) and keeps the lock until the second is done
@@ -56,8 +60,10 @@ use App\Models\Workspace;
 use App\Workspaces\Exceptions\LastWorkspaceException;
 use App\Workspaces\Locks;
 use App\Workspaces\Workspaces;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -134,6 +140,41 @@ function insertUserWhileLocked(string $go): array
     } finally {
         touch($go.'.released');
     }
+}
+
+/**
+ * Makes an inventory with a call of the API, through the HTTP kernel: the same middleware, request validation, controller and
+ * answers as a request of the web front, for a person who is signed in (a stateless call: no session, no CSRF token).
+ *
+ * @param  list<string>  $arguments  The user id, the workspace id, the name and, optionally, the slug of a template.
+ * @return array{result: string, reason?: string}
+ */
+function postInventory(Application $app, array $arguments): array
+{
+    $user = User::query()->findOrFail((int) $arguments[0]);
+    $workspace = Workspace::query()->findOrFail((int) $arguments[1]);
+    $body = ['name' => $arguments[2]] + (isset($arguments[3]) ? ['template' => $arguments[3]] : []);
+
+    $request = Request::create(
+        "/api/v1/workspaces/{$workspace->ulid}/inventories",
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ACCEPT_LANGUAGE' => 'en'],
+        content: json_encode($body, JSON_THROW_ON_ERROR),
+    );
+
+    // The guard of a session needs the request it will serve; the kernel binds the same one again.
+    $app->instance('request', $request);
+    $app['auth']->guard('web')->setUser($user);
+    $app['auth']->shouldUse('web');
+
+    $response = $app->make(Kernel::class)->handle($request);
+    $answer = json_decode((string) $response->getContent(), true);
+
+    return match ($response->getStatusCode()) {
+        201 => ['result' => 'created'],
+        409 => ['result' => 'refused', 'reason' => is_array($answer) && is_string($answer['code'] ?? null) ? $answer['code'] : 'conflict'],
+        default => ['result' => 'error', 'reason' => 'HTTP '.$response->getStatusCode().': '.$response->getContent()],
+    };
 }
 
 /**
@@ -216,6 +257,7 @@ try {
     $outcome = match ($action) {
         'hold-admin-lock' => holdAdministratorLock($app->make(Locks::class), $go, (int) $arguments[0]),
         'insert-user' => insertUserWhileLocked($go),
+        'post-inventory' => postInventory($app, $arguments),
         'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };

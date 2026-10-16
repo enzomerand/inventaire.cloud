@@ -1,0 +1,48 @@
+{
+    "category": "hobby",
+    "icon": "tools",
+    "name": { "fr": "Outils", "en": "Tools" },
+    "summary": {
+        "fr": "Retrouvez chaque outil, son état et la personne à qui vous l'avez prêté.",
+        "en": "Find every tool, its condition and who you lent it to."
+    },
+    "description": {
+        "fr": [
+            "Un inventaire d'atelier pour ne plus racheter un outil que vous avez déjà.",
+            "Notez les prêts dans le champ prévu : plus besoin de vous souvenir qui a quoi."
+        ],
+        "en": [
+            "A workshop inventory so you never buy a tool you already own.",
+            "Write loans in the field provided: no need to remember who has what."
+        ]
+    },
+    "fields": [
+        { "key": "name", "type": "text", "required": true, "name": { "fr": "Outil", "en": "Tool" } },
+        { "key": "brand", "type": "text", "name": { "fr": "Marque", "en": "Brand" }, "options": { "max_length": 80 } },
+        {
+            "key": "power",
+            "type": "select",
+            "name": { "fr": "Énergie", "en": "Power" },
+            "options": {
+                "choices": [
+                    { "key": "hand", "label": { "fr": "Manuel", "en": "Hand" }, "color": "gray" },
+                    { "key": "corded", "label": { "fr": "Filaire", "en": "Corded" }, "color": "blue" },
+                    { "key": "battery", "label": { "fr": "Sur batterie", "en": "Battery" }, "color": "yellow" }
+                ]
+            }
+        },
+        { "key": "lent_to", "type": "text", "name": { "fr": "Prêté à", "en": "Lent to" } },
+        { "key": "condition", "type": "rating", "name": { "fr": "État", "en": "Condition" } },
+        { "key": "photo", "type": "photo", "name": { "fr": "Photo", "en": "Photo" } }
+    ],
+    "examples": {
+        "fr": [
+            { "name": "Scie sauteuse", "brand": "Bosch", "power": "corded", "condition": 4 },
+            { "name": "Tournevis cruciforme", "power": "hand", "lent_to": "Marie", "condition": 2 }
+        ],
+        "en": [
+            { "name": "Jigsaw", "brand": "Bosch", "power": "corded", "condition": 4 },
+            { "name": "Phillips screwdriver", "power": "hand", "lent_to": "Marie", "condition": 2 }
+        ]
+    }
+}

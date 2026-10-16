@@ -6,7 +6,9 @@ namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
 use App\Inventories\Attachments\AttachmentCleanup;
+use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
+use App\Inventories\Templates\Template;
 use App\Models\Inventory;
 use App\Models\Workspace;
 use App\Rules\SingleLineText;
@@ -15,6 +17,7 @@ use Collator;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Collection as SupportCollection;
 
 /**
  * Listing, creating, changing and deleting the inventories of a workspace.
@@ -35,6 +38,7 @@ final class Inventories
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
         private readonly AttachmentCleanup $files,
+        private readonly InventoryFields $fields,
     ) {}
 
     /**
@@ -69,20 +73,37 @@ final class Inventories
      */
     public function create(Workspace $workspace, string $name, ?string $description): Inventory
     {
-        return DeadlockRetries::run(fn (): Inventory => $this->db->transaction(function () use ($workspace, $name, $description): Inventory {
-            if ($this->locks->workspaces([$workspace->getKey()])->isEmpty()) {
-                throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
+        return DeadlockRetries::run(fn (): Inventory => $this->db->transaction(fn (): Inventory => $this->insert($workspace, $name, $description)));
+    }
+
+    /**
+     * Creates an inventory in the workspace with the fields of a template: the inventory and every field, or nothing.
+     *
+     * It is one transaction, retried as a whole when the database picks it as the loser of a deadlock: the workspace is
+     * locked, the quota of inventories is counted, the inventory is inserted, then its fields one by one with the checks
+     * of a field made by hand (the quota of fields, the name, the options), whose insertion needs no lock of its own since
+     * nobody can see the inventory before the commit. A field that fails (the quota of fields included) rolls the inventory
+     * back with it.
+     *
+     * @param  string  $name  Already validated and trimmed.
+     * @param  string|null  $description  Already validated; null for none.
+     * @param  string  $locale  The language the field names and the choices are written in.
+     *
+     * @throws InventoryLimitReachedException When the workspace already holds as many inventories as allowed.
+     * @throws FieldLimitReachedException When the template has more fields than an inventory may hold.
+     * @throws ModelNotFoundException When the workspace was deleted in the meantime.
+     */
+    public function createFromTemplate(Workspace $workspace, Template $template, string $name, ?string $description, string $locale): Inventory
+    {
+        $definitions = $template->fields($locale);
+
+        return DeadlockRetries::run(fn (): Inventory => $this->db->transaction(function () use ($workspace, $name, $description, $definitions): Inventory {
+            $inventory = $this->insert($workspace, $name, $description);
+            $fields = new SupportCollection;
+
+            foreach ($definitions as $definition) {
+                $this->fields->insert($inventory, $fields, $definition->type, SingleLineText::normalize($definition->name), $definition->creationOptions(), $definition->required);
             }
-
-            $limit = config()->integer('inventories.max_per_workspace');
-
-            if (Inventory::query()->where('workspace_id', $workspace->getKey())->count() >= $limit) {
-                throw new InventoryLimitReachedException($limit);
-            }
-
-            $inventory = new Inventory(['name' => SingleLineText::normalize($name), 'description' => $description]);
-            $inventory->workspace_id = $workspace->getKey();
-            $inventory->save();
 
             return $inventory;
         }));
@@ -129,5 +150,30 @@ final class Inventories
             $this->files->releaseInventory($workspace, $locked);
             $locked->delete();
         }));
+    }
+
+    /**
+     * Inserts an inventory under the lock of its workspace, inside the caller's transaction.
+     *
+     * @throws InventoryLimitReachedException
+     * @throws ModelNotFoundException
+     */
+    private function insert(Workspace $workspace, string $name, ?string $description): Inventory
+    {
+        if ($this->locks->workspaces([$workspace->getKey()])->isEmpty()) {
+            throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
+        }
+
+        $limit = config()->integer('inventories.max_per_workspace');
+
+        if (Inventory::query()->where('workspace_id', $workspace->getKey())->count() >= $limit) {
+            throw new InventoryLimitReachedException($limit);
+        }
+
+        $inventory = new Inventory(['name' => SingleLineText::normalize($name), 'description' => $description]);
+        $inventory->workspace_id = $workspace->getKey();
+        $inventory->save();
+
+        return $inventory;
     }
 }

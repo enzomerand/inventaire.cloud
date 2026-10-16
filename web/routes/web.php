@@ -7,18 +7,55 @@ use App\Http\Controllers\Install\InstallController;
 use App\Http\Controllers\Install\InstallStepController;
 use App\Http\Controllers\Install\TokenController;
 use App\Http\Controllers\RefreshCsrfTokenController;
+use App\Http\Controllers\RobotsController;
+use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
+use App\Http\Controllers\Web\HomePageController;
 use App\Http\Controllers\Web\InventoryFieldsPageController;
 use App\Http\Controllers\Web\InventoryPageController;
+use App\Http\Controllers\Web\TemplateGalleryController;
+use App\Http\Controllers\Web\TemplatePageController;
+use App\Http\Controllers\Web\TemplateUseController;
 use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
+use App\Http\Middleware\UseUrlLocale;
 use App\Installer\InstallStep;
+use App\Services\LocaleResolver;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
-Route::view('/', 'home')->name('home');
+Route::get('/', HomePageController::class)->name('home');
+
+// The public pages of the templates (the gallery and one page for each template), rendered by the server so that search
+// engines read them. They exist once per language, each with an address of its own: the language of the instance has no
+// prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
+// permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale). They are public and
+// rendered from files, so they are limited in pace (the `public-pages` limiter, apart from the one of the API).
+$localeCodes = implode('|', array_map(fn (string $code): string => preg_quote($code, '/'), app(LocaleResolver::class)->supported()));
+
+Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(function () use ($localeCodes): void {
+    Route::get('/templates', TemplateGalleryController::class)->name('templates.index');
+    Route::get('/templates/{slug}', TemplatePageController::class)->name('templates.show');
+
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])
+        ->name('templates.localized.')->group(function (): void {
+            Route::get('/templates', TemplateGalleryController::class)->name('index');
+            Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
+        });
+});
+
+// What robots read. Routes, not files of public/ (a web server would serve a file before the application, and the answer
+// depends on APP_INDEXABLE). Robots keep no session: nothing here starts one or sets a cookie. The sitemap reads the
+// whole catalogue, so it has the same limit as the pages it lists.
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
+    Route::get('/robots.txt', RobotsController::class)->name('robots');
+    Route::get('/sitemap.xml', SitemapController::class)->middleware('throttle:public-pages')->name('sitemap');
+});
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the
 // workspace they work in), where the pages drive the /api/v1 endpoints of their workspaces, their inventories, their
@@ -29,6 +66,10 @@ Route::middleware(['auth', AuthenticateSession::class])->group(function (): void
     Route::get('/app', CurrentWorkspaceRedirectController::class)->name('app');
     Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
     Route::view('/app/account', 'app.account')->name('app.account');
+
+    // "Use this template" on a public page: opens the dialog of a new inventory, with the template chosen, in a workspace
+    // the person may change. A visitor who is not signed in goes through the login page and comes back here.
+    Route::get('/app/templates/{slug}', TemplateUseController::class)->name('app.templates.use');
 
     // The pages of a workspace: its inventories, the items of one of them and its fields. The ULID of the workspace is in
     // the path (not the "current" workspace of the account), so that a link always shows the same thing; the inventory

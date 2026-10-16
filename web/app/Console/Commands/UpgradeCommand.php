@@ -9,6 +9,7 @@ use App\Installer\DatabaseMigrator;
 use App\Installer\Exceptions\InstallationException;
 use App\Installer\InstallationState;
 use App\Inventories\DerivedData;
+use App\Inventories\Templates\TemplateCatalogue;
 use Illuminate\Console\Command;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Foundation\Bootstrap\LoadEnvironmentVariables;
@@ -26,7 +27,9 @@ use Throwable;
  *    database password) and not the ones cached before;
  * 2. applies the pending migrations, under a file lock: if another upgrade is
  *    running, this one waits for it and then finds nothing to do;
- * 3. clears the route, view, event and package caches, which could keep
+ * 3. forgets the verdict on the inventory templates (the one entry of the
+ *    application cache that is judged by code: see {@see TemplateCatalogue}),
+ *    then clears the route, view, event and package caches, which could keep
  *    serving the previous version;
  * 4. brings the derived data right ({@see DerivedData}): the text the items are
  *    searched by is built again when the way it is made changed (or for the
@@ -123,12 +126,17 @@ final class UpgradeCommand extends Command
      * cleared before the migrations).
      *
      * The application cache (`cache:clear`) is left alone: it holds live data
-     * such as rate limiters, not compiled code.
+     * such as rate limiters, not compiled code. The one entry of it that is: the
+     * verdict on the template files, which the new version of the code may
+     * judge differently without saying so, is forgotten (and only that). It is
+     * forgotten first, so that a command that fails does not keep a stale verdict.
      *
      * @return bool Whether every cache was cleared.
      */
     private function clearCaches(): bool
     {
+        $this->forgetTemplates();
+
         foreach (['route:clear', 'view:clear', 'event:clear', ...array_values(ServiceProvider::$optimizeClearCommands)] as $command) {
             if (! $this->runSilently($command)) {
                 return false;
@@ -138,6 +146,21 @@ final class UpgradeCommand extends Command
         $this->components->info(__('The caches were cleared.'));
 
         return true;
+    }
+
+    /**
+     * Forgets the verdict on the inventory templates kept in the application cache. A cache that cannot be reached does not
+     * make the upgrade fail: the templates are judged again by the next request that finds nothing, or after a day.
+     */
+    private function forgetTemplates(): void
+    {
+        try {
+            $this->laravel->make(TemplateCatalogue::class)->forget();
+        } catch (Throwable $exception) {
+            Log::warning('The verdict on the inventory templates could not be forgotten by the upgrade.', ['exception' => $exception]);
+
+            $this->components->warn(__('The inventory templates could not be judged again (:error, see the log): a changed template may take up to a day to show.', ['error' => $exception::class]));
+        }
     }
 
     /**

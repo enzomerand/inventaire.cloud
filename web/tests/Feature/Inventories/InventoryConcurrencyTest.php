@@ -80,6 +80,34 @@ describe('requests for the last place of a quota', function (): void {
         }
     });
 
+    it('give it to one of two inventories made from a template at the same moment, with all of its fields or not at all', function (): void {
+        $fields = count(json_decode((string) file_get_contents(base_path('inventory-templates/workshop-tools.json')), true, flags: JSON_THROW_ON_ERROR)['fields']);
+
+        foreach (range(1, 3) as $_) {
+            $team = inventoryTeam();
+            inventoryIn($team['workspace'], 'First');
+            inventoryIn($team['workspace'], 'Second');
+
+            // The workspace holds as many inventories as it may less one: two calls of the API ask for the last place.
+            $outcomes = actTogether($this->sandbox->root, [
+                ['post-inventory', $team['owner']->id, $team['workspace']->id, 'Third', 'workshop-tools'],
+                ['post-inventory', $team['editor']->id, $team['workspace']->id, 'Fourth', 'workshop-tools'],
+            ], ['INVENTORIES_MAX_PER_WORKSPACE' => '3']);
+
+            expect($outcomes)->toBe(['created', 'refused:inventory_limit_reached']);
+
+            $made = Inventory::query()->where('workspace_id', $team['workspace']->id)->whereIn('name', ['Third', 'Fourth'])->sole();
+
+            expect(Inventory::query()->where('workspace_id', $team['workspace']->id)->count())->toBe(3)
+                // The one that was made has every field of the template; nothing was left behind by the one that was refused.
+                ->and($made->fields()->count())->toBe($fields)
+                ->and(InventoryField::query()->count())->toBe($fields)
+                ->and(InventoryField::query()->whereNotIn('inventory_id', Inventory::query()->select('id'))->count())->toBe(0);
+
+            removeConcurrencyRows();
+        }
+    });
+
     it('give it to one of two fields created at the same moment', function (): void {
         foreach (range(1, 4) as $_) {
             $team = inventoryTeam();

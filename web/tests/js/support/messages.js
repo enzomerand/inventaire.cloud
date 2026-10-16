@@ -123,6 +123,11 @@ export const MESSAGES = {
     'history.file_removed': 'File removed: :name',
     'history.deleted_field': 'Deleted field',
     'history.deleted_user': 'Deleted user',
+    'templates.all': 'All templates',
+    'templates.based_on': 'Template: :name',
+    'templates.results.one': ':count template',
+    'templates.results.other': ':count templates',
+    'templates.error.unknown': 'This template does not exist. Pick one from the list.',
 };
 
 /**

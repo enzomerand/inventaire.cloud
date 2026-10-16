@@ -1,0 +1,96 @@
+{
+    "category": "business",
+    "icon": "building-store",
+    "name": { "fr": "Stock de boutique", "en": "Shop stock" },
+    "summary": {
+        "fr": "Suivez vos références, vos quantités et vos prix, avec le code-barres de chaque produit.",
+        "en": "Track your products, quantities and prices, with the barcode of each product."
+    },
+    "description": {
+        "fr": [
+            "Un stock simple pour une petite boutique : une ligne par référence, avec sa quantité et son prix.",
+            "Le statut vous montre d'un coup d'œil ce qu'il faut recommander."
+        ],
+        "en": [
+            "A simple stock for a small shop: one row per product, with its quantity and price.",
+            "The status shows at a glance what has to be reordered."
+        ]
+    },
+    "fields": [
+        {
+            "key": "barcode",
+            "type": "barcode",
+            "name": { "fr": "Code-barres", "en": "Barcode" },
+            "options": { "format": "ean13" }
+        },
+        { "key": "name", "type": "text", "required": true, "name": { "fr": "Produit", "en": "Product" } },
+        {
+            "key": "quantity",
+            "type": "number",
+            "required": true,
+            "name": { "fr": "Quantité", "en": "Quantity" },
+            "options": { "min": "0" }
+        },
+        {
+            "key": "price",
+            "type": "money",
+            "name": { "fr": "Prix de vente", "en": "Selling price" },
+            "options": { "currency": "EUR" }
+        },
+        { "key": "vat", "type": "percentage", "name": { "fr": "TVA", "en": "VAT" }, "options": { "decimals": 1 } },
+        {
+            "key": "status",
+            "type": "select",
+            "name": { "fr": "Statut", "en": "Status" },
+            "options": {
+                "choices": [
+                    { "key": "in_stock", "label": { "fr": "En stock", "en": "In stock" }, "color": "green" },
+                    { "key": "low", "label": { "fr": "Stock bas", "en": "Low stock" }, "color": "orange" },
+                    { "key": "out", "label": { "fr": "Épuisé", "en": "Out of stock" }, "color": "red" }
+                ]
+            }
+        },
+        { "key": "supplier_site", "type": "url", "name": { "fr": "Site du fournisseur", "en": "Supplier website" } },
+        { "key": "expires_on", "type": "date", "name": { "fr": "À consommer avant", "en": "Best before" } }
+    ],
+    "examples": {
+        "fr": [
+            {
+                "barcode": "4006381333931",
+                "name": "Cahier A5",
+                "quantity": "42",
+                "price": "3.50",
+                "vat": "20.0",
+                "status": "in_stock"
+            },
+            {
+                "name": "Stylo bille bleu",
+                "quantity": "4",
+                "price": "1.20",
+                "vat": "20.0",
+                "status": "low",
+                "supplier_site": "https://example.com/stylos"
+            },
+            { "name": "Carnet de notes", "quantity": "0", "price": "6.90", "status": "out", "expires_on": "2027-01-31" }
+        ],
+        "en": [
+            {
+                "barcode": "4006381333931",
+                "name": "A5 notebook",
+                "quantity": "42",
+                "price": "3.50",
+                "vat": "20.0",
+                "status": "in_stock"
+            },
+            {
+                "name": "Blue ballpoint pen",
+                "quantity": "4",
+                "price": "1.20",
+                "vat": "20.0",
+                "status": "low",
+                "supplier_site": "https://example.com/pens"
+            },
+            { "name": "Pocket notebook", "quantity": "0", "price": "6.90", "status": "out", "expires_on": "2027-01-31" }
+        ]
+    }
+}

@@ -1,0 +1,173 @@
+{
+    "category": "it",
+    "icon": "device-laptop",
+    "name": { "fr": "Parc informatique", "en": "IT equipment" },
+    "summary": {
+        "fr": "Suivez les ordinateurs, écrans et périphériques de votre entreprise : numéro de série, utilisateur, statut, garantie et facture, avec le total des achats.",
+        "en": "Track your company's laptops, monitors and peripherals: serial number, assignee, status, warranty and invoice, with the total of what you spent."
+    },
+    "description": {
+        "fr": [
+            "Ce modèle sert aux petites entreprises, aux associations et aux indépendants qui veulent savoir qui utilise quoi : ordinateurs, écrans, téléphones, imprimantes et matériel réseau. Chaque équipement a un type, un numéro de série, un statut, un utilisateur et un emplacement.",
+            "Déposez la facture dans le champ prévu et ajoutez une photo, par exemple de l'étiquette collée sous l'ordinateur : la preuve d'achat et le numéro de série restent au même endroit en cas de réparation ou de vol. Le prix est saisi hors taxes ; renommez le champ si vous travaillez en TTC.",
+            "Astuces : filtrez sur le statut « En réparation » pour voir ce qui est en panne, triez la colonne « Fin de garantie » pour anticiper les renouvellements, et affichez le total de la colonne « Prix d'achat HT » pour connaître les sommes investies dans le parc. Chaque modification d'une fiche reste visible dans son historique, ce qui aide quand un équipement change de mains."
+        ],
+        "en": [
+            "This template is for small businesses, nonprofits and freelancers who need to know who is using what: computers, monitors, phones, printers and network gear. Each piece of equipment has a type, a serial number, a status, an assignee and a location.",
+            "Attach the invoice to the matching field and add a photo, for example of the label under the laptop: proof of purchase and serial number stay together when something needs repair or goes missing. Prices are entered excluding tax; rename the field if you work with tax-inclusive prices.",
+            "Tips: filter on the \"In repair\" status to see what is out of order, sort the \"Warranty end\" column to plan renewals, and show the total of the \"Purchase price (excl. tax)\" column to see how much you have invested in your equipment. Every change to an item stays visible in its history, which helps when a device changes hands."
+        ]
+    },
+    "fields": [
+        { "key": "name", "type": "text", "name": { "fr": "Équipement", "en": "Equipment" }, "required": true },
+        {
+            "key": "type",
+            "type": "select",
+            "name": { "fr": "Type", "en": "Type" },
+            "options": {
+                "choices": [
+                    { "key": "laptop", "label": { "fr": "Ordinateur portable", "en": "Laptop" }, "color": "blue" },
+                    { "key": "desktop", "label": { "fr": "Poste fixe", "en": "Desktop" }, "color": "indigo" },
+                    { "key": "monitor", "label": { "fr": "Écran", "en": "Monitor" }, "color": "teal" },
+                    { "key": "phone", "label": { "fr": "Smartphone", "en": "Smartphone" }, "color": "green" },
+                    { "key": "tablet", "label": { "fr": "Tablette", "en": "Tablet" }, "color": "purple" },
+                    { "key": "network", "label": { "fr": "Réseau", "en": "Networking" }, "color": "orange" },
+                    { "key": "printer", "label": { "fr": "Imprimante", "en": "Printer" }, "color": "pink" },
+                    {
+                        "key": "peripheral",
+                        "label": { "fr": "Périphérique ou accessoire", "en": "Peripheral or accessory" },
+                        "color": "gray"
+                    }
+                ]
+            }
+        },
+        { "key": "brand_model", "type": "text", "name": { "fr": "Marque et modèle", "en": "Brand and model" } },
+        {
+            "key": "serial",
+            "type": "barcode",
+            "name": { "fr": "Numéro de série", "en": "Serial number" },
+            "options": { "format": "any" }
+        },
+        { "key": "specs", "type": "text", "name": { "fr": "Configuration", "en": "Specifications" } },
+        {
+            "key": "status",
+            "type": "select",
+            "name": { "fr": "Statut", "en": "Status" },
+            "options": {
+                "choices": [
+                    { "key": "in_use", "label": { "fr": "En service", "en": "In use" }, "color": "green" },
+                    { "key": "in_stock", "label": { "fr": "En stock", "en": "In stock" }, "color": "blue" },
+                    { "key": "repair", "label": { "fr": "En réparation", "en": "In repair" }, "color": "orange" },
+                    { "key": "retired", "label": { "fr": "Retiré du parc", "en": "Retired" }, "color": "gray" },
+                    { "key": "lost", "label": { "fr": "Perdu ou volé", "en": "Lost or stolen" }, "color": "red" }
+                ]
+            }
+        },
+        { "key": "assignee", "type": "text", "name": { "fr": "Affecté à", "en": "Assigned to" } },
+        { "key": "location", "type": "text", "name": { "fr": "Emplacement", "en": "Location" } },
+        { "key": "purchase_date", "type": "date", "name": { "fr": "Date d'achat", "en": "Purchase date" } },
+        {
+            "key": "price",
+            "type": "money",
+            "name": { "fr": "Prix d'achat HT", "en": "Purchase price (excl. tax)" },
+            "options": { "currency": "EUR" }
+        },
+        { "key": "warranty_end", "type": "date", "name": { "fr": "Fin de garantie", "en": "Warranty end" } },
+        {
+            "key": "photos",
+            "type": "photo",
+            "name": { "fr": "Photos", "en": "Photos" },
+            "options": { "max_files": 2 }
+        },
+        {
+            "key": "invoice",
+            "type": "file",
+            "name": { "fr": "Facture et documents", "en": "Invoice and documents" },
+            "options": { "max_files": 3 }
+        }
+    ],
+    "examples": {
+        "fr": [
+            {
+                "name": "MacBook Pro 14 pouces",
+                "type": "laptop",
+                "brand_model": "Apple MacBook Pro 14 (M3 Pro)",
+                "serial": "C02ZK1ABMD6T",
+                "specs": "18 Go de RAM, SSD 512 Go",
+                "status": "in_use",
+                "assignee": "Équipe design",
+                "location": "Bureau 2.14",
+                "purchase_date": "2024-02-06",
+                "price": "1899.00",
+                "warranty_end": "2027-02-06"
+            },
+            {
+                "name": "Écran 27 pouces 4K",
+                "type": "monitor",
+                "brand_model": "Dell UltraSharp U2723QE",
+                "serial": "CN0X1Y2Z3W4V",
+                "specs": "3840 × 2160, hub USB-C",
+                "status": "in_use",
+                "assignee": "Comptabilité",
+                "location": "Bureau 1.03",
+                "purchase_date": "2024-09-18",
+                "price": "519.00",
+                "warranty_end": "2027-09-18"
+            },
+            {
+                "name": "Imprimante laser couleur",
+                "type": "printer",
+                "brand_model": "Brother HL-L3270CDW",
+                "serial": "U64412A9N654321",
+                "specs": "Recto verso, Wi-Fi",
+                "status": "repair",
+                "assignee": "Équipe commerciale",
+                "location": "Salle de reprographie",
+                "purchase_date": "2022-05-10",
+                "price": "239.00",
+                "warranty_end": "2025-05-10"
+            }
+        ],
+        "en": [
+            {
+                "name": "14-inch MacBook Pro",
+                "type": "laptop",
+                "brand_model": "Apple MacBook Pro 14 (M3 Pro)",
+                "serial": "C02ZK1ABMD6T",
+                "specs": "18 GB RAM, 512 GB SSD",
+                "status": "in_use",
+                "assignee": "Design team",
+                "location": "Office 2.14",
+                "purchase_date": "2024-02-06",
+                "price": "1899.00",
+                "warranty_end": "2027-02-06"
+            },
+            {
+                "name": "27-inch 4K monitor",
+                "type": "monitor",
+                "brand_model": "Dell UltraSharp U2723QE",
+                "serial": "CN0X1Y2Z3W4V",
+                "specs": "3840 × 2160, USB-C hub",
+                "status": "in_use",
+                "assignee": "Accounting",
+                "location": "Office 1.03",
+                "purchase_date": "2024-09-18",
+                "price": "519.00",
+                "warranty_end": "2027-09-18"
+            },
+            {
+                "name": "Color laser printer",
+                "type": "printer",
+                "brand_model": "Brother HL-L3270CDW",
+                "serial": "U64412A9N654321",
+                "specs": "Duplex, Wi-Fi",
+                "status": "repair",
+                "assignee": "Sales team",
+                "location": "Copy room",
+                "purchase_date": "2022-05-10",
+                "price": "239.00",
+                "warranty_end": "2025-05-10"
+            }
+        ]
+    }
+}
