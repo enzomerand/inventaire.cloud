@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
+use App\Database\JsonValues;
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Fields\FieldType;
@@ -17,6 +18,7 @@ use App\Workspaces\Locks;
 use Closure;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use JsonException;
@@ -330,57 +332,34 @@ final class InventoryFields
     }
 
     /**
-     * Takes a deleted field out of the history of the items of the inventory, one chunk at a time: its values leave the
-     * revisions of values (the revision is deleted when nothing else is left in it), and the revisions of files that were
-     * attached to the field no longer name it.
+     * Takes a deleted field out of the history of the items of the inventory: its values leave the revisions of values (the
+     * revision is deleted when nothing else is left in it), and the revisions of files that were attached to the field no
+     * longer name it.
      *
-     * Through the query builder and by chunks of the primary key, like {@see self::rewriteValues()}, with the JSON edited in
-     * PHP (not portable in SQL); the inventory is locked by the caller, so no revision is written meanwhile.
+     * Three statements, however long the history is (it can be a hundred revisions of each of ten thousand items), with the
+     * JSON edited by the database ({@see JsonValues}, the only place that knows how each engine does it): the revisions
+     * that hold nothing but the field go first, the others lose the field, and the revisions of files lose their reference
+     * to it. A revision that was empty already stays. The inventory is locked by the caller, so no revision is written meanwhile.
      *
      * @param  string  $ulid  The key of the field.
-     *
-     * @throws JsonException
      */
     private function forgetInHistory(Inventory $inventory, string $ulid): void
     {
-        $this->db->table('item_revisions')
-            ->where('inventory_id', $inventory->getKey())
-            ->chunkById(self::PURGE_CHUNK, function (Collection $rows) use ($ulid): void {
-                foreach ($rows as $row) {
-                    $json = (string) $row->changes;
+        $json = new JsonValues($this->db->connection());
+        $revisions = fn (array $actions): Builder => $this->db->table('item_revisions')->where('inventory_id', $inventory->getKey())->whereIn('action', $actions);
+        $ofValues = [ItemRevision::CREATED, ItemRevision::UPDATED];
 
-                    // Most revisions never mention the field: a cheap look before decoding.
-                    if (! str_contains($json, $ulid)) {
-                        continue;
-                    }
+        $nothingElse = $revisions($ofValues);
+        $json->whereHoldsOnly($nothingElse, 'changes', $ulid);
+        $nothingElse->delete();
 
-                    $changes = json_decode($json, true);
+        $others = $revisions($ofValues);
+        $json->whereHolds($others, 'changes', $ulid);
+        $others->update(['changes' => $json->withoutKey('changes', $ulid)]);
 
-                    if (! is_array($changes)) {
-                        continue;
-                    }
-
-                    if (in_array($row->action, [ItemRevision::ATTACHMENT_ADDED, ItemRevision::ATTACHMENT_REMOVED], true)) {
-                        if (($changes['field'] ?? null) !== $ulid) {
-                            continue;
-                        }
-
-                        $changes['field'] = null;
-                    } elseif (array_key_exists($ulid, $changes)) {
-                        unset($changes[$ulid]);
-
-                        if ($changes === []) {
-                            $this->db->table('item_revisions')->where('id', $row->id)->delete();
-
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    }
-
-                    $this->db->table('item_revisions')->where('id', $row->id)->update(['changes' => json_encode($changes, JSON_THROW_ON_ERROR)]);
-                }
-            }, 'id');
+        $revisions([ItemRevision::ATTACHMENT_ADDED, ItemRevision::ATTACHMENT_REMOVED])
+            ->where('changes->field', $ulid)
+            ->update(['changes' => $json->withKeyNull('changes', 'field')]);
     }
 
     /**

@@ -407,6 +407,45 @@ describe('reading the history', function (): void {
             ->and(DB::table('item_revisions')->where('item_id', $case['item']->id)->where('changes', 'like', '%'.$case['price']->ulid.'%')->count())->toBe(0);
     });
 
+    it('takes it out with a fixed number of statements, whatever the length of the history', function (): void {
+        $case = historyCase();
+        $second = itemIn($case['inventory'], [$case['name']->ulid => 'Saw', $case['price']->ulid => '3.00'], $case['team']['editor']);
+        $empty = itemIn($case['inventory']);
+        $rows = [];
+
+        foreach ([$case['item'], $second] as $item) {
+            foreach (range(1, 300) as $number) {
+                $rows[] = ['ulid' => strtolower((string) Str::ulid()), 'inventory_id' => $case['inventory']->id, 'item_id' => $item->id, 'user_id' => null, 'action' => 'updated', 'created_at' => now(),
+                    'changes' => json_encode($number % 3 === 0 ? [$case['price']->ulid => ['before' => '1', 'after' => '2']] : [$case['name']->ulid => ['before' => 'a', 'after' => 'b'], $case['price']->ulid => ['before' => '1', 'after' => '2']])];
+            }
+        }
+
+        foreach (array_chunk($rows, 200) as $chunk) {
+            DB::table('item_revisions')->insert($chunk);
+        }
+
+        DB::enableQueryLog();
+        app(InventoryFields::class)->delete($case['inventory'], $case['price']);
+        $statements = collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql): bool => preg_match('/^\s*(update|delete)\b[^;]*\bitem_revisions\b/i', $sql) === 1);
+        DB::disableQueryLog();
+
+        // One statement deletes the revisions that had nothing else to say, one takes the field out of the others, one is for the revisions of files.
+        expect($statements)->toHaveCount(3)
+            // Of the 300 changes of each of the two items, the 200 that touched the name stay; so do their three creations (the empty one included).
+            ->and(DB::table('item_revisions')->where('inventory_id', $case['inventory']->id)->whereIn('action', ['created', 'updated'])->count())->toBe(200 + 200 + 3)
+            ->and(DB::table('item_revisions')->where('inventory_id', $case['inventory']->id)->where('changes', 'like', '%'.$case['price']->ulid.'%')->count())->toBe(0)
+            ->and(historyRows($empty))->toHaveCount(1);
+    });
+
+    it('keeps a revision that was empty already, which is not one the field left empty', function (): void {
+        $case = historyCase();
+        $empty = itemIn($case['inventory']);
+
+        app(InventoryFields::class)->delete($case['inventory'], $case['price']);
+
+        expect(array_map(fn (ItemRevision $revision): array => [$revision->action, $revision->changes], historyRows($empty)))->toBe([['created', []]]);
+    });
+
     it('shows a value through the field as it is now: a choice deleted since is gone', function (): void {
         $case = historyCase();
         inventoryCall($this, $case['team']['owner'], 'PATCH', $case['uri'], ['values' => [$case['state']->ulid => $case['used']]])->assertOk();
