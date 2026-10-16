@@ -53,6 +53,7 @@ const ROUTES = {
     'api.v1.me.destroy': '/api/v1/me',
     'api.v1.admin.users.index': '/api/v1/admin/users',
     'api.v1.admin.settings.show': '/api/v1/admin/settings',
+    'api.v1.templates.index': '/api/v1/templates',
     home: '/',
     'app.workspaces': '/app/workspaces',
 };
@@ -63,6 +64,7 @@ const ROUTE_PATTERNS = {
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
     'api.v1.workspaces.inventories.index': '/api/v1/workspaces/{workspace}/inventories',
+    'api.v1.templates.show': '/api/v1/templates/{slug}',
     'api.v1.inventories.show': '/api/v1/inventories/{inventory}',
     'api.v1.inventories.items.index': '/api/v1/inventories/{inventory}/items',
     'api.v1.inventories.items.show': '/api/v1/inventories/{inventory}/items/{item}',
@@ -1104,7 +1106,42 @@ describe('the pages under the real Alpine CSP build', () => {
             await mount('app/workspace.blade.php');
 
             expect(visible(document.querySelector('.empty'))).toBe(false);
-            expect(visible(document.querySelector('[role="status"]'))).toBe(true);
+            expect(document.querySelector('[role="status"]').textContent).toBe('Loading…');
+        });
+
+        it('keeps the live region of the page where it is, and only changes what it says', async () => {
+            const reading = deferred();
+            http.get.mockReturnValue(reading.promise);
+            await mount('app/workspace.blade.php');
+
+            const region = document.querySelector('[x-data="workspaceInventories"] > [role="status"]');
+
+            expect(region.hidden).toBe(false);
+            expect(region.textContent).toBe('Loading…');
+
+            reading.resolve({ data: INVENTORIES });
+            await flush();
+
+            expect(region.isConnected).toBe(true);
+            expect(region.hidden).toBe(false);
+            expect(region.textContent).toBe('');
+            // The spinner people see is no second announcement.
+            expect(visible(document.querySelector('[aria-hidden="true"].text-secondary'))).toBe(false);
+        });
+
+        it('takes the addresses of the templates from the named routes, not from literals', async () => {
+            const source = readFileSync(join(VIEWS, 'app/workspace.blade.php'), 'utf8');
+
+            expect(source).toContain(`data-templates-url="{{ route('api.v1.templates.index', absolute: false) }}"`);
+            expect(source).toContain(
+                `data-template-url="{{ route('api.v1.templates.show', ['slug' => '__id__'], absolute: false) }}"`,
+            );
+
+            await open();
+            const root = document.querySelector('[x-data="workspaceInventories"]');
+
+            expect(root.dataset.templatesUrl).toBe('/api/v1/templates');
+            expect(root.dataset.templateUrl).toBe('/api/v1/templates/__id__');
         });
 
         it('does not claim the workspace is empty when the list could not be read, and reads it again on request', async () => {
@@ -1386,6 +1423,76 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(http.get).not.toHaveBeenCalled();
             });
 
+            it('puts the cursor back in the search box when the catalogue is read again, the retry button being gone', async () => {
+                http.get.mockImplementation(async (url) => {
+                    if (url === '/api/v1/templates') {
+                        throw new HttpError(500, 'Server down');
+                    }
+
+                    return { data: INVENTORIES };
+                });
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromTemplate();
+
+                const alert = step('pick').querySelector('.alert-danger');
+
+                buttons('Try again', alert)[0].focus();
+                serve();
+                await press('Try again', alert);
+
+                expect(visible(alert)).toBe(false);
+                expect(document.activeElement).toBe(search());
+            });
+
+            it('keeps the live regions of the picker and of the preview on the page, and only changes what they say', async () => {
+                const catalogue = deferred();
+
+                http.get.mockImplementation(async (url) =>
+                    url === '/api/v1/workspaces/shop/inventories'
+                        ? { data: INVENTORIES.slice(0, 1) }
+                        : catalogue.promise,
+                );
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+
+                const [pickStatus, pickCount] = step('pick').querySelectorAll('[role="status"]');
+                const previewStatus = step('preview').querySelector('[role="status"]');
+                const regions = [pickStatus, pickCount, previewStatus];
+                const onPage = () => regions.every((region) => region.isConnected && !region.hidden);
+
+                expect(regions.every(Boolean)).toBe(true);
+                expect(onPage()).toBe(true);
+                expect([pickStatus.textContent, previewStatus.textContent]).toEqual(['', '']);
+
+                await startFromTemplate();
+
+                expect(onPage()).toBe(true);
+                expect(pickStatus.textContent).toBe('Loading…');
+
+                catalogue.resolve({ data: CATALOGUE });
+                await flush();
+
+                expect(onPage()).toBe(true);
+                expect(pickStatus.textContent).toBe('');
+                expect(pickCount.textContent).toBe('3 templates');
+
+                const template = deferred();
+
+                http.get.mockImplementation(async () => template.promise);
+                await pick('Home inventory');
+
+                expect(onPage()).toBe(true);
+                expect(previewStatus.textContent).toBe('Loading…');
+                expect(pickStatus.textContent).toBe('');
+
+                template.resolve({ data: DETAILS['home-inventory'] });
+                await flush();
+
+                expect(onPage()).toBe(true);
+                expect(previewStatus.textContent).toBe('');
+            });
+
             it('narrows the templates by search, whatever the case or the accents, and says how many are left', async () => {
                 await openPicker();
 
@@ -1537,7 +1644,7 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 // What the catalogue says is shown meanwhile, and the template can already be used.
                 expect(step('preview').querySelector('h3').textContent).toBe('Home inventory');
-                expect(visible(step('preview').querySelector('[role="status"]'))).toBe(true);
+                expect(step('preview').querySelector('[role="status"]').textContent).toBe('Loading…');
                 expect(button('Use this template').disabled).toBe(false);
 
                 reading.reject(new HttpError(500, 'Server down'));
@@ -1546,7 +1653,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 const alert = step('preview').querySelector('.alert-danger');
 
                 expect(visible(alert)).toBe(true);
-                expect(visible(step('preview').querySelector('[role="status"]'))).toBe(false);
+                expect(step('preview').querySelector('[role="status"]').textContent).toBe('');
                 expect(notify).toHaveBeenCalledWith('danger', 'Server down');
 
                 serve();
@@ -1723,6 +1830,18 @@ describe('the pages under the real Alpine CSP build', () => {
                     await press('Use this template');
 
                     expect(dialog().querySelector('#inventory-create-name').value).toBe('Home inventory');
+                });
+
+                it('gives the focus to the button that adds an inventory as the dialog opens, for it to be given back there', async () => {
+                    let anchor = null;
+
+                    showModal.mockImplementationOnce(() => {
+                        anchor = document.activeElement;
+                    });
+                    await openAt('?template=home-inventory');
+
+                    expect(anchor).not.toBeNull();
+                    expect(anchor).toBe(buttons('New inventory')[0]);
                 });
 
                 it('goes back from that preview to the picker', async () => {

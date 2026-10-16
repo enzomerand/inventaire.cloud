@@ -81,6 +81,7 @@ describe('the template picker of the new inventory dialog', () => {
                 canCreate: '1',
                 templatesUrl: TEMPLATES_URL,
                 templateUrl: TEMPLATE_URL,
+                loadingLabel: 'Loading…',
             },
         };
         component.$refs = { modal };
@@ -226,6 +227,21 @@ describe('the template picker of the new inventory dialog', () => {
             expect(component.templates).toHaveLength(1);
         });
 
+        it('puts the cursor back in the picker when it is read again, the button that asked for it being hidden by then', async () => {
+            http.get.mockRejectedValueOnce(new HttpError(500, 'Server down'));
+            await component.startFromTemplate();
+
+            // The "Try again" button of the failure notice, which the notice hides as soon as the reading starts.
+            const retry = document.createElement('button');
+            modal.querySelector('[data-step="pick"]').append(retry);
+            retry.focus();
+            http.get.mockResolvedValueOnce({ data: [summary('a')] });
+
+            await component.loadTemplates();
+
+            expect(document.activeElement).toBe(modal.querySelector('[data-step="pick"] [data-autofocus]'));
+        });
+
         it('is taken for empty when the server answers anything but a list', async () => {
             http.get.mockResolvedValue({ data: null });
 
@@ -245,6 +261,22 @@ describe('the template picker of the new inventory dialog', () => {
 
             expect(component.templatesNoMatch).toBe(true);
             expect(component.templatesEmpty).toBe(false);
+        });
+
+        it('announces its reading to the screen readers, and nothing otherwise', async () => {
+            const reading = deferred();
+            http.get.mockReturnValue(reading.promise);
+
+            expect(component.templatesLoadingAnnouncement).toBe('');
+
+            const first = component.loadTemplates();
+
+            expect(component.templatesLoadingAnnouncement).toBe('Loading…');
+
+            reading.resolve({ data: [summary('a')] });
+            await first;
+
+            expect(component.templatesLoadingAnnouncement).toBe('');
         });
 
         it('counts the fields of a template', () => {
@@ -340,6 +372,22 @@ describe('the template picker of the new inventory dialog', () => {
             expect(component.previewFields[0].name).toBe('Name');
         });
 
+        it('announces the reading of the template to the screen readers, and nothing otherwise', async () => {
+            const reading = deferred();
+            http.get.mockReturnValue(reading.promise);
+
+            expect(component.previewLoadingAnnouncement).toBe('');
+
+            const selecting = component.selectTemplate(summary('a'));
+
+            expect(component.previewLoadingAnnouncement).toBe('Loading…');
+
+            reading.resolve({ data: detail('a') });
+            await selecting;
+
+            expect(component.previewLoadingAnnouncement).toBe('');
+        });
+
         it('has nothing to show or use while a link is being read', async () => {
             http.get.mockReturnValue(new Promise(() => {}));
 
@@ -421,6 +469,79 @@ describe('the template picker of the new inventory dialog', () => {
             expect(component.step).toBe('choose');
             expect(component.template).toBeNull();
             expect(component.previewLoading).toBe(false);
+        });
+
+        it.each([
+            ['an empty answer', {}],
+            ['an answer with no template', { data: null }],
+            ['a template with no name', { data: { slug: 'a' } }],
+        ])(
+            'says it could not be read when the server sends %s, and never throws on "Use this template"',
+            async (_label, answer) => {
+                http.get.mockResolvedValueOnce(answer);
+
+                await component.showTemplate('a');
+
+                expect(component.previewFailed).toBe(true);
+                expect(component.previewLoading).toBe(false);
+                expect(component.canUseTemplate).toBe(false);
+                expect(() => component.useTemplate()).not.toThrow();
+                expect(component.step).toBe('preview');
+            },
+        );
+
+        it('keeps what the catalogue says of a template when the server sends none of it, and reads it again on request', async () => {
+            http.get.mockResolvedValueOnce({});
+
+            await component.selectTemplate(summary('a'));
+
+            expect(component.previewFailed).toBe(true);
+            expect(component.previewName).toBe('Template a');
+            expect(component.canUseTemplate).toBe(true);
+
+            http.get.mockResolvedValueOnce({ data: detail('a') });
+            await component.retryTemplate();
+
+            expect(component.previewFailed).toBe(false);
+            expect(component.previewFieldCount).toBe(1);
+        });
+
+        it('does not let the late 404 of a preview eject the person from the form they are filling', async () => {
+            const slow = deferred();
+            http.get.mockReturnValueOnce(slow.promise);
+            const selecting = component.selectTemplate(summary('a'));
+
+            // The template can be used while its fields are still being read.
+            component.useTemplate();
+            component.form.name = 'Typed';
+
+            slow.reject(new HttpError(404, 'Not found'));
+            await selecting;
+
+            expect(component.step).toBe('form');
+            expect(component.form.name).toBe('Typed');
+            expect(notify).not.toHaveBeenCalled();
+            expect(component.templatesState).toBe('idle');
+            expect(http.get).toHaveBeenCalledTimes(1);
+        });
+
+        it('reads a template again when the person comes back from the form before its fields had arrived', async () => {
+            const slow = deferred();
+            http.get.mockReturnValueOnce(slow.promise);
+            const selecting = component.selectTemplate(summary('a'));
+
+            component.useTemplate();
+            slow.resolve({ data: detail('a', { name: 'A, late' }) });
+            await selecting;
+
+            // The answer that came late was dropped: the preview must not stay on its spinner for good.
+            http.get.mockResolvedValueOnce({ data: detail('a') });
+            component.back();
+            await vi.waitFor(() => expect(component.previewLoading).toBe(false));
+
+            expect(component.step).toBe('preview');
+            expect(component.previewFieldCount).toBe(1);
+            expect(http.get).toHaveBeenCalledTimes(2);
         });
 
         it('goes back to the picker, and reads the catalogue if a link skipped it', async () => {
@@ -606,6 +727,33 @@ describe('the template picker of the new inventory dialog', () => {
             expect(component.previewFieldCount).toBe(1);
             expect(window.location.search).toBe('?view=cards');
             expect(window.location.pathname).toBe('/app/w/shop');
+        });
+
+        it('gives the focus to the button that adds an inventory before it opens the dialog, so that closing the dialog gives it back there', async () => {
+            linkTo('?template=wine-cellar');
+            http.get.mockResolvedValue({ data: detail('wine-cellar') });
+
+            const button = document.createElement('button');
+            document.body.append(button);
+            component.$refs.newInventory = button;
+            // The dialog remembers the element that has the focus as it opens, and gives the focus back to it.
+            let anchor = null;
+            showModal.mockImplementationOnce(() => {
+                anchor = document.activeElement;
+            });
+
+            await component.openLinkedTemplate();
+
+            expect(anchor).toBe(button);
+        });
+
+        it('opens the dialog all the same when the page has no such button', async () => {
+            linkTo('?template=wine-cellar');
+            http.get.mockResolvedValue({ data: detail('wine-cellar') });
+
+            await component.openLinkedTemplate();
+
+            expect(showModal).toHaveBeenCalledWith(modal);
         });
 
         it('opens the dialog before the template has been read, so that the person sees it at once', async () => {

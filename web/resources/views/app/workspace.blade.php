@@ -13,6 +13,10 @@
     with __id__ for the slug) when the person first asks for them. Every text that comes from the API goes through
     x-text, never x-html.
 
+    The live regions (role="status") are always on the page and never hidden: a region that appears together with its text
+    is not announced, so only their text changes (x-text, with the words of data-loading-label on the root). What people
+    see while something loads is a separate spinner, which the screen readers skip (aria-hidden).
+
     The icon of a template is the same generic one for all: the API names a Tabler icon, but Blade cannot render a name
     that is only known in the browser.
 
@@ -30,12 +34,13 @@
         data-url="{{ route('api.v1.workspaces.inventories.index', ['workspace' => $workspace->ulid], absolute: false) }}"
         data-inventory-url="{{ route('app.inventory', ['workspace' => $workspace->ulid, 'inventory' => '__id__'], absolute: false) }}"
         data-can-create="{{ $abilities['create'] ? '1' : '0' }}"
-        data-templates-url="/api/v1/templates"
-        data-template-url="/api/v1/templates/__id__"
+        data-templates-url="{{ route('api.v1.templates.index', absolute: false) }}"
+        data-template-url="{{ route('api.v1.templates.show', ['slug' => '__id__'], absolute: false) }}"
+        data-loading-label="{{ __('Loading…') }}"
     >
         <div class="d-flex align-items-center mb-3">
             <h2 class="h3 m-0">{{ __('Inventories') }}</h2>
-            <button type="button" class="btn btn-primary ms-auto" x-show="canCreate" @click="startCreate">
+            <button type="button" class="btn btn-primary ms-auto" x-ref="newInventory" x-show="canCreate" @click="startCreate">
                 <x-tabler-plus aria-hidden="true" />
                 {{ __('New inventory') }}
             </button>
@@ -43,10 +48,11 @@
 
         {{-- Hidden with the "hidden" attribute, not x-show: Alpine shows an element a tick late and hides it at once, so a
              state that goes up and down faster than that (a local server answers in a few milliseconds) would leave it on. --}}
-        <p class="text-secondary" :hidden="!loading" role="status">
-            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+        <p class="text-secondary" :hidden="!loading" aria-hidden="true">
+            <span class="spinner-border spinner-border-sm me-2"></span>
             {{ __('Loading…') }}
         </p>
+        <div class="visually-hidden" role="status" x-text="loadingAnnouncement"></div>
 
         {{-- The list could not be read: the workspace is not empty for all we know, so it says so and offers to try again.
              The alert is hidden by attribute, with the flex layout on an inner element (a display utility would win). --}}
@@ -174,10 +180,11 @@
                                 </div>
                             </div>
 
-                            <p class="text-secondary" :hidden="!templatesLoading" role="status">
-                                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                            <p class="text-secondary" :hidden="!templatesLoading" aria-hidden="true">
+                                <span class="spinner-border spinner-border-sm me-2"></span>
                                 {{ __('Loading…') }}
                             </p>
+                            <div class="visually-hidden" role="status" x-text="templatesLoadingAnnouncement"></div>
 
                             <div class="alert alert-danger" role="alert" :hidden="!templatesFailed">
                                 <div class="d-flex align-items-center gap-3">
@@ -216,10 +223,11 @@
                             <p class="mb-2" :hidden="!previewCategory"><span class="badge bg-blue-lt" x-text="previewCategory"></span></p>
                             <p class="text-break" x-text="previewSummary"></p>
 
-                            <p class="text-secondary" :hidden="!previewLoading" role="status">
-                                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                            <p class="text-secondary" :hidden="!previewLoading" aria-hidden="true">
+                                <span class="spinner-border spinner-border-sm me-2"></span>
                                 {{ __('Loading…') }}
                             </p>
+                            <div class="visually-hidden" role="status" x-text="previewLoadingAnnouncement"></div>
 
                             <div class="alert alert-danger" role="alert" :hidden="!previewFailed">
                                 <div class="d-flex align-items-center gap-3">

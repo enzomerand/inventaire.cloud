@@ -2,7 +2,8 @@
  * The part of the "New inventory" dialog that starts an inventory from a template.
  *
  * It is a piece of the `workspaceInventories` component (see `lib/compose.js`), so `this` is the whole component: it uses
- * its form (`form`, `errors`, `formError`), its `canCreate`, its elements (`rootElement`, `modalElement`) and its `fail()`.
+ * its form (`form`, `errors`, `formError`), its `canCreate`, its elements (`rootElement`, `modalElement`), its `loadingLabel`
+ * and its `fail()`.
  *
  * The dialog is a short path with four steps, all in the same markup (only the current one is shown):
  *
@@ -31,6 +32,16 @@ const MAX_NAME = 120;
 
 /** The longest description of an inventory, as the API takes it (the form's own `maxlength`). */
 const MAX_DESCRIPTION = 2000;
+
+/**
+ * Whether the body of a template answer is a template the preview can work with (the form takes its slug and its name).
+ *
+ * @param {any} data
+ * @returns {boolean}
+ */
+function isTemplateBody(data) {
+    return typeof data?.slug === 'string' && typeof data?.name === 'string';
+}
 
 /**
  * @typedef {import('./catalogue.js').Template} Template
@@ -70,7 +81,10 @@ export default function templatePicker() {
         /** The template the form is for (`slug`, `name`), or null when the inventory starts from scratch. */
         formTemplate: null,
 
-        /** Counts the readings of a template, so that the answer to an older one (or to a dialog since closed) is dropped. */
+        /**
+         * Counts the readings of a template, so that the answer to an older one is dropped: one since replaced, or made
+         * useless because the dialog was closed or the person went on to the form.
+         */
         templateRequest: 0,
 
         /** The element of the dialog, kept when the page opens (see `modalElement`); null until then. */
@@ -216,7 +230,17 @@ export default function templatePicker() {
 
         /** Whether the preview can go on to the form: there is a template (its fields may still be on their way). */
         get canUseTemplate() {
-            return this.template !== null;
+            return (this.template ?? null) !== null;
+        },
+
+        /** What the screen readers hear while the catalogue is being read ("" otherwise). Its region is always on the page. */
+        get templatesLoadingAnnouncement() {
+            return this.templatesLoading ? this.loadingLabel : '';
+        },
+
+        /** What the screen readers hear while the template on the preview is being read ("" otherwise). */
+        get previewLoadingAnnouncement() {
+            return this.previewLoading ? this.loadingLabel : '';
         },
 
         /**
@@ -293,7 +317,15 @@ export default function templatePicker() {
             }
 
             if (this.step === 'form') {
-                this.goTo(this.formTemplate === null ? 'choose' : 'preview');
+                if (this.formTemplate === null) {
+                    this.goTo('choose');
+                } else if (this.templateState === 'ready') {
+                    this.goTo('preview');
+                } else {
+                    // The answer that was on its way when the form was opened was dropped (see `useTemplate`): ask again,
+                    // or the preview would stay on its spinner.
+                    void this.retryTemplate();
+                }
             } else if (this.step === 'preview') {
                 // An answer still on its way is of no use any more. The catalogue may not have been read yet (a link opened
                 // the preview), and the picker is empty without it.
@@ -341,6 +373,9 @@ export default function templatePicker() {
             }
 
             this.templatesState = 'loading';
+            // The notice that offers to try again is hidden now, and the button the person pressed with it: the cursor
+            // would fall to the page behind the dialog.
+            this.$nextTick(() => this.focusStep());
 
             try {
                 const answer = await http.get(this.templatesUrl);
@@ -394,8 +429,16 @@ export default function templatePicker() {
                 const answer = await http.get(fillUrl(this.templateUrl, slug), { silent: true });
 
                 if (request === this.templateRequest) {
-                    this.template = answer.data;
-                    this.templateState = 'ready';
+                    const data = answer?.data ?? null;
+
+                    if (isTemplateBody(data)) {
+                        this.template = data;
+                        this.templateState = 'ready';
+                    } else {
+                        // An answer with no template in it is no answer: what the catalogue says of it stays, with the
+                        // offer to read it again.
+                        this.templateState = 'failed';
+                    }
                 }
             } catch (error) {
                 if (request !== this.templateRequest) {
@@ -436,9 +479,13 @@ export default function templatePicker() {
          * @returns {void}
          */
         useTemplate() {
-            if (this.template === null) {
+            if ((this.template ?? null) === null) {
                 return;
             }
+
+            // The template can be used while its fields are still being read; that answer, whatever it is (a 404 would send
+            // the person back to the picker), has nothing to say to the form.
+            this.templateRequest++;
 
             if (this.formTemplate?.slug !== this.template.slug) {
                 this.form = {
@@ -488,6 +535,9 @@ export default function templatePicker() {
             }
 
             this.resetForm();
+            // The page was just opened, so nothing has the cursor, and the dialog would have nothing to give it back to when
+            // it closes: the button that adds an inventory is where the person would have come from.
+            this.$refs.newInventory?.focus();
             showModal(this.modalElement);
 
             if (isSlug(slug)) {

@@ -6,8 +6,8 @@
  * inventory is created the person is taken to its page, where its fields are next. The dialog starts from scratch (a name
  * and a description) or from a template (see `inventory-templates/picker.js`, which this component is merged with), and
  * `?template=<slug>` on the address opens it on a template. The endpoints and the link of a card come from the markup
- * (`data-url`, `data-inventory-url`, `data-templates-url`, `data-template-url` on the root), because the CSP build of
- * Alpine does not allow Blade to inject values into expressions.
+ * (`data-url`, `data-inventory-url`, `data-templates-url`, `data-template-url` on the root, and `data-loading-label` for
+ * the words the live regions say), because the CSP build of Alpine does not allow Blade to inject values into expressions.
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the form that caused them, or as a toast.
@@ -81,6 +81,16 @@ export default function workspaceInventories() {
         /** Whether the person may add inventories to the workspace, from `data-can-create` on the component root. */
         get canCreate() {
             return this.rootElement.dataset.canCreate === '1';
+        },
+
+        /** The word that says something is being read ("Loading…"), from `data-loading-label` on the component root. */
+        get loadingLabel() {
+            return this.rootElement.dataset.loadingLabel ?? '';
+        },
+
+        /** What the screen readers hear while the list is being read ("" otherwise). Its region is always on the page. */
+        get loadingAnnouncement() {
+            return this.loading ? this.loadingLabel : '';
         },
 
         /** Whether the workspace is known to hold no inventory (not when the list could not be read). */
