@@ -157,13 +157,23 @@ export function page(
  * runs at once.
  *
  * @param {() => Record<string, any>} factory The component function.
- * @param {{ canEdit?: boolean, maxAttachmentSize?: number, laterTick?: boolean }} [options] `maxAttachmentSize`: the largest
- *   file the page says the server takes, in bytes (the page says nothing when not given). `laterTick`: `$nextTick` runs the
- *   function after the code that asked is done, as Alpine's does, instead of at once (which hides the bugs of what is
- *   assumed to have happened by the time the function runs).
+ * @param {{ canEdit?: boolean, canManageFields?: boolean, maxAttachmentSize?: number, importMaxSize?: number, laterTick?: boolean }} [options]
+ *   `canManageFields`: whether the person may create and change the fields (they may when not given). `maxAttachmentSize`: the
+ *   largest file the page says the server takes, in bytes (the page says nothing when not given). `importMaxSize`: the same
+ *   for a spreadsheet to import. `laterTick`: `$nextTick` runs the function after the code that asked is done, as Alpine's
+ *   does, instead of at once (which hides the bugs of what is assumed to have happened by the time the function runs).
  * @returns {Record<string, any>}
  */
-export function mountComponent(factory, { canEdit = true, maxAttachmentSize = undefined, laterTick = false } = {}) {
+export function mountComponent(
+    factory,
+    {
+        canEdit = true,
+        canManageFields = true,
+        maxAttachmentSize = undefined,
+        importMaxSize = undefined,
+        laterTick = false,
+    } = {},
+) {
     const component = factory();
 
     const root = document.createElement('div');
@@ -174,11 +184,15 @@ export function mountComponent(factory, { canEdit = true, maxAttachmentSize = un
         itemUrl: ITEMS + '/__id__',
         workspacePage: '/app/w/shop',
         canEdit: canEdit ? '1' : '0',
-        canManageFields: '1',
+        canManageFields: canManageFields ? '1' : '0',
     });
 
     if (maxAttachmentSize !== undefined) {
         root.dataset.maxAttachmentSize = String(maxAttachmentSize);
+    }
+
+    if (importMaxSize !== undefined) {
+        root.dataset.importMaxSize = String(importMaxSize);
     }
 
     component.$root = root;
