@@ -106,6 +106,15 @@ final class AttachmentStorage
     }
 
     /**
+     * The folder of an import: the source file of the import is in it, alone, until the job that reads it ends. It is under the
+     * folder of the inventory, so that the purge of an inventory or of a workspace takes the imports with it.
+     */
+    public static function importDirectory(string $workspace, string $inventory, string $import): string
+    {
+        return self::inventoryDirectory($workspace, $inventory)."/imports/{$import}";
+    }
+
+    /**
      * The path of a thumbnail, from the path of its file.
      */
     public static function thumbnailPath(string $path): string

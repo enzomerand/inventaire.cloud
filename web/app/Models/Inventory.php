@@ -111,6 +111,17 @@ final class Inventory extends Model
     }
 
     /**
+     * The imports started from the inventory, whoever sent the file. The route key of an import is its ULID, and an import is bound
+     * through this relation (`/inventories/{inventory}/imports/{import}`), so an import of another inventory is a 404.
+     *
+     * @return HasMany<Import, $this>
+     */
+    public function imports(): HasMany
+    {
+        return $this->hasMany(Import::class);
+    }
+
+    /**
      * The items of the inventory. Unordered: the caller says whether it wants the newest first or something else.
      *
      * @return HasMany<Item, $this>

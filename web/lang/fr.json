@@ -947,5 +947,16 @@
     "A PDF of this inventory cannot hold more than :count item: choose another format, or a view with fewer items.|A PDF of this inventory cannot hold more than :count items: choose another format, or a view with fewer items.": "Un PDF de cet inventaire ne peut pas contenir plus de :count article : choisissez un autre format, ou une vue avec moins d'articles.|Un PDF de cet inventaire ne peut pas contenir plus de :count articles : choisissez un autre format, ou une vue avec moins d'articles.",
     "None of these items has a file to put in the zip.": "Aucun de ces articles n'a de fichier à mettre dans le zip.",
     "This export is not ready yet.": "Cet export n'est pas encore prêt.",
-    "This export has expired.": "Cet export a expiré."
+    "This export has expired.": "Cet export a expiré.",
+    "Some rows are not valid, so nothing was imported. Correct them in the file, or choose to skip the rows in error, and import it again.": "Certaines lignes ne sont pas valides, donc rien n'a été importé. Corrigez-les dans le fichier, ou choisissez d'ignorer les lignes en erreur, puis importez-le à nouveau.",
+    "The file holds more rows than an import may take.": "Le fichier contient plus de lignes qu'un import n'en accepte.",
+    "A column you made a choice field of holds too many different values for a list of choices.": "Une colonne dont vous avez fait un champ à choix contient trop de valeurs différentes pour une liste de choix.",
+    "A column you made a choice field of holds no value, so the field would have no choice.": "Une colonne dont vous avez fait un champ à choix ne contient aucune valeur : le champ n'aurait aucun choix.",
+    "The fields of the inventory changed while the import was waiting, so nothing was imported. Start the import again.": "Les champs de l'inventaire ont changé pendant l'attente de l'import, donc rien n'a été importé. Relancez l'import.",
+    "The import would take the inventory past the number of items it may hold, so nothing was imported.": "L'import dépasserait le nombre d'articles que l'inventaire peut contenir, donc rien n'a été importé.",
+    "The import would take the inventory past the number of fields it may have, so nothing was imported.": "L'import dépasserait le nombre de champs que l'inventaire peut avoir, donc rien n'a été importé.",
+    "You are no longer allowed to change the items of this inventory, so nothing was imported.": "Vous n'avez plus le droit de modifier les articles de cet inventaire, donc rien n'a été importé.",
+    "The file could not be read any more, so nothing was imported. Send it again.": "Le fichier n'a plus pu être lu, donc rien n'a été importé. Envoyez-le à nouveau.",
+    "The import could not be done. Try again.": "L'import n'a pas pu être fait. Réessayez.",
+    "The import did not finish and was cancelled. Try again.": "L'import ne s'est pas terminé et a été annulé. Réessayez."
 }

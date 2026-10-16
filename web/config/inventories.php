@@ -121,7 +121,8 @@ return [
     |   the time since it started instead: it is given up on after the time a
     |   job may run (15 minutes) plus 5, whenever it was asked for.
     |
-    | The jobs that write the files go on their own queue, `exports`: the Docker
+    | The jobs that write the files go on their own queue, `exports` (the imports
+    |   use it too: both are heavy): the Docker
     |   example runs a worker for it (`export-worker`, `QUEUE_WORKER_QUEUES=exports`)
     |   next to the one of the short jobs (`default`). A single worker must listen
     |   to both, `--queue=default,exports`, which the image's worker does without
@@ -139,6 +140,67 @@ return [
     'pdf_max_items' => (int) env('INVENTORIES_PDF_MAX_ITEMS', 500),
 
     'export_stale_minutes' => (int) env('INVENTORIES_EXPORT_STALE_MINUTES', 60),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Imports
+    |--------------------------------------------------------------------------
+    |
+    | An editor of a workspace can bring the rows of a spreadsheet (XLSX, ODS) or
+    | of a CSV, TSV or TXT file into an inventory, creating the fields it needs
+    | from the columns. The file is read once when it is sent, to propose where
+    | each column goes, then a queued job (on the same `exports` queue as the
+    | exports: the heavy jobs) converts, checks and writes the rows in one
+    | transaction. The file is stored with the other private files, under the
+    | folder of its inventory, and deleted as soon as the job ends.
+    |
+    | - `imports_per_minute`: files one person may send, or analyse again, in a
+    |   minute (`INVENTORIES_IMPORTS_PER_MINUTE`, 10), `429` beyond.
+    | - `max_active_imports`: imports one person may have at once **for one
+    |   inventory**, not yet finished (sent, waiting or running)
+    |   (`INVENTORIES_MAX_ACTIVE_IMPORTS`, 3): the API answers 409
+    |   (`import_limit_reached`) beyond, until one is started and ends, or
+    |   deleted. Counted under the lock of the person's row.
+    | - `import_max_size`: bytes the file may weigh
+    |   (`INVENTORIES_IMPORT_MAX_SIZE_MB`, megabytes, 10), `422` beyond.
+    | - `import_max_rows`: rows with something in them the file may hold, the
+    |   header not counted (`INVENTORIES_IMPORT_MAX_ROWS`, 10000): the import
+    |   fails (`too_many_rows`) beyond. The quota of items of the inventory
+    |   (`max_items`) applies too.
+    | - `import_max_columns`: columns the file may use
+    |   (`INVENTORIES_IMPORT_MAX_COLUMNS`, 200): `422` beyond.
+    | - `import_max_unpacked_size`: bytes all the parts of a spreadsheet may
+    |   weigh once unpacked (`INVENTORIES_IMPORT_MAX_UNPACKED_SIZE_MB`,
+    |   megabytes, 100): a spreadsheet is a zip archive, and a small one can
+    |   unpack to gigabytes. The sizes announced by the archive are summed
+    |   before anything is read, and the file is refused (`422`) beyond.
+    | - `import_ttl_hours`: hours a file that was sent but not started is kept,
+    |   and a finished import with its report is kept
+    |   (`INVENTORIES_IMPORT_TTL_HOURS`, 24), then purged by
+    |   `inventaire:prune-imports`.
+    | - `import_stale_minutes`: minutes after which an import that is still
+    |   waiting (`pending`) is marked failed by `inventaire:prune-imports`
+    |   (`INVENTORIES_IMPORT_STALE_MINUTES`, 60), counted from the day it was
+    |   started: the queue is assumed not to be running. One that is running is
+    |   judged on the time since it began instead: it is given up on after the
+    |   time a job may run (15 minutes) plus 5.
+    |
+    */
+    'imports_per_minute' => (int) env('INVENTORIES_IMPORTS_PER_MINUTE', 10),
+
+    'max_active_imports' => (int) env('INVENTORIES_MAX_ACTIVE_IMPORTS', 3),
+
+    'import_max_size' => (int) round((float) env('INVENTORIES_IMPORT_MAX_SIZE_MB', 10) * 1048576),
+
+    'import_max_rows' => (int) env('INVENTORIES_IMPORT_MAX_ROWS', 10000),
+
+    'import_max_columns' => (int) env('INVENTORIES_IMPORT_MAX_COLUMNS', 200),
+
+    'import_max_unpacked_size' => (int) round((float) env('INVENTORIES_IMPORT_MAX_UNPACKED_SIZE_MB', 100) * 1048576),
+
+    'import_ttl_hours' => (int) env('INVENTORIES_IMPORT_TTL_HOURS', 24),
+
+    'import_stale_minutes' => (int) env('INVENTORIES_IMPORT_STALE_MINUTES', 60),
 
     /*
     |--------------------------------------------------------------------------
