@@ -9,6 +9,7 @@
  */
 import { choicesOf } from './types.js';
 import { parseDecimal, toDecimalInput } from './decimal.js';
+import { maxFilesOf } from './files.js';
 import { pageLocale } from './locale.js';
 import { t } from '../lib/i18n.js';
 
@@ -22,7 +23,12 @@ const OPTION_NAMES = {
     multiselect: ['choices'],
     rating: ['max'],
     barcode: ['format'],
+    file: ['max_files'],
+    photo: ['max_files'],
 };
+
+/** The types a field of which can never be required: it is filled by uploading files, which an item can be saved without. */
+const NEVER_REQUIRED = ['file', 'photo'];
 
 /** The formats of a barcode, as the API names them. */
 export const BARCODE_FORMATS = ['any', 'ean13', 'ean8', 'upca', 'isbn10', 'isbn13'];
@@ -44,6 +50,7 @@ const BARCODE_NAMES = { ean13: 'EAN-13', ean8: 'EAN-8', upca: 'UPC-A', isbn10: '
  * @property {string} unit
  * @property {string} currency
  * @property {string} format
+ * @property {string} max_files
  * @property {ChoiceForm[]} choices
  */
 
@@ -55,6 +62,16 @@ const BARCODE_NAMES = { ean13: 'EAN-13', ean8: 'EAN-8', upca: 'UPC-A', isbn10: '
  */
 export function optionNames(type) {
     return OPTION_NAMES[type] ?? [];
+}
+
+/**
+ * Whether a field of a type can be made required (the ones filled by uploading files cannot).
+ *
+ * @param {string} type
+ * @returns {boolean}
+ */
+export function canBeRequired(type) {
+    return !NEVER_REQUIRED.includes(type);
 }
 
 /**
@@ -86,6 +103,7 @@ export function optionsToForm(type, options = null) {
         unit: String(stored.unit ?? ''),
         currency: String(stored.currency ?? 'EUR'),
         format: String(stored.format ?? 'any'),
+        max_files: String(maxFilesOf({ options: stored })),
         choices:
             choices.length > 0
                 ? choices.map((choice) => ({ id: choice.id, label: choice.label, color: choice.color ?? '' }))
@@ -131,6 +149,7 @@ export function formToOptions(type, form, opened = null) {
         unit: () => (form.unit.trim() === '' ? null : form.unit.trim()),
         currency: () => form.currency || null,
         format: () => form.format || null,
+        max_files: () => wholeNumber(form.max_files),
         choices: () =>
             opened !== null && JSON.stringify(form.choices) === JSON.stringify(opened.choices)
                 ? undefined
@@ -203,6 +222,10 @@ export function summarizeOptions(field, currencyName) {
             break;
         case 'barcode':
             parts.push(t('fields.summary.format', { format: barcodeFormatName(options.format ?? 'any') }));
+            break;
+        case 'file':
+        case 'photo':
+            parts.push(t('fields.summary.max_files', { count: maxFilesOf(field) }));
             break;
         default:
     }

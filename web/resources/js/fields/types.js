@@ -18,19 +18,22 @@
  * Everything shown is data for `x-text` and attribute bindings, never markup.
  */
 import { cell, emptyCell } from './cell.js';
+import { filesCell } from './files.js';
 import { formatDecimal, formatMoney, formatPercentage, parseDecimal, toDecimalInput } from './decimal.js';
 import { dateFormat, pageLocale } from './locale.js';
 import { badgeClass } from './palette.js';
 import { t } from '../lib/i18n.js';
 
 /**
- * @typedef {'input' | 'textarea' | 'select' | 'checks' | 'tags' | 'rating' | 'color'} Control
+ * @typedef {'input' | 'textarea' | 'select' | 'checks' | 'tags' | 'rating' | 'color' | 'files'} Control
  * The control of a form: a one-line `<input>` (text, number, date...), a `<textarea>`, a `<select>`, a list of check
- * boxes, a box of tags, a row of stars, a color picker.
+ * boxes, a box of tags, a row of stars, a color picker, the files of a photo or file field (sent one by one as they are
+ * chosen, never with the values of the item).
  *
- * @typedef {'text' | 'number' | 'temporal' | 'boolean' | 'choice' | 'choices' | 'tags'} QueryKind
+ * @typedef {'text' | 'number' | 'temporal' | 'boolean' | 'choice' | 'choices' | 'tags' | 'files'} QueryKind
  * How the server sorts and filters a type (`query_kind` of a field): text by collation, numbers as numbers, dates, moments
- * and times in their stored form, a yes / no, one choice, several choices (cannot be sorted), tags (cannot be sorted).
+ * and times in their stored form, a yes / no, one choice, several choices (cannot be sorted), tags (cannot be sorted),
+ * files (cannot be sorted; only whether there are some can be filtered).
  *
  * @typedef {object} Choice
  * @property {string} id
@@ -49,6 +52,7 @@ import { t } from '../lib/i18n.js';
  *
  * @typedef {object} DescribeOptions
  * @property {boolean} [full] Whether to show the whole value (the details of an item) rather than what fits a table cell.
+ * @property {import('./files.js').Attachment[]} [attachments] The attachments of the item, which the value of a photo or file field points to.
  *
  * @typedef {object} FieldType
  * @property {Control} control
@@ -166,6 +170,13 @@ const DECIMAL_INPUT = {
     inputMode: 'decimal',
     toInput: (value) => toDecimalInput(value, pageLocale()),
     fromInput: (input) => parseDecimal(input),
+};
+
+/** What the photo and file fields share: files are added and removed one by one, never typed in a box or sent with the values. */
+const FILES_INPUT = {
+    control: /** @type {Control} */ ('files'),
+    toInput: () => [],
+    fromInput: () => null,
 };
 
 /** @type {Record<string, FieldType>} */
@@ -394,6 +405,18 @@ export const FIELD_TYPES = {
         control: 'input',
         ...TEXT_INPUT,
         describe: (value) => cell('mono', { text: String(value) }),
+    },
+
+    // The value of a file or photo field is the list of the ids of its attachments, kept by the uploads: the form holds
+    // nothing for it and sends nothing.
+    file: {
+        ...FILES_INPUT,
+        describe: (value, field, options) => filesCell('files', value, field, options),
+    },
+
+    photo: {
+        ...FILES_INPUT,
+        describe: (value, field, options) => filesCell('photos', value, field, options),
     },
 };
 
