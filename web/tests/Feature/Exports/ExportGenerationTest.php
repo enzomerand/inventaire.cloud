@@ -12,8 +12,11 @@ use App\Inventories\InventoryFields;
 use App\Inventories\Items;
 use App\Jobs\GenerateExport;
 use App\Models\Export;
+use App\Models\Inventory;
 use App\Models\Item;
+use App\Providers\AppServiceProvider;
 use Illuminate\Database\Connection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\DevCommands;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -415,7 +418,33 @@ describe('the end of an export', function (): void {
             ->and(Export::query()->count())->toBe(0)
             ->and(exportFiles())->toBe([]);
 
-        // The export is gone: that is not an error of the server.
+        // The export is gone: that is not an error of the server, nor a warning.
+        Log::shouldNotHaveReceived('error');
+        Log::shouldNotHaveReceived('warning');
+    });
+
+    it('fails with generation_failed, and warns in the log, when a record it needs is missing while the export is still there', function (): void {
+        $case = exportFixture();
+        $export = exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv);
+        $armed = true;
+        // The inventory cannot be found when the context is made, although the export that belongs to it is there.
+        DB::listen(function (QueryExecuted $query) use (&$armed): void {
+            if ($armed && preg_match('/^select .* from [`"]inventories[`"]/i', $query->sql) === 1) {
+                $armed = false;
+
+                throw (new ModelNotFoundException)->setModel(Inventory::class, [1]);
+            }
+        });
+        Log::spy();
+
+        $export = exportRun($export);
+
+        expect($armed)->toBeFalse()
+            ->and($export->status)->toBe(ExportStatus::Failed)
+            ->and($export->error)->toBe(ExportError::GenerationFailed->value)
+            ->and(exportFiles())->toBe([]);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'a record it needs is missing') && $context['export'] === $export->ulid && $context['exception'] instanceof ModelNotFoundException)->once();
         Log::shouldNotHaveReceived('error');
     });
 
@@ -472,16 +501,50 @@ describe('the job', function (): void {
         expect(GenerateExport::QUEUE)->toBe('exports');
     });
 
-    it('is listened to by the worker of the image and by `composer dev`, the default queue first, so that short jobs pass between exports', function (): void {
+    it('is listened to by the worker of the image, on both queues unless QUEUE_WORKER_QUEUES says otherwise, the default queue first so that short jobs pass between exports', function (): void {
         $worker = (string) file_get_contents(base_path('docker/entrypoint.sh'));
-        $dev = collect(DevCommands::commands())->firstWhere('name', 'queue');
 
-        expect($worker)->toContain('php artisan queue:work --queue=default,exports ')
-            ->and($dev)->not->toBeNull()
-            ->and($dev['command'])->toContain('queue:listen')
-            ->and($dev['command'])->toContain('--queue=default,exports')
-            // One listener only: the framework\'s own, on the default queue alone, is replaced.
-            ->and(collect(DevCommands::commands())->where('name', 'queue')->count())->toBe(1);
+        // An older compose file, which sets nothing, still runs the exports.
+        expect($worker)->toContain('php artisan queue:work --queue="${QUEUE_WORKER_QUEUES:-default,exports}" ');
+    });
+
+    it('is given a worker of its own by the Docker example, next to the one of the short jobs', function (): void {
+        $compose = (string) file_get_contents(base_path('docker/compose.yaml'));
+        // The lines of a service: from its name to the next line that is not indented below it.
+        $service = fn (string $name): string => preg_match('/^    '.preg_quote($name, '/').':\n((?:(?: {8,}.*)?\n)+)/m', $compose, $matches) === 1 ? $matches[1] : '';
+
+        expect($service('worker'))->toMatch('/^\s+QUEUE_WORKER_QUEUES: default$/m')
+            ->and($service('export-worker'))->toMatch('/^\s+QUEUE_WORKER_QUEUES: '.GenerateExport::QUEUE.'$/m')
+            // Both are the worker of the image (the anchor holds `command: worker`).
+            ->and($service('worker'))->toContain('<<: *worker')
+            ->and($service('export-worker'))->toContain('<<: *worker')
+            ->and($compose)->toContain("x-worker: &worker\n    <<: *app\n    command: worker\n");
+    });
+
+    it('is listened to by `composer dev` on a development machine, the default queue first', function (): void {
+        // The registry is the process\'s: start from an empty one, and put back what was there.
+        $registry = new ReflectionProperty(DevCommands::class, 'commands');
+        $saved = $registry->getValue();
+        $registry->setValue(null, []);
+
+        try {
+            app()->instance('env', 'production');
+            (new AppServiceProvider(app()))->boot();
+
+            expect(collect(DevCommands::commands())->where('name', 'queue')->count())->toBe(0);
+
+            app()->instance('env', 'local');
+            (new AppServiceProvider(app()))->boot();
+            $dev = collect(DevCommands::commands())->firstWhere('name', 'queue');
+
+            expect($dev)->not->toBeNull()
+                ->and($dev['command'])->toContain('queue:listen')
+                ->and($dev['command'])->toContain('--queue=default,exports')
+                // One listener only: the framework\'s own, on the default queue alone, is replaced.
+                ->and(collect(DevCommands::commands())->where('name', 'queue')->count())->toBe(1);
+        } finally {
+            $registry->setValue(null, $saved);
+        }
     });
 
     it('is picked by a worker that listens to the default queue and the exports, and dropped, not failed, when its export was deleted before it runs', function (): void {

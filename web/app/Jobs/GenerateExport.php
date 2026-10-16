@@ -22,7 +22,10 @@ use Throwable;
  * 960 seconds).
  *
  * The job goes on its own queue, `exports` ({@see self::QUEUE}), so that a long export does not hold up the short jobs (mails,
- * file purges) behind it: a worker listens to `default` first, then `exports` (`queue:work --queue=default,exports`).
+ * file purges) behind it. The Docker example runs a worker for each: `worker` on `default` and `export-worker` on `exports`
+ * (`QUEUE_WORKER_QUEUES` of the image's entrypoint). A single worker, with that variable unset, listens to both, `default` first
+ * (`queue:work --queue=default,exports`), as `composer dev` does: the exports are written, but a long one holds up the short jobs
+ * that arrive behind it.
  *
  * The export is serialized by its key, not as a snapshot (`SerializesModels`) and read again when the job runs: one deleted before
  * that is no failure, the job is dropped (`deleteWhenMissingModels`). One that was killed (a timeout, a worker stopped) is recorded

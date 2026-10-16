@@ -27,9 +27,9 @@ use ZipArchive;
  *
  * Only a file that is **missing** from its disk is skipped and logged: the export of the others goes on. Any other problem (a
  * file that exists but cannot be read, a copy that comes out short or cannot be written, a disk that does not answer) fails the
- * whole export, which the person can ask for again: a zip that silently lacks files would be taken for a complete one. A file
- * that disappears from the local disk between the moment it is added and the moment the zip is closed fails the export too, with
- * a clear error.
+ * whole export, which the person can ask for again: a zip that silently lacks files would be taken for a complete one. So does an
+ * export whose files are **all** missing: an empty zip is only for a scope that has no file to begin with. A file that disappears
+ * from the local disk between the moment it is added and the moment the zip is closed fails the export too, with a clear error.
  */
 final class ZipWriter implements ExportWriter
 {
@@ -47,7 +47,7 @@ final class ZipWriter implements ExportWriter
     /**
      * Writes the zip.
      *
-     * @throws RuntimeException When the zip cannot be written.
+     * @throws RuntimeException When the zip cannot be written, or when every file of the scope is missing from its disk.
      */
     public function write(ExportContext $context, string $path): int
     {
@@ -62,6 +62,7 @@ final class ZipWriter implements ExportWriter
         $scratch = [];
         $items = 0;
         $entries = 0;
+        $skipped = 0;
         $closed = false;
 
         try {
@@ -79,6 +80,8 @@ final class ZipWriter implements ExportWriter
                     $source = $this->source($file, $scratch);
 
                     if ($source === null) {
+                        $skipped++;
+
                         continue;
                     }
 
@@ -95,15 +98,20 @@ final class ZipWriter implements ExportWriter
                 $items++;
             }
 
+            // Files were asked for and none could be read: completing with an empty zip would pass for an export of nothing, while
+            // the person has photos. Thrown before the archive is closed, so that the cleanup below discards it.
+            if ($entries === 0 && $skipped > 0) {
+                throw new RuntimeException("None of the {$skipped} files of the export could be added to the zip: they are all missing from their disk.");
+            }
+
             // The library reads the files, and writes the archive, only now. It is closed either way (a failure discards it).
             $closed = true;
 
+            $this->close($zip);
+
             // An archive without an entry is not written at all: leave the empty one a reader accepts (just its end marker).
             if ($entries === 0) {
-                $zip->close();
                 $this->writeEmpty($path);
-            } else {
-                $this->close($zip);
             }
         } finally {
             if (! $closed) {

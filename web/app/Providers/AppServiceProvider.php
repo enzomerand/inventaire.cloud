@@ -59,8 +59,11 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('admin', fn (User $user): bool => $user->is_admin);
 
         // `composer dev` (`artisan dev`) runs a queue listener; the framework's one only listens to `default`, and the exports are
-        // on their own queue (see GenerateExport). `default` first, as the worker of the Docker image does.
-        DevCommands::artisan('queue:listen --tries=1 --timeout=0 --queue=default,'.GenerateExport::QUEUE, 'queue');
+        // on their own queue (see GenerateExport). `default` first, as the worker of the Docker image does. Only on a
+        // development machine: `artisan dev` is not run anywhere else.
+        if ($this->app->isLocal()) {
+            DevCommands::artisan('queue:listen --tries=1 --timeout=0 --queue=default,'.GenerateExport::QUEUE, 'queue');
+        }
 
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();

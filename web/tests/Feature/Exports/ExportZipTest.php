@@ -319,6 +319,26 @@ describe('what cannot be added', function (): void {
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'could not be read for a zip export') && $context['attachment'] === $case['files']['front']->ulid)->once();
     });
 
+    it('fails the export, instead of completing with an empty zip, when every file of the scope is gone from its disk', function (): void {
+        $case = zipCase();
+        // The two photos are the files of the scope; the document and the plain attachment are not asked for.
+        Storage::disk(ATTACHMENT_TEST_DISK)->delete($case['files']['front']->path);
+        Storage::disk(ATTACHMENT_TEST_DISK)->delete($case['files']['back']->path);
+        Log::spy();
+        $before = zipScratch();
+
+        $export = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Zip));
+
+        expect($export->status)->toBe(ExportStatus::Failed)
+            ->and($export->error)->toBe(ExportError::GenerationFailed->value)
+            ->and($export->path)->toBeNull()
+            ->and(array_filter(storedFiles(), fn (string $file): bool => str_contains($file, '/exports/')))->toBe([])
+            ->and(zipScratch())->toBe($before);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'could not be read for a zip export'))->twice();
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($context['exception']->getMessage(), 'None of the 2 files'))->once();
+    });
+
     it('copies the file to a scratch file first when its disk is not a local one, and deletes the copy', function (): void {
         $case = zipCase();
         config(['filesystems.disks.'.ATTACHMENT_TEST_DISK.'.driver' => 's3']);

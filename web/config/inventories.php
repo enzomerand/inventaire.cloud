@@ -113,15 +113,19 @@ return [
     |   4 MiB (cards): raise the limit with that in mind. The other formats are
     |   streamed and have no limit but the quota of items of an inventory.
     | - `export_stale_minutes`: minutes after which an export that is still
-    |   waiting (`pending`) is given up as failed by `inventaire:prune-exports`
-    |   (`INVENTORIES_EXPORT_STALE_MINUTES`, 60): the queue is not running. One
-    |   that is running is judged on the time since it started instead: it is
-    |   given up on after the time a job may run (15 minutes) plus 5, whenever it
-    |   was asked for, so that a backlog does not fail the exports that wait.
+    |   waiting (`pending`) is marked failed by `inventaire:prune-exports`
+    |   (`INVENTORIES_EXPORT_STALE_MINUTES`, 60), counted from the day it was
+    |   asked for: the queue is assumed not to be running. Its job may still be
+    |   in the queue, and exits without writing anything when it is picked up,
+    |   since the export is no longer pending. One that is running is judged on
+    |   the time since it started instead: it is given up on after the time a
+    |   job may run (15 minutes) plus 5, whenever it was asked for.
     |
-    | The jobs that write the files go on their own queue, `exports`: run the
-    |   worker with `--queue=default,exports` (the Docker image and
-    |   `composer dev` do).
+    | The jobs that write the files go on their own queue, `exports`: the Docker
+    |   example runs a worker for it (`export-worker`, `QUEUE_WORKER_QUEUES=exports`)
+    |   next to the one of the short jobs (`default`). A single worker must listen
+    |   to both, `--queue=default,exports`, which the image's worker does without
+    |   `QUEUE_WORKER_QUEUES` and `composer dev` does.
     |
     */
     'exports_per_minute' => (int) env('INVENTORIES_EXPORTS_PER_MINUTE', 10),

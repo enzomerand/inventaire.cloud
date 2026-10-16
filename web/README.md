@@ -368,7 +368,7 @@ The upgrade that follows brings dates stored in UTC. Until then they were stored
 
 ## Self-hosting with Docker
 
-The image bundles PHP, the web server (FrankenPHP) and the built front end: you need Docker with Compose, not PHP or Node. `docker/compose.yaml` is a ready-to-use example with the application, a queue worker, a scheduler and PostgreSQL.
+The image bundles PHP, the web server (FrankenPHP) and the built front end: you need Docker with Compose, not PHP or Node. `docker/compose.yaml` is a ready-to-use example with the application, two queue workers (`worker` for the short jobs, `export-worker` for the exports), a scheduler and PostgreSQL.
 
 ```bash
 cd docker
@@ -398,13 +398,13 @@ git pull
 docker compose up -d --build
 ```
 
-When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If the update fails (a migration, for instance) the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. Compose restarts the worker and the scheduler whenever it recreates or restarts `app` (`restart: true` in their `depends_on`), so they run the new code once the application is healthy. Back up before updating.
+When the `app` container starts on an installed instance it runs `inventaire:upgrade --optimize` before serving: the migrations are applied and the caches rebuilt. If the update fails (a migration, for instance) the container stops with a non-zero status instead of serving a half-updated instance; read `docker compose logs app`. Compose restarts the workers and the scheduler whenever it recreates or restarts `app` (`restart: true` in their `depends_on`), so they run the new code once the application is healthy. Back up before updating.
 
 To run the update by hand, without recreating the containers:
 
 ```bash
 docker compose exec app php artisan inventaire:upgrade --optimize
-docker compose restart worker scheduler
+docker compose restart worker export-worker scheduler
 ```
 
 ### Another database server

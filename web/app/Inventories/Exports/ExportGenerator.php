@@ -73,8 +73,14 @@ final class ExportGenerator
             App::setLocale($export->locale);
             $scratch = ExportTemp::file();
             $this->generate($export, $scratch, $path);
-        } catch (ModelNotFoundException) {
-            // The export, its inventory or its workspace was deleted while the file was written: nothing to report, only what was stored to purge.
+        } catch (ModelNotFoundException $exception) {
+            // The export, its inventory or its workspace was deleted while the file was written: the export is gone with them, there
+            // is nothing to report, only what was stored to purge. A model that is missing while the export is still there is
+            // something else (a record the export depends on, lost), and it is told in the log before the export is failed.
+            if (Export::query()->whereKey($export->getKey())->exists()) {
+                Log::warning('An export could not be generated: a record it needs is missing.', ['export' => $export->ulid, 'format' => $export->format->value, 'exception' => $exception]);
+            }
+
             $this->fail($export, ExportError::GenerationFailed, $path);
         } catch (ValidationException) {
             $this->fail($export, ExportError::InvalidQuery, $path);

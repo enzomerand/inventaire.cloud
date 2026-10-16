@@ -4,7 +4,8 @@
 # The first argument chooses what the container does; "app" is the default.
 #
 #   app        The web server, after updating or installing the instance.
-#   worker     The queue worker. It waits until the instance is installed.
+#   worker     The queue worker. It waits until the instance is installed. QUEUE_WORKER_QUEUES chooses
+#              the queues it listens to, in priority order (default: `default,exports`).
 #   scheduler  The task scheduler. It waits until the instance is installed.
 #   other      Any other command is run as it is.
 
@@ -102,8 +103,11 @@ case "$role" in
         ;;
     worker)
         wait_until_installed
-        # `default` first: the short jobs (mails, file purges) pass between two exports, which go on their own queue.
-        exec php artisan queue:work --queue=default,exports --tries=3 --max-time=3600
+        # The queues come from the environment so that the exports, which may run for 15 minutes, can have a worker of their own
+        # (the `export-worker` service of docker/compose.yaml) and never hold up the short jobs (mails, file purges). Without the
+        # variable, one worker listens to both, `default` first so that the short jobs pass between two exports: an older
+        # compose file, which has no export worker, still runs the exports.
+        exec php artisan queue:work --queue="${QUEUE_WORKER_QUEUES:-default,exports}" --tries=3 --max-time=3600
         ;;
     scheduler)
         wait_until_installed

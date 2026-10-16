@@ -16,7 +16,9 @@ use Illuminate\Database\Eloquent\Builder;
  * (`stale`) so that the person is told, and kept as long as any other failed export before it expires in turn. What "never ended"
  * means depends on where it is stuck, because a queue with a backlog makes an export wait without anything being wrong:
  *
- * - `pending` is stale when it was **asked for** more than `inventories.export_stale_minutes` ago;
+ * - `pending` is stale when it was **asked for** more than `inventories.export_stale_minutes` ago: it is marked failed even
+ *   though its job may still be queued behind a long backlog. That job then exits without writing anything, because the export is
+ *   no longer pending ({@see ExportGenerator::run()});
  * - `running` is stale when it was **started** more than the time a job may run ({@see GenerateExport::TIMEOUT}) plus a margin
  *   ago, whenever it was asked for: one that waited for hours behind others and started a minute ago is left to finish.
  *
