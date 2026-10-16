@@ -57,6 +57,18 @@ describe('the language of a public page', function (): void {
         ['/fr/templates/sample-tools?utm=x&a=1', '/templates/sample-tools?a=1&utm=x'],
     ]);
 
+    it('redirects to the address of the instance (APP_URL), never to the Host header of the request', function (string $from, string $to): void {
+        config(['app.url' => 'https://inventaire.example/']);
+
+        $response = $this->get($from, ['Host' => 'evil.example', 'X-Forwarded-Host' => 'evil.example'])->assertStatus(301);
+
+        expect($response->headers->get('Location'))->toBe($to);
+    })->with([
+        ['/fr/templates', 'https://inventaire.example/templates'],
+        ['/fr/templates/sample-tools', 'https://inventaire.example/templates/sample-tools'],
+        ['/fr/templates/sample-tools?b=2&a=1', 'https://inventaire.example/templates/sample-tools?a=1&b=2'],
+    ]);
+
     it('is not found for a language the application does not support', function (string $path): void {
         $this->get($path)->assertNotFound();
     })->with(['/de/templates', '/de/templates/sample-tools', '/EN/templates', '/en-US/templates', '/xx/templates', '/app/templates']);

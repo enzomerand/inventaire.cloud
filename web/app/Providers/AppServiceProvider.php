@@ -66,16 +66,19 @@ class AppServiceProvider extends ServiceProvider
     /**
      * The rate limiter of the endpoint that uploads a file to an item (limit in config/inventories.php,
      * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the one
-     * of the public endpoints of the catalogue of templates (`templates_per_minute`), keyed on the network.
+     * of the public endpoints and pages of the catalogue of templates (`templates_per_minute`), keyed on the user when there is
+     * one, else on the network.
      */
     private function registerInventoryLimiters(): void
     {
         RateLimiter::for('attachment-upload', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.uploads_per_minute'))
             ->by('attachment-upload:'.$this->signedInKey($request)));
 
-        // The catalogue of templates is public: anybody may read it, so the network is what is counted.
+        // The catalogue of templates is public: anybody may read it. A signed-in person is counted on their own (many people
+        // share a network, an office or a mobile operator, and one of them must not use the pace of the others); a visitor
+        // is counted on their network.
         RateLimiter::for('templates', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.templates_per_minute'))
-            ->by('templates:'.ClientNetwork::key($request->ip())));
+            ->by('templates:'.$this->signedInKey($request)));
     }
 
     /**

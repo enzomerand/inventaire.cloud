@@ -6,9 +6,11 @@ use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Installer\PostMigrationHook;
 use App\Inventories\SearchText;
+use App\Inventories\Templates\TemplateCatalogue;
 use App\Settings\InstanceSettings;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -16,6 +18,7 @@ use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
 require_once __DIR__.'/../../Support/inventories.php';
+require_once __DIR__.'/../../Support/templates.php';
 
 /**
  * Replaces one of the framework's (or a package's) commands with a stand-in that
@@ -170,6 +173,48 @@ it('clears the configuration, route, view and event caches and the packages\' on
     expect($this->calls->getArrayCopy())->toBe(['icons:clear'])
         ->and(cache()->get('upgrade-test'))->toBe('kept')
         ->and(is_file($kept) ? filemtime($kept) : null)->toBe($keptBefore);
+});
+
+it('forgets the verdict on the inventory templates, and only that', function (): void {
+    $folder = templateFolder();
+    copy(base_path('tests/Fixtures/templates/sample-shop.json'), $folder.'/sample-shop.json');
+    file_put_contents($folder.'/broken.json', '{"category": ');
+    templateCatalogueFrom($folder);
+    cache()->put('upgrade-test', 'kept', 60);
+    Log::spy();
+
+    $catalogue = app(TemplateCatalogue::class);
+    $catalogue->all();
+    $catalogue->flush();
+    $catalogue->all();
+
+    // Judged once: the second question found the verdict in the cache.
+    Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'not valid JSON'))->once();
+
+    try {
+        $this->artisan('inventaire:upgrade')->expectsOutputToContain('The caches were cleared.')->assertExitCode(0);
+        $catalogue->all();
+    } finally {
+        templateRemoveFolder($folder);
+    }
+
+    // Judged again after the upgrade, and the rest of the application cache was left alone.
+    Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'not valid JSON'))->twice();
+    expect(cache()->get('upgrade-test'))->toBe('kept')
+        ->and($catalogue->find('sample-shop'))->not->toBeNull();
+});
+
+it('does not fail when the verdict on the inventory templates cannot be forgotten, and says so', function (): void {
+    Cache::shouldReceive('forget')->andThrow(new RuntimeException('cache down'));
+    Cache::makePartial();
+    Log::spy();
+
+    $this->artisan('inventaire:upgrade')
+        ->expectsOutputToContain('The inventory templates could not be judged again (RuntimeException, see the log)')
+        ->expectsOutputToContain('The caches were cleared.')
+        ->assertExitCode(0);
+
+    Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'could not be forgotten'))->once();
 });
 
 describe('the derived data', function (): void {

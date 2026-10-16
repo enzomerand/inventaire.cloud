@@ -598,6 +598,7 @@
     "The application is not installed yet.": "L'application n'est pas encore installée.",
     "The application key is missing and the .env file is not writable. Set APP_KEY in the environment, or make the .env file writable.": "La clé de l'application est absente et le fichier .env n'est pas accessible en écriture. Définissez APP_KEY dans l'environnement, ou rendez le fichier .env modifiable.",
     "The caches were cleared.": "Les caches ont été vidés.",
+    "The inventory templates could not be judged again (:error, see the log): a changed template may take up to a day to show.": "Les modèles d'inventaire n'ont pas pu être réexaminés (:error, voir le journal) : un modèle modifié peut mettre jusqu'à un jour à apparaître.",
     "The command :command failed, so that cache was not rebuilt: the instance works, only slower. Fix the cause above and run inventaire:upgrade --optimize again.": "La commande :command a échoué, ce cache n'a donc pas été reconstruit : l'instance fonctionne, en plus lent. Corrigez la cause ci-dessus puis relancez inventaire:upgrade --optimize.",
     "The command :command failed.": "La commande :command a échoué.",
     "The conditions on a field must be given by operator.": "Les conditions sur un champ doivent être données par opérateur.",

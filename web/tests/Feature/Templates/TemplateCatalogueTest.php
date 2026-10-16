@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Inventories\Templates\Template;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Inventories\Templates\TemplateCategories;
+use App\Inventories\Templates\TemplateValidator;
 use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../../Support/templates.php';
@@ -164,6 +165,60 @@ describe('a file that cannot be used', function (): void {
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_ends_with($context['file'] ?? '', 'huge.json'))->once();
 
         rmdir($folder.'/folder.json');
+    });
+
+    it('is left out, with a message that says so, when it is written in a newer format of the files', function (): void {
+        $folder = templateFolder();
+        copy(base_path('tests/Fixtures/templates/sample-shop.json'), $folder.'/sample-shop.json');
+        file_put_contents($folder.'/from-the-future.json', json_encode(templateWith(templateWith(templateData(), 'format', TemplateValidator::FORMAT + 1), 'something-new', ['a' => 1])));
+        file_put_contents($folder.'/current-format.json', json_encode(templateWith(templateData(), 'format', TemplateValidator::FORMAT)));
+
+        Log::spy();
+        templateCatalogueFrom($folder);
+        $catalogue = app(TemplateCatalogue::class);
+
+        expect(array_map(fn (Template $template): string => $template->slug, $catalogue->all()))->toBe(['current-format', 'sample-shop'])
+            ->and($catalogue->rejected())->toBe([['file' => 'from-the-future.json', 'reasons' => ['The file needs a newer inventaire.cloud (format 2; this version reads up to format 1).']]]);
+
+        Log::shouldHaveReceived('warning')->once();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'needs a newer inventaire.cloud') && str_ends_with($context['file'] ?? '', 'from-the-future.json') && ($context['format'] ?? null) === 2)->once();
+    });
+
+    it('is not looked at when its name starts with an underscore or a dot, nor is a file that is not JSON', function (): void {
+        $folder = templateFolder();
+        copy(base_path('tests/Fixtures/templates/sample-shop.json'), $folder.'/sample-shop.json');
+        // Drafts and notes, valid or not: neither listed, nor judged, nor logged.
+        copy(base_path('tests/Fixtures/templates/sample-tools.json'), $folder.'/_sample-tools.json');
+        file_put_contents($folder.'/_draft.json', '{"half": ');
+        file_put_contents($folder.'/.hidden.json', '"text"');
+        file_put_contents($folder.'/.json', '[]');
+        file_put_contents($folder.'/_.json', '[]');
+        file_put_contents($folder.'/README.md', 'Notes.');
+
+        Log::spy();
+        templateCatalogueFrom($folder);
+        $catalogue = app(TemplateCatalogue::class);
+
+        expect(array_map(fn (Template $template): string => $template->slug, $catalogue->all()))->toBe(['sample-shop'])
+            ->and($catalogue->find('_sample-tools'))->toBeNull()
+            ->and($catalogue->rejected())->toBe([])
+            ->and(TemplateCatalogue::slugOf('sample-shop.json'))->toBe('sample-shop')
+            ->and(TemplateCatalogue::slugOf('_draft.json'))->toBeNull()
+            ->and(TemplateCatalogue::slugOf('.hidden.json'))->toBeNull()
+            ->and(TemplateCatalogue::slugOf('notes.txt'))->toBeNull();
+
+        Log::shouldNotHaveReceived('warning');
+    });
+
+    it('keeps a $schema and x- keys of the file without a complaint', function (): void {
+        $folder = templateFolder();
+        file_put_contents($folder.'/annotated.json', json_encode(['$schema' => 'https://example.test/schema.json', 'x-notes' => 'for the reviewers'] + templateData()));
+
+        Log::spy();
+        templateCatalogueFrom($folder);
+
+        expect(app(TemplateCatalogue::class)->find('annotated')?->name('en'))->toBe('Shop stock');
+        Log::shouldNotHaveReceived('warning');
     });
 
     it('gives an empty catalogue, and one warning, for a folder that does not exist', function (): void {

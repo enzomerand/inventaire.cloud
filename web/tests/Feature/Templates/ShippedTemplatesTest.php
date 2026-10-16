@@ -24,7 +24,10 @@ function shippedTemplateFiles(): array
     $files = [];
 
     foreach (glob(base_path('inventory-templates').'/*.json') ?: [] as $file) {
-        $files[basename($file, '.json')] = $file;
+        // The catalogue does not look at a file whose name starts with an underscore: a draft is not judged here either.
+        if (TemplateCatalogue::slugOf(basename($file)) !== null) {
+            $files[basename($file, '.json')] = $file;
+        }
     }
 
     ksort($files);

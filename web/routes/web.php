@@ -33,10 +33,11 @@ Route::get('/', HomePageController::class)->name('home');
 // The public pages of the templates (the gallery and one page for each template), rendered by the server so that search
 // engines read them. They exist once per language, each with an address of its own: the language of the instance has no
 // prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
-// permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale).
+// permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale). They are public and
+// rendered from files, so they are limited in pace like the endpoints of the API (the `templates` limiter).
 $localeCodes = implode('|', array_map(fn (int|string $code): string => preg_quote((string) $code, '/'), array_keys(config()->array('app.locale_names'))));
 
-Route::middleware(UseUrlLocale::class)->group(function () use ($localeCodes): void {
+Route::middleware(['throttle:templates', UseUrlLocale::class])->group(function () use ($localeCodes): void {
     Route::get('/templates', TemplateGalleryController::class)->name('templates.index');
     Route::get('/templates/{slug}', TemplatePageController::class)->name('templates.show');
 
@@ -48,10 +49,11 @@ Route::middleware(UseUrlLocale::class)->group(function () use ($localeCodes): vo
 });
 
 // What robots read. Routes, not files of public/ (a web server would serve a file before the application, and the answer
-// depends on APP_INDEXABLE). Robots keep no session: nothing here starts one or sets a cookie.
+// depends on APP_INDEXABLE). Robots keep no session: nothing here starts one or sets a cookie. The sitemap reads the
+// whole catalogue, so it has the same limit as the pages it lists.
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
     Route::get('/robots.txt', RobotsController::class)->name('robots');
-    Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');
+    Route::get('/sitemap.xml', SitemapController::class)->middleware('throttle:templates')->name('sitemap');
 });
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Inventories\Templates\TemplateIcons;
+use App\Inventories\Templates\TemplateValidator;
 
 require_once __DIR__.'/../../Support/templates.php';
 
@@ -65,6 +66,34 @@ describe('the file', function (): void {
 
     it('refuses a key that is not part of the format', function (): void {
         expectTemplateError(templateWith(templateData(), 'colour', 'red'), 'colour: this key is not part of the format');
+    });
+
+    it('may say which version of the format it is written in, and is in the first one when it does not', function (mixed $format): void {
+        expect(templateErrors(templateWith(templateData(), 'format', $format)))->toBe([])
+            ->and(templateErrors(templateData()))->toBe([]);
+    })->with(['the first' => [1]]);
+
+    it('refuses a version of the format that is not a whole number, 1 or more', function (mixed $format): void {
+        expectTemplateError(templateWith(templateData(), 'format', $format), 'format: must be a whole number, 1 or more.');
+    })->with(['zero' => [0], 'negative' => [-1], 'a text' => ['1'], 'a decimal' => [1.5], 'null' => [null], 'a boolean' => [true], 'a list' => [[1]]]);
+
+    it('refuses a newer version of the format with a message that says so, and judges nothing else', function (): void {
+        $data = templateWith(templateWith(templateData(), 'format', TemplateValidator::FORMAT + 1), 'new_key_of_the_future', ['anything']);
+
+        expect(templateErrors($data))->toBe(['format: this file needs a newer inventaire.cloud (format 2; this version reads up to format 1).']);
+    });
+
+    it('tolerates a $schema and keys that start with x- at the top level, and nothing else of the kind', function (): void {
+        $data = templateData();
+        $data['$schema'] = 'https://inventaire.cloud/schemas/template.json';
+        $data['x-notes'] = ['anything', 'at all'];
+        $data['x-author'] = 'someone';
+
+        expect(templateErrors($data))->toBe([]);
+
+        expectTemplateError(templateWith($data, 'X-notes', 'capital'), 'X-notes: this key is not part of the format');
+        expectTemplateError(templateWith($data, 'xnotes', 'no hyphen'), 'xnotes: this key is not part of the format');
+        expectTemplateError(templateWith(templateData(), 'fields.0.x-note', 'not on a field'), 'fields[0].x-note: this key is not part of the format');
     });
 
     it('lists every problem at once', function (): void {

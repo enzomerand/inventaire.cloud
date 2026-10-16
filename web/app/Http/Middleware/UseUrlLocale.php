@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Services\LocaleResolver;
+use App\Support\PublicUrls;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Http\Request;
@@ -23,6 +24,9 @@ use Symfony\Component\HttpFoundation\Response;
  * The routes of the other languages carry the code as the `{locale}` parameter. The language of the instance has one
  * address only, without a prefix: its prefixed address answers with a permanent redirect to it. A code the application does
  * not support does not match any route (404).
+ *
+ * The permanent redirect is to an absolute address built from `APP_URL` ({@see PublicUrls}), not from the `Host` header of
+ * the request: a shared cache must not be able to keep a redirect to a host somebody made up.
  */
 final class UseUrlLocale
 {
@@ -48,7 +52,8 @@ final class UseUrlLocale
         }
 
         if ($prefixed && $locale === $default) {
-            return redirect()->to($this->withoutPrefix($request, $locale), 301);
+            // Built from APP_URL, never from the Host header (see PublicUrls): the header is written by whoever calls.
+            return redirect()->away(PublicUrls::to($this->withoutPrefix($request, $locale)), 301);
         }
 
         // The controllers do not know the code: the page is the same, it is the language that differs.

@@ -23,6 +23,7 @@ use Illuminate\Validation\ValidationException;
  *
  * ```
  * {
+ *   "format": 1,                              optional, 1 by default: the version of this format the file is written in
  *   "category": "home",                       one of {@see TemplateCategories::KEYS}
  *   "icon": "home",                           one of {@see TemplateIcons::ALLOWED}
  *   "name":        { "fr": "...", "en": "..." },
@@ -37,6 +38,11 @@ use Illuminate\Validation\ValidationException;
  * }
  * ```
  *
+ * A file may also carry a `$schema` key (an editor's link to a JSON Schema) and keys that start with `x-` (a contributor's own
+ * notes): they are not part of the format and are ignored. A `format` higher than {@see self::FORMAT} is a file written for
+ * a newer version of the application, which cannot judge it: it is refused with a message that says so, and the catalogue
+ * leaves it out.
+ *
  * The file name (without `.json`) is the slug. Every text is written in French and English at least (and in no language the
  * application does not support), is plain text on one line (no HTML, no Markdown), and every field has the same keys in
  * every language. What is judged is not only the shape: the fields of each language are built and go through the rules of
@@ -49,6 +55,20 @@ use Illuminate\Validation\ValidationException;
  */
 final class TemplateValidator
 {
+    /**
+     * The version of the rules this class applies. Bump it whenever a file that was judged one way would be judged another
+     * (a rule added, removed or changed, a limit moved, a message that says something else, or the rules of the options
+     * of a type of field), together with the golden test (tests/Feature/Templates/TemplateValidatorGoldenTest.php), which
+     * fails whenever that happens.
+     *
+     * The catalogue keeps its verdict on the files in the cache under a key that holds this number: without it, a file
+     * judged valid by the previous rules would stay in the catalogue, for a day, after the new rules refused it.
+     */
+    public const VERSION = 1;
+
+    /** The newest version of the file format this version of the application reads (the `format` key of a file). */
+    public const FORMAT = 1;
+
     /** What a slug looks like. */
     public const SLUG_PATTERN = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
@@ -83,7 +103,7 @@ final class TemplateValidator
     public const MAX_EXAMPLES = 5;
 
     /** The keys a file may have. */
-    private const TOP_KEYS = ['category', 'icon', 'name', 'summary', 'description', 'fields', 'examples'];
+    private const TOP_KEYS = ['format', 'category', 'icon', 'name', 'summary', 'description', 'fields', 'examples'];
 
     /** The keys a field may have. */
     private const FIELD_KEYS = ['key', 'type', 'name', 'required', 'options'];
@@ -124,8 +144,17 @@ final class TemplateValidator
             return [...$errors, 'The file must hold a JSON object.'];
         }
 
+        $format = $this->checkFormat($data, $errors);
+
+        if ($format > self::FORMAT) {
+            // The rules of a newer format are unknown here: judging the rest with these ones would only invent errors.
+            return $errors;
+        }
+
         foreach (array_diff(array_map(strval(...), array_keys($data)), self::TOP_KEYS) as $key) {
-            $errors[] = "{$key}: this key is not part of the format.";
+            if ($key !== '$schema' && ! str_starts_with($key, 'x-')) {
+                $errors[] = "{$key}: this key is not part of the format.";
+            }
         }
 
         $this->checkCategoryAndIcon($data, $errors);
@@ -146,6 +175,44 @@ final class TemplateValidator
         }
 
         return $errors;
+    }
+
+    /**
+     * The version of the format a decoded file is written in: the whole number of 1 or more it says, 1 when it does not say,
+     * and null for anything else (which {@see self::validate()} refuses).
+     *
+     * @param  array<array-key, mixed>  $data
+     */
+    public static function formatOf(array $data): ?int
+    {
+        if (! array_key_exists('format', $data)) {
+            return 1;
+        }
+
+        return is_int($data['format']) && $data['format'] >= 1 ? $data['format'] : null;
+    }
+
+    /**
+     * Checks the format of the file; gives the number it is written in (the first when it says nonsense).
+     *
+     * @param  array<array-key, mixed>  $data
+     * @param  list<string>  $errors
+     */
+    private function checkFormat(array $data, array &$errors): int
+    {
+        $format = self::formatOf($data);
+
+        if ($format === null) {
+            $errors[] = 'format: must be a whole number, 1 or more.';
+
+            return 1;
+        }
+
+        if ($format > self::FORMAT) {
+            $errors[] = 'format: this file needs a newer inventaire.cloud (format '.$format.'; this version reads up to format '.self::FORMAT.').';
+        }
+
+        return $format;
     }
 
     /**
