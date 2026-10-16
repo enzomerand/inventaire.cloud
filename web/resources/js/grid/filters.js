@@ -205,16 +205,6 @@ export function filterFromDraft(field, draft) {
 }
 
 /**
- * How many fields are filtered.
- *
- * @param {Record<string, Filter>} filters
- * @returns {number}
- */
-export function filterCount(filters) {
-    return Object.keys(filters).length;
-}
-
-/**
  * The filters as chips, one per filtered field, in the order of the fields. A filter on a field the inventory no longer
  * has shows no chip (the server refuses it anyway).
  *

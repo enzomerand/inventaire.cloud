@@ -11,6 +11,7 @@ use App\Inventories\Fields\Decimal;
 use App\Inventories\Fields\DecimalType;
 use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
+use App\Inventories\Fields\NumberType;
 use App\Inventories\Fields\QueryKind;
 use App\Models\Inventory;
 use App\Models\InventoryField;
@@ -18,7 +19,6 @@ use App\Models\Item;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\MessageBag;
@@ -59,9 +59,6 @@ use LogicException;
  */
 final class ItemQuery
 {
-    /** Most digits after the dot of a bound for a number, as many as a number is stored with. */
-    private const MAX_DECIMALS = 6;
-
     /** The conditions every kind of field understands. */
     private const EMPTY = 'empty';
 
@@ -151,7 +148,7 @@ final class ItemQuery
             return [];
         }
 
-        $sums = $this->json()->sums($this->base($items), array_keys($summed));
+        $sums = $this->json()->sums(($items instanceof Relation ? $items->getQuery() : $items)->toBase(), array_keys($summed));
         $totals = [];
 
         foreach ($summed as $key => ['field' => $field, 'type' => $type]) {
@@ -247,6 +244,7 @@ final class ItemQuery
             return;
         }
 
+        // Text and tags only answer `empty`, which was handled above: no other kind of field reaches a case.
         switch ($kind) {
             case QueryKind::Number:
                 $bound = $this->decimal($value);
@@ -298,9 +296,6 @@ final class ItemQuery
                     $json->whereContainsAny($items, $key, $ids);
                 }
 
-                return;
-            default:
-                // Text and tags only answer `empty`, which was handled above.
                 return;
         }
     }
@@ -475,7 +470,7 @@ final class ItemQuery
     {
         $number = is_string($value) || is_int($value) ? Decimal::tryFrom($value) : null;
 
-        return $number !== null && $number->fits() && $number->scale() <= self::MAX_DECIMALS ? $number->format() : null;
+        return $number !== null && $number->fits() && $number->scale() <= NumberType::MAX_DECIMALS ? $number->format() : null;
     }
 
     /**
@@ -489,16 +484,6 @@ final class ItemQuery
         }
 
         return $type->normalize($value, $field) === $value ? $value : null;
-    }
-
-    /**
-     * The base query of a query on the items.
-     *
-     * @param  EloquentBuilder<Item>|Relation<Item, Inventory, *>  $items
-     */
-    private function base(EloquentBuilder|Relation $items): QueryBuilder
-    {
-        return ($items instanceof Relation ? $items->getQuery() : $items)->toBase();
     }
 
     /**

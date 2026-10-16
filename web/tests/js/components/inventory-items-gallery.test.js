@@ -145,7 +145,7 @@ describe('the gallery of the items of an inventory', () => {
         });
 
         it('switches to the gallery, keeps the choice for the inventory and writes it in the address', () => {
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             expect(component.view).toBe('gallery');
             expect(component.isGallery).toBe(true);
@@ -154,8 +154,8 @@ describe('the gallery of the items of an inventory', () => {
         });
 
         it('switches back to the table', () => {
-            component.showAsGallery();
-            component.showAsTable();
+            component.chooseView('gallery');
+            component.chooseView('table');
 
             expect(component.view).toBe('table');
             expect(window.localStorage.getItem(viewKey(INVENTORY))).toBe('table');
@@ -163,7 +163,7 @@ describe('the gallery of the items of an inventory', () => {
         });
 
         it('keeps the view in the address along with the rest of the criteria and the page', async () => {
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             component.query = { ...component.query, q: 'ham' };
             await component.loadItems(2);
@@ -176,7 +176,7 @@ describe('the gallery of the items of an inventory', () => {
         it('keeps working when the browser refuses to keep the choice', () => {
             useRefusingStorage();
 
-            expect(() => component.showAsGallery()).not.toThrow();
+            expect(() => component.chooseView('gallery')).not.toThrow();
             expect(component.view).toBe('gallery');
         });
 
@@ -184,7 +184,7 @@ describe('the gallery of the items of an inventory', () => {
             expect([component.tablePressed, component.galleryPressed]).toEqual(['true', 'false']);
             expect([component.tableButtonClass, component.galleryButtonClass]).toEqual(['active', '']);
 
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             expect([component.tablePressed, component.galleryPressed]).toEqual(['false', 'true']);
             expect([component.tableButtonClass, component.galleryButtonClass]).toEqual(['', 'active']);
@@ -193,7 +193,7 @@ describe('the gallery of the items of an inventory', () => {
         it('shows the sort select and its direction in the gallery, and on a small screen only in the table', () => {
             expect(component.sortBarClass).toBe('d-sm-none');
 
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             expect(component.sortBarClass).toBe('');
         });
@@ -202,7 +202,7 @@ describe('the gallery of the items of an inventory', () => {
             await component.startInline(component.rows[0], component.rows[0].cells[0]);
             expect(component.inlineRow).toBe('i1');
 
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             expect(component.inlineRow).toBeNull();
         });
@@ -354,11 +354,11 @@ describe('the gallery of the items of an inventory', () => {
             await open([HAMMER], { totals: { qty: '12.5' } });
             expect(component.showGalleryTotals).toBe(false);
 
-            component.showAsGallery();
+            component.chooseView('gallery');
             expect(component.showGalleryTotals).toBe(true);
 
             await open([HAMMER]);
-            component.showAsGallery();
+            component.chooseView('gallery');
             expect(component.showGalleryTotals).toBe(false);
         });
 

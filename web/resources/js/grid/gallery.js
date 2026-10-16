@@ -101,24 +101,6 @@ export default function gridView() {
         },
 
         /**
-         * Shows the items as a table.
-         *
-         * @returns {void}
-         */
-        showAsTable() {
-            this.chooseView('table');
-        },
-
-        /**
-         * Shows the items as cards.
-         *
-         * @returns {void}
-         */
-        showAsGallery() {
-            this.chooseView('gallery');
-        },
-
-        /**
          * Switches to a view as the person asked: kept for the next visit and written in the address.
          *
          * @param {import('./view.js').View} view

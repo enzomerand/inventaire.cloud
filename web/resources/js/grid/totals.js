@@ -37,7 +37,7 @@ export function totalsParams(fields) {
  */
 export function totalCells(fields, totals) {
     return fields.map((field, index) => {
-        const total = isSummable(field) ? (totals[field.id] ?? totals[field.id.toLowerCase()]) : undefined;
+        const total = isSummable(field) ? totals[field.id] : undefined;
 
         return {
             key: field.id,

@@ -4,7 +4,6 @@ import {
     blankDraft,
     chipsOf,
     draftOf,
-    filterCount,
     filterFromDraft,
     hasAnswer,
     hasChoiceList,
@@ -319,11 +318,6 @@ describe('the filters of the list of items', () => {
         it('shows no chip for a field the inventory no longer has, nor for a filter that asks for nothing', () => {
             expect(chipsOf([NAME], { gone: { empty: true } })).toEqual([]);
             expect(chipsOf([NAME], { name: {} })).toEqual([]);
-        });
-
-        it('counts the filtered fields', () => {
-            expect(filterCount({})).toBe(0);
-            expect(filterCount({ a: { empty: true }, b: { min: '1' } })).toBe(2);
         });
     });
 });

@@ -78,16 +78,6 @@ export function hasCriteria(query) {
 }
 
 /**
- * Whether a query is the one that asks for everything, newest first.
- *
- * @param {Query} query
- * @returns {boolean}
- */
-export function isEmptyQuery(query) {
-    return !hasCriteria(query) && query.sort === '';
-}
-
-/**
  * What the totals of the list depend on: the search and the filters, not the sort nor the page. Two queries with the same
  * key have the same totals.
  *

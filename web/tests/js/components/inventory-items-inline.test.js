@@ -442,7 +442,7 @@ describe('editing a cell in place', () => {
         it('says which field was refused, by a toast, when the view changed meanwhile', async () => {
             const { sent, saving } = await sendPrice();
 
-            component.showAsGallery();
+            component.chooseView('gallery');
             expect(component.inlineRow).toBeNull();
 
             sent.reject(refusal());
@@ -471,7 +471,7 @@ describe('editing a cell in place', () => {
 
         it('says which field was refused with the message of the server for the item when it names no field', async () => {
             const { sent, saving } = await sendPrice();
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             sent.reject(new HttpError(422, 'Invalid.', { errors: { values: ['Unknown field.'] } }));
             await saving;
@@ -481,7 +481,7 @@ describe('editing a cell in place', () => {
 
         it('says which field failed for any other answer of the server', async () => {
             const { sent, saving } = await sendPrice();
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             sent.reject(new HttpError(500, 'Server down'));
             await saving;
@@ -491,7 +491,7 @@ describe('editing a cell in place', () => {
 
         it('does not repeat a toast the HTTP helper has already shown for the answer', async () => {
             const { sent, saving } = await sendPrice();
-            component.showAsGallery();
+            component.chooseView('gallery');
             const down = new HttpError(500, 'Server down');
             down.reported = true;
 
@@ -503,7 +503,7 @@ describe('editing a cell in place', () => {
 
         it('has nothing to say about a request that was cancelled', async () => {
             const { sent, saving } = await sendPrice();
-            component.showAsGallery();
+            component.chooseView('gallery');
 
             sent.reject(new DOMException('Aborted', 'AbortError'));
             await saving;
@@ -513,9 +513,9 @@ describe('editing a cell in place', () => {
 
         it('still opens the cell that is edited next when the item turns out to be gone', async () => {
             const { sent, saving } = await sendPrice();
-            component.showAsGallery();
+            component.chooseView('gallery');
             // The person comes back to the table and starts another cell once the value on its way has been answered.
-            component.showAsTable();
+            component.chooseView('table');
             const next = edit(1, 'name');
 
             sent.reject(new HttpError(404, 'This item no longer exists.'));

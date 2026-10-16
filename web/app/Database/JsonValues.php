@@ -60,6 +60,9 @@ use WeakMap;
  */
 final class JsonValues
 {
+    /** The JSON column that holds the values, as the query names it. */
+    private const COLUMN = 'items.values';
+
     /** What a key looks like: the lowercase ULID of a field (26 characters of the alphabet of ULIDs, lowercase). */
     private const KEY_PATTERN = '/^[0-9a-z]{26}$/D';
 
@@ -77,13 +80,10 @@ final class JsonValues
     private static ?WeakMap $icu = null;
 
     /**
-     * Gets the connection whose engine decides the SQL, and the JSON column to read.
-     *
-     * @param  string  $column  The JSON column that holds the values, as the query names it.
+     * Gets the connection whose engine decides the SQL.
      */
     public function __construct(
         private readonly Connection $connection,
-        private readonly string $column = 'items.values',
     ) {}
 
     /**
@@ -94,7 +94,7 @@ final class JsonValues
     {
         $this->driver();
 
-        return $this->connection->getQueryGrammar()->wrap($this->column.'->'.$this->checked($key));
+        return $this->connection->getQueryGrammar()->wrap(self::COLUMN.'->'.$this->checked($key));
     }
 
     /**
@@ -153,7 +153,7 @@ final class JsonValues
      */
     public function wherePresent(EloquentBuilder|Relation $query, string $key, bool $present): void
     {
-        $path = $this->column.'->'.$this->checked($key);
+        $path = self::COLUMN.'->'.$this->checked($key);
 
         if ($present) {
             $query->whereJsonContainsKey($path);
@@ -220,7 +220,7 @@ final class JsonValues
      */
     public function whereContainsAny(EloquentBuilder|Relation $query, string $key, array $values): void
     {
-        $path = $this->column.'->'.$this->checked($key);
+        $path = self::COLUMN.'->'.$this->checked($key);
 
         $query->where(function (EloquentBuilder $any) use ($path, $values): void {
             foreach ($values as $value) {
@@ -234,12 +234,12 @@ final class JsonValues
      * no value come last, in either direction.
      *
      * @param  EloquentBuilder<*>|Relation<*, *, *>  $query
-     * @param  string  $direction  `asc` or `desc`.
+     * @param  'asc'|'desc'  $direction  Anything else is refused by the builder with an {@see InvalidArgumentException}.
      */
     public function orderByCollatedText(EloquentBuilder|Relation $query, string $key, string $direction): void
     {
         $this->orderEmptyLast($query, $key);
-        $query->orderBy(new RawSql($this->sortableText($key)), $this->direction($direction));
+        $query->orderBy(new RawSql($this->sortableText($key)), $direction);
     }
 
     /**
@@ -247,24 +247,24 @@ final class JsonValues
      * time, and a boolean, whose `false` or `0` comes before `true` or `1`). The rows that hold no value come last, in either direction.
      *
      * @param  EloquentBuilder<*>|Relation<*, *, *>  $query
-     * @param  string  $direction  `asc` or `desc`.
+     * @param  'asc'|'desc'  $direction  Anything else is refused by the builder with an {@see InvalidArgumentException}.
      */
     public function orderByText(EloquentBuilder|Relation $query, string $key, string $direction): void
     {
         $this->orderEmptyLast($query, $key);
-        $query->orderBy(new RawSql($this->text($key)), $this->direction($direction));
+        $query->orderBy(new RawSql($this->text($key)), $direction);
     }
 
     /**
      * Orders by the value as an exact number. The rows that hold no value come last, in either direction.
      *
      * @param  EloquentBuilder<*>|Relation<*, *, *>  $query
-     * @param  string  $direction  `asc` or `desc`.
+     * @param  'asc'|'desc'  $direction  Anything else is refused by the builder with an {@see InvalidArgumentException}.
      */
     public function orderByNumber(EloquentBuilder|Relation $query, string $key, string $direction): void
     {
         $this->orderEmptyLast($query, $key);
-        $query->orderBy(new RawSql($this->number($key)), $this->direction($direction));
+        $query->orderBy(new RawSql($this->number($key)), $direction);
     }
 
     /**
@@ -273,7 +273,7 @@ final class JsonValues
      *
      * @param  EloquentBuilder<*>|Relation<*, *, *>  $query
      * @param  list<string>  $ids  The ids in the order they sort.
-     * @param  string  $direction  `asc` or `desc`.
+     * @param  'asc'|'desc'  $direction  Anything else is refused by the builder with an {@see InvalidArgumentException}.
      */
     public function orderByPosition(EloquentBuilder|Relation $query, string $key, array $ids, string $direction): void
     {
@@ -291,7 +291,7 @@ final class JsonValues
         // The ids are bound; a binding of an order clause follows the order the clauses are added in.
         $query->orderBy(new RawSql("case when {$text} in (".implode(', ', array_fill(0, count($ids), '?')).') then 0 else 1 end'), 'asc');
         $query->addBinding($ids, 'order');
-        $query->orderBy(new RawSql("case {$text}{$whens} end"), $this->direction($direction));
+        $query->orderBy(new RawSql("case {$text}{$whens} end"), $direction);
         $query->addBinding($ids, 'order');
     }
 
@@ -376,21 +376,6 @@ final class JsonValues
     private function operator(string $operator): string
     {
         return in_array($operator, self::OPERATORS, true) ? $operator : throw new InvalidArgumentException('Unsupported comparison.');
-    }
-
-    /**
-     * The direction of an order, once it is known to be one of the two.
-     *
-     * @return 'asc'|'desc'
-     *
-     * @throws InvalidArgumentException When it is not.
-     */
-    private function direction(string $direction): string
-    {
-        return match ($direction) {
-            'asc', 'desc' => $direction,
-            default => throw new InvalidArgumentException('An order is ascending or descending.'),
-        };
     }
 
     /**

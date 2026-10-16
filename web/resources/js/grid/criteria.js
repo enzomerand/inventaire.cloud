@@ -19,7 +19,6 @@ import {
     blankDraft,
     chipsOf,
     draftOf,
-    filterCount,
     filterFromDraft,
     hasAnswer,
     hasChoiceList,
@@ -74,7 +73,7 @@ export default function gridCriteria() {
 
         /** How many fields are filtered. */
         get filterCount() {
-            return filterCount(this.query.filters);
+            return Object.keys(this.query.filters).length;
         },
 
         /** The filters as removable chips. */

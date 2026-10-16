@@ -5,7 +5,6 @@ import {
     emptyQuery,
     fromSearch,
     hasCriteria,
-    isEmptyQuery,
     toParams,
     toSearch,
     totalsKeyOf,
@@ -43,7 +42,6 @@ describe('the query of the list of items', () => {
         const query = emptyQuery();
 
         expect(query).toEqual({ q: '', sort: '', direction: 'asc', filters: {} });
-        expect(isEmptyQuery(query)).toBe(true);
         expect(hasCriteria(query)).toBe(false);
     });
 
@@ -51,7 +49,6 @@ describe('the query of the list of items', () => {
         expect(hasCriteria({ ...emptyQuery(), q: 'x' })).toBe(true);
         expect(hasCriteria({ ...emptyQuery(), filters: { f: { empty: true } } })).toBe(true);
         expect(hasCriteria({ ...emptyQuery(), sort: 'price' })).toBe(false);
-        expect(isEmptyQuery({ ...emptyQuery(), sort: 'price' })).toBe(false);
     });
 
     describe('as the parameters of the API', () => {
