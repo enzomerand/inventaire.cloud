@@ -151,34 +151,47 @@ export default function inventoryItems() {
         /** True while the dialog asks to confirm the deletion of the item. */
         confirming: false,
 
+        /** The element the component is set on, kept when the page opens (see `rootElement`); null until then. */
+        rootNode: null,
+
+        /**
+         * The element the component is set on, which carries the endpoints and the abilities (`data-*`). Taken when the page
+         * opens rather than asked of Alpine each time: Alpine stops answering `$root` to a call made from the scope of an
+         * element that has been taken out of the page since (the close button of a chip that was removed, the button of a
+         * cell that turned into its control), and the reading of the list that such a call starts still needs them.
+         */
+        get rootElement() {
+            return this.rootNode ?? this.$root;
+        },
+
         /** Endpoint of the inventory (GET), from `data-url` on the component root. */
         get url() {
-            return this.$root.dataset.url;
+            return this.rootElement.dataset.url;
         },
 
         /** Endpoint of the items (GET, POST), from `data-items-url` on the component root. */
         get itemsUrl() {
-            return this.$root.dataset.itemsUrl;
+            return this.rootElement.dataset.itemsUrl;
         },
 
         /** Endpoint of one item, with `__id__` where its ULID goes, from `data-item-url` on the component root. */
         get itemUrl() {
-            return this.$root.dataset.itemUrl;
+            return this.rootElement.dataset.itemUrl;
         },
 
         /** Page of the workspace the inventory belongs to, where the person goes if it was deleted, from `data-workspace-page`. */
         get workspacePage() {
-            return this.$root.dataset.workspacePage;
+            return this.rootElement.dataset.workspacePage;
         },
 
         /** Whether the person may add, change and delete items, from `data-can-edit` on the component root. */
         get canEdit() {
-            return this.$root.dataset.canEdit === '1';
+            return this.rootElement.dataset.canEdit === '1';
         },
 
         /** Whether the person is offered the link to the field editor, from `data-can-manage-fields` on the root. */
         get canManageFields() {
-            return this.$root.dataset.canManageFields === '1';
+            return this.rootElement.dataset.canManageFields === '1';
         },
 
         /** Whether either the inventory or a page of items is being read. */
@@ -313,6 +326,7 @@ export default function inventoryItems() {
          * @returns {Promise<void>}
          */
         async init() {
+            this.rootNode = this.$root;
             this.$nextTick(() => onModalHidden(this.$refs.modal, () => this.resetDialog()));
 
             const page = this.restoreQuery();
@@ -323,7 +337,8 @@ export default function inventoryItems() {
         },
 
         /**
-         * Stops the pause that waits for the end of the typing, when the page is taken apart.
+         * Stops the pause that waits for the end of the typing, when the page is taken apart (Alpine calls `destroy()` when
+         * the element of the component is removed from the page, as it calls `init()` when it is set up).
          *
          * @returns {void}
          */

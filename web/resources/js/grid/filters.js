@@ -21,16 +21,10 @@ import {
 import { parseDecimal, toDecimalInput } from '../fields/decimal.js';
 import { pageLocale } from '../fields/locale.js';
 import { t } from '../lib/i18n.js';
+import { NUMBER_BOUND, TEMPORAL_BOUND } from './query.js';
 
-/** A bound for a number the way the server takes it: below 1e15 in absolute value, with at most 6 decimals. */
-const NUMBER_BOUND = /^-?\d{1,15}(\.\d{1,6})?$/;
-
-/** The forms in which the server stores a date, a moment and a time of day, which a bound must be written in. */
-const TEMPORAL_BOUND = {
-    date: /^\d{4}-\d{2}-\d{2}$/,
-    datetime: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
-    time: /^\d{2}:\d{2}$/,
-};
+/** A number written with more than 15 digits before the decimal sign (the server takes 15 at most). */
+const TOO_LARGE_NUMBER = /^-?\d{16,}(\.\d+)?$/;
 
 /**
  * @typedef {import('../fields/types.js').Field} Field
@@ -176,9 +170,7 @@ export function filterFromDraft(field, draft) {
             const bound = boundFromInput(field, text, edge);
 
             if (bound === null) {
-                errors[edge] = t(
-                    queryKindOf(field) === 'number' ? 'grid.filter.invalid_number' : 'grid.filter.invalid_value',
-                );
+                errors[edge] = t(refusalOf(field, text));
             } else {
                 filter[edge] = bound;
             }
@@ -279,7 +271,10 @@ export function labelOf(field, filter) {
     }
 
     if (filter.in !== undefined && filter.in.length > 0) {
-        const labels = filter.in.map((id) => choicesOf(field).find((choice) => choice.id === id)?.label ?? id);
+        // A choice that was deleted since is no more than a choice that was: its id means nothing to the person.
+        const labels = filter.in.map(
+            (id) => choicesOf(field).find((choice) => choice.id === id)?.label ?? t('grid.chip.deleted_choice'),
+        );
 
         return t('grid.chip.value', { name, value: labels.join(', ') });
     }
@@ -312,6 +307,21 @@ function boundToInput(field, value) {
     }
 
     return queryKindOf(field) === 'number' ? toDecimalInput(value, pageLocale()) : String(toInput(field, value) ?? '');
+}
+
+/**
+ * Why a box of the panel holds no bound: the message to show under it.
+ *
+ * @param {Field} field
+ * @param {string} text What the box holds, not empty.
+ * @returns {string} The key of the message: a number too large is told apart from one that is no number or has too many decimals.
+ */
+function refusalOf(field, text) {
+    if (queryKindOf(field) !== 'number') {
+        return 'grid.filter.invalid_value';
+    }
+
+    return TOO_LARGE_NUMBER.test(parseDecimal(text) ?? '') ? 'grid.filter.too_large' : 'grid.filter.invalid_number';
 }
 
 /**

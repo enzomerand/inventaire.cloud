@@ -18,6 +18,8 @@ import {
     item,
     mountComponent,
     page,
+    ulid,
+    withUlids,
 } from '../support/inventory.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
@@ -80,12 +82,18 @@ describe('the criteria of the items of an inventory', () => {
         });
 
         it('brings back the page, the search, the sort and the filters it holds', async () => {
+            const [PRICE, STATE, FRAGILE] = ['price', 'state', 'fragile'].map(ulid);
             window.history.replaceState(
                 null,
                 '',
-                '/?page=2&q=ham+mer&sort=price&direction=desc&filter[state][in][]=aaaaaaaa&filter[price][min]=10&filter[fragile][is]=false',
+                `/?page=2&q=ham+mer&sort=price&direction=desc&filter[${STATE}][in][]=aaaaaaaa&filter[${PRICE}][min]=10&filter[${FRAGILE}][is]=false`,
             );
-            answer([item('i1')], { current: 2, last: 3, total: 120 });
+            answer([item('i1')], {
+                current: 2,
+                last: 3,
+                total: 120,
+                fields: withUlids(['price', 'state', 'fragile']),
+            });
 
             await component.init();
 
@@ -95,9 +103,9 @@ describe('the criteria of the items of an inventory', () => {
                     q: 'ham mer',
                     sort: 'price',
                     direction: 'desc',
-                    'filter[state][in][0]': 'aaaaaaaa',
-                    'filter[price][min]': '10',
-                    'filter[fragile][is]': 'false',
+                    [`filter[${STATE}][in][0]`]: 'aaaaaaaa',
+                    [`filter[${PRICE}][min]`]: '10',
+                    [`filter[${FRAGILE}][is]`]: 'false',
                 },
             });
             expect(component.searchText).toBe('ham mer');
@@ -107,6 +115,31 @@ describe('the criteria of the items of an inventory', () => {
                 'State: New',
                 'Fragile: No',
             ]);
+        });
+
+        it('leaves out a wrong value of the address on its own: the rest of the view is asked for, and nothing is reset', async () => {
+            const [PRICE, STATE, FRAGILE] = ['price', 'state', 'fragile'].map(ulid);
+            window.history.replaceState(
+                null,
+                '',
+                `/?q=saw&sort=price&filter[${PRICE}][min]=cheap&filter[${PRICE}][max]=50&filter[${STATE}][in][]=NOT-A-CHOICE&filter[__proto__][min]=1&filter[${FRAGILE}][is]=true`,
+            );
+            answer([item('i1')], { fields: withUlids(['price', 'state', 'fragile']) });
+
+            await component.init();
+
+            expect(http.get).toHaveBeenCalledTimes(2);
+            expect(http.get).toHaveBeenCalledWith(ITEMS, {
+                params: {
+                    page: 1,
+                    q: 'saw',
+                    sort: 'price',
+                    [`filter[${PRICE}][max]`]: '50',
+                    [`filter[${FRAGILE}][is]`]: 'true',
+                },
+            });
+            expect(notify).not.toHaveBeenCalled();
+            expect({}.min).toBeUndefined();
         });
 
         it('keeps the address up to date as the criteria and the page change, so that a reload or Back comes back to them', async () => {
@@ -545,6 +578,84 @@ describe('the criteria of the items of an inventory', () => {
             expect(component.hasCriteria).toBe(false);
         });
 
+        /**
+         * Puts what the page draws for the chips in the document (the close button of each chip, the button of the
+         * filters), as Alpine would, and lets a removal take its chip away before the cursor is placed.
+         *
+         * @param {string[]} fieldIds The fields that are filtered, in the order of the chips.
+         * @returns {{ closers: HTMLButtonElement[], filtersButton: HTMLButtonElement }}
+         */
+        function drawChips(fieldIds) {
+            const filtersButton = document.createElement('button');
+            const closers = fieldIds.map((fieldId) => {
+                const closer = document.createElement('button');
+
+                closer.dataset.chipRemove = fieldId;
+
+                return closer;
+            });
+
+            document.body.replaceChildren(filtersButton, ...closers);
+            component.$root.replaceChildren();
+            component.$root.append(...closers);
+            document.body.append(component.$root);
+            component.$refs.filtersButton = filtersButton;
+            component.query = {
+                ...component.query,
+                filters: Object.fromEntries(fieldIds.map((fieldId) => [fieldId, { empty: true }])),
+            };
+            component.$nextTick = (callback) => {
+                // The page draws again before the callback runs: the chip that was removed is gone.
+                for (const closer of [...component.$root.querySelectorAll('[data-chip-remove]')]) {
+                    if (component.query.filters[closer.dataset.chipRemove] === undefined) {
+                        closer.remove();
+                    }
+                }
+
+                callback();
+            };
+
+            return { closers, filtersButton };
+        }
+
+        it('puts the cursor on the chip that takes the place of the one that was removed', async () => {
+            const { closers } = drawChips(['name', 'qty', 'price']);
+
+            component.removeChip(component.chips[1]);
+            await settle();
+
+            expect(document.activeElement).toBe(closers[2]);
+        });
+
+        it('puts the cursor on the chip before it when the last one was removed', async () => {
+            const { closers } = drawChips(['name', 'qty', 'price']);
+
+            component.removeChip(component.chips[2]);
+            await settle();
+
+            expect(document.activeElement).toBe(closers[1]);
+        });
+
+        it('puts the cursor on the button of the filters when the only chip was removed', async () => {
+            const { filtersButton } = drawChips(['price']);
+
+            component.removeChip(component.chips[0]);
+            await settle();
+
+            expect(document.activeElement).toBe(filtersButton);
+        });
+
+        it('puts the cursor in the search box when the search and the filters are cleared', async () => {
+            drawChips(['price']);
+            document.body.append(component.$refs.search);
+            component.query = { ...component.query, q: 'saw' };
+
+            component.clearCriteria();
+            await settle();
+
+            expect(document.activeElement).toBe(component.$refs.search);
+        });
+
         it('has a chip for each filter, each with a name for its close button', () => {
             component.query = {
                 ...component.query,
@@ -583,8 +694,8 @@ describe('the criteria of the items of an inventory', () => {
         });
 
         it('says one result, not "1 results"', async () => {
-            answer([item('i1')], { itemsCount: 120, total: 1 });
-            window.history.replaceState(null, '', '/?filter[price][min]=5');
+            answer([item('i1')], { itemsCount: 120, total: 1, fields: withUlids(['price']) });
+            window.history.replaceState(null, '', `/?filter[${ulid('price')}][min]=5`);
 
             await component.init();
 

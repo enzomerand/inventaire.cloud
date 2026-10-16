@@ -4,9 +4,12 @@
  * The cell of a person who may edit items is a button; pressing it turns the cell into the control of the field (a box, a
  * select) with the cursor in it. Enter or leaving the control saves just that value, Escape gives up and puts the cursor
  * back on the cell, Tab moves on as it always does (the control loses the cursor, which saves). A value the server refuses
- * is shown under the control, which stays; an item that is gone is reported and the list is read again. The row is updated
- * from the answer where it stands: the list is not sorted again under the person's hands. When the field adds up, the
- * totals (and the count) are read again, without replacing the rows.
+ * is shown under the control, which stays until the person fixes it, gives up (Escape) or edits another cell, which gives
+ * it up; an item that is gone is reported and the list is read again. A refusal that comes after the control was closed
+ * (the page, the search or the view changed meanwhile) is told by a toast that names the field, so that no edit is lost
+ * unseen. The row is updated from the answer where it stands: the list is not sorted again under the person's hands. When
+ * the field adds up, or when a search or filters narrow the list down (an edit can change what matches), the totals and
+ * the count are read again, without replacing the rows.
  *
  * The controls that do not fit a cell (a long text, several choices, tags, a rating, a color) open the dialog of the item
  * with the cursor on that field instead.
@@ -121,6 +124,11 @@ export default function gridInline() {
             return this.inlineError === '' ? null : 'true';
         },
 
+        /** The value of `aria-describedby` for the control of the cell: the message that says why its value was refused. */
+        get inlineDescribedBy() {
+            return this.inlineError === '' ? null : 'item-inline-error';
+        },
+
         /**
          * Whether a cell is the one being edited.
          *
@@ -165,7 +173,8 @@ export default function gridInline() {
 
         /**
          * Turns a cell into its control, with the cursor in it; the controls that do not fit a cell open the dialog on the
-         * field instead. A cell that is being edited, or another one while a value is being sent, is left alone.
+         * field instead. A cell that is being edited is left alone; another one takes its place once the value on its way
+         * has been answered, giving up a value the server refused.
          *
          * @param {{ id: string }} row
          * @param {{ key: string }} cell
@@ -185,14 +194,22 @@ export default function gridInline() {
                 return;
             }
 
-            // A value still on its way: the person is not asked to repeat the click, unless it was refused and is still being fixed.
+            // A value still on its way: the person is not asked to repeat the click.
+            const sending = this.inlinePending !== null;
+
             await this.inlinePending;
 
             if (this.inlineRow !== null) {
-                if (this.inlineSaving || this.inlineError !== '') {
+                if (this.inlineSaving) {
                     return;
                 }
 
+                // A refusal the person never saw (it came after the click that left the control) is not lost silently.
+                if (sending && this.inlineError !== '') {
+                    this.tellNotSaved(this.inlineDefinition?.name ?? '', this.inlineError);
+                }
+
+                // A value that was refused is given up: the cell shows the value the item holds again.
                 this.closeInline(false);
             }
 
@@ -202,8 +219,7 @@ export default function gridInline() {
             this.inlineInput = this.inlineOriginal;
             this.inlineError = '';
 
-            // The root is taken now: once the button is gone, Alpine no longer answers `$root` to a call made from its scope.
-            const root = this.$root;
+            const root = this.rootElement;
 
             this.$nextTick(() => focusEditor(root));
         },
@@ -282,11 +298,12 @@ export default function gridInline() {
                 this.rebuild();
                 this.closeInline(source === 'enter');
 
-                if (isSummable(field)) {
+                // The edit can change what a column adds up to, and what the search or the filters match.
+                if (isSummable(field) || this.hasCriteria) {
                     await this.refreshTotals();
                 }
             } catch (error) {
-                this.failInline(error, source);
+                this.failInline(error, source, field, itemId);
             } finally {
                 this.inlineSaving = false;
             }
@@ -295,39 +312,84 @@ export default function gridInline() {
         /**
          * Tells the person why a value was not saved: under the control for a refusal (which stays, to be fixed), by the
          * toast the HTTP helper already showed for an item that is gone (and the list is read again, since what is shown is
-         * not what the server holds), or by a toast.
+         * not what the server holds), or by a toast. When the control is gone by the time the answer comes (the page, the
+         * search or the view changed meanwhile), the value would be lost unseen: a toast then names the field and says why.
          *
          * @param {unknown} error
          * @param {'enter' | 'blur'} source
+         * @param {Field} field The field whose value was sent.
+         * @param {string} itemId The item it was sent for.
          * @returns {void}
          */
-        failInline(error, source) {
+        failInline(error, source, field, itemId) {
+            const editing = this.inlineRow === itemId && this.inlineFieldId === field.id;
+
             if (error instanceof HttpError && error.status === 404) {
                 if (!error.reported) {
                     notify('warning', error.message);
                 }
 
-                this.closeInline(false);
+                if (editing) {
+                    this.closeInline(false);
+                }
+
                 // If it is the inventory that is gone, this reading finds out and takes the person away.
                 this.loadItems(this.page);
 
                 return;
             }
 
-            if (error instanceof HttpError && error.status === 422) {
-                const messages = firstMessages(error.errors);
+            const reason = this.refusalOf(error, field);
 
-                this.inlineError =
-                    messages[VALUES_PREFIX + this.inlineFieldId] ?? Object.values(messages)[0] ?? error.message;
+            if (!editing) {
+                // A request that was cancelled has nothing to tell.
+                if (reason !== null) {
+                    this.tellNotSaved(field.name, reason);
+                }
+
+                return;
+            }
+
+            if (error instanceof HttpError && error.status === 422) {
+                this.inlineError = reason ?? '';
             } else {
                 this.fail(error);
             }
 
             if (source === 'enter') {
-                const root = this.$root;
+                const root = this.rootElement;
 
                 this.$nextTick(() => focusEditor(root));
             }
+        },
+
+        /**
+         * Why a request that changes a value failed, in words: the message the server gave for the value (or for the item),
+         * else its general message.
+         *
+         * @param {unknown} error
+         * @param {Field} field The field whose value was sent.
+         * @returns {string | null} Null for anything that is not an answer of the server (a request that was cancelled).
+         */
+        refusalOf(error, field) {
+            if (!(error instanceof HttpError)) {
+                return null;
+            }
+
+            const messages = error.status === 422 ? firstMessages(error.errors) : {};
+
+            return messages[VALUES_PREFIX + field.id] ?? Object.values(messages)[0] ?? error.message;
+        },
+
+        /**
+         * Says by a toast that the value of a field was not saved, and why.
+         *
+         * @param {string} name The name of the field.
+         * @param {string} reason
+         * @returns {void}
+         */
+        tellNotSaved(name, reason) {
+            notify('warning', t('grid.notice.not_saved', { field: name, reason }));
         },
 
         /**
@@ -367,7 +429,7 @@ export default function gridInline() {
          */
         closeInline(refocus) {
             const key = this.inlineRow === null ? null : cellKey(this.inlineRow, this.inlineFieldId);
-            const root = this.$root;
+            const root = this.rootElement;
 
             this.inlineRow = null;
             this.inlineFieldId = null;

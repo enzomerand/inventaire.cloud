@@ -9,6 +9,15 @@ import {
     toParams,
     toSearch,
 } from '../../../resources/js/grid/query.js';
+import { ulid } from '../support/inventory.js';
+
+const PRICE = ulid('price');
+const STATE = ulid('state');
+const FRAGILE = ulid('fragile');
+const PHOTO = ulid('photo');
+const NOTES = ulid('notes');
+const SEEN = ulid('seen');
+const PARTS = ulid('parts');
 
 /** A query that uses every kind of condition. */
 function fullQuery() {
@@ -17,12 +26,12 @@ function fullQuery() {
         sort: 'price',
         direction: 'desc',
         filters: {
-            price: { min: '10', max: '50.50' },
-            state: { in: ['aaaaaaaa', 'bbbbbbbb'] },
-            fragile: { is: false },
-            photo: { empty: true },
-            notes: { empty: false },
-            seen: { min: '2026-10-15T08:00:00Z' },
+            [PRICE]: { min: '10', max: '50.50' },
+            [STATE]: { in: ['aaaaaaaa', 'bbbbbbbb'] },
+            [FRAGILE]: { is: false },
+            [PHOTO]: { empty: true },
+            [NOTES]: { empty: false },
+            [SEEN]: { min: '2026-10-15T08:00:00Z' },
         },
     };
 }
@@ -55,14 +64,14 @@ describe('the query of the list of items', () => {
                 q: 'claw hammer',
                 sort: 'price',
                 direction: 'desc',
-                'filter[price][min]': '10',
-                'filter[price][max]': '50.50',
-                'filter[state][in][0]': 'aaaaaaaa',
-                'filter[state][in][1]': 'bbbbbbbb',
-                'filter[fragile][is]': 'false',
-                'filter[photo][empty]': 'true',
-                'filter[notes][empty]': 'false',
-                'filter[seen][min]': '2026-10-15T08:00:00Z',
+                [`filter[${PRICE}][min]`]: '10',
+                [`filter[${PRICE}][max]`]: '50.50',
+                [`filter[${STATE}][in][0]`]: 'aaaaaaaa',
+                [`filter[${STATE}][in][1]`]: 'bbbbbbbb',
+                [`filter[${FRAGILE}][is]`]: 'false',
+                [`filter[${PHOTO}][empty]`]: 'true',
+                [`filter[${NOTES}][empty]`]: 'false',
+                [`filter[${SEEN}][min]`]: '2026-10-15T08:00:00Z',
             });
         });
 
@@ -94,23 +103,132 @@ describe('the query of the list of items', () => {
 
         it('reads the choices of a filter written with empty brackets as well as numbered ones', () => {
             const { query } = fromSearch(
-                'filter[state][in][]=aaaaaaaa&filter[state][in][]=bbbbbbbb&filter[parts][in][1]=cccccccc',
+                `filter[${STATE}][in][]=aaaaaaaa&filter[${STATE}][in][]=bbbbbbbb&filter[${PARTS}][in][1]=cccccccc`,
             );
 
-            expect(query.filters).toEqual({ state: { in: ['aaaaaaaa', 'bbbbbbbb'] }, parts: { in: ['cccccccc'] } });
+            expect(query.filters).toEqual({ [STATE]: { in: ['aaaaaaaa', 'bbbbbbbb'] }, [PARTS]: { in: ['cccccccc'] } });
         });
 
         it('reads the field of a filter in lowercase, as the values are keyed', () => {
-            expect(fromSearch('filter[ABC][min]=5').query.filters).toEqual({ abc: { min: '5' } });
+            expect(fromSearch(`filter[${PRICE.toUpperCase()}][min]=5`).query.filters).toEqual({
+                [PRICE]: { min: '5' },
+            });
         });
 
         it('leaves out what makes no sense, so that an address edited by hand never breaks the page', () => {
             const { query, page } = fromSearch(
-                'direction=sideways&sort=price&page=abc&unknown=1&filter[a][bogus]=1&filter[b][empty]=maybe&filter[c][is]=1&filter[d][min]=&filter[e][max]=9',
+                `direction=sideways&sort=price&page=abc&unknown=1&filter[${ulid('a')}][bogus]=1&filter[${ulid('b')}][empty]=maybe&filter[${ulid('c')}][is]=1&filter[${ulid('d')}][min]=&filter[${ulid('e')}][max]=9`,
             );
 
             expect(page).toBe(1);
-            expect(query).toEqual({ q: '', sort: 'price', direction: 'asc', filters: { e: { max: '9' } } });
+            expect(query).toEqual({
+                q: '',
+                sort: 'price',
+                direction: 'asc',
+                filters: { [ulid('e')]: { max: '9' } },
+            });
+        });
+
+        it('takes only the id of a field (a ULID) as the name of a filter, whatever it is wrapped in', () => {
+            const { query } = fromSearch(
+                [
+                    'filter[price][min]=5',
+                    'filter[][min]=5',
+                    `filter[${PRICE}x][min]=5`,
+                    `filter[${PRICE.slice(1)}][min]=5`,
+                    `filter[${PRICE}%5D%5Bmin][min]=5`,
+                    `filter[${STATE}][min]=7`,
+                ].join('&'),
+            );
+
+            expect(query.filters).toEqual({ [STATE]: { min: '7' } });
+        });
+
+        it.each(['__proto__', 'constructor', 'prototype', 'hasOwnProperty', 'toString', '__defineGetter__'])(
+            'cannot be used to write on an object it does not own, with %s as the name of a filter',
+            (name) => {
+                const { query } = fromSearch(
+                    `filter[${name}][min]=1&filter[${name}][max]=2&filter[${name}][empty]=true&filter[${name}][is]=true&filter[${name}][in][]=aaaaaaaa`,
+                );
+
+                expect(query.filters).toEqual({});
+                expect(Object.keys(query.filters)).toEqual([]);
+                expect(Object.getPrototypeOf(query.filters)).toBe(Object.prototype);
+                // Nothing leaked on the prototype of the objects, nor on the constructors.
+                expect({}.min).toBeUndefined();
+                expect({}.max).toBeUndefined();
+                expect({}.empty).toBeUndefined();
+                expect({}.is).toBeUndefined();
+                expect({}.in).toBeUndefined();
+                expect(Object.min).toBeUndefined();
+                expect(Object.prototype).not.toHaveProperty('min');
+                expect(Object.keys(Object.prototype)).toEqual([]);
+            },
+        );
+
+        it('keeps the filters of a ULID that carries a name of the prototype in the middle of the address', () => {
+            const { query } = fromSearch(
+                `filter[__proto__][min]=1&filter[${STATE}][in][]=aaaaaaaa&filter[constructor][is]=true`,
+            );
+
+            expect(query.filters).toEqual({ [STATE]: { in: ['aaaaaaaa'] } });
+            expect({}.min).toBeUndefined();
+        });
+
+        it('drops a bound that is written in no form the server takes, and only that condition', () => {
+            const { query } = fromSearch(
+                [
+                    'q=saw',
+                    'sort=price',
+                    `filter[${PRICE}][min]=abc`,
+                    `filter[${PRICE}][max]=50.5`,
+                    `filter[${NOTES}][min]=1e5`,
+                    `filter[${NOTES}][max]=1.1234567`,
+                    `filter[${SEEN}][min]=tomorrow`,
+                    `filter[${SEEN}][max]=2026-10-15T08:00:00Z`,
+                    `filter[${FRAGILE}][min]=1000000000000000`,
+                    `filter[${FRAGILE}][is]=true`,
+                    `filter[${PHOTO}][min]=2026-10-15`,
+                    `filter[${PARTS}][max]=09:30`,
+                    `filter[${ulid('closed')}][max]=%20`,
+                ].join('&'),
+            );
+
+            expect(query).toEqual({
+                q: 'saw',
+                sort: 'price',
+                direction: 'asc',
+                filters: {
+                    [PRICE]: { max: '50.5' },
+                    [SEEN]: { max: '2026-10-15T08:00:00Z' },
+                    [FRAGILE]: { is: true },
+                    [PHOTO]: { min: '2026-10-15' },
+                    [PARTS]: { max: '09:30' },
+                },
+            });
+        });
+
+        it('takes the bounds the panel writes, negative numbers and decimals included', () => {
+            const { query } = fromSearch(`filter[${PRICE}][min]=-5&filter[${PRICE}][max]=999999999999999.999999`);
+
+            expect(query.filters).toEqual({ [PRICE]: { min: '-5', max: '999999999999999.999999' } });
+        });
+
+        it('drops a choice that is not written like the id of a choice (8 lowercase letters and digits), and only that one', () => {
+            const { query } = fromSearch(
+                [
+                    `filter[${STATE}][in][]=aaaaaaaa`,
+                    `filter[${STATE}][in][]=AAAAAAAA`,
+                    `filter[${STATE}][in][]=short`,
+                    `filter[${STATE}][in][]=waytoolong1`,
+                    `filter[${STATE}][in][]=%3Cb%3Ebad%3E`,
+                    `filter[${STATE}][in][]=bbbbbbbb`,
+                    `filter[${STATE}][in][]=aaaaaaaa`,
+                    `filter[${PARTS}][in][]=nope`,
+                ].join('&'),
+            );
+
+            expect(query.filters).toEqual({ [STATE]: { in: ['aaaaaaaa', 'bbbbbbbb'] } });
         });
 
         it('ignores a direction when nothing is sorted', () => {
@@ -146,6 +264,25 @@ describe('the query of the list of items', () => {
         it('cuts a search that is longer than the API takes, and trims it', () => {
             expect(fromSearch('q=' + 'x'.repeat(SEARCH_MAX_LENGTH + 50)).query.q).toHaveLength(SEARCH_MAX_LENGTH);
             expect(fromSearch('q=%20%20hammer%20').query.q).toBe('hammer');
+        });
+
+        it('cuts a search by characters, never through a character made of two units', () => {
+            const emoji = '\u{1F600}';
+            const long = fromSearch('q=' + encodeURIComponent(emoji.repeat(SEARCH_MAX_LENGTH + 50))).query.q;
+            const straddling = fromSearch('q=' + encodeURIComponent('x'.repeat(SEARCH_MAX_LENGTH - 1) + emoji + 'yyy'))
+                .query.q;
+
+            expect([...long]).toHaveLength(SEARCH_MAX_LENGTH);
+            expect(long).toBe(emoji.repeat(SEARCH_MAX_LENGTH));
+            expect(straddling).toBe('x'.repeat(SEARCH_MAX_LENGTH - 1) + emoji);
+            expect(long).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+            expect(straddling).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+        });
+
+        it('cuts a sort by characters too', () => {
+            const sort = fromSearch('sort=' + encodeURIComponent('x'.repeat(63) + '\u{1F600}' + 'z')).query.sort;
+
+            expect(sort).toBe('x'.repeat(63) + '\u{1F600}');
         });
     });
 });

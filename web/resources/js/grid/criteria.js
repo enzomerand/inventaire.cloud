@@ -102,11 +102,6 @@ export default function gridCriteria() {
             return t(this.query.direction === 'desc' ? 'grid.sort.descending' : 'grid.sort.ascending');
         },
 
-        /** The classes of the sort select and its direction: the table has the headers for it on a wide screen, the gallery has not. */
-        get sortBarClass() {
-            return 'd-sm-none';
-        },
-
         /** Whether the sort goes from the highest to the lowest. */
         get isDescending() {
             return this.query.direction === 'desc';
@@ -311,23 +306,41 @@ export default function gridCriteria() {
          * @returns {void}
          */
         removeChip(chip) {
+            // Taken now: once the button is gone with its chip, Alpine may no longer answer `$refs` to a call made from its scope.
+            const refs = this.$refs;
+            const position = this.chips.findIndex((one) => one.key === chip.key);
             const filters = { ...this.query.filters };
 
             delete filters[chip.fieldId];
             this.query = { ...this.query, filters };
             this.loadItems(1);
+
+            // The button that was pressed is gone: the cursor goes to the close button of the chip that took its place, else
+            // of the one before it, else to the button of the filters.
+            this.$nextTick(() => {
+                const closers = [...(this.rootElement.querySelectorAll?.('[data-chip-remove]') ?? [])];
+                const target = closers[Math.min(position, closers.length - 1)] ?? refs.filtersButton;
+
+                target?.focus();
+            });
         },
 
         /**
-         * Empties the search and removes every filter: what the list shows when nothing matched.
+         * Empties the search and removes every filter: what the list shows when nothing matched. The cursor goes to the
+         * search box, since the button that was pressed goes away.
          *
          * @returns {void}
          */
         clearCriteria() {
+            const refs = this.$refs;
+
             this.stopSearchTimer();
             this.searchText = '';
             this.query = { ...this.query, q: '', filters: {} };
             this.loadItems(1);
+
+            // The button that was pressed goes away with the message it was in: the cursor goes to the search box.
+            this.$nextTick(() => refs.search?.focus());
         },
 
         /**
@@ -449,6 +462,39 @@ export default function gridCriteria() {
          */
         filterError(field, name) {
             return this.filterErrors[field.id]?.[name] ?? '';
+        },
+
+        /**
+         * The `id` of the message under a box of the panel, which the box points to while it is refused.
+         *
+         * @param {Field} field
+         * @param {'min' | 'max'} name
+         * @returns {string}
+         */
+        filterErrorId(field, name) {
+            return `${this.filterId(field, name)}-error`;
+        },
+
+        /**
+         * The value of `aria-invalid` for a box of the panel: "true" while its value is refused.
+         *
+         * @param {Field} field
+         * @param {'min' | 'max'} name
+         * @returns {'true' | null}
+         */
+        filterInvalid(field, name) {
+            return this.filterError(field, name) === '' ? null : 'true';
+        },
+
+        /**
+         * The value of `aria-describedby` for a box of the panel: the message that says why its value is refused.
+         *
+         * @param {Field} field
+         * @param {'min' | 'max'} name
+         * @returns {string | null}
+         */
+        filterDescribedBy(field, name) {
+            return this.filterError(field, name) === '' ? null : this.filterErrorId(field, name);
         },
 
         /**

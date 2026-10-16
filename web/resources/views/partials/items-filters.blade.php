@@ -28,12 +28,14 @@
                                     :type="rangeInputType(field)"
                                     :inputmode="rangeInputMode(field)"
                                     :class="filterInputClass(field, 'min')"
+                                    :aria-invalid="filterInvalid(field, 'min')"
+                                    :aria-describedby="filterDescribedBy(field, 'min')"
                                     :value="draftValue(field, 'min')"
                                     :disabled="draftEmpty(field)"
                                     @input="setDraft(field, 'min', $event)"
                                     autocomplete="off"
                                 >
-                                <div class="invalid-feedback" x-text="filterError(field, 'min')"></div>
+                                <div class="invalid-feedback" :id="filterErrorId(field, 'min')" x-text="filterError(field, 'min')"></div>
                             </div>
                             <div class="col-6">
                                 <label class="form-label small text-secondary" :for="filterId(field, 'max')">{{ __('To') }}</label>
@@ -42,12 +44,14 @@
                                     :type="rangeInputType(field)"
                                     :inputmode="rangeInputMode(field)"
                                     :class="filterInputClass(field, 'max')"
+                                    :aria-invalid="filterInvalid(field, 'max')"
+                                    :aria-describedby="filterDescribedBy(field, 'max')"
                                     :value="draftValue(field, 'max')"
                                     :disabled="draftEmpty(field)"
                                     @input="setDraft(field, 'max', $event)"
                                     autocomplete="off"
                                 >
-                                <div class="invalid-feedback" x-text="filterError(field, 'max')"></div>
+                                <div class="invalid-feedback" :id="filterErrorId(field, 'max')" x-text="filterError(field, 'max')"></div>
                             </div>
                         </div>
                     </template>

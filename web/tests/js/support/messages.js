@@ -34,7 +34,9 @@ export const MESSAGES = {
     'grid.totals.all': 'Total',
     'grid.totals.selection': 'Selection total',
     'grid.notice.reset': 'Some of the search options no longer apply: the list was reset.',
+    'grid.notice.not_saved': 'The new value of :field was not saved: :reason',
     'grid.filter.invalid_number': 'Enter a number with at most 6 decimals.',
+    'grid.filter.too_large': 'Enter a number with at most 15 digits before the decimal sign.',
     'grid.filter.invalid_value': 'This value is not valid.',
     'grid.card.untitled': 'Untitled item',
     'grid.cell.edit': 'Edit :field: :value',
@@ -46,6 +48,7 @@ export const MESSAGES = {
     'grid.chip.min': ':name: from :value',
     'grid.chip.max': ':name: up to :value',
     'grid.chip.value': ':name: :value',
+    'grid.chip.deleted_choice': 'Deleted choice',
     'fields.boolean.yes': 'Yes',
     'fields.boolean.no': 'No',
     'fields.rating': ':value out of :max',
@@ -92,9 +95,9 @@ export const MESSAGES = {
  * @returns {string}
  */
 export function t(key, replacements = {}) {
-    return Object.entries(replacements).reduce(
-        (text, [name, value]) => text.replaceAll(':' + name, String(value)),
-        MESSAGES[key] ?? key,
+    // One pass over the message, as the real `t()` does: what a value holds is never read as a placeholder.
+    return (MESSAGES[key] ?? key).replace(/:(\w+)/g, (placeholder, name) =>
+        Object.hasOwn(replacements, name) ? String(replacements[name]) : placeholder,
     );
 }
 

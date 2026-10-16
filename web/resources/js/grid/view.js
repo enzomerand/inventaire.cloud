@@ -7,9 +7,6 @@
  */
 import { readPreference, writePreference } from '../lib/storage.js';
 
-/** The ways to lay the items out. */
-export const VIEWS = ['table', 'gallery'];
-
 /** The screen width below which the gallery is the default view, in pixels: Bootstrap's `sm` breakpoint. */
 export const NARROW_BELOW = 576;
 

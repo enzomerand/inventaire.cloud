@@ -18,6 +18,7 @@ import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
 import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
+import { ulid, withUlids } from '../support/inventory.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
 import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
 
@@ -1564,6 +1565,18 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(window.location.search).toBe('?q=hamm');
             });
 
+            it('stops waiting for the end of the typing when the page is taken apart (Alpine calls destroy())', async () => {
+                await open({ items: [HAMMER] });
+                http.get.mockClear();
+
+                await type(searchBox(), 'ham');
+                document.body.replaceChildren();
+                await flush();
+                await new Promise((resolve) => setTimeout(resolve, 400));
+
+                expect(http.get).not.toHaveBeenCalled();
+            });
+
             it('searches at once on Enter, and clears the search with its button', async () => {
                 await open({ items: [HAMMER] });
 
@@ -1819,6 +1832,29 @@ describe('the pages under the real Alpine CSP build', () => {
                     );
                 });
 
+                it('links the message under a refused box to the box, and takes the link away once it is typed again', async () => {
+                    const [min, max] = row('Price').querySelectorAll('input');
+
+                    await type(min, '1000000000000000');
+                    await submit(panel().querySelector('form'));
+
+                    const feedback = min.parentElement.querySelector('.invalid-feedback');
+
+                    expect(feedback.id).not.toBe('');
+                    expect(min.getAttribute('aria-invalid')).toBe('true');
+                    expect(min.getAttribute('aria-describedby')).toBe(feedback.id);
+                    expect(document.getElementById(feedback.id).textContent).toBe(
+                        'Enter a number with at most 15 digits before the decimal sign.',
+                    );
+                    expect(max.hasAttribute('aria-invalid')).toBe(false);
+                    expect(max.hasAttribute('aria-describedby')).toBe(false);
+
+                    await type(min, '5');
+
+                    expect(min.hasAttribute('aria-invalid')).toBe(false);
+                    expect(min.hasAttribute('aria-describedby')).toBe(false);
+                });
+
                 it('disables the boxes of a value for a field that is asked to hold none', async () => {
                     const [min, max] = row('Price').querySelectorAll('input');
 
@@ -1854,9 +1890,45 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(document.querySelectorAll('.badge .btn-close')).toHaveLength(0);
                 });
 
+                it('puts the cursor on the next chip when one is removed, and on the button of the filters after the last', async () => {
+                    await choose(row('Fragile').querySelector('select'), 'true');
+                    await choose(row('Name').querySelector('select'), 'filled');
+                    await submit(panel().querySelector('form'));
+                    const closer = (label) => document.querySelector(`.badge .btn-close[aria-label="${label}"]`);
+
+                    await press('Remove the filter Name: not empty');
+
+                    // The list was read again after the chip it came from was taken out of the page, and shown.
+                    expect(visible(closer('Remove the filter Fragile: Yes'))).toBe(true);
+                    expect(bodyRows()).toHaveLength(1);
+                    expect(document.activeElement).toBe(closer('Remove the filter Fragile: Yes'));
+
+                    await press('Remove the filter Fragile: Yes');
+
+                    expect(visible(filtersButton())).toBe(true);
+                    expect(bodyRows()).toHaveLength(1);
+                    expect(document.activeElement).toBe(filtersButton());
+                });
+
+                it('lets a chip wrap, so that a long name never pushes the page sideways, and keeps its close button whole', async () => {
+                    await choose(row('Fragile').querySelector('select'), 'true');
+                    await submit(panel().querySelector('form'));
+
+                    const chip = document.querySelector('.badge .btn-close').parentElement;
+
+                    expect(chip.classList.contains('text-wrap')).toBe(true);
+                    expect(chip.classList.contains('text-break')).toBe(true);
+                    expect(chip.classList.contains('mw-100')).toBe(true);
+                    expect(document.querySelector('.badge .btn-close').classList.contains('flex-shrink-0')).toBe(true);
+                });
+
                 it('brings the filters of the address back into the boxes of the panel', async () => {
-                    window.history.replaceState(null, '', '/?filter[price][min]=89.90&filter[state][in][]=bbbbbbbb');
-                    await open({ items: [STORED], itemsCount: 3 });
+                    window.history.replaceState(
+                        null,
+                        '',
+                        `/?filter[${ulid('price')}][min]=89.90&filter[${ulid('state')}][in][]=bbbbbbbb`,
+                    );
+                    await open({ fields: withUlids(['price', 'state'], FIELDS), items: [STORED], itemsCount: 3 });
                     await openPanel();
 
                     expect(row('Price').querySelector('input').value).toBe('89.90');
@@ -1867,8 +1939,13 @@ describe('the pages under the real Alpine CSP build', () => {
 
             describe('when nothing matches', () => {
                 beforeEach(async () => {
-                    window.history.replaceState(null, '', '/?q=zzz&filter[price][min]=5');
-                    await open({ items: [], itemsCount: 3, meta: { total: 0, from: null, to: null } });
+                    window.history.replaceState(null, '', `/?q=zzz&filter[${ulid('price')}][min]=5`);
+                    await open({
+                        fields: withUlids(['price'], FIELDS),
+                        items: [],
+                        itemsCount: 3,
+                        meta: { total: 0, from: null, to: null },
+                    });
                 });
 
                 it('says so, apart from an empty inventory, and offers to clear the search and the filters', async () => {
@@ -1886,10 +1963,13 @@ describe('the pages under the real Alpine CSP build', () => {
                             ? { data: { id: 'tools', name: 'Tools', items_count: 3, fields: FIELDS } }
                             : itemsPage([STORED]),
                     );
+                    expect(document.querySelector('.badge .btn-close')).not.toBeNull();
                     await press('Clear the search and the filters');
 
                     expect(lastParams()).toEqual({ page: 1 });
                     expect(searchBox().value).toBe('');
+                    // The button that was pressed went away with the message: the cursor is in the search box.
+                    expect(document.activeElement).toBe(searchBox());
                     expect(bodyRows()).toHaveLength(1);
                     expect([...document.querySelectorAll('.empty')].filter((element) => visible(element))).toHaveLength(
                         0,
@@ -2316,6 +2396,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(editor().classList.contains('is-invalid')).toBe(true);
                 expect(editor().getAttribute('aria-invalid')).toBe('true');
+                expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
+                expect(document.getElementById('item-inline-error').textContent).toBe('The price must be a number.');
                 expect(editor().disabled).toBe(false);
                 expect(editor().closest('td').querySelector('.text-danger').textContent).toBe(
                     'The price must be a number.',
@@ -2327,6 +2409,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 await type(editor(), '12');
 
                 expect(editor().classList.contains('is-invalid')).toBe(false);
+                expect(editor().hasAttribute('aria-describedby')).toBe(false);
 
                 key(editor(), 'Enter');
                 await flush();

@@ -26,6 +26,22 @@ const MAX_PAGE = 1_000_000;
 /** A condition of a filter in the address or in the parameters: `filter[<field>][<condition>]`, with `[<index>]` after `in`. */
 const FILTER_KEY = /^filter\[([^\]]+)\]\[(empty|min|max|is|in)\](?:\[\d*\])?$/;
 
+/** The id of a field: a ULID, 26 letters and digits (lowercase on the server, read in lowercase from the address). */
+const FIELD_ID = /^[0-9a-z]{26}$/i;
+
+/** The id of a choice of a field: 8 lowercase letters and digits (`ChoiceType::ID_LENGTH`). */
+const CHOICE_ID = /^[a-z0-9]{8}$/;
+
+/** A bound for a number the way the server takes it: below 1e15 in absolute value, with at most 6 decimals. */
+export const NUMBER_BOUND = /^-?\d{1,15}(\.\d{1,6})?$/;
+
+/** The forms in which the server stores a date, a moment and a time of day, which a bound must be written in. */
+export const TEMPORAL_BOUND = {
+    date: /^\d{4}-\d{2}-\d{2}$/,
+    datetime: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+    time: /^\d{2}:\d{2}$/,
+};
+
 /**
  * @typedef {object} Filter The conditions on one field, as the API takes them. All of them have to hold.
  * @property {boolean} [empty] True for the items with no value in the field, false for the ones with one.
@@ -147,8 +163,9 @@ export function toSearch(query, { page = 1, view = null } = {}) {
 
 /**
  * Reads a view back from the query string of the address of the page. Anything that makes no sense (a direction that is
- * neither `asc` nor `desc`, a page that is no number, a condition nobody knows) is left out, so that a hand-edited
- * address never breaks the page; whether the fields and the values it mentions are right is for the server to say.
+ * neither `asc` nor `desc`, a page that is no number, a condition nobody knows, a field that is no ULID, a bound or a
+ * choice written in no form the server takes) is left out on its own, so that a hand-edited address never breaks the page
+ * nor costs the rest of the view; whether the fields and the values it mentions exist is for the server to say.
  *
  * @param {string} search The query string, with or without its leading `?`.
  * @returns {{ query: Query, page: number, view: import('./view.js').View | null }} The way to lay the items out is null
@@ -158,17 +175,24 @@ export function fromSearch(search) {
     const params = new URLSearchParams(search);
     const query = emptyQuery();
 
-    query.q = (params.get('q') ?? '').trim().slice(0, SEARCH_MAX_LENGTH);
-    query.sort = (params.get('sort') ?? '').trim().slice(0, SORT_MAX_LENGTH);
+    query.q = clip((params.get('q') ?? '').trim(), SEARCH_MAX_LENGTH);
+    query.sort = clip((params.get('sort') ?? '').trim(), SORT_MAX_LENGTH);
     query.direction = query.sort !== '' && params.get('direction') === 'desc' ? 'desc' : 'asc';
+
+    // The names in the address are the person's to choose: they land in a map without a prototype, and only as the id of a
+    // field, never as a name that means something to an object (`__proto__`, `constructor`).
+    /** @type {Record<string, Filter>} */
+    const filters = Object.create(null);
 
     for (const [key, value] of params) {
         const condition = FILTER_KEY.exec(key);
 
         if (condition !== null) {
-            addCondition(query.filters, condition[1].toLowerCase(), condition[2], value);
+            addCondition(filters, condition[1].toLowerCase(), condition[2], value);
         }
     }
+
+    query.filters = { ...filters };
 
     const page = Number.parseInt(params.get('page') ?? '', 10);
 
@@ -180,33 +204,58 @@ export function fromSearch(search) {
 }
 
 /**
- * Adds one condition read from the address to the filters, unless its value makes no sense for it.
+ * Whether a text is a bound in one of the forms the server takes (a number, a date, a moment, a time of day). Which of
+ * them a field takes is for the server to say: this only turns away what no field takes, so that one wrong value in an
+ * address costs that condition alone, not the whole view.
  *
- * @param {Record<string, Filter>} filters
- * @param {string} id The field.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isBound(value) {
+    return NUMBER_BOUND.test(value) || Object.values(TEMPORAL_BOUND).some((form) => form.test(value));
+}
+
+/**
+ * Cuts a text to a number of characters, by code points, so that a character made of two UTF-16 units is never split.
+ *
+ * @param {string} text
+ * @param {number} max
+ * @returns {string}
+ */
+function clip(text, max) {
+    const characters = [...text];
+
+    return characters.length > max ? characters.slice(0, max).join('') : text;
+}
+
+/**
+ * Adds one condition read from the address to the filters, unless the field or its value makes no sense: only the
+ * condition is left out, the rest of the view stays.
+ *
+ * @param {Record<string, Filter>} filters A map without a prototype.
+ * @param {string} id The field, in lowercase.
  * @param {string} condition `empty`, `min`, `max`, `is` or `in`.
  * @param {string} value
  * @returns {void}
  */
 function addCondition(filters, id, condition, value) {
-    if (value === '') {
+    if (!FIELD_ID.test(id)) {
         return;
     }
 
-    const filter = (filters[id] ??= {});
-
     if (condition === 'empty' || condition === 'is') {
         if (value === 'true' || value === 'false') {
-            filter[condition] = value === 'true';
+            (filters[id] ??= {})[condition] = value === 'true';
         }
     } else if (condition === 'in') {
-        (filter.in ??= []).push(value);
-    } else {
-        filter[condition] = value;
-    }
+        if (CHOICE_ID.test(value)) {
+            const filter = (filters[id] ??= {});
 
-    // A field whose only conditions were refused has no filter.
-    if (Object.keys(filter).length === 0) {
-        delete filters[id];
+            if (!(filter.in ??= []).includes(value)) {
+                filter.in.push(value);
+            }
+        }
+    } else if (isBound(value)) {
+        (filters[id] ??= {})[condition] = value;
     }
 }

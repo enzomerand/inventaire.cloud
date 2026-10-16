@@ -124,8 +124,18 @@ describe('the filters of the list of items', () => {
                 min: 'Enter a number with at most 6 decimals.',
                 max: 'Enter a number with at most 6 decimals.',
             });
-            expect(filterFromDraft(WEIGHT, { ...blankDraft(), min: '1000000000000000' }).errors.min).toBeDefined();
             expect(filterFromDraft(WEIGHT, { ...blankDraft(), min: '-5' }).filter).toEqual({ min: '-5' });
+        });
+
+        it('tells a number with too many digits before the decimal sign from one with too many decimals', () => {
+            const tooLarge = 'Enter a number with at most 15 digits before the decimal sign.';
+            const tooPrecise = 'Enter a number with at most 6 decimals.';
+
+            expect(filterFromDraft(WEIGHT, { ...blankDraft(), min: '1000000000000000' }).errors.min).toBe(tooLarge);
+            expect(filterFromDraft(WEIGHT, { ...blankDraft(), max: '-1234567890123456,5' }).errors.max).toBe(tooLarge);
+            expect(filterFromDraft(WEIGHT, { ...blankDraft(), min: '1.1234567' }).errors.min).toBe(tooPrecise);
+            expect(filterFromDraft(WEIGHT, { ...blankDraft(), min: 'abc' }).errors.min).toBe(tooPrecise);
+            expect(filterFromDraft(WEIGHT, { ...blankDraft(), min: '999999999999999.999999' }).errors).toEqual({});
         });
 
         it('keeps one bound when the other box is empty', () => {
@@ -271,8 +281,16 @@ describe('the filters of the list of items', () => {
             expect(labelOf(NAME, { empty: false })).toBe('Name: not empty');
         });
 
-        it('says the id of a choice the field no longer has rather than nothing', () => {
-            expect(labelOf(STATE, { in: ['gone'] })).toBe('State: gone');
+        it('says "Deleted choice", not its id, for a choice the field no longer has', () => {
+            expect(labelOf(STATE, { in: ['gone'] })).toBe('State: Deleted choice');
+            expect(labelOf(STATE, { in: ['aaaaaaaa', 'gone'] })).toBe('State: New, Deleted choice');
+        });
+
+        it('reads what a field is called as a name, even when it looks like a placeholder', () => {
+            const odd = field('odd', 'number', {}, ':value');
+
+            expect(labelOf(odd, { min: '1' })).toBe(':value: from 1');
+            expect(chipsOf([odd], { odd: { min: '1' } })[0].removeLabel).toBe('Remove the filter :value: from 1');
         });
 
         it('has one chip for each filtered field, in the order of the fields, with the name of its remove button', () => {

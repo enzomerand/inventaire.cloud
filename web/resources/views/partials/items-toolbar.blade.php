@@ -9,6 +9,9 @@
     the "sm" breakpoint only, the gallery always.
 
     Do not put a display utility (d-flex...) on an element that carries :hidden: the utility wins and it never hides.
+
+    A chip wraps (a long name must not push the page sideways on a phone), and its close button never shrinks. Removing a
+    chip puts the cursor on the next one, else on the filters button (see removeChip in resources/js/grid/criteria.js).
 --}}
 <div class="card-body border-bottom" :hidden="!showToolbar">
     <div class="row g-2 align-items-center">
@@ -33,7 +36,7 @@
             </div>
         </div>
         <div class="col-auto">
-            <button type="button" class="btn" aria-haspopup="dialog" @click="openFilters">
+            <button type="button" class="btn" aria-haspopup="dialog" x-ref="filtersButton" @click="openFilters">
                 <x-tabler-adjustments-horizontal aria-hidden="true" />
                 {{ __('Filters') }}
                 <span class="badge bg-primary ms-2" :hidden="filterCount === 0" x-text="filterCount"></span>
@@ -68,9 +71,9 @@
     <div class="mt-2" :hidden="chips.length === 0">
         <div class="d-flex flex-wrap gap-1">
             <template x-for="chip in chips" :key="chip.key">
-                <span class="badge bg-blue-lt d-inline-flex align-items-center gap-1">
+                <span class="badge bg-blue-lt d-inline-flex align-items-center gap-1 text-wrap text-break text-start lh-sm mw-100">
                     <span x-text="chip.label"></span>
-                    <button type="button" class="btn-close" :aria-label="chip.removeLabel" @click="removeChip(chip)"></button>
+                    <button type="button" class="btn-close flex-shrink-0" :data-chip-remove="chip.fieldId" :aria-label="chip.removeLabel" @click="removeChip(chip)"></button>
                 </span>
             </template>
         </div>

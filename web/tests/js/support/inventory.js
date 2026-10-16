@@ -46,6 +46,28 @@ export const FIELDS = [
     field('tint', 'color', {}, { name: 'Tint' }),
 ];
 
+/**
+ * An id in the form of the id of a field (a ULID: 26 letters and digits), made of a readable name, since the address of the
+ * page only takes ids in that form for the fields it filters.
+ *
+ * @param {string} name Letters and digits, at most 26.
+ * @returns {string}
+ */
+export function ulid(name) {
+    return name.padStart(26, '0');
+}
+
+/**
+ * The fields of the inventory with the ids of some of them turned into ULIDs (see {@link ulid}).
+ *
+ * @param {string[]} names The ids to turn.
+ * @param {Record<string, any>[]} [fields]
+ * @returns {Record<string, any>[]}
+ */
+export function withUlids(names, fields = FIELDS) {
+    return fields.map((one) => (names.includes(one.id) ? { ...one, id: ulid(one.id) } : one));
+}
+
 /** An item as `ItemResource` describes it. */
 export function item(id, values = {}) {
     return { id, values, created_at: '2026-10-15T10:00:00Z', updated_at: '2026-10-15T10:00:00Z' };

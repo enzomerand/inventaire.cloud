@@ -18,6 +18,7 @@ import {
     item,
     mountComponent,
     page,
+    ulid,
 } from '../support/inventory.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
@@ -352,7 +353,7 @@ describe('editing a cell in place', () => {
             expect(component.inlineRow).toBeNull();
         });
 
-        it('does not let another cell take its place while the value is refused', async () => {
+        it('gives up the value that was refused when another cell is edited, and opens that cell', async () => {
             http.patch.mockRejectedValue(refusal());
             await edit(0, 'price');
             component.onInlineInput({ target: { value: 'abc' } });
@@ -360,8 +361,50 @@ describe('editing a cell in place', () => {
 
             await edit(1, 'name');
 
-            expect(component.inlineRow).toBe('i1');
-            expect(component.inlineFieldId).toBe('price');
+            expect(component.inlineRow).toBe('i2');
+            expect(component.inlineFieldId).toBe('name');
+            expect(component.inlineInput).toBe('Saw');
+            expect(component.inlineError).toBe('');
+            expect(component.items[0].values.price).toBe('19.90');
+            expect(cellOf(0, 'price').text).toBe('€19.90');
+            // The person had seen the message under the control: no need to say it again.
+            expect(notify).not.toHaveBeenCalled();
+        });
+
+        it('says that the value was not saved when the refusal comes after the click on another cell', async () => {
+            const sent = deferred();
+            http.patch.mockReturnValue(sent.promise);
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: 'abc' } });
+            const saving = component.commitInline('blur');
+
+            const next = edit(1, 'name');
+            sent.reject(refusal());
+            await saving;
+            await next;
+
+            expect(notify).toHaveBeenCalledWith(
+                'warning',
+                'The new value of Price was not saved: The Price must be a number.',
+            );
+            expect(component.inlineRow).toBe('i2');
+            expect(component.inlineFieldId).toBe('name');
+            expect(component.inlineError).toBe('');
+        });
+
+        it('points the control to the message that says why its value was refused', async () => {
+            http.patch.mockRejectedValue(refusal());
+            await edit(0, 'price');
+            expect(component.inlineDescribedBy).toBeNull();
+
+            component.onInlineInput({ target: { value: 'abc' } });
+            await component.commitInline('blur');
+
+            expect(component.inlineDescribedBy).toBe('item-inline-error');
+
+            component.onInlineInput({ target: { value: '1' } });
+
+            expect(component.inlineDescribedBy).toBeNull();
         });
 
         it('shows the message of the server when it names no field of the item', async () => {
@@ -372,6 +415,103 @@ describe('editing a cell in place', () => {
             await component.commitInline('blur');
 
             expect(component.inlineError).toBe('Unknown field.');
+        });
+    });
+
+    describe('when the control is closed before the answer comes', () => {
+        const refusal = () =>
+            new HttpError(422, 'The given data was invalid.', {
+                errors: { 'values.price': ['The Price must be a number.'] },
+            });
+
+        /** Starts saving a price, and leaves the request pending. */
+        async function sendPrice() {
+            const sent = deferred();
+            http.patch.mockReturnValue(sent.promise);
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: 'abc' } });
+
+            return { sent, saving: component.commitInline('blur') };
+        }
+
+        const NOT_SAVED = 'The new value of Price was not saved: The Price must be a number.';
+
+        it('says which field was refused, by a toast, when the view changed meanwhile', async () => {
+            const { sent, saving } = await sendPrice();
+
+            component.showAsGallery();
+            expect(component.inlineRow).toBeNull();
+
+            sent.reject(refusal());
+            await saving;
+
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith('warning', NOT_SAVED);
+            expect(component.inlineError).toBe('');
+            expect(component.inlineRow).toBeNull();
+            expect(component.inlineSaving).toBe(false);
+        });
+
+        it('says which field was refused when the page changed meanwhile and the row is no longer there', async () => {
+            const { sent, saving } = await sendPrice();
+
+            http.get.mockResolvedValue(page([SAW]));
+            await component.loadItems(1);
+            expect(component.inlineRow).toBeNull();
+
+            sent.reject(refusal());
+            await saving;
+
+            expect(notify).toHaveBeenCalledWith('warning', NOT_SAVED);
+            expect(component.inlineError).toBe('');
+        });
+
+        it('says which field was refused with the message of the server for the item when it names no field', async () => {
+            const { sent, saving } = await sendPrice();
+            component.showAsGallery();
+
+            sent.reject(new HttpError(422, 'Invalid.', { errors: { values: ['Unknown field.'] } }));
+            await saving;
+
+            expect(notify).toHaveBeenCalledWith('warning', 'The new value of Price was not saved: Unknown field.');
+        });
+
+        it('says which field failed for any other answer of the server, even one the helper has reported', async () => {
+            const { sent, saving } = await sendPrice();
+            component.showAsGallery();
+            const down = new HttpError(500, 'Server down');
+            down.reported = true;
+
+            sent.reject(down);
+            await saving;
+
+            expect(notify).toHaveBeenCalledWith('warning', 'The new value of Price was not saved: Server down');
+        });
+
+        it('has nothing to say about a request that was cancelled', async () => {
+            const { sent, saving } = await sendPrice();
+            component.showAsGallery();
+
+            sent.reject(new DOMException('Aborted', 'AbortError'));
+            await saving;
+
+            expect(notify).not.toHaveBeenCalled();
+        });
+
+        it('still opens the cell that is edited next when the item turns out to be gone', async () => {
+            const { sent, saving } = await sendPrice();
+            component.showAsGallery();
+            // The person comes back to the table and starts another cell once the value on its way has been answered.
+            component.showAsTable();
+            const next = edit(1, 'name');
+
+            sent.reject(new HttpError(404, 'This item no longer exists.'));
+            await saving;
+            await next;
+
+            expect(notify).toHaveBeenCalledWith('warning', 'This item no longer exists.');
+            expect(component.inlineRow).toBe('i2');
+            expect(component.inlineFieldId).toBe('name');
         });
     });
 
@@ -472,6 +612,59 @@ describe('editing a cell in place', () => {
             await component.commitInline('enter');
 
             expect(component.inventoryCount).toBe(3);
+        });
+
+        it.each([
+            ['a search', { q: 'ham' }, { page: 1, q: 'ham' }],
+            [
+                'a filter',
+                { filters: { [ulid('state')]: { in: ['aaaaaaaa'] } } },
+                { page: 1, [`filter[${ulid('state')}][in][0]`]: 'aaaaaaaa' },
+            ],
+        ])(
+            'are read again, for the count too, when %s narrows the list down, whatever the field: an edit can change what matches',
+            async (_name, criteria, params) => {
+                component.query = { ...component.query, ...criteria };
+                http.patch.mockResolvedValue(changed(HAMMER, { name: 'Big hammer' }));
+                http.get.mockResolvedValue(page([SAW], { total: 1, totals: { qty: '', price: '10.00' } }));
+                await edit(0, 'name');
+                component.onInlineInput({ target: { value: 'Big hammer' } });
+
+                await component.commitInline('enter');
+
+                expect(http.get).toHaveBeenCalledTimes(1);
+                expect(http.get).toHaveBeenCalledWith(ITEMS, { params });
+                expect(component.total).toBe(1);
+                expect(component.totalRow.find((cell) => cell.key === 'price').text).toBe('€10.00');
+                // The rows stay where they are, whatever the answer says.
+                expect(component.rows.map((row) => row.id)).toEqual(['i1', 'i2']);
+                expect(cellOf(0, 'name').text).toBe('Big hammer');
+            },
+        );
+
+        it('keep the count of the inventory when it is a search that narrows the list down', async () => {
+            component.itemsCount = 7;
+            component.query = { ...component.query, q: 'ham' };
+            http.patch.mockResolvedValue(changed(HAMMER, { name: 'Big hammer' }));
+            http.get.mockResolvedValue(page([HAMMER], { total: 1 }));
+            await edit(0, 'name');
+            component.onInlineInput({ target: { value: 'Big hammer' } });
+
+            await component.commitInline('enter');
+
+            expect(component.total).toBe(1);
+            expect(component.inventoryCount).toBe(7);
+        });
+
+        it('are not read again for a sort alone, which changes no item that matches', async () => {
+            component.query = { ...component.query, sort: 'name' };
+            http.patch.mockResolvedValue(changed(HAMMER, { name: 'Big hammer' }));
+            await edit(0, 'name');
+            component.onInlineInput({ target: { value: 'Big hammer' } });
+
+            await component.commitInline('enter');
+
+            expect(http.get).not.toHaveBeenCalled();
         });
 
         it('are not read again for a field that does not add up', async () => {
