@@ -495,6 +495,57 @@ describe('the files of an item', () => {
             expect(component.canAddTo(PHOTOS)).toBe(true);
         });
 
+        it('offers to send a file again only when the refusal can be different the next time', async () => {
+            await open([SAW]);
+            await openItem('i2');
+            const refusals = [
+                [refused({ file: ['The file must be an image.'] }), false],
+                [conflict('attachment_limit_reached', 20), false],
+                [conflict('field_file_limit_reached', 3), false],
+                [conflict('storage_limit_reached', undefined), false],
+                [new HttpError(404, 'This item no longer exists.'), false],
+                [new HttpError(0, 'Network error.', { kind: 'network' }), true],
+                [new HttpError(0, 'Timeout.', { kind: 'timeout' }), true],
+                [new HttpError(429, 'Too many requests.'), true],
+                [new HttpError(500, 'Server error.'), true],
+                [new HttpError(503, 'Unavailable.'), true],
+            ];
+
+            for (const [error, retryable] of refusals) {
+                http.post.mockRejectedValueOnce(error);
+                component.uploads = [];
+
+                await component.receive([picked('front.jpg')], 'photos');
+
+                expect(component.uploads, `${error.status} ${error.code ?? error.kind}`).toMatchObject([
+                    { state: 'error', retryable },
+                ]);
+            }
+        });
+
+        it('gives the files left behind a refusal that ended the batch the same chance to be sent again', async () => {
+            await open([SAW]);
+            await openItem('i2');
+            http.post.mockRejectedValueOnce(conflict('storage_limit_reached', undefined));
+
+            await component.receive([picked('a.jpg'), picked('b.jpg')], 'photos');
+
+            expect(component.uploads).toMatchObject([
+                { name: 'a.jpg', state: 'error', retryable: false },
+                { name: 'b.jpg', state: 'error', retryable: false },
+            ]);
+
+            component.uploads = [];
+            http.post.mockRejectedValueOnce(new HttpError(429, 'Too many requests.'));
+
+            await component.receive([picked('c.jpg'), picked('d.jpg')], 'photos');
+
+            expect(component.uploads).toMatchObject([
+                { name: 'c.jpg', state: 'error', retryable: true },
+                { name: 'd.jpg', state: 'error', retryable: true },
+            ]);
+        });
+
         it('says which limit it ran into when the server answers a conflict', async () => {
             await open([SAW]);
             await openItem('i2');

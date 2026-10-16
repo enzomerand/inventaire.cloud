@@ -228,11 +228,17 @@
     position: relative;
 }
 
+/*
+ * The remove button of a photo tile. .btn-close draws its cross with a mask of 0.75 em, so the mark stays compact, while the
+ * box that takes the click is 1.5 rem square (24 CSS pixels, the minimum of WCAG 2.5.8) in the corner of the tile.
+ */
 .app-tile-remove {
     position: absolute;
-    top: 0.125rem;
-    inset-inline-end: 0.125rem;
-    padding: 0.25rem;
+    top: 0;
+    inset-inline-end: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
     border-radius: 50%;
     background-color: var(--tblr-bg-surface);
     background-size: 0.625rem;

@@ -7,6 +7,10 @@
     Included in the dialog of an item (app/inventory.blade.php), so it reads the inventoryItems component
     (resources/js/components/inventory-items.js, with resources/js/item/files.js).
 
+    The links to a file carry rel="noopener" and never "noreferrer": the file is served by the API on this very origin, and
+    without a Referer the request of the new tab is not stateful for Sanctum, so the API answers 401 instead of the file.
+    (The Referrer-Policy of the app is same-origin: the Referer never leaves the site.)
+
     Do not put a display utility (d-flex...) on an element that carries x-show or :hidden: the utility wins and it never hides.
 --}}
 <div>
@@ -23,7 +27,7 @@
         <template x-for="file in attachmentRows" :key="file.id">
             <li class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-3">
-                    <a :href="file.href" :target="file.target" rel="noopener noreferrer" tabindex="-1" aria-hidden="true">
+                    <a :href="file.href" :target="file.target" rel="noopener" tabindex="-1" aria-hidden="true">
                         <template x-if="file.thumb">
                             <img class="app-thumb-lg" :src="file.thumb" alt="" width="72" height="72" loading="lazy" decoding="async">
                         </template>
@@ -34,7 +38,7 @@
                         </template>
                     </a>
                     <div class="app-grow">
-                        <a class="fw-bold text-break" :href="file.href" :target="file.target" rel="noopener noreferrer" x-text="file.name"></a>
+                        <a class="fw-bold text-break" :href="file.href" :target="file.target" rel="noopener" x-text="file.name"></a>
                         <div class="text-secondary small">
                             <span x-text="file.sizeText"></span>
                             <span x-show="file.added"> · <span x-text="file.added"></span></span>

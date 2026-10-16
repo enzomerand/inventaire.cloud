@@ -3044,7 +3044,8 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(images[0].getAttribute('src')).toBe('/api/v1/attachments/a1/thumbnail');
                     expect(images[0].closest('a').getAttribute('href')).toBe('/api/v1/attachments/a1?inline=1');
                     expect(images[0].closest('a').getAttribute('target')).toBe('_blank');
-                    expect(images[0].closest('a').getAttribute('rel')).toBe('noopener noreferrer');
+                    // Never "noreferrer": without a Referer the API does not treat the request of the new tab as stateful (401).
+                    expect(images[0].closest('a').getAttribute('rel')).toBe('noopener');
                     expect(buttons('Remove front.jpg', field('photos'))).toHaveLength(1);
                     expect(buttons('Remove back.jpg', field('photos'))).toHaveLength(1);
                 });
@@ -3057,6 +3058,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
                     expect(entry.querySelector('a').textContent).toBe('invoice.pdf');
                     expect(entry.querySelector('a').getAttribute('href')).toBe('/api/v1/attachments/d1?inline=1');
+                    expect(entry.querySelector('a').getAttribute('target')).toBe('_blank');
+                    expect(entry.querySelector('a').getAttribute('rel')).toBe('noopener');
                     expect(entry.textContent).toContain('1 MB');
                     expect(buttons('Remove invoice.pdf', field('docs'))).toHaveLength(1);
                 });
@@ -3294,6 +3297,23 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(entries[2].querySelector('img')).toBeNull();
                     expect(entries[2].textContent).toContain('1 MB');
                     expect(entries[2].textContent).toContain('Documents');
+                });
+
+                it('opens a file in a new tab without hiding the Referer, which the API needs to know the session', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('Attachments (3)');
+
+                    const links = [...panel('files').querySelectorAll('a[href*="inline=1"]')];
+
+                    // The thumbnail and the name of each of the three files.
+                    expect(links).toHaveLength(6);
+
+                    for (const link of links) {
+                        expect(link.getAttribute('target')).toBe('_blank');
+                        expect(link.getAttribute('rel')).toBe('noopener');
+                    }
                 });
 
                 it('downloads a file, and deletes it after asking', async () => {
@@ -3761,7 +3781,7 @@ describe('the pages under the real Alpine CSP build', () => {
                         '/api/v1/attachments/d1?inline=1',
                     ]);
                     expect(links[0].querySelector('img').getAttribute('alt')).toBe('front.jpg');
-                    expect(links.every((link) => link.getAttribute('rel') === 'noopener noreferrer')).toBe(true);
+                    expect(links.every((link) => link.getAttribute('rel') === 'noopener')).toBe(true);
                 });
 
                 it('can read the attachments and download them, but not add or delete any', async () => {

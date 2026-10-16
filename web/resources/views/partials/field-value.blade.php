@@ -1,7 +1,11 @@
 {{--
     How the value of a field is shown, from a "cell" (see resources/js/fields/cell.js): the element is chosen by its
     kind, and everything else is bound with x-text and attribute bindings, never x-html, so that nothing a person typed
-    is interpreted as markup. Links carry rel="noopener noreferrer nofollow".
+    is interpreted as markup. Links to the web carry rel="noopener noreferrer nofollow".
+
+    The links to a file are the exception: they carry rel="noopener" and never "noreferrer". The file is served by the API on
+    this very origin, and without a Referer the request of the new tab is not stateful for Sanctum, so the API answers 401
+    instead of the file. (The Referrer-Policy of the app is same-origin: the Referer never leaves the site.)
 
     Included in a template that has a "cell" in scope: the table of the items, the cards of the gallery and the details of an item.
 
@@ -45,7 +49,7 @@
 <template x-if="cell.kind === 'photos'">
     <span class="d-inline-flex flex-wrap align-items-center gap-1">
         <template x-for="file in cell.files" :key="file.id">
-            <a :href="file.href" :target="file.target" rel="noopener noreferrer">
+            <a :href="file.href" :target="file.target" rel="noopener">
                 <template x-if="file.thumb">
                     <img class="app-thumb" :src="file.thumb" :alt="file.name" width="32" height="32" loading="lazy" decoding="async">
                 </template>
@@ -64,7 +68,7 @@
 <template x-if="cell.kind === 'files'">
     <span class="d-inline-flex flex-wrap align-items-center gap-2">
         <template x-for="file in cell.files" :key="file.id">
-            <a class="d-inline-flex align-items-center gap-1" :href="file.href" :target="file.target" rel="noopener noreferrer">
+            <a class="d-inline-flex align-items-center gap-1" :href="file.href" :target="file.target" rel="noopener">
                 <span class="app-file-icon text-secondary" aria-hidden="true">
                     @include('partials.file-icon')
                 </span>

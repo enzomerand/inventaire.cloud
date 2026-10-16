@@ -99,6 +99,18 @@ function endsBatch(error) {
 }
 
 /**
+ * Whether sending the same file again can end differently: the connection broke or the time ran out, the server throttles
+ * the uploads (429; the allowance renews with the minute) or it failed on its own side (5xx). A refusal of the request itself
+ * (a type it does not take, a file too large: 422; a limit: 409; an item that is gone: 404) will be the same every time.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryable(error) {
+    return error instanceof HttpError && (isCutShort(error) || error.status === 429 || error.status >= 500);
+}
+
+/**
  * A file the browser holds, shown like one the server holds (a name, a size, an icon; no thumbnail, no link).
  *
  * @param {Staged} staged
@@ -603,7 +615,7 @@ export default function itemFiles() {
          *
          * @param {Staged[]} files
          * @param {string} reason
-         * @param {boolean} retryable Whether they can be sent again (not when the item is gone).
+         * @param {boolean} retryable Whether they can be sent again (not when the same refusal would come back: item gone, limit reached).
          * @returns {void}
          */
         failUploads(files, reason, retryable) {
@@ -756,9 +768,10 @@ export default function itemFiles() {
 
             const reason = this.uploadFailure(error);
             const gone = error instanceof HttpError && error.status === 404;
+            const retryable = isRetryable(error);
 
             if (token === this.dialogToken) {
-                this.setUpload(one.key, { state: 'error', message: reason, retryable: !gone });
+                this.setUpload(one.key, { state: 'error', message: reason, retryable });
                 this.announcement = '';
             } else {
                 // The dialog moved on: the row that would have said it is gone.
@@ -769,7 +782,7 @@ export default function itemFiles() {
                 await this.followGone(token);
             }
 
-            return { added: false, endsBatch: endsBatch(error) ? { reason, retryable: !gone } : null };
+            return { added: false, endsBatch: endsBatch(error) ? { reason, retryable } : null };
         },
 
         /**

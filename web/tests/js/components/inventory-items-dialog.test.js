@@ -635,7 +635,7 @@ describe('the dialog of an item while its requests are on their way', () => {
             expect(component.uploading).toBe(false);
         });
 
-        it('ends when the space is full: the files that follow are not sent, and say why', async () => {
+        it('ends when the space is full: the files that follow are not sent, say why and are not offered again', async () => {
             await open();
             component.open({ id: 'i2' });
             http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'storage_limit_reached' }));
@@ -644,9 +644,9 @@ describe('the dialog of an item while its requests are on their way', () => {
 
             expect(http.post).toHaveBeenCalledTimes(1);
             expect(component.uploads.map((upload) => [upload.state, upload.message, upload.retryable])).toEqual([
-                ['error', 'The storage space of this workspace is full.', true],
-                ['error', 'The storage space of this workspace is full.', true],
-                ['error', 'The storage space of this workspace is full.', true],
+                ['error', 'The storage space of this workspace is full.', false],
+                ['error', 'The storage space of this workspace is full.', false],
+                ['error', 'The storage space of this workspace is full.', false],
             ]);
         });
 
