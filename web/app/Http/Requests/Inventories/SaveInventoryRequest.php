@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Inventories;
 
+use App\Inventories\Templates\Template;
+use App\Inventories\Templates\TemplateCatalogue;
+use App\Inventories\Templates\TemplateValidator;
 use App\Models\Inventory;
 use App\Policies\InventoryPolicy;
 use App\Rules\MultiLineText;
 use App\Rules\SingleLineText;
+use Closure;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
@@ -17,7 +21,8 @@ use Illuminate\Support\Facades\Gate;
  *
  * Who may do it is decided before anything is looked at (see {@see InventoryPolicy}), so that somebody who may not
  * learns nothing from the validation: a stranger is told the workspace or the inventory does not exist. Creating needs
- * a name; changing takes whichever of the two is sent, and a name that is sent cannot be empty.
+ * a name; changing takes whichever of the two is sent, and a name that is sent cannot be empty. Creating may also name a
+ * template of the catalogue (`template`, its slug), which only a new inventory can do.
  */
 final class SaveInventoryRequest extends FormRequest
 {
@@ -51,7 +56,25 @@ final class SaveInventoryRequest extends FormRequest
         return [
             'name' => [$creating ? 'required' : 'sometimes', 'required', 'string', 'max:'.self::NAME_MAX_LENGTH, new SingleLineText],
             'description' => ['sometimes', 'nullable', 'string', 'max:'.self::DESCRIPTION_MAX_LENGTH, new MultiLineText],
+            // The slug of a template of the catalogue (`GET /api/v1/templates`): the inventory is made with its fields.
+            'template' => $creating
+                ? ['bail', 'sometimes', 'nullable', 'string', 'max:'.TemplateValidator::SLUG_MAX_LENGTH, function (string $attribute, mixed $value, Closure $fail): void {
+                    if (! is_string($value) || app(TemplateCatalogue::class)->find($value) === null) {
+                        $fail(__('This template does not exist.'));
+                    }
+                }]
+                : ['prohibited'],
         ];
+    }
+
+    /**
+     * The template the inventory is to be made from, or null for an empty inventory.
+     */
+    public function template(): ?Template
+    {
+        $slug = $this->input('template');
+
+        return is_string($slug) ? app(TemplateCatalogue::class)->find($slug) : null;
     }
 
     /**

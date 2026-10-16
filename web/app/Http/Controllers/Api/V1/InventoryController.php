@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Inventories\SaveInventoryRequest;
 use App\Http\Resources\InventoryResource;
 use App\Http\Responses\ApiError;
+use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
 use App\Inventories\Inventories;
 use App\Models\Inventory;
@@ -53,16 +54,31 @@ final class InventoryController extends Controller
     }
 
     /**
-     * Creates an inventory in the workspace (`201`): editors and owners.
+     * Creates an inventory in the workspace (`201`): editors and owners. With a `template` (a slug of
+     * `GET /api/v1/templates`) it gets the fields of the template, in the language of the request, in the same transaction;
+     * `422` for a template that does not exist, `409` (`field_limit_reached`) when the template has more fields than an
+     * inventory may hold.
      */
     public function store(SaveInventoryRequest $request, Workspace $workspace): JsonResponse
     {
+        $name = $request->changes()['name'] ?? '';
+        $description = $request->changes()['description'] ?? null;
+        $template = $request->template();
+
         try {
-            $inventory = $this->inventories->create($workspace, $request->changes()['name'] ?? '', $request->changes()['description'] ?? null);
+            $inventory = $template === null
+                ? $this->inventories->create($workspace, $name, $description)
+                : $this->inventories->createFromTemplate($workspace, $template, $name, $description, app()->getLocale());
         } catch (InventoryLimitReachedException $limit) {
             return ApiError::conflict(
                 trans_choice('A workspace cannot hold more than :count inventory.|A workspace cannot hold more than :count inventories.', $limit->limit),
                 InventoryLimitReachedException::CODE,
+                ['limit' => $limit->limit],
+            );
+        } catch (FieldLimitReachedException $limit) {
+            return ApiError::conflict(
+                trans_choice('An inventory cannot have more than :count field.|An inventory cannot have more than :count fields.', $limit->limit),
+                FieldLimitReachedException::CODE,
                 ['limit' => $limit->limit],
             );
         }
