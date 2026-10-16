@@ -50,6 +50,56 @@ function seoJsonLd(DOMXPath $page): array
     return $found;
 }
 
+/**
+ * `app.indexable` as config/app.php computes it for a value of APP_INDEXABLE (null: the variable is not set).
+ */
+function seoIndexableFor(?string $value): bool
+{
+    $name = 'APP_INDEXABLE';
+    $previous = ['env' => $_ENV[$name] ?? null, 'server' => $_SERVER[$name] ?? null, 'process' => getenv($name)];
+
+    unset($_ENV[$name], $_SERVER[$name]);
+    putenv($name);
+
+    if ($value !== null) {
+        $_ENV[$name] = $_SERVER[$name] = $value;
+        putenv("{$name}={$value}");
+    }
+
+    try {
+        return (require config_path('app.php'))['indexable'];
+    } finally {
+        unset($_ENV[$name], $_SERVER[$name]);
+        putenv($name);
+
+        if ($previous['env'] !== null) {
+            $_ENV[$name] = $previous['env'];
+        }
+
+        if ($previous['server'] !== null) {
+            $_SERVER[$name] = $previous['server'];
+        }
+
+        if ($previous['process'] !== false) {
+            putenv("{$name}={$previous['process']}");
+        }
+    }
+}
+
+describe('APP_INDEXABLE', function (): void {
+    it('is on for the ways a person writes yes', function (string $value): void {
+        expect(seoIndexableFor($value))->toBeTrue();
+    })->with(['true', 'TRUE', 'True', '1', 'yes', 'Yes', 'on', 'ON', '(true)']);
+
+    it('is off for everything else: the ways a person writes no, a typo, nothing', function (?string $value): void {
+        expect(seoIndexableFor($value))->toBeFalse();
+    })->with(['false', 'FALSE', '0', 'no', 'No', 'off', 'OFF', 'n', 'N', 'f', '', ' ', 'nope', 'ture', '2', null]);
+
+    it('is a boolean', function (): void {
+        expect(seoIndexableFor('on'))->toBeBool()->and(seoIndexableFor(null))->toBeBool();
+    });
+});
+
 describe('with indexing off, which is the default', function (): void {
     it('asks every page not to be indexed', function (string $path): void {
         $page = templateDom($this->get($path)->assertOk());
@@ -77,6 +127,77 @@ describe('with indexing off, which is the default', function (): void {
 
     it('has no static robots.txt in front of the route', function (): void {
         expect(file_exists(public_path('robots.txt')))->toBeFalse();
+    });
+});
+
+describe('the X-Robots-Tag header', function (): void {
+    /**
+     * Every kind of answer: a public page, a page of the application, a redirect, the API, an error, the files of robots.
+     *
+     * @return array<string, array{0: string, 1: bool}> The path, and whether it is a public page that asks to be indexed.
+     */
+    dataset('answers', fn (): array => [
+        'the home page' => ['/', true],
+        'the gallery' => ['/templates', true],
+        'the gallery in English' => ['/en/templates', true],
+        'a template' => ['/templates/sample-tools', true],
+        'a template in English' => ['/en/templates/sample-tools', true],
+        'the login page' => ['/login', false],
+        'the permanent redirect to the address without prefix' => ['/fr/templates', false],
+        'a template that does not exist' => ['/templates/nothing', false],
+        'a page that does not exist' => ['/nothing-here', false],
+        'an unknown language' => ['/de/templates', false],
+        'the API of the templates' => ['/api/v1/templates', false],
+        'the API, refused' => ['/api/v1/me', false],
+        'robots.txt' => ['/robots.txt', false],
+        'the sitemap' => ['/sitemap.xml', false],
+        'the health check' => ['/up', false],
+    ]);
+
+    it('goes out with every answer when indexing is off, which is the default', function (string $path): void {
+        $response = $this->get($path);
+
+        expect(config('app.indexable'))->toBeFalse()
+            ->and($response->headers->get('X-Robots-Tag'))->toBe('noindex');
+    })->with('answers');
+
+    it('goes out with every answer that is not a public page that asks to be indexed when indexing is on', function (string $path, bool $indexed): void {
+        config(['app.indexable' => true]);
+
+        $response = $this->get($path);
+
+        expect($response->headers->get('X-Robots-Tag'))->toBe($indexed ? null : 'noindex');
+    })->with('answers');
+
+    it('goes out with the pages of the application, a signed-in person or not, and the files of the API', function (): void {
+        config(['app.indexable' => true]);
+        $person = inventoryPerson();
+
+        foreach (['/app', '/app/workspaces', '/app/account', '/app/templates/sample-tools', "/app/w/{$person->workspaces()->sole()->ulid}"] as $path) {
+            expect($this->actingAs($person)->get($path)->headers->get('X-Robots-Tag'))->toBe('noindex', $path);
+        }
+
+        expect($this->actingAs($person)->getJson('/api/v1/me')->headers->get('X-Robots-Tag'))->toBe('noindex')
+            ->and($this->post('/api/v1/auth/code', ['email' => 'a@b.test'])->headers->get('X-Robots-Tag'))->toBe('noindex');
+    });
+
+    it('follows the page: the one that asks not to be indexed has the header, the one that asks for it has not', function (): void {
+        config(['app.indexable' => true]);
+        $page = $this->get('/templates/sample-tools');
+        $meta = seoMeta(templateDom($page), 'name', 'robots');
+
+        expect($meta)->toBe(['index, follow'])->and($page->headers->get('X-Robots-Tag'))->toBeNull();
+
+        config(['app.indexable' => false]);
+        $page = $this->get('/templates/sample-tools');
+
+        expect(seoMeta(templateDom($page), 'name', 'robots'))->toBe(['noindex, nofollow'])->and($page->headers->get('X-Robots-Tag'))->toBe('noindex');
+    });
+
+    it('goes out while the instance is not installed yet', function (): void {
+        $this->bootInstaller(installed: false);
+
+        $this->get('/')->assertRedirect()->assertHeader('X-Robots-Tag', 'noindex');
     });
 });
 
@@ -262,8 +383,21 @@ describe('robots.txt with indexing on', function (): void {
     it('allows the public pages, keeps robots out of the application and announces the sitemap', function (): void {
         $response = $this->get('/robots.txt')->assertOk();
 
-        expect($response->getContent())->toBe("User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /api\nDisallow: /install\nDisallow: /login\n\nSitemap: http://localhost/sitemap.xml\n")
+        expect($response->getContent())->toBe("User-agent: *\nAllow: /\nDisallow: /app/\nDisallow: /api/\nDisallow: /install\nDisallow: /login\n\nSitemap: http://localhost/sitemap.xml\n")
             ->and($response->headers->get('Content-Type'))->toBe('text/plain; charset=UTF-8');
+    });
+
+    it('closes the folders of the application and not the paths that merely start like them', function (): void {
+        preg_match_all('/^Disallow: (\S+)$/m', (string) $this->get('/robots.txt')->getContent(), $matches);
+        $closed = fn (string $path): bool => array_filter($matches[1], fn (string $rule): bool => str_starts_with($path, $rule)) !== [];
+
+        foreach (['/app/w/01HZ', '/app/templates/home-inventory', '/app/account', '/api/v1/me', '/api/v1/templates', '/install', '/install/requirements', '/login'] as $path) {
+            expect($closed($path))->toBeTrue($path);
+        }
+
+        foreach (['/', '/templates', '/en/templates/sample-tools', '/apple-pie', '/application', '/apis', '/robots.txt', '/sitemap.xml'] as $path) {
+            expect($closed($path))->toBeFalse($path);
+        }
     });
 
     it('announces the sitemap at APP_URL', function (): void {

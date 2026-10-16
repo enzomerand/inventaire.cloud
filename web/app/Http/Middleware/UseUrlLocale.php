@@ -31,6 +31,12 @@ use Symfony\Component\HttpFoundation\Response;
 final class UseUrlLocale
 {
     /**
+     * The request attribute that says the language comes from the address: {@see SetLocale} then does not make the answer
+     * vary on `Accept-Language`, which decided nothing.
+     */
+    public const ATTRIBUTE = 'locale_from_url';
+
+    /**
      * Gets the resolver that knows the supported languages.
      */
     public function __construct(private readonly LocaleResolver $locales) {}
@@ -50,6 +56,8 @@ final class UseUrlLocale
         if (! $this->locales->isSupported($locale)) {
             abort(404);
         }
+
+        $request->attributes->set(self::ATTRIBUTE, true);
 
         if ($prefixed && $locale === $default) {
             // Built from APP_URL, never from the Host header (see PublicUrls): the header is written by whoever calls.

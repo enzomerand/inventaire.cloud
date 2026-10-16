@@ -3,8 +3,9 @@
 
     `page` is the App\Support\Seo\PageMeta of a public page (the home page, the gallery of templates, the page of a template),
     or null for every other page (signing in, the application, the installer, the errors), which always asks not to be
-    indexed. A public page asks to be indexed only when the instance allows it (`app.indexable`, APP_INDEXABLE): a copy
-    for development or staging does not end up in a search engine, and nothing else changes on its pages.
+    indexed. A public page asks to be indexed only when the instance allows it (`app.indexable`, APP_INDEXABLE) and the page
+    itself does not ask otherwise (PageMeta::mayBeIndexed(), which the X-Robots-Tag header follows too): a copy for
+    development or staging does not end up in a search engine, and nothing else changes on its pages.
 
     The addresses are absolute and come from APP_URL, never from the request (see App\Support\PublicUrls). The structured
     data (JSON-LD) is encoded by PageMeta so that no text can end the script element: it is the one place where the output is
@@ -12,7 +13,7 @@
 --}}
 @props(['page' => null])
 
-@if ($page !== null && config('app.indexable'))
+@if ($page !== null && $page->mayBeIndexed())
     <meta name="robots" content="index, follow">
 @else
     <meta name="robots" content="noindex, nofollow">

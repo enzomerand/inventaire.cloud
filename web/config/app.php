@@ -19,9 +19,12 @@ return [
     | and the public pages ask to be indexed. The pages of the application itself
     | (signing in, your space, the API) always ask not to be.
     |
+    | Read as a person writes a switch: 1, true, on and yes turn it on; anything
+    | else (0, false, off, no, n, a typo) leaves it off, which is the safe side.
+    |
     */
 
-    'indexable' => (bool) env('APP_INDEXABLE', false),
+    'indexable' => filter_var(env('APP_INDEXABLE', false), FILTER_VALIDATE_BOOLEAN),
 
     /*
     |--------------------------------------------------------------------------

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Seo;
 
+use App\Http\Middleware\SetRobotsTag;
 use App\Support\PublicUrls;
 
 /**
@@ -12,6 +13,9 @@ use App\Support\PublicUrls;
  *
  * The layout draws it as `<meta>` and `<link>` tags and JSON-LD scripts (`components/seo.blade.php`). A page that has none
  * is not public: the layout then asks not to be indexed. Addresses are absolute (see {@see PublicUrls}).
+ *
+ * Whether the page asks to be indexed is decided once, by {@see self::mayBeIndexed()}: the `<meta name="robots">` of the
+ * layout and the `X-Robots-Tag` header of {@see SetRobotsTag} both follow it.
  */
 final readonly class PageMeta
 {
@@ -30,6 +34,8 @@ final readonly class PageMeta
      *                                             none for a page that exists in one language only.
      * @param  string|null  $default  The address for visitors whose language is not among the alternates (`x-default`).
      * @param  list<array<string, mixed>>  $jsonLd  Structured data, one schema.org object each.
+     * @param  bool  $noindex  Whether the page asks not to be indexed even when the instance allows it: a page that shows the
+     *                         text of another language than its own address (its canonical address is the other one).
      */
     public function __construct(
         public string $title,
@@ -39,7 +45,17 @@ final readonly class PageMeta
         public array $alternates = [],
         public ?string $default = null,
         public array $jsonLd = [],
+        public bool $noindex = false,
     ) {}
+
+    /**
+     * Whether the page asks to be indexed: the instance allows it (`app.indexable`, APP_INDEXABLE) and the page does not
+     * ask otherwise.
+     */
+    public function mayBeIndexed(): bool
+    {
+        return config()->boolean('app.indexable') && ! $this->noindex;
+    }
 
     /**
      * The Open Graph locale of the page ("fr_FR").

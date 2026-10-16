@@ -13,7 +13,9 @@ use App\Support\PublicUrls;
  *
  * A template is offered in the languages it is written in: the other languages of the application show it with the
  * texts of the default language (the language switcher links to them), but they are not listed as alternates, which
- * would announce a translation that is not there.
+ * would announce a translation that is not there. Such a page is the same page as the one in the language of its texts, so
+ * it asks not to be indexed, its canonical address is the one of that language, and it says it is written in it
+ * (`inLanguage`, `og:locale`): the engines keep one page, not one copy for each language that has no text of its own.
  */
 final class PublicPageMeta
 {
@@ -84,19 +86,21 @@ final class PublicPageMeta
      */
     public function template(Template $template, string $locale): PageMeta
     {
-        $canonical = PublicUrls::template($template->slug, $locale);
+        // The language of the texts the page shows: its own language when the template is written in it, else the one it falls back on.
+        $pageLocale = $template->localeFor($locale);
+        $canonical = PublicUrls::template($template->slug, $pageLocale);
         $name = $template->name($locale);
         $title = __(':name: free inventory template', ['name' => $name]);
         $summary = $template->summary($locale);
 
         $written = array_values(array_intersect($this->locales->supported(), $template->locales()));
-        $default = in_array(config()->string('app.default_locale'), $written, true) ? config()->string('app.default_locale') : ($written[0] ?? $locale);
+        $default = in_array(config()->string('app.default_locale'), $written, true) ? config()->string('app.default_locale') : ($written[0] ?? $pageLocale);
 
         return new PageMeta(
             title: $title,
             description: $summary,
             canonical: $canonical,
-            locale: $locale,
+            locale: $pageLocale,
             alternates: array_combine($written, array_map(fn (string $alternate): string => PublicUrls::template($template->slug, $alternate), $written)),
             default: PublicUrls::template($template->slug, $default),
             jsonLd: [
@@ -105,7 +109,7 @@ final class PublicPageMeta
                     'name' => $title,
                     'description' => $summary,
                     'url' => $canonical,
-                    'inLanguage' => $locale,
+                    'inLanguage' => $pageLocale,
                     'about' => ['@type' => 'Thing', 'name' => $name, 'description' => $summary],
                     'isPartOf' => $this->site(),
                 ],
@@ -113,11 +117,12 @@ final class PublicPageMeta
                     '@type' => 'BreadcrumbList',
                     'itemListElement' => [
                         ['@type' => 'ListItem', 'position' => 1, 'name' => __('Home'), 'item' => PublicUrls::home()],
-                        ['@type' => 'ListItem', 'position' => 2, 'name' => __('Inventory templates'), 'item' => PublicUrls::templates($locale)],
+                        ['@type' => 'ListItem', 'position' => 2, 'name' => __('Inventory templates'), 'item' => PublicUrls::templates($pageLocale)],
                         ['@type' => 'ListItem', 'position' => 3, 'name' => $name, 'item' => $canonical],
                     ],
                 ],
             ],
+            noindex: $pageLocale !== $locale,
         );
     }
 
