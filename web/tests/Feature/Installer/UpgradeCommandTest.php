@@ -204,6 +204,28 @@ it('forgets the verdict on the inventory templates, and only that', function ():
         ->and($catalogue->find('sample-shop'))->not->toBeNull();
 });
 
+it('forgets the verdict on the inventory templates even when a cache cannot be cleared, so that no stale verdict is kept', function (): void {
+    $folder = templateFolder();
+    copy(base_path('tests/Fixtures/templates/sample-shop.json'), $folder.'/sample-shop.json');
+    file_put_contents($folder.'/broken.json', '{"category": ');
+    templateCatalogueFrom($folder);
+    standIn($this->calls, 'icons:clear', 1);
+    Log::spy();
+
+    $catalogue = app(TemplateCatalogue::class);
+    $catalogue->all();
+
+    try {
+        $this->artisan('inventaire:upgrade')->expectsOutputToContain('The command icons:clear failed.')->assertExitCode(1);
+        $catalogue->all();
+    } finally {
+        templateRemoveFolder($folder);
+    }
+
+    // Judged again: the failure of a command that comes after the others did not keep the verdict.
+    Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'not valid JSON'))->twice();
+});
+
 it('does not fail when the verdict on the inventory templates cannot be forgotten, and says so', function (): void {
     Cache::shouldReceive('forget')->andThrow(new RuntimeException('cache down'));
     Cache::makePartial();
