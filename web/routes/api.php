@@ -31,7 +31,8 @@ use Illuminate\Support\Facades\Route;
  * clients will use API tokens. Every answer is JSON, even for a client that does not send an Accept header.
  */
 Route::prefix('v1')->name('api.v1.')->group(function (): void {
-    // The catalogue of inventory templates is public (the gallery pages show the same files): no account, a pace per network.
+    // The catalogue of inventory templates is public (the gallery pages show the same files): no account needed, and a pace per
+    // user when signed in, else per network (apart from the one of the public pages).
     Route::middleware('throttle:templates')->group(function (): void {
         Route::get('/templates', [TemplateController::class, 'index'])->name('templates.index');
         Route::get('/templates/{slug}', [TemplateController::class, 'show'])->name('templates.show');

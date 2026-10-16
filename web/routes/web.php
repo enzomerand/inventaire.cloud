@@ -35,10 +35,10 @@ Route::get('/', HomePageController::class)->name('home');
 // engines read them. They exist once per language, each with an address of its own: the language of the instance has no
 // prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
 // permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale). They are public and
-// rendered from files, so they are limited in pace like the endpoints of the API (the `templates` limiter).
+// rendered from files, so they are limited in pace (the `public-pages` limiter, apart from the one of the API).
 $localeCodes = implode('|', array_map(fn (string $code): string => preg_quote($code, '/'), app(LocaleResolver::class)->supported()));
 
-Route::middleware(['throttle:templates', UseUrlLocale::class])->group(function () use ($localeCodes): void {
+Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(function () use ($localeCodes): void {
     Route::get('/templates', TemplateGalleryController::class)->name('templates.index');
     Route::get('/templates/{slug}', TemplatePageController::class)->name('templates.show');
 
@@ -54,7 +54,7 @@ Route::middleware(['throttle:templates', UseUrlLocale::class])->group(function (
 // whole catalogue, so it has the same limit as the pages it lists.
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
     Route::get('/robots.txt', RobotsController::class)->name('robots');
-    Route::get('/sitemap.xml', SitemapController::class)->middleware('throttle:templates')->name('sitemap');
+    Route::get('/sitemap.xml', SitemapController::class)->middleware('throttle:public-pages')->name('sitemap');
 });
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the

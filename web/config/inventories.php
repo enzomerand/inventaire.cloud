@@ -83,12 +83,19 @@ return [
     |   (`inventory-templates/` of the application by default). They are the
     |   catalogue: the public gallery, the API and the "new inventory" dialog read
     |   them, and a file that is not valid is ignored and logged.
-    | - `templates_per_minute`: requests per minute and per address the public
-    |   endpoints of the catalogue answer (`INVENTORIES_TEMPLATES_PER_MINUTE`, 60).
+    | - `templates_per_minute`: requests per minute the public endpoints of the
+    |   catalogue (the API) answer, per user when signed in, else per network
+    |   (`INVENTORIES_TEMPLATES_PER_MINUTE`, 60).
+    | - `public_pages_per_minute`: requests per minute the public pages of the
+    |   gallery (every language) and `/sitemap.xml` answer, counted the same way
+    |   but apart from the API (`INVENTORIES_PUBLIC_PAGES_PER_MINUTE`, 300): a
+    |   visitor loads many pages, and a crawler reads them one after the other.
     |
     */
     'templates_path' => base_path('inventory-templates'),
 
     'templates_per_minute' => (int) env('INVENTORIES_TEMPLATES_PER_MINUTE', 60),
+
+    'public_pages_per_minute' => (int) env('INVENTORIES_PUBLIC_PAGES_PER_MINUTE', 300),
 
 ];

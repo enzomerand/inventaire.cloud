@@ -65,9 +65,10 @@ class AppServiceProvider extends ServiceProvider
 
     /**
      * The rate limiter of the endpoint that uploads a file to an item (limit in config/inventories.php,
-     * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the one
-     * of the public endpoints and pages of the catalogue of templates (`templates_per_minute`), keyed on the user when there is
-     * one, else on the network.
+     * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the two
+     * of the catalogue of templates, keyed on the user when there is one, else on the network: the one of its API endpoints
+     * (`templates_per_minute`) and the one of its public pages and the sitemap (`public_pages_per_minute`), which do not
+     * share a count.
      */
     private function registerInventoryLimiters(): void
     {
@@ -79,6 +80,11 @@ class AppServiceProvider extends ServiceProvider
         // is counted on their network.
         RateLimiter::for('templates', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.templates_per_minute'))
             ->by('templates:'.$this->signedInKey($request)));
+
+        // The pages of the gallery and the sitemap are read by browsers and crawlers, which load many of them in a row: their
+        // limit is higher, and their count is not the one of the API (a crawler must not use up what a client of the API has).
+        RateLimiter::for('public-pages', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.public_pages_per_minute'))
+            ->by('public-pages:'.$this->signedInKey($request)));
     }
 
     /**
