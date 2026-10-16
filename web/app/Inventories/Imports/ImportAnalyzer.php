@@ -18,7 +18,8 @@ use Illuminate\Support\Collection;
 /**
  * Reads the beginning of a file to say what its columns are and where each one is proposed to go ({@see ImportAnalysis}).
  *
- * A column has a header (the first row, when the options say it is a header; else `Column A`, `Column B`...), three samples, and the type
+ * A column has a header (the first row of the file, when the options say it is a header; else `Column A`, `Column B`..., and a first
+ * row that is empty is no header: the data begin on the second row), three samples, and the type
  * of field its values look like, judged on the first {@see self::SAMPLE_ROWS} rows: yes/no when every value is, a date or a date and
  * time, a time of the day, a number (an amount when every value has a currency, a percentage when every value has a percent sign),
  * an email address, an address of a web page, a long text when a value has a line break or is long, else a text. A column with nothing
@@ -67,10 +68,12 @@ final class ImportAnalyzer
         $data = [];
         $width = 0;
 
-        foreach ($rows->rows() as $cells) {
+        foreach ($rows->rows() as $number => $cells) {
             $width = max($width, count($cells));
 
-            if ($options->hasHeader && $header === null) {
+            // The header is the first row of the file, and only that: when it is empty, the columns are named by their letters and the
+            // data begin on the second row, whatever the first row with something in it is.
+            if ($options->hasHeader && $number === 1) {
                 $header = $cells;
 
                 continue;

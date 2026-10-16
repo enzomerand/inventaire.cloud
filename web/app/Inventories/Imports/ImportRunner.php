@@ -302,13 +302,11 @@ final class ImportRunner
         $rows = $this->reader->open($local, $import->format, $options->delimiter, $options->encoding);
 
         try {
-            $header = $options->hasHeader;
             $count = 0;
 
-            foreach ($rows->rows() as $cells) {
-                if ($header) {
-                    $header = false;
-
+            foreach ($rows->rows() as $number => $cells) {
+                // The header is the first row of the file: an empty one is no header, and the data begin on the second.
+                if ($options->hasHeader && $number === 1) {
                     continue;
                 }
 
@@ -417,14 +415,13 @@ final class ImportRunner
         $errors = new ImportErrors;
         $rows = [];
         $total = 0;
-        $header = $options->hasHeader;
+        $width = count($import->columns);
         $source = $this->reader->open($local, $import->format, $options->delimiter, $options->encoding);
 
         try {
             foreach ($source->rows() as $number => $cells) {
-                if ($header) {
-                    $header = false;
-
+                // The header is the first row of the file: an empty one is no header, and the data begin on the second.
+                if ($options->hasHeader && $number === 1) {
                     continue;
                 }
 
@@ -432,7 +429,7 @@ final class ImportRunner
                     throw new ImportFailure(ImportError::TooManyRows);
                 }
 
-                $found = $this->convertRow($number, $cells, $plan, $context, $all, $labels);
+                $found = $this->convertRow($number, $cells, $width, $plan, $context, $all, $labels);
 
                 if ($found['errors'] === []) {
                     $rows[] = ['row' => $number, 'values' => $found['values']];
@@ -450,13 +447,22 @@ final class ImportRunner
     /**
      * Converts and checks one row.
      *
+     * The columns are those that were shown to the person, found by reading the beginning of the file: a row further down that has
+     * something past the last of them (its trailing empty cells are cut off, so it has more cells than that) has a value that no column
+     * could take, and is in error, as any other row that cannot be imported whole.
+     *
      * @param  list<ImportCell>  $cells
+     * @param  int  $width  The number of columns the person was shown.
      * @param  Collection<int, InventoryField>  $all  The fields of the inventory and those to create.
      * @param  array<string, string>  $labels
      * @return array{values: array<string, mixed>, errors: list<array{row: int, column: string|null, message: string}>}
      */
-    private function convertRow(int $number, array $cells, ImportPlan $plan, ImportContext $context, Collection $all, array $labels): array
+    private function convertRow(int $number, array $cells, int $width, ImportPlan $plan, ImportContext $context, Collection $all, array $labels): array
     {
+        if (count($cells) > $width) {
+            return ['values' => [], 'errors' => [['row' => $number, 'column' => null, 'message' => __('This row has more columns than the header.')]]];
+        }
+
         $input = [];
         $errors = [];
 

@@ -223,6 +223,21 @@ describe('adding items to the fields of an inventory', function (): void {
         expect($import->status)->toBe(ImportStatus::Completed)->and($import->rows_total)->toBe(0)->and($import->rows_imported)->toBe(0);
     });
 
+    it('takes the header to be the first row of the file, and an empty first row to be no header: the data begin on the second row', function (): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        $number = fieldIn($case['inventory'], 'number', 'Quantity');
+        // The first row with something in it is not the header of a file whose first row is empty.
+        $csv = importFile("\r\nDrill,1\r\nSaw,x\r\n");
+
+        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid), runToField(1, $number->ulid)], ['on_error' => 'skip']));
+
+        expect($import->rows_total)->toBe(2)
+            ->and($import->rows_imported)->toBe(1)
+            ->and($import->errors)->toBe([['row' => 3, 'column' => 'Column B', 'message' => '"x" is not a number.']])
+            ->and(importItemsOf($case['inventory']))->toBe([['Name' => 'Drill', 'Quantity' => '1']]);
+    });
+
     it('reads a file with no header', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
@@ -461,6 +476,27 @@ describe('a row that is not valid', function (): void {
             ->and($import->errors[0])->toBe(['row' => 2, 'column' => 'Quantity', 'message' => '"bad" is not a number.'])
             ->and($import->errors[99]['row'])->toBe(112);
     });
+
+    it('reports a row that has something past the last column the person was shown, as any row in error', function (string $onError, string $status, int $imported): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        // The columns are worked out from the first rows; a row far below has a third cell.
+        $rows = array_map(fn (int $row): array => ["Item {$row}", (string) $row], range(1, 70));
+        $rows[59][] = 'stray';
+        $csv = importFile(importCsv([['Name', 'Qty'], ...$rows]));
+
+        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid)], ['on_error' => $onError]));
+
+        expect($import->status->value)->toBe($status)
+            ->and($import->rows_total)->toBe(70)
+            ->and($import->rows_failed)->toBe(1)
+            ->and($import->rows_imported)->toBe($imported)
+            ->and($import->errors)->toBe([['row' => 61, 'column' => null, 'message' => 'This row has more columns than the header.']])
+            ->and(Item::query()->count())->toBe($imported);
+    })->with([
+        'cancelling everything' => ['abort', 'failed', 0],
+        'skipping the rows in error' => ['skip', 'completed', 69],
+    ]);
 
     it('reports a value that breaks the rules of a field it creates too', function (): void {
         $case = importCase();

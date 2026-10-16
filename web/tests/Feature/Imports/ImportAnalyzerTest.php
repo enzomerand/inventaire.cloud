@@ -128,6 +128,16 @@ describe('the columns', function (): void {
             ->and(importAnalyze(importFile(importCsv([['a', 'b']])), options: ['has_header' => false])->columns[0]['samples'])->toBe(['a']);
     });
 
+    it('take the first row of the file for the header, and no other: an empty first row gives the names by letters', function (): void {
+        $csv = importFile("\r\nName,Qty\r\nDrill,3\r\n");
+
+        $columns = importAnalyze($csv, options: ['has_header' => true])->columns;
+
+        expect(array_column($columns, 'header'))->toBe(['Column A', 'Column B'])
+            ->and($columns[0]['samples'])->toBe(['Name', 'Drill'])
+            ->and($columns[1]['samples'])->toBe(['Qty', '3']);
+    });
+
     it('are refused when the file holds no row', function (): void {
         expect(fn () => importAnalyze(importSpreadsheet('xlsx', [[null]]), ImportFormat::Xlsx))
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::EMPTY));
