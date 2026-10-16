@@ -81,16 +81,17 @@ export function page(
 export function mountComponent(factory, { canEdit = true } = {}) {
     const component = factory();
 
-    component.$root = {
-        dataset: {
-            url: INVENTORY,
-            itemsUrl: ITEMS,
-            itemUrl: ITEMS + '/__id__',
-            workspacePage: '/app/w/shop',
-            canEdit: canEdit ? '1' : '0',
-            canManageFields: '1',
-        },
-    };
+    const root = document.createElement('div');
+
+    Object.assign(root.dataset, {
+        url: INVENTORY,
+        itemsUrl: ITEMS,
+        itemUrl: ITEMS + '/__id__',
+        workspacePage: '/app/w/shop',
+        canEdit: canEdit ? '1' : '0',
+        canManageFields: '1',
+    });
+    component.$root = root;
     component.$refs = {
         modal: document.createElement('div'),
         filters: document.createElement('div'),

@@ -20,7 +20,8 @@
  *
  * What narrows and orders the list (the search, the filters, the sort, and the address of the page that remembers them)
  * is `../grid/criteria.js`, merged into this component: the page asked for is always read with the criteria in force, an
- * older answer never replaces a newer one, and the totals of the numbers and amounts come with each page.
+ * older answer never replaces a newer one, and the totals of the numbers and amounts come with each page. Editing a value
+ * in its cell, without the dialog, is `../grid/inline.js`.
  */
 import {
     choicesOf,
@@ -42,8 +43,9 @@ import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
 import { compose } from '../lib/compose.js';
 import gridCriteria from '../grid/criteria.js';
+import gridInline from '../grid/inline.js';
 import { isEmptyQuery } from '../grid/query.js';
-import { momentText } from '../grid/rows.js';
+import { fieldFocusSelectors, momentText } from '../grid/rows.js';
 import { hasTotals, totalCells } from '../grid/totals.js';
 
 /** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
@@ -64,7 +66,7 @@ const VALUES_PREFIX = 'values.';
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return compose(gridCriteria(), {
+    return compose(gridCriteria(), gridInline(), {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -394,6 +396,11 @@ export default function inventoryItems() {
                 this.totals = answer.meta.totals ?? {};
                 this.loadedOnce = true;
 
+                // The row being edited is not on this page.
+                if (this.inlineRow !== null && !this.items.some((one) => one.id === this.inlineRow)) {
+                    this.closeInline(false);
+                }
+
                 // Nothing narrows the list down: it holds the whole inventory.
                 if (!this.hasCriteria) {
                     this.itemsCount = answer.meta.total;
@@ -466,6 +473,8 @@ export default function inventoryItems() {
             return this.fields.map((field) => ({
                 key: field.id,
                 name: field.name,
+                // The cell of a person who edits is a button, which cannot hold a link: the table puts one beside it.
+                plain: this.canEdit && !full,
                 ...describeValue(field, item.values?.[field.id], { full }),
             }));
         },
@@ -511,19 +520,29 @@ export default function inventoryItems() {
         },
 
         /**
-         * Opens the dialog on the item of a row that was clicked, unless the click was on a link or a button of the row
-         * (a click on the address of an item is for the address).
+         * Opens the dialog on the item of a row that was clicked, unless the click was on a link, a button or a control of the
+         * row (a click on the address of an item is for the address, one on a cell is for the cell).
+         *
+         * What was clicked is read from the path the event took when it was dispatched, not from where its target is now:
+         * a cell that turns into its control at that very click is gone from the page by the time the click reaches the row.
          *
          * @param {{ id: string }} row
          * @param {Event} event
          * @returns {void}
          */
         openFromRow(row, event) {
-            if (!(event.target instanceof Element) || event.target.closest('a, button') !== null) {
+            if (!(event.target instanceof Element)) {
                 return;
             }
 
-            this.open(row);
+            const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+            const onControl = [...path, event.target].some(
+                (node) => node instanceof Element && node.matches('a, button, input, select, textarea'),
+            );
+
+            if (!onControl && event.target.closest('a, button') === null) {
+                this.open(row);
+            }
         },
 
         /**
@@ -545,9 +564,10 @@ export default function inventoryItems() {
          *
          * @param {'create' | 'edit' | 'view'} mode
          * @param {Item | null} item The item, null to add one.
+         * @param {string | null} [focusField] The id of the field the cursor goes to (the first control otherwise).
          * @returns {void}
          */
-        begin(mode, item) {
+        begin(mode, item, focusField = null) {
             this.resetDialog();
             this.mode = mode;
             this.itemId = item === null ? null : item.id;
@@ -559,7 +579,12 @@ export default function inventoryItems() {
             );
             this.original = JSON.parse(JSON.stringify(this.values));
             this.details = item === null ? [] : this.cellsOf(item, true);
-            showModal(this.$refs.modal);
+
+            if (focusField === null) {
+                showModal(this.$refs.modal);
+            } else {
+                showModal(this.$refs.modal, { focus: fieldFocusSelectors(focusField) });
+            }
         },
 
         /**

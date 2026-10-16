@@ -157,8 +157,9 @@ function render(path) {
         .replace(/@extends\([^)]*\)/g, '')
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
         // table of the items are parts of the page of an inventory.
-        .replace(/@include\('partials\.(field-value|items-toolbar|items-filters|items-table)'\)/g, (_match, name) =>
-            render(`partials/${name}.blade.php`),
+        .replace(
+            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-cell-editor)'\)/g,
+            (_match, name) => render(`partials/${name}.blade.php`),
         )
         // The tabs of the administration are not under test.
         .replace(/@include\([^\n]*\)\n/g, '')
@@ -2154,6 +2155,289 @@ describe('the pages under the real Alpine CSP build', () => {
             });
         });
 
+        describe('editing a cell in place', () => {
+            const cellButton = (rowIndex, columnIndex) =>
+                cellsOf(bodyRows()[rowIndex])[columnIndex].querySelector('button.app-cell-button');
+            const editor = () => document.querySelector('#item-inline-editor');
+            const PRICE = 2;
+            const NAME = 0;
+            const STATE = 3;
+            const key = (name, eventKey) =>
+                name.dispatchEvent(new KeyboardEvent('keydown', { key: eventKey, bubbles: true, cancelable: true }));
+
+            beforeEach(async () => {
+                await open({ items: [HAMMER, TRICKY] });
+            });
+
+            it('gives each cell of an editor a button that says what it edits and what it holds', () => {
+                expect(cellButton(0, NAME).getAttribute('aria-label')).toBe('Edit Name: Hammer');
+                expect(cellButton(0, PRICE).getAttribute('aria-label')).toBe('Edit Price: €19.90');
+                expect(cellButton(0, STATE).getAttribute('aria-label')).toBe('Edit State: New');
+                expect(cellButton(1, 1).getAttribute('aria-label')).toBe('Edit Weight: Not set');
+                expect(cellButton(0, NAME).type).toBe('button');
+                expect(cellButton(0, NAME).textContent.trim()).toBe('Hammer');
+            });
+
+            it('puts the web address beside the button of its cell, never inside it', () => {
+                const site = cellsOf(bodyRows()[0])[7];
+
+                expect(site.querySelector('button a')).toBeNull();
+                expect(site.querySelector('button').textContent.trim()).toBe('https://example.com/hammer');
+
+                const link = site.querySelector('a');
+
+                expect(link.getAttribute('href')).toBe('https://example.com/hammer');
+                expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+                expect(link.getAttribute('aria-label')).toBe('Open the link of Site');
+                expect(cellsOf(bodyRows()[1])[7].querySelector('a')).toBeNull();
+            });
+
+            it('turns the cell into a box with the cursor in it, holding the value, when its button is pressed', async () => {
+                cellButton(0, PRICE).click();
+                await flush();
+
+                expect(editor().tagName).toBe('INPUT');
+                expect(editor().value).toBe('19.90');
+                expect(editor().getAttribute('aria-label')).toBe('Price');
+                expect(editor().getAttribute('inputmode')).toBe('decimal');
+                expect(document.activeElement).toBe(editor());
+                expect(cellButton(0, PRICE)).toBeNull();
+                expect(showModal).not.toHaveBeenCalled();
+            });
+
+            it('saves the value on Enter, shows the item as the answer has it, and puts the cursor back on the cell', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, price: '25.50' } } });
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '25,50');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledTimes(1);
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { price: '25.50' },
+                });
+                expect(editor()).toBeNull();
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('€25.50');
+                expect(document.activeElement).toBe(cellButton(0, PRICE));
+            });
+
+            it('gives up on Escape: nothing is sent, the value is as it was, the cursor is back on the cell', async () => {
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '99');
+                key(editor(), 'Escape');
+                await flush();
+
+                expect(http.patch).not.toHaveBeenCalled();
+                expect(editor()).toBeNull();
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('€19.90');
+                expect(document.activeElement).toBe(cellButton(0, PRICE));
+            });
+
+            it('saves when the cursor leaves the box, and leaves the cursor where the person put it', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, name: 'Big hammer' } } });
+                cellButton(0, NAME).click();
+                await flush();
+
+                await type(editor(), 'Big hammer');
+                // Tab: the browser moves the cursor to the next control, which blurs the box.
+                cellButton(0, PRICE).focus();
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { name: 'Big hammer' },
+                });
+                expect(editor()).toBeNull();
+                expect(cellButton(0, NAME).textContent.trim()).toBe('Big hammer');
+                expect(document.activeElement).toBe(cellButton(0, PRICE));
+            });
+
+            it('sends nothing when the cursor leaves a box that was not changed', async () => {
+                cellButton(0, NAME).click();
+                await flush();
+
+                cellButton(0, PRICE).focus();
+                await flush();
+
+                expect(http.patch).not.toHaveBeenCalled();
+                expect(editor()).toBeNull();
+            });
+
+            it('clears a value that is emptied', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, price: undefined } } });
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { price: null },
+                });
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('—');
+            });
+
+            it('edits a choice and a yes / no in a select', async () => {
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, state: 'bbbbbbbb' } } });
+                cellButton(0, STATE).click();
+                await flush();
+
+                expect(editor().tagName).toBe('SELECT');
+                expect([...editor().options].map((option) => option.textContent)).toEqual(['Not set', 'New', 'Used']);
+                expect(editor().value).toBe('aaaaaaaa');
+
+                await choose(editor(), 'bbbbbbbb');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { state: 'bbbbbbbb' },
+                });
+                expect(cellButton(0, STATE).textContent.trim()).toBe('Used');
+            });
+
+            it('shows what the server refuses under the box, which stays for the value to be fixed', async () => {
+                http.patch.mockRejectedValueOnce(
+                    new HttpError(422, 'Invalid', { errors: { 'values.price': ['The price must be a number.'] } }),
+                );
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), 'abc');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(editor().classList.contains('is-invalid')).toBe(true);
+                expect(editor().getAttribute('aria-invalid')).toBe('true');
+                expect(editor().disabled).toBe(false);
+                expect(editor().closest('td').querySelector('.text-danger').textContent).toBe(
+                    'The price must be a number.',
+                );
+                expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
+                expect(document.activeElement).toBe(editor());
+
+                http.patch.mockResolvedValueOnce({ data: { ...HAMMER, values: { ...HAMMER.values, price: '12.00' } } });
+                await type(editor(), '12');
+
+                expect(editor().classList.contains('is-invalid')).toBe(false);
+
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(editor()).toBeNull();
+                expect(cellButton(0, PRICE).textContent.trim()).toBe('€12.00');
+            });
+
+            it('says an item is gone with a toast, and reads the list again', async () => {
+                http.patch.mockRejectedValueOnce(new HttpError(404, 'This item no longer exists.'));
+                http.get.mockClear();
+                cellButton(0, NAME).click();
+                await flush();
+
+                await type(editor(), 'Big hammer');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(notify).toHaveBeenCalledWith('warning', 'This item no longer exists.');
+                expect(editor()).toBeNull();
+                expect(http.get).toHaveBeenCalledWith('/api/v1/inventories/tools/items', { params: { page: 1 } });
+            });
+
+            it('reads the totals again when an amount is changed, without replacing the rows', async () => {
+                await open({ items: [HAMMER, TRICKY], meta: { totals: { qty: '1.50', price: '19.90' } } });
+                const rowsBefore = bodyRows();
+                http.patch.mockResolvedValue({ data: { ...HAMMER, values: { ...HAMMER.values, price: '30.00' } } });
+                http.get.mockClear();
+                http.get.mockResolvedValue(itemsPage([TRICKY, HAMMER], { totals: { qty: '1.50', price: '30.00' } }));
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), '30');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.get).toHaveBeenCalledTimes(1);
+                expect(document.querySelector('tfoot').textContent).toContain('€30.00');
+                // The row of the item that was changed is still the first, whatever order the list is in now.
+                expect(cellButton(0, NAME).textContent.trim()).toBe('Hammer');
+                expect(bodyRows()).toHaveLength(rowsBefore.length);
+            });
+
+            it('edits one cell at a time', async () => {
+                cellButton(0, NAME).click();
+                await flush();
+                cellButton(0, PRICE).click();
+                await flush();
+
+                expect(document.querySelectorAll('#item-inline-editor')).toHaveLength(1);
+                expect(editor().value).toBe('19.90');
+                expect(cellButton(0, NAME)).not.toBeNull();
+            });
+
+            it('does not open the dialog when a cell is pressed, nor when its editor is clicked', async () => {
+                cellButton(0, NAME).click();
+                await flush();
+                editor().click();
+                await flush();
+
+                expect(showModal).not.toHaveBeenCalled();
+            });
+
+            it('still opens the dialog from the padding of the row and from the button of the row', async () => {
+                bodyRows()[0].querySelector('td').click();
+                await flush();
+
+                expect(showModal).toHaveBeenCalledWith(itemDialog());
+            });
+
+            it.each([
+                ['labels', 8, 'tags'],
+                ['parts', 4, 'several choices'],
+                ['grade', 9, 'a rating'],
+                ['tint', 10, 'a color'],
+            ])(
+                'opens the dialog with the cursor on the field for %s (%s), which a cell cannot hold',
+                async (id, column) => {
+                    cellButton(0, column).click();
+                    await flush();
+
+                    expect(editor()).toBeNull();
+                    expect(showModal).toHaveBeenCalledTimes(1);
+                    expect(showModal.mock.calls[0][0]).toBe(itemDialog());
+                    expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('Edit the item');
+
+                    const [first, second] = showModal.mock.calls[0][1].focus;
+                    const wanted = itemDialog().querySelector(first) ?? itemDialog().querySelector(second);
+
+                    expect(wanted).not.toBeNull();
+                    expect(wanted.closest('[data-field]').getAttribute('data-field')).toBe(id);
+                },
+            );
+
+            it('opens the dialog on the text of a long note too', async () => {
+                const notes = {
+                    id: 'notes',
+                    name: 'Notes',
+                    type: 'textarea',
+                    options: {},
+                    required: false,
+                    position: 0,
+                };
+                await open({ fields: [notes], items: [{ id: 'i7', values: { notes: 'Line one\nLine two' } }] });
+
+                cellsOf(bodyRows()[0])[0].querySelector('button').click();
+                await flush();
+
+                expect(document.querySelector('#item-inline-editor')).toBeNull();
+                expect(showModal.mock.calls[0][1].focus[0]).toContain('[data-field="notes"]');
+                expect(itemDialog().querySelector('[data-field="notes"] textarea')).not.toBeNull();
+            });
+        });
+
         describe('reading an item as a viewer', () => {
             beforeEach(async () => {
                 PAGE.abilities = { edit_items: false };
@@ -2184,6 +2468,17 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(detail.textContent).toBe(long);
                 expect(detail.classList.contains('app-multiline')).toBe(true);
+            });
+
+            it('gives no button, no box and no link beside the value to a person who may not edit', async () => {
+                expect(bodyRows()[0].querySelectorAll('button.app-cell-button')).toHaveLength(0);
+                expect(bodyRows()[0].querySelectorAll('td.app-cell button')).toHaveLength(0);
+
+                const site = cellsOf(bodyRows()[0])[7];
+
+                // The address is a link of its own, as it always was.
+                expect(site.querySelector('a').getAttribute('href')).toBe('https://example.com/hammer');
+                expect(site.querySelector('a').getAttribute('aria-label')).toBeNull();
             });
 
             it('shows the details of the item, read only', async () => {

@@ -36,6 +36,8 @@ export const MESSAGES = {
     'grid.notice.reset': 'Some of the search options no longer apply: the list was reset.',
     'grid.filter.invalid_number': 'Enter a number with at most 6 decimals.',
     'grid.filter.invalid_value': 'This value is not valid.',
+    'grid.cell.edit': 'Edit :field: :value',
+    'grid.cell.open_link': 'Open the link of :field',
     'grid.chip.remove': 'Remove the filter :label',
     'grid.chip.empty': ':name: empty',
     'grid.chip.not_empty': ':name: not empty',

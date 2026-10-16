@@ -66,6 +66,25 @@ describe('the dialogs', () => {
         expect(document.activeElement).toBe(document.querySelector('#first'));
     });
 
+    it('puts the cursor where the caller asks, the first of its selectors that finds something', () => {
+        const element = dialog();
+        element.querySelector('.modal-body').insertAdjacentHTML('beforeend', '<button id="star">Star</button>');
+
+        showModal(element, { focus: ['#missing', '#star', '#first'] });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#star'));
+    });
+
+    it('puts the cursor in the usual place when none of the selectors the caller gives finds anything', () => {
+        const element = dialog();
+
+        showModal(element, { focus: ['#missing', '.nothing'] });
+        element.dispatchEvent(new Event('shown.bs.modal'));
+
+        expect(document.activeElement).toBe(document.querySelector('#second'));
+    });
+
     it('gives the focus back to the button that opened it when it is closed, however it was', () => {
         const element = dialog();
         const opener = document.querySelector('#opener');

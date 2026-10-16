@@ -245,7 +245,7 @@
                         <template x-if="isForm && !confirming">
                             <div>
                                 <template x-for="field in fields" :key="field.id">
-                                    <div class="mb-3">
+                                    <div class="mb-3" :data-field="field.id">
                                         <label class="form-label" :class="{ required: field.required }" :for="controlId(field)" x-text="field.name"></label>
 
                                         <template x-if="control(field) === 'input'">

@@ -148,3 +148,31 @@
     display: none;
     appearance: none;
 }
+
+/*
+ * An editable cell of the table: a button that looks like the value it holds and edits it in place. It pulls back by its own
+ * padding so that the text stays where the header above it is, and shows it is a control on hover and on focus.
+ */
+.app-cell-button {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.125rem 0.375rem;
+    margin-inline: -0.375rem;
+    border: 0;
+    border-radius: var(--tblr-border-radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: text;
+}
+
+.app-cell-button:hover {
+    background: var(--tblr-hover-bg);
+}
+
+.app-cell-button:focus-visible {
+    outline: 2px solid var(--tblr-primary);
+    outline-offset: 1px;
+}

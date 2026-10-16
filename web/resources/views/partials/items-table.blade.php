@@ -4,7 +4,8 @@
 
     Included in the items card of the page of an inventory (app/inventory.blade.php), so it reads the inventoryItems
     component (resources/js/components/inventory-items.js). The header of a column that can be sorted is a button
-    (aria-sort says the state; a click goes ascending, descending, then back to the newest first).
+    (aria-sort says the state; a click goes ascending, descending, then back to the newest first), and a cell of an
+    editor is a button that edits its value in place (resources/js/grid/inline.js).
 
     position-relative: the visually hidden label of the last header is absolutely positioned, and without a positioned
     ancestor it would sit outside the scrolling area, making the whole page scroll sideways on a phone.
@@ -38,7 +39,29 @@
                 <tr class="app-row-link" @click="openFromRow(row, $event)">
                     <template x-for="cell in row.cells" :key="cell.key">
                         <td class="app-cell">
-                            @include('partials.field-value')
+                            {{-- Who may edit gets a button in each cell, which turns into the control of the field (partials/items-cell-editor);
+                                 the others get the value alone. A link is beside the button, never inside it. --}}
+                            <template x-if="canEdit && !isEditing(row, cell)">
+                                <div class="d-flex align-items-center gap-1">
+                                    <button type="button" class="app-cell-button" :data-cell="cellKey(row, cell)" :aria-label="editCellLabel(cell)" @click="startInline(row, cell)">
+                                        @include('partials.field-value')
+                                    </button>
+                                    <template x-if="cell.href">
+                                        <a class="btn btn-sm btn-icon btn-ghost-secondary" :href="cell.href" :target="cell.target" rel="noopener noreferrer nofollow" :aria-label="openLinkLabel(cell)" :title="openLinkLabel(cell)">
+                                            <x-tabler-external-link aria-hidden="true" />
+                                        </a>
+                                    </template>
+                                </div>
+                            </template>
+                            <template x-if="canEdit && isEditing(row, cell)">
+                                @include('partials.items-cell-editor')
+                            </template>
+                            {{-- An x-if holds one element: the value is several templates of its own, so they are wrapped. --}}
+                            <template x-if="!canEdit">
+                                <div>
+                                    @include('partials.field-value')
+                                </div>
+                            </template>
                         </td>
                     </template>
                     <td class="text-secondary text-nowrap small" x-text="row.created"></td>

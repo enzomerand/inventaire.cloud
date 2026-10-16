@@ -3,7 +3,7 @@
     kind, and everything else is bound with x-text and attribute bindings, never x-html, so that nothing a person typed
     is interpreted as markup. Links carry rel="noopener noreferrer nofollow".
 
-    Included in a template that has a "cell" in scope: the table of the items and the details of an item.
+    Included in a template that has a "cell" in scope: the table of the items, the cards of the gallery and the details of an item.
 --}}
 <template x-if="cell.kind === 'empty'">
     <span class="text-secondary" x-text="cell.text"></span>
@@ -21,8 +21,12 @@
         </template>
     </span>
 </template>
-<template x-if="cell.kind === 'link'">
+<template x-if="cell.kind === 'link' && !cell.plain">
     <a class="text-break" :href="cell.href" :target="cell.target" rel="noopener noreferrer nofollow" x-text="cell.text"></a>
+</template>
+{{-- A cell that is itself a button cannot hold a link: it shows the address as text (the table puts a link beside it). --}}
+<template x-if="cell.kind === 'link' && cell.plain">
+    <span class="text-break text-primary" x-text="cell.text"></span>
 </template>
 <template x-if="cell.kind === 'stars'">
     <span class="text-yellow text-nowrap" role="img" :aria-label="cell.title" :title="cell.title" x-text="cell.text"></span>

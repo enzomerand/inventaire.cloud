@@ -13,13 +13,17 @@ import { Modal } from '@tabler/core';
  * Opens a dialog, and puts the cursor in its first input (or in the one marked `data-autofocus`) once it is shown. When
  * the dialog is closed, however it was, the focus goes back to the element that had it before, if that is still on the page.
  *
+ * A caller that opens the dialog for one control (the cell of a table that has no editor of its own) can name where the
+ * cursor goes: the first of its selectors that finds something wins, and the usual place is the fallback.
+ *
  * Nothing is waited for when Bootstrap ignores the call (a dialog that is in the middle of opening or closing): its
  * `show.bs.modal` event is not fired then, and the listeners that would be left behind are not added.
  *
  * @param {HTMLElement} element The `.modal` element.
+ * @param {{ focus?: string[] }} [options] `focus`: CSS selectors of where the cursor goes, in order of preference.
  * @returns {void}
  */
-export function showModal(element) {
+export function showModal(element, { focus = [] } = {}) {
     const opener = document.activeElement;
     let started = false;
     const markStarted = () => {
@@ -37,7 +41,9 @@ export function showModal(element) {
     element.addEventListener(
         'shown.bs.modal',
         () => {
+            const asked = focus.map((selector) => element.querySelector(selector)).find((found) => found !== null);
             const target =
+                asked ??
                 element.querySelector('[data-autofocus]') ??
                 element.querySelector('.modal-body :is(input:not([type="hidden"]), select, textarea)');
 

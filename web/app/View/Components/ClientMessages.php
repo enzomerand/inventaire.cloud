@@ -114,6 +114,8 @@ class ClientMessages extends Component
             'grid.notice.reset' => __('Some of the search options no longer apply: the list was reset.'),
             'grid.filter.invalid_number' => __('Enter a number with at most 6 decimals.'),
             'grid.filter.invalid_value' => __('This value is not valid.'),
+            'grid.cell.edit' => __('Edit :field: :value'),
+            'grid.cell.open_link' => __('Open the link of :field'),
             'grid.chip.remove' => __('Remove the filter :label'),
             'grid.chip.empty' => __(':name: empty'),
             'grid.chip.not_empty' => __(':name: not empty'),

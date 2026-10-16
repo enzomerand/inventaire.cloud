@@ -581,6 +581,27 @@ describe('the items of an inventory', () => {
             expect(showModal).toHaveBeenCalledTimes(1);
         });
 
+        it('reads what was clicked from the path of the click, since a cell that turns into its control is gone by the time the click reaches the row', async () => {
+            answer([item('i1', { name: 'Hammer' })]);
+            await component.init();
+            const row = document.createElement('tr');
+            const button = document.createElement('button');
+            const inner = document.createElement('span');
+            button.append(inner);
+            row.append(button);
+            // The button has been taken out of the row since: from the span, `closest` no longer reaches anything useful.
+            button.remove();
+            inner.remove();
+
+            component.openFromRow({ id: 'i1' }, { target: inner, composedPath: () => [inner, button, row] });
+
+            expect(showModal).not.toHaveBeenCalled();
+
+            component.openFromRow({ id: 'i1' }, { target: row, composedPath: () => [row] });
+
+            expect(showModal).toHaveBeenCalledTimes(1);
+        });
+
         it('opens nothing for an item that is no longer in the page', () => {
             component.open({ id: 'gone' });
 
