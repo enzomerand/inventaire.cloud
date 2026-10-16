@@ -105,18 +105,25 @@ final class PurgeStoredFiles implements ShouldQueue
     }
 
     /**
-     * Whether a deletion worked: it answered true, and did not throw.
+     * Whether a deletion worked: it answered true, and did not throw. One that did not is written in the log with what the disk
+     * said, if it said anything (a disk that does not throw answers false).
      *
      * @param  callable(): bool  $delete
      */
     private function succeeded(callable $delete, string $what): bool
     {
         try {
-            return $delete();
-        } catch (Throwable $exception) {
-            Log::warning('A stored file could not be deleted: it will be tried again.', ['disk' => $this->disk, 'path' => $what, 'exception' => $exception]);
+            if ($delete()) {
+                return true;
+            }
 
-            return false;
+            $exception = null;
+        } catch (Throwable $exception) {
+            // Logged below, with what it said.
         }
+
+        Log::warning('A stored file could not be deleted: it will be tried again.', ['disk' => $this->disk, 'path' => $what, 'exception' => $exception]);
+
+        return false;
     }
 }

@@ -10,7 +10,9 @@ use App\Models\Item;
 use App\Models\Workspace;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use WeakMap;
 
 /**
  * What becomes of the files when what holds them is deleted: they are counted out of the storage of the workspace, in the
@@ -21,11 +23,24 @@ use Illuminate\Support\Collection;
  * also the part that remembers the files. Every method is called with the workspace
  * locked first, then the inventory (see {@see Locks}), so that the counter and the files that exist cannot change meanwhile,
  * and reads the attachments that are about to go before the deletion removes their rows.
+ *
+ * The folder of an inventory or of a workspace is worked out in the `deleting` event of its model (the rows that say which
+ * disks hold files are still there) but queued only in the `deleted` event, once the `DELETE` has gone through: a deletion
+ * that fails must not purge anything, and outside a transaction (a bare `$workspace->delete()`) "after the commit" is
+ * immediately, which in `deleting` would be before the row is deleted.
  */
 final class AttachmentCleanup
 {
     /** Rows read at a time when the files of a field are listed. */
     private const CHUNK = 500;
+
+    /**
+     * The folders to purge for each inventory and workspace that is being deleted, between its `deleting` and its `deleted`
+     * event. Dropped with the model if the deletion fails.
+     *
+     * @var WeakMap<Model, list<array{disk: string, directory: string}>>|null
+     */
+    private static ?WeakMap $collected = null;
 
     /**
      * Gets the database, the storage that purges files and the counter of the workspace.
@@ -65,8 +80,8 @@ final class AttachmentCleanup
 
     /**
      * Counts the files of an inventory that is about to be deleted out of the storage of its workspace. Their rows go with
-     * the inventory (the foreign key cascades) and their deletion from the disk is queued by {@see self::forgetInventory()},
-     * which the `deleting` event of the inventory calls.
+     * the inventory (the foreign key cascades) and their deletion from the disk is queued by {@see self::purgeCollected()}
+     * (the `deleted` event of the inventory), after {@see self::collectForInventory()} (its `deleting` event) worked it out.
      *
      * @param  Workspace  $workspace  The workspace of the inventory, locked.
      */
@@ -76,32 +91,36 @@ final class AttachmentCleanup
     }
 
     /**
-     * Queues the deletion of the folder of an inventory that is being deleted, on every disk its files were written to, to be
-     * run once the transaction that deletes it is committed. Called by the `deleting` event of {@see Inventory}, so that
-     * every way of deleting an inventory through its model does it. Does nothing for an inventory that holds no file.
+     * Works out the folder of an inventory that is being deleted, on every disk its files were written to, to be queued by
+     * {@see self::purgeCollected()} once the inventory is really gone. Called by the `deleting` event of {@see Inventory}, so
+     * that every way of deleting an inventory through its model does it. Collects nothing for an inventory that holds no file.
      */
-    public function forgetInventory(Inventory $inventory): void
+    public function collectForInventory(Inventory $inventory): void
     {
         $disks = $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all();
 
         if ($disks === []) {
+            $this->drop($inventory);
+
             return;
         }
 
         $workspace = (string) $this->db->table('workspaces')->where('id', $inventory->workspace_id)->value('ulid');
 
-        foreach ($disks as $disk) {
-            $this->storage->purgeAfterCommit((string) $disk, [], [AttachmentStorage::inventoryDirectory($workspace, $inventory->ulid)]);
-        }
+        $this->remember($inventory, array_map(strval(...), $disks), AttachmentStorage::inventoryDirectory($workspace, $inventory->ulid));
     }
 
     /**
-     * Queues the deletion of the folder of a workspace that is being deleted, on every disk the files of its inventories were
-     * written to, to be run once the transaction that deletes it is committed. Called by the `deleting` event of
-     * {@see Workspace}, so that deleting a workspace, an account that owned one alone, or an account through the
-     * administration all do it. The rows go with the workspace (the foreign keys cascade); there is no counter to move.
+     * Works out the folder of a workspace that is being deleted, to be queued by {@see self::purgeCollected()} once the
+     * workspace is really gone. Called by the `deleting` event of {@see Workspace}, so that deleting a workspace, an account
+     * that owned one alone, or an account through the administration all do it. The rows go with the workspace (the foreign
+     * keys cascade); there is no counter to move.
+     *
+     * The disks are the ones the files of its inventories were written to, and always the one new files are written to:
+     * an upload writes its file before its row is committed, so a file may be on the disk with no row to say which one.
+     * Deleting a folder that does not exist is harmless.
      */
-    public function forgetWorkspace(Workspace $workspace): void
+    public function collectForWorkspace(Workspace $workspace): void
     {
         $disks = $this->db->table('attachments')
             ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
@@ -110,8 +129,21 @@ final class AttachmentCleanup
             ->pluck('attachments.disk')
             ->all();
 
-        foreach ($disks as $disk) {
-            $this->storage->purgeAfterCommit((string) $disk, [], [AttachmentStorage::workspaceDirectory($workspace->ulid)]);
+        $this->remember($workspace, [...array_map(strval(...), $disks), $this->storage->diskName()], AttachmentStorage::workspaceDirectory($workspace->ulid));
+    }
+
+    /**
+     * Queues the deletion of the folders collected for an inventory or a workspace that has just been deleted, to be run once
+     * the transaction that deletes it is committed (at once when there is none). Called by the `deleted` event of both models.
+     */
+    public function purgeCollected(Inventory|Workspace $model): void
+    {
+        $collected = self::collected();
+        $folders = $collected[$model] ?? [];
+        $this->drop($model);
+
+        foreach ($folders as $folder) {
+            $this->storage->purgeAfterCommit($folder['disk'], [], [$folder['directory']]);
         }
     }
 
@@ -149,5 +181,35 @@ final class AttachmentCleanup
         foreach ($paths as $disk => $list) {
             $this->storage->purgeAfterCommit($disk, $list);
         }
+    }
+
+    /**
+     * Remembers the folder to purge on each disk, for a model that is being deleted (replacing what an earlier try collected).
+     *
+     * @param  array<array-key, string>  $disks  The names of the disks, possibly repeated.
+     */
+    private function remember(Model $model, array $disks, string $directory): void
+    {
+        $collected = self::collected();
+        $collected[$model] = array_map(fn (string $disk): array => ['disk' => $disk, 'directory' => $directory], array_values(array_unique($disks)));
+    }
+
+    /**
+     * Forgets what was collected for a model.
+     */
+    private function drop(Model $model): void
+    {
+        $collected = self::collected();
+        unset($collected[$model]);
+    }
+
+    /**
+     * What was collected, by model.
+     *
+     * @return WeakMap<Model, list<array{disk: string, directory: string}>>
+     */
+    private static function collected(): WeakMap
+    {
+        return self::$collected ??= new WeakMap;
     }
 }

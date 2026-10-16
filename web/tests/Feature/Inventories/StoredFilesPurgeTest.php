@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 require_once __DIR__.'/../../Support/attachments.php';
 
@@ -103,6 +104,18 @@ function purgeStorage(Workspace $workspace): array
     ];
 }
 
+/**
+ * Makes the next deletion from a table fail in the database, once it is asked for (the statement never reaches the engine).
+ */
+function purgeRefuseDeletionFrom(string $table): void
+{
+    DB::beforeExecuting(function (string $query) use ($table): void {
+        if (preg_match('/^delete from ["`]?'.$table.'["`]?(\s|$)/i', $query) === 1) {
+            throw new RuntimeException("The database refuses to delete from {$table}.");
+        }
+    });
+}
+
 describe('the job', function (): void {
     it('deletes the paths and the folders it is given, and what is already gone is no failure', function (): void {
         attachmentDisk();
@@ -121,6 +134,19 @@ describe('the job', function (): void {
             'workspaces/w1/inventories/i1/items/ab/file',
             'workspaces/w2/inventories/i2/items/c/file',
         ]);
+    });
+
+    it('writes a warning in the log for a path or a folder that the disk says it did not delete, and fails so that it is tried again', function (): void {
+        attachmentDisk();
+        $disk = attachmentDiskProxy();
+        $disk->shouldReceive('delete')->once()->with('workspaces/w1/file')->andReturn(false);
+        $disk->shouldReceive('deleteDirectory')->once()->with('workspaces/w1')->andReturn(false);
+        Log::spy();
+
+        expect(fn () => (new PurgeStoredFiles(ATTACHMENT_TEST_DISK, ['workspaces/w1/file'], ['workspaces/w1']))->handle(app('filesystem')))->toThrow(RuntimeException::class);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'could not be deleted') && $context['path'] === 'workspaces/w1/file')->once();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'could not be deleted') && $context['path'] === 'workspaces/w1')->once();
     });
 
     it('deletes a whole workspace, or a whole inventory, by its folder', function (): void {
@@ -427,6 +453,43 @@ describe('deleting an inventory', function (): void {
         expect(storedFiles())->toBe(purgePaths($case['files']['novel'], $case['foreign']));
     });
 
+    it('deletes nothing from the disk when the deletion itself fails, outside any transaction too', function (): void {
+        $case = purgeCase();
+        $before = storedFiles();
+        purgeRefuseDeletionFrom('inventories');
+
+        expect(fn () => $case['tools']->delete())->toThrow(RuntimeException::class);
+
+        expect(storedFiles())->toBe($before)
+            ->and(Inventory::query()->whereKey($case['tools']->id)->exists())->toBeTrue();
+    });
+
+    it('deletes the folder only once the row is gone, and keeps it when a transaction around a bare deletion is rolled back', function (): void {
+        $case = purgeCase();
+        $before = storedFiles();
+        $gone = [];
+        DB::listen(function ($query) use (&$gone, $case): void {
+            if (str_starts_with(strtolower($query->sql), 'delete from') && str_contains($query->sql, 'inventories')) {
+                $gone[] = count(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles("workspaces/{$case['workspace']->ulid}/inventories/{$case['tools']->ulid}"));
+            }
+        });
+
+        expect(fn () => DB::transaction(function () use ($case): void {
+            $case['tools']->delete();
+
+            throw new RuntimeException('The request failed afterwards.');
+        }))->toThrow(RuntimeException::class);
+
+        // The files were still there when the DELETE ran, and are still there after the rollback.
+        expect($gone)->not->toBe([])
+            ->and($gone[0])->toBeGreaterThan(0)
+            ->and(storedFiles())->toBe($before);
+
+        Inventory::query()->findOrFail($case['tools']->id)->delete();
+
+        expect(storedFiles())->toBe(purgePaths($case['files']['novel'], $case['foreign']));
+    });
+
     it('keeps everything when the deletion is rolled back', function (): void {
         $case = purgeCase();
         $before = [Attachment::query()->count(), count(storedFiles()), purgeStorage($case['workspace'])];
@@ -474,6 +537,44 @@ describe('deleting a workspace', function (): void {
         app(Workspaces::class)->delete($case['owner'], $case['workspace']);
 
         expect(storedFiles())->toBe(purgePaths($case['foreign']));
+    });
+
+    it('deletes nothing from the disk when the deletion itself fails, outside any transaction too', function (): void {
+        $case = purgeCase();
+        $before = storedFiles();
+        purgeRefuseDeletionFrom('workspaces');
+
+        expect(fn () => $case['workspace']->delete())->toThrow(RuntimeException::class);
+
+        expect(storedFiles())->toBe($before)
+            ->and(Workspace::query()->whereKey($case['workspace']->id)->exists())->toBeTrue();
+    });
+
+    it('keeps the files when a transaction around a bare deletion of the model is rolled back', function (): void {
+        $case = purgeCase();
+        $before = storedFiles();
+
+        expect(fn () => DB::transaction(function () use ($case): void {
+            $case['workspace']->delete();
+
+            throw new RuntimeException('The request failed afterwards.');
+        }))->toThrow(RuntimeException::class);
+
+        expect(storedFiles())->toBe($before);
+    });
+
+    it('empties the folder on the disk of today even when no file of the workspace is recorded: an upload whose row is not committed yet is not orphaned', function (): void {
+        attachmentDisk();
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $item = itemIn($inventory);
+        $unrecorded = AttachmentStorage::itemDirectory($team['workspace']->ulid, $inventory->ulid, $item->ulid).'/'.strtolower((string) Str::ulid());
+        Storage::disk(ATTACHMENT_TEST_DISK)->put($unrecorded, 'written for an upload that is still in flight');
+        Storage::disk(ATTACHMENT_TEST_DISK)->put('workspaces/another-one/inventories/i/items/a/file', 'x');
+
+        inventoryCall($this, $team['owner'], 'DELETE', "/api/v1/workspaces/{$team['workspace']->ulid}")->assertNoContent();
+
+        expect(storedFiles())->toBe(['workspaces/another-one/inventories/i/items/a/file']);
     });
 
     it('keeps the files when the deletion is rolled back', function (): void {

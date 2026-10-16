@@ -115,7 +115,8 @@ final class Inventories
      *
      * The workspace is locked first (see {@see Locks}): the files of the inventory are counted out of its storage in this
      * transaction. The inventory goes through the model's own `delete()`, so that its events fire: the `deleting` event
-     * queues the deletion of the inventory's folder on the disk, to be run once the transaction is committed.
+     * works out the inventory's folder on the disk and its `deleted` event queues the deletion, to be run once the transaction
+     * is committed.
      *
      * @throws ModelNotFoundException When the workspace or the inventory was deleted in the meantime.
      */

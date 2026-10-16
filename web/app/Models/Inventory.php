@@ -43,12 +43,17 @@ final class Inventory extends Model
 
     /**
      * Has the files of the inventory deleted from the disk once its deletion is committed, whichever way the model is
-     * deleted (the database cascades the rows, and fires no event for them: see {@see AttachmentCleanup}).
+     * deleted (the database cascades the rows, and fires no event for them: see {@see AttachmentCleanup}). What to delete is
+     * worked out before the row goes and queued only after it has: a deletion that fails purges nothing.
      */
     protected static function booted(): void
     {
         self::deleting(function (self $inventory): void {
-            app(AttachmentCleanup::class)->forgetInventory($inventory);
+            app(AttachmentCleanup::class)->collectForInventory($inventory);
+        });
+
+        self::deleted(function (self $inventory): void {
+            app(AttachmentCleanup::class)->purgeCollected($inventory);
         });
     }
 

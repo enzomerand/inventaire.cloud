@@ -15,6 +15,7 @@ use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
+use Mockery\MockInterface;
 
 require_once __DIR__.'/inventories.php';
 
@@ -28,6 +29,18 @@ function attachmentDisk(): void
 {
     Storage::fake(ATTACHMENT_TEST_DISK);
     config(['inventories.attachments_disk' => ATTACHMENT_TEST_DISK]);
+}
+
+/**
+ * Puts a proxy between the code and the fake disk of the test: every method works as it does on the disk until the test says
+ * otherwise (`shouldReceive()`), which is how a disk that fails is made.
+ */
+function attachmentDiskProxy(): MockInterface
+{
+    $proxy = Mockery::mock(Storage::disk(ATTACHMENT_TEST_DISK));
+    Storage::set(ATTACHMENT_TEST_DISK, $proxy);
+
+    return $proxy;
 }
 
 /**
@@ -88,6 +101,20 @@ function attachmentImageBytes(string $format = 'png', int $width = 40, int $heig
     };
 
     return (string) ob_get_clean();
+}
+
+/**
+ * The bytes of an animated WebP: an image type that is allowed, whose header says how large it is, and that GD cannot decode.
+ */
+function attachmentAnimatedWebpBytes(int $width = 40, int $height = 20): string
+{
+    $chunk = fn (string $id, string $data): string => $id.pack('V', strlen($data)).$data.(strlen($data) % 2 === 1 ? "\0" : '');
+    $dimension = fn (int $value): string => substr(pack('V', $value), 0, 3);
+    $canvas = chr(0x02)."\0\0\0".$dimension($width - 1).$dimension($height - 1);
+    $frame = $dimension(0).$dimension(0).$dimension($width - 1).$dimension($height - 1).$dimension(100)."\x00".$chunk('VP8L', "\x2f\0\0\0\0");
+    $body = 'WEBP'.$chunk('VP8X', $canvas).$chunk('ANIM', "\xff\xff\xff\xff".pack('v', 0)).$chunk('ANMF', $frame);
+
+    return 'RIFF'.pack('V', strlen($body)).$body;
 }
 
 /**
