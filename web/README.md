@@ -8,7 +8,7 @@ It is built **API-first**: the pages are classic server-rendered navigation, but
 
 | Layer      | Choice                                                                                  |
 |------------|-----------------------------------------------------------------------------------------|
-| Backend    | Laravel 13, PHP 8.3+                                                                    |
+| Backend    | Laravel 13, PHP 8.4+                                                                    |
 | Database   | PostgreSQL, MySQL or MariaDB, never engine-specific SQL (SQLite is not supported)       |
 | Front end  | Blade + [Tabler](https://tabler.io) (Bootstrap 5) + Alpine.js (CSP build), bundled by Vite |
 | Icons      | [`secondnetwork/blade-tabler-icons`](https://github.com/secondnetwork/blade-tabler-icons) |
@@ -19,7 +19,7 @@ Privacy by design: no CDN, no Google Fonts, no external request from the browser
 
 ## Requirements
 
-- PHP 8.3 or newer (developed on 8.5) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB) and `intl` (currencies and their decimals, the sorting of names)
+- PHP 8.4 or newer (developed on 8.5; OpenSpout 5.12, which writes the spreadsheets of the exports, needs 8.4) with the `pdo_pgsql` and `pdo_mysql` extensions (`pdo_mysql` serves both MySQL and MariaDB) and `intl` (currencies and their decimals, the sorting of names)
 - [Composer](https://getcomposer.org) 2
 - Node.js 20.19+ / 22.12+ and npm
 - [Docker](https://www.docker.com) with Compose, for the development database and mail services
@@ -101,7 +101,7 @@ Everything the wizard does is behind the setup token: whoever holds it is truste
 
 The wizard is one page with a progress bar and one AJAX endpoint per step. Each step **tests the real service before saving**, writes its values to `.env` immediately and is recorded in `storage/installer/progress.json`, so an interrupted installation resumes where it stopped (the token is asked again in a new browser session).
 
-1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` (the only image library used: Imagick does not stand in for it), `zip`, `curl`; `exif` is recommended, the installer warns without it) and write access to `storage/`, `bootstrap/cache/` and `.env`.
+1. **Requirements**: the PHP version required by `composer.json`, the extensions (`pdo` with `pdo_pgsql` or `pdo_mysql`, `mbstring`, `openssl`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `intl`, `gd` (the only image library used: Imagick does not stand in for it), `zip`, `dom`, `xmlreader` (spreadsheets and PDF of the exports), `curl`; `exif` is recommended, the installer warns without it) and write access to `storage/`, `bootstrap/cache/` and `.env`.
 2. **Database**: PostgreSQL 14+, MySQL 8.0+ or MariaDB 10.11+. The connection is tested with a temporary connection; a MariaDB server selected as "MySQL" (or the reverse) is refused, so is a database that holds anything but a previous run of this installer is refused (it must be empty, or have a `migrations` table whose entries are all this application's migrations), and the user must be able to create tables (the check creates, then drops, a table named `installer_probe_check`: it is refused if one already exists, and never touches it). An interrupted installation can be resumed on the same database.
 3. **Application**: public URL, default language and display timezone. Dates are always stored in UTC; the display timezone (`APP_TIMEZONE`) is only the zone the server uses when it writes a date itself, such as in the name of a download. Pages show dates in the timezone of the browser.
 4. **Email**: SMTP settings and a test address. A 6-digit code is sent there and the step is only validated once it is typed back (valid 15 minutes, 5 attempts; the pending values are kept encrypted in the session).

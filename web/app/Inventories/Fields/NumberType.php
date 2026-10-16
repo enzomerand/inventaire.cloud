@@ -88,6 +88,16 @@ final class NumberType extends DecimalType
     }
 
     /**
+     * The unit of the field ("kg"), when it has one.
+     */
+    public function exportUnit(InventoryField $field): ?string
+    {
+        $unit = $field->option('unit');
+
+        return is_string($unit) && $unit !== '' ? $unit : null;
+    }
+
+    /**
      * The decimals option of the field (none by default).
      */
     public function decimals(InventoryField $field): int

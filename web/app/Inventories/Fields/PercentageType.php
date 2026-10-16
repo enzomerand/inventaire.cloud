@@ -60,6 +60,14 @@ final class PercentageType extends DecimalType
     }
 
     /**
+     * The percent sign: the value is the number before it.
+     */
+    public function exportUnit(InventoryField $field): string
+    {
+        return '%';
+    }
+
+    /**
      * The decimals option of the field (two by default).
      */
     public function decimals(InventoryField $field): int

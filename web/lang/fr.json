@@ -883,5 +883,8 @@
     "Template: :name": "Modèle : :name",
     "This template does not exist. Pick one from the list.": "Ce modèle n'existe pas : choisissez-en un dans la liste.",
     ":count template": ":count modèle",
-    ":count templates": ":count modèles"
+    ":count templates": ":count modèles",
+    "The view this export was made on is no longer valid: a field it uses was deleted or changed.": "La vue sur laquelle cet export a été demandé n'est plus valable : un champ qu'elle utilise a été supprimé ou modifié.",
+    "The export could not be generated. Try again.": "L'export n'a pas pu être généré. Réessayez.",
+    "The export did not finish and was cancelled. Try again.": "L'export ne s'est pas terminé et a été annulé. Réessayez."
 }

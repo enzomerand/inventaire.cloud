@@ -50,6 +50,27 @@ abstract class DecimalType extends AbstractFieldType
     }
 
     /**
+     * A number with the decimals of the field, and the currency and the unit it is written with ({@see self::exportCurrency()},
+     * {@see FieldType::exportUnit()}).
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        $currency = $this->exportCurrency($field);
+
+        return ExportValue::number($stored, $this->decimals($field), $currency, $currency === null ? $this->exportUnit($field) : null);
+    }
+
+    /**
+     * The currency of the amounts of the field: none, unless the type is an amount.
+     */
+    protected function exportCurrency(InventoryField $field): ?string
+    {
+        return null;
+    }
+
+    /**
      * The bound of an option, read back from its stored text.
      */
     private function bound(InventoryField $field, string $option): ?Decimal

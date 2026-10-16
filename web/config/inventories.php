@@ -76,6 +76,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Exports
+    |--------------------------------------------------------------------------
+    |
+    | A member of a workspace can take the items of an inventory out as a
+    | spreadsheet, a CSV, a JSON, a PDF or a zip of the photos. A queued job
+    | writes the file, which is stored with the other private files and can be
+    | downloaded by the person who asked for it only.
+    |
+    | - `exports_per_minute`: exports one person may ask for in a minute
+    |   (`INVENTORIES_EXPORTS_PER_MINUTE`, 10), `429` beyond.
+    | - `max_active_exports`: exports one person may have at once, not expired
+    |   ones, whatever their state (`INVENTORIES_MAX_ACTIVE_EXPORTS`, 10): the
+    |   API answers 409 (`export_limit_reached`) beyond, until one is deleted or
+    |   expires. Counted under the lock of the person's row.
+    | - `export_ttl_hours`: hours a finished export is kept, then purged by
+    |   `inventaire:prune-exports` (`INVENTORIES_EXPORT_TTL_HOURS`, 24).
+    | - `pdf_max_items`: items a PDF may hold (`INVENTORIES_PDF_MAX_ITEMS`,
+    |   1000): the library lays the whole document out in memory. The API
+    |   answers 422 beyond; the other formats are streamed and have no limit but
+    |   the quota of items of an inventory.
+    | - `export_stale_minutes`: minutes after which an export that is still
+    |   waiting or running is given up as failed by `inventaire:prune-exports`
+    |   (`INVENTORIES_EXPORT_STALE_MINUTES`, 60): its worker stopped.
+    |
+    */
+    'exports_per_minute' => (int) env('INVENTORIES_EXPORTS_PER_MINUTE', 10),
+
+    'max_active_exports' => (int) env('INVENTORIES_MAX_ACTIVE_EXPORTS', 10),
+
+    'export_ttl_hours' => (int) env('INVENTORIES_EXPORT_TTL_HOURS', 24),
+
+    'pdf_max_items' => (int) env('INVENTORIES_PDF_MAX_ITEMS', 1000),
+
+    'export_stale_minutes' => (int) env('INVENTORIES_EXPORT_STALE_MINUTES', 60),
+
+    /*
+    |--------------------------------------------------------------------------
     | Inventory templates
     |--------------------------------------------------------------------------
     |

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories\Fields;
 
 use App\Models\InventoryField;
+use App\Support\DisplayTime;
 use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -101,5 +102,18 @@ final class DateTimeType extends AbstractFieldType
         $years = (int) $utc->format('Y');
 
         return $years >= 1000 && $years <= 9999 ? $utc->format(self::STORED_FORMAT) : null;
+    }
+
+    /**
+     * The moment in the timezone of the instance (stored in UTC), the one the people of the instance read their dates in.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        $utc = is_string($stored) ? self::toUtc($stored) : null;
+        $moment = $utc === null ? false : DateTimeImmutable::createFromFormat(self::STORED_FORMAT, $utc, new DateTimeZone('UTC'));
+
+        return $moment === false ? ExportValue::empty() : ExportValue::dateTime($moment->setTimezone(new DateTimeZone(DisplayTime::zone())));
     }
 }

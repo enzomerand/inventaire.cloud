@@ -38,6 +38,7 @@ final class ApplicationTables
         'items',
         'item_revisions',
         'attachments',
+        'exports',
     ];
 
     /**

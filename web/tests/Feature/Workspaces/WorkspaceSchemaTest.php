@@ -68,7 +68,10 @@ describe('the migrations', function (): void {
         $revisions = require database_path('migrations/2026_10_22_000000_create_item_revisions_table.php');
         $attachments = require database_path('migrations/2026_10_22_000100_create_attachments_table.php');
         $storage = require database_path('migrations/2026_10_22_000200_add_storage_used_to_workspaces.php');
+        // The exports hang from inventories and accounts.
+        $exports = require database_path('migrations/2026_10_23_000000_create_exports_table.php');
 
+        $exports->down();
         $attachments->down();
         $revisions->down();
         $inventories->down();
@@ -88,6 +91,7 @@ describe('the migrations', function (): void {
             $inventories->up();
             $revisions->up();
             $attachments->up();
+            $exports->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

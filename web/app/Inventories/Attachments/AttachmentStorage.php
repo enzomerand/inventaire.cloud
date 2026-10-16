@@ -97,6 +97,15 @@ final class AttachmentStorage
     }
 
     /**
+     * The folder of an export: the file of the export is in it, alone. It is under the folder of the inventory, so that the
+     * purge of an inventory or of a workspace takes the exports with it.
+     */
+    public static function exportDirectory(string $workspace, string $inventory, string $export): string
+    {
+        return self::inventoryDirectory($workspace, $inventory)."/exports/{$export}";
+    }
+
+    /**
      * The path of a thumbnail, from the path of its file.
      */
     public static function thumbnailPath(string $path): string

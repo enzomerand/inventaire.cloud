@@ -121,4 +121,16 @@ final class RatingType extends AbstractFieldType
     {
         return is_numeric($value) ? (int) $value : $value;
     }
+
+    /**
+     * The grade, out of the maximum of the field; one that is out of it (the maximum was lowered) is nothing, as it is for the API.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        $max = (int) $field->option('max', self::DEFAULT_MAX);
+
+        return is_int($stored) && $stored >= 1 && $stored <= $max ? ExportValue::number($stored, 0, maximum: $max) : ExportValue::empty();
+    }
 }

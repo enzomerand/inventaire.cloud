@@ -15,8 +15,9 @@
 ############################################################
 FROM dunglas/frankenphp:1-php8.5-trixie AS base
 
-# opcache is part of PHP 8.5; mbstring, openssl, tokenizer, xml, ctype, json, fileinfo,
-# curl and posix come with the base image.
+# opcache is part of PHP 8.5; mbstring, openssl, tokenizer, xml (with dom, xmlreader and xmlwriter,
+# which the spreadsheet writers and readers need), ctype, json, fileinfo, curl and posix come with the
+# base image; zip (the zip of the photos of an export) and gd (images, PDF) are installed below.
 RUN install-php-extensions bcmath exif gd intl pcntl pdo_mysql pdo_pgsql zip \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 

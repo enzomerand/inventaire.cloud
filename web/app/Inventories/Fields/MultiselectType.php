@@ -100,4 +100,14 @@ final class MultiselectType extends ChoiceType
     {
         return is_array($stored) ? $this->labelsText($stored, $field) : null;
     }
+
+    /**
+     * The labels of the choices, in the order they were chosen, joined by a comma; the choices the field no longer has are left out.
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return ExportValue::text(implode(', ', is_array($stored) ? $this->choiceLabels($stored, $field) : []));
+    }
 }

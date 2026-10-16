@@ -61,4 +61,14 @@ final class DateType extends AbstractFieldType
 
         return (int) $parts[1] >= 1000 && checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1]);
     }
+
+    /**
+     * The day, as it was stored (`YYYY-MM-DD`).
+     *
+     * @param  array<string, string>  $fileNames
+     */
+    public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
+    {
+        return is_string($stored) && self::isDate($stored) ? ExportValue::date($stored) : ExportValue::empty();
+    }
 }

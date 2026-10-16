@@ -56,10 +56,10 @@ it('takes the PHP version from composer.json', function (): void {
 });
 
 it('fails when PHP is too old', function (): void {
-    $php = requirement(checker($this, phpVersion: '8.2.30')->check(), 'php');
+    $php = requirement(checker($this, phpVersion: '8.3.30')->check(), 'php');
 
-    expect($php->ok)->toBeFalse()->and($php->detail)->toContain('8.2.30');
-    expect(requirement(checker($this, phpVersion: '8.3.0')->check(), 'php')->ok)->toBeTrue();
+    expect($php->ok)->toBeFalse()->and($php->detail)->toContain('8.3.30');
+    expect(requirement(checker($this, phpVersion: '8.4.0')->check(), 'php')->ok)->toBeTrue();
 });
 
 it('lists the extension that is missing', function (): void {

@@ -93,11 +93,16 @@ final class AttachmentCleanup
     /**
      * Works out the folder of an inventory that is being deleted, on every disk its files were written to, to be queued by
      * {@see self::purgeCollected()} once the inventory is really gone. Called by the `deleting` event of {@see Inventory}, so
-     * that every way of deleting an inventory through its model does it. Collects nothing for an inventory that holds no file.
+     * that every way of deleting an inventory through its model does it. Collects nothing for an inventory that holds no file and no
+     * export.
      */
     public function collectForInventory(Inventory $inventory): void
     {
-        $disks = $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all();
+        // The exports of the inventory are stored under its folder too (see AttachmentStorage::exportDirectory()).
+        $disks = [
+            ...$this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
+            ...$this->db->table('exports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
+        ];
 
         if ($disks === []) {
             $this->drop($inventory);
@@ -122,12 +127,21 @@ final class AttachmentCleanup
      */
     public function collectForWorkspace(Workspace $workspace): void
     {
-        $disks = $this->db->table('attachments')
-            ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
-            ->where('inventories.workspace_id', $workspace->getKey())
-            ->distinct()
-            ->pluck('attachments.disk')
-            ->all();
+        $disks = [
+            ...$this->db->table('attachments')
+                ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
+                ->where('inventories.workspace_id', $workspace->getKey())
+                ->distinct()
+                ->pluck('attachments.disk')
+                ->all(),
+            // The exports are stored under the folder of their inventory too.
+            ...$this->db->table('exports')
+                ->join('inventories', 'inventories.id', '=', 'exports.inventory_id')
+                ->where('inventories.workspace_id', $workspace->getKey())
+                ->distinct()
+                ->pluck('exports.disk')
+                ->all(),
+        ];
 
         $this->remember($workspace, [...array_map(strval(...), $disks), $this->storage->diskName()], AttachmentStorage::workspaceDirectory($workspace->ulid));
     }
