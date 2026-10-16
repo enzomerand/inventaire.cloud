@@ -56,10 +56,10 @@ function writtenToField(string $type, mixed $value, array $options = []): array
 }
 
 describe('the registry', function (): void {
-    it('lists the eighteen types, in the order they are offered', function (): void {
+    it('lists the twenty types, in the order they are offered', function (): void {
         expect(app(FieldTypes::class)->keys())->toBe([
             'text', 'textarea', 'number', 'money', 'percentage', 'boolean', 'date', 'datetime', 'time',
-            'select', 'multiselect', 'tags', 'url', 'email', 'phone', 'rating', 'color', 'barcode',
+            'select', 'multiselect', 'tags', 'url', 'email', 'phone', 'rating', 'color', 'barcode', 'file', 'photo',
         ]);
     });
 

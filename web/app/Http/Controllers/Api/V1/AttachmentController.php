@@ -12,6 +12,7 @@ use App\Http\Responses\StoredFileResponse;
 use App\Inventories\Attachments\Attachments;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Exceptions\AttachmentLimitReachedException;
+use App\Inventories\Exceptions\FieldFileLimitReachedException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Models\Attachment;
 use App\Models\Inventory;
@@ -29,7 +30,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Who may is decided by {@see InventoryPolicy}: every member reads, editors and owners write. A file belongs to the item in
  * the path, and the item to the inventory in the path, or it is a 404. The answers to a change describe the item as it is
  * now ({@see ItemResource}), `attachments` included. The limits answer `409` with a machine-readable `code`:
- * `attachment_limit_reached` (files of the item), `storage_limit_reached` (storage of the workspace).
+ * `attachment_limit_reached` (files of the item), `field_file_limit_reached` (files of a file or photo field),
+ * `storage_limit_reached` (storage of the workspace).
  */
 final class AttachmentController extends Controller
 {
@@ -42,17 +44,24 @@ final class AttachmentController extends Controller
     ) {}
 
     /**
-     * Attaches the `file` part of the request to the item (`201`, the item as it is now). `422` when the file is missing or too
-     * large.
+     * Attaches the `file` part of the request to the item (`201`, the item as it is now), as the content of the file or photo
+     * `field` of the inventory when one is named (its ULID). `422` when the file is missing or too large, the field is not a
+     * file or photo field of the inventory, or a photo field is given something that is not a readable image.
      */
     public function store(UploadAttachmentRequest $request, Inventory $inventory, Item $item): JsonResponse
     {
         try {
-            $this->attachments->upload($inventory, $item, $request->uploaded(), $this->user($request));
+            $this->attachments->upload($inventory, $item, $request->uploaded(), $this->user($request), $request->field());
         } catch (AttachmentLimitReachedException $limit) {
             return ApiError::conflict(
                 trans_choice('An item cannot hold more than :count file.|An item cannot hold more than :count files.', $limit->limit),
                 AttachmentLimitReachedException::CODE,
+                ['limit' => $limit->limit],
+            );
+        } catch (FieldFileLimitReachedException $limit) {
+            return ApiError::conflict(
+                trans_choice('This field cannot hold more than :count file.|This field cannot hold more than :count files.', $limit->limit),
+                FieldFileLimitReachedException::CODE,
                 ['limit' => $limit->limit],
             );
         } catch (StorageLimitReachedException $limit) {
@@ -103,6 +112,6 @@ final class AttachmentController extends Controller
      */
     private function describe(Inventory $inventory, Item $item): ItemResource
     {
-        return new ItemResource($item->refresh()->load('attachments'), $inventory->fields()->get(), $inventory);
+        return new ItemResource($item->refresh()->load('attachments.uploader:id,name'), $inventory->fields()->get(), $inventory);
     }
 }

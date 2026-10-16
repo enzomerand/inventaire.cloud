@@ -87,6 +87,15 @@ final class ItemRevisions
     }
 
     /**
+     * Deletes the whole history of an item that is being deleted (see the migration that creates the table: the database
+     * does not cascade from the item).
+     */
+    public function forget(Item $item): void
+    {
+        $this->db->table('item_revisions')->where('item_id', $item->getKey())->delete();
+    }
+
+    /**
      * Writes one revision, then prunes the history of the item.
      *
      * @param  array<string, mixed>  $changes
@@ -94,6 +103,7 @@ final class ItemRevisions
     private function write(Item $item, ?User $author, string $action, array $changes): void
     {
         $revision = new ItemRevision;
+        $revision->inventory_id = $item->inventory_id;
         $revision->item_id = $item->getKey();
         $revision->user_id = $author?->getKey();
         $revision->action = $action;

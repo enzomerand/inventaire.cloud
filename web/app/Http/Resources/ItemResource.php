@@ -45,7 +45,7 @@ final class ItemResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $this->resource->loadMissing('attachments');
+        $this->resource->loadMissing('attachments.uploader:id,name');
         $values = app(ItemValues::class)->present($this->fields, $this->resource->values);
 
         return [

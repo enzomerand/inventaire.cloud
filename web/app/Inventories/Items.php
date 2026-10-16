@@ -33,7 +33,9 @@ use Illuminate\Validation\ValidationException;
  * - the text the item is searched by ({@see ItemSearchText}) is built from the values and the fields read under that
  *   same lock, and written with them;
  * - the history of the item ({@see ItemRevisions}) gets its line in the same transaction, from the values as they were and
- *   as they become, so that a change that is rolled back leaves no trace and a change that happens always leaves one.
+ *   as they become, so that a change that is rolled back leaves no trace and a change that happens always leaves one. The
+ *   history and the files of an item are deleted with it by {@see self::delete()}: no foreign key does it (see the
+ *   migrations that create their tables).
  *
  * The account of the person who writes is locked first (see {@see Locks::author()}). Each write is one transaction,
  * retried when the database picks it as the loser of a deadlock.
@@ -150,6 +152,7 @@ final class Items
             $current = $this->locks->itemOf($locked, $item);
 
             $this->files->releaseItem($workspace, $locked, $current);
+            $this->revisions->forget($current);
             $current->delete();
             $this->moveCount($locked, $inventory, -1);
         }));

@@ -52,7 +52,7 @@ function historyRows(Item $item): array
 
 describe('the table', function (): void {
     it('has the columns the model reads, and an index for the history of an item', function (): void {
-        expect(Schema::hasColumns('item_revisions', ['id', 'item_id', 'user_id', 'action', 'changes', 'created_at']))->toBeTrue()
+        expect(Schema::hasColumns('item_revisions', ['id', 'inventory_id', 'item_id', 'user_id', 'action', 'changes', 'created_at']))->toBeTrue()
             ->and(Schema::hasColumn('item_revisions', 'updated_at'))->toBeFalse()
             ->and(collect(Schema::getIndexes('item_revisions'))->contains(fn (array $index): bool => $index['columns'] === ['item_id', 'id']))->toBeTrue();
     });
@@ -322,7 +322,7 @@ describe('reading the history', function (): void {
 
     it('gives no change for a stray revision whose changes are not what is expected', function (): void {
         $case = historyCase();
-        DB::table('item_revisions')->insert(['item_id' => $case['item']->id, 'user_id' => null, 'action' => 'updated', 'changes' => '{"x":5}', 'created_at' => now()]);
+        DB::table('item_revisions')->insert(['inventory_id' => $case['inventory']->id, 'item_id' => $case['item']->id, 'user_id' => null, 'action' => 'updated', 'changes' => '{"x":5}', 'created_at' => now()]);
 
         $data = inventoryCall($this, $case['team']['owner'], 'GET', $case['uri'].'/revisions')->assertOk()->json('data');
 

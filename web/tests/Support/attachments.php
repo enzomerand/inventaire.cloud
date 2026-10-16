@@ -9,6 +9,7 @@ declare(strict_types=1);
 use App\Inventories\Attachments\Attachments;
 use App\Models\Attachment;
 use App\Models\Inventory;
+use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -148,9 +149,9 @@ function attachmentGet(object $test, ?User $as, string $uri, array $headers = []
 /**
  * Attaches a file the way the application does, to an item, and returns the row.
  */
-function attachmentTo(Inventory $inventory, Item $item, ?UploadedFile $file = null, ?User $by = null): Attachment
+function attachmentTo(Inventory $inventory, Item $item, ?UploadedFile $file = null, ?User $by = null, ?InventoryField $field = null): Attachment
 {
-    return app(Attachments::class)->upload($inventory, $item, $file ?? attachmentPdf(), $by ?? inventoryPerson('Uploader'));
+    return app(Attachments::class)->upload($inventory, $item, $file ?? attachmentPdf(), $by ?? inventoryPerson('Uploader'), $field?->ulid);
 }
 
 /**

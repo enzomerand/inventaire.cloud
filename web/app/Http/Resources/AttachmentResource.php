@@ -10,11 +10,14 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * How the API describes a file attached to an item: its ULID, the file or photo field it fills (or none), its name, type
- * and size, the size of an image, whether it has a thumbnail, when it was uploaded and the addresses to fetch it from.
+ * and size, the size of an image, whether it has a thumbnail, when it was uploaded and by whom (`uploaded_by`: the `id` and
+ * `name` of the person, or null when their account was deleted since) and the addresses to fetch it from.
+ *
+ * The uploader is read from the `uploader` relation: load it with the files (`attachments.uploader`) to spare a query for each.
  *
  * The addresses (`url`, `thumbnail_url`) are paths of the API, relative to the host: a client signed in with the session or a
  * token calls them as it calls the rest of the API. The file is a download unless `?inline=1` is added (for the types that
- * may be shown); the thumbnail is null when there is none. Never the disk, the path, or who uploaded it.
+ * may be shown); the thumbnail is null when there is none. Never the disk or the path.
  *
  * @mixin Attachment
  */
@@ -52,6 +55,7 @@ final class AttachmentResource extends JsonResource
             'height' => $this->height,
             'has_thumbnail' => $this->resource->hasThumbnail(),
             'uploaded_at' => $this->created_at?->toIso8601String(),
+            'uploaded_by' => $this->resource->uploader === null ? null : ['id' => $this->resource->uploader->getKey(), 'name' => $this->resource->uploader->name],
             'url' => route('api.v1.inventories.items.attachments.show', $parameters, false),
             'thumbnail_url' => $this->resource->hasThumbnail() ? route('api.v1.inventories.items.attachments.thumbnail', $parameters, false) : null,
         ];

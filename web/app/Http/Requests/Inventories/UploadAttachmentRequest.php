@@ -13,7 +13,8 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Number;
 
 /**
- * A file to attach to an item: one multipart `file` part, at most `inventories.max_attachment_size` bytes.
+ * A file to attach to an item: one multipart `file` part, at most `inventories.max_attachment_size` bytes, and optionally the
+ * ULID of the file or photo `field` of the inventory it fills.
  *
  * Only the shape and the size are checked here. The type is detected from the content by the service that stores the file,
  * and the limits that depend on what the item and the workspace hold now are judged under their locks
@@ -41,6 +42,8 @@ final class UploadAttachmentRequest extends FormRequest
 
         return [
             'file' => ['required', 'file', 'max:'.$kilobytes],
+            // The ULID of a file or photo field of the inventory to put the file in; none for a plain attachment.
+            'field' => ['nullable', 'string', 'max:26'],
         ];
     }
 
@@ -54,6 +57,16 @@ final class UploadAttachmentRequest extends FormRequest
         return [
             'file.max' => __('The file must not be larger than :size.', ['size' => Number::fileSize(config()->integer('inventories.max_attachment_size'), maxPrecision: 1)]),
         ];
+    }
+
+    /**
+     * The ULID of the field the file is for, or null for a plain attachment.
+     */
+    public function field(): ?string
+    {
+        $field = $this->input('field');
+
+        return is_string($field) && $field !== '' ? $field : null;
     }
 
     /**

@@ -57,8 +57,8 @@ final class ItemController extends Controller
     public function index(ListItemsRequest $request, Inventory $inventory): AnonymousResourceCollection
     {
         $fields = $inventory->fields()->get();
-        // The files of the page's items come in one more query, not one per item.
-        $items = $inventory->items()->with('attachments');
+        // The files of the page's items, and the names of those who uploaded them, come in two more queries, not two per item.
+        $items = $inventory->items()->with('attachments.uploader:id,name');
         $this->search->restrict($items, (string) $request->validated('q', ''));
         $totalled = $this->query->apply($items, $fields, $request->validated());
         $page = $items->paginate(Items::PER_PAGE, Items::LIST_COLUMNS)->withQueryString();

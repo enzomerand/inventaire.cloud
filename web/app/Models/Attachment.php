@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Models\Concerns\HasUlidRouteKey;
 use Illuminate\Database\Eloquent\Model;
@@ -20,10 +21,12 @@ use Illuminate\Support\Carbon;
  * download only: it is never part of a path. `ulid` is the identifier the outside world uses ({@see HasUlidRouteKey}).
  *
  * The files of a workspace add up to the `storage_used` of the workspace, which only the code that adds and removes
- * attachments moves.
+ * attachments moves. A row goes with its inventory (the foreign key cascades); with its item or its field, it is the code
+ * that deletes either that deletes the row ({@see AttachmentCleanup}), since the database holds no foreign key to them.
  *
  * @property int $id
  * @property string $ulid
+ * @property int $inventory_id
  * @property int $item_id
  * @property int|null $field_id
  * @property string $disk

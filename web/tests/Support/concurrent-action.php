@@ -14,7 +14,7 @@
 //        php concurrent-action.php <go file> create-item <user id> <inventory id> [<field ULID> <value>]
 //        php concurrent-action.php <go file> update-item <user id> <inventory id> <item id> <field ULID> <value>
 //        php concurrent-action.php <go file> delete-item <inventory id> <item id>
-//        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload>
+//        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload> [<ULID of the file or photo field>]
 //        php concurrent-action.php <go file> remove-attachment <user id> <inventory id> <item id> <attachment id>
 //
 // The files of the attachments are written to the local disk, whose folder the test gives with TEST_STORAGE_ROOT (the
@@ -190,6 +190,7 @@ function changeInventories(Application $app, string $action, array $arguments): 
                 Item::query()->findOrFail((int) $arguments[2]),
                 new UploadedFile($arguments[3], basename($arguments[3]), null, null, true),
                 User::query()->findOrFail((int) $arguments[0]),
+                $arguments[4] ?? null,
             );
 
             return ['result' => 'uploaded'];

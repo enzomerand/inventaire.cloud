@@ -133,8 +133,8 @@ describe('adding a field', function (): void {
     })->with(['select' => 'select', 'multiselect' => 'multiselect']);
 
     it('offers every type of the registry (a test per type above must not be forgotten)', function (): void {
-        // The two datasets above cover all of them: 16 here, select and multiselect separately.
-        expect(app(FieldTypes::class)->keys())->toHaveCount(18);
+        // The datasets above cover all of them: 16 here, select and multiselect separately, file and photo in FileFieldsTest.php.
+        expect(app(FieldTypes::class)->keys())->toHaveCount(20);
     });
 
     it('is refused when the request is wrong', function (array $data, string $key): void {

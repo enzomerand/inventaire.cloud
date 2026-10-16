@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Attachment;
+use App\Models\Item;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\CommitsDatabaseChanges;
@@ -131,6 +132,43 @@ describe('uploads for the last place of an item', function (): void {
             removeConcurrencyRows();
             Storage::disk('local')->deleteDirectory('workspaces');
         }
+    });
+});
+
+describe('uploads for the last place of a file field', function (): void {
+    it('are taken one after the other: the value of the field lists one file and the other is deleted', function (): void {
+        foreach (range(1, 2) as $_) {
+            $team = inventoryTeam();
+            $inventory = inventoryIn($team['workspace']);
+            $field = fieldIn($inventory, 'file', 'Documents');
+            $item = itemIn($inventory);
+            $files = concurrencyUploads($this->sandbox->root, 3, 100);
+
+            $outcomes = actTogether($this->sandbox->root, array_map(fn (string $path): array => ['upload-attachment', $team['owner']->id, $inventory->id, $item->id, $path, $field->ulid], $files), concurrencyEnvironment($this->sandbox->root, []));
+
+            expect($outcomes)->toBe(['refused:field_file_limit_reached', 'refused:field_file_limit_reached', 'uploaded'])
+                ->and(Attachment::query()->count())->toBe(1)
+                ->and(Item::query()->findOrFail($item->id)->values[$field->ulid])->toBe([Attachment::query()->sole()->ulid])
+                ->and(concurrencyStorageUsed($team['workspace']->id))->toBe(100)
+                ->and(concurrencyFiles())->toHaveCount(1);
+
+            removeConcurrencyRows();
+            Storage::disk('local')->deleteDirectory('workspaces');
+        }
+    });
+
+    it('keep every file of a field that takes several, in the list, none lost to another upload', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $field = fieldIn($inventory, 'file', 'Documents', ['max_files' => 4]);
+        $item = itemIn($inventory);
+        $files = concurrencyUploads($this->sandbox->root, 4, 50);
+
+        $outcomes = actTogether($this->sandbox->root, array_map(fn (string $path): array => ['upload-attachment', $team['owner']->id, $inventory->id, $item->id, $path, $field->ulid], $files), concurrencyEnvironment($this->sandbox->root, []));
+
+        expect($outcomes)->toBe(['uploaded', 'uploaded', 'uploaded', 'uploaded'])
+            ->and(Item::query()->findOrFail($item->id)->values[$field->ulid])->toEqualCanonicalizing(Attachment::query()->pluck('ulid')->all())
+            ->and(Item::query()->findOrFail($item->id)->values[$field->ulid])->toHaveCount(4);
     });
 });
 

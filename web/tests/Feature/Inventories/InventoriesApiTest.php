@@ -49,9 +49,11 @@ describe('the field types', function (): void {
         $english = inventoryCall($this, $person, 'GET', '/api/v1/field-types', headers: ['Accept-Language' => 'en'])->assertOk();
         $french = inventoryCall($this, $person, 'GET', '/api/v1/field-types', headers: ['Accept-Language' => 'fr'])->assertOk();
 
-        expect($english->json('data'))->toHaveCount(18)
+        expect($english->json('data'))->toHaveCount(20)
             ->and($english->json('data.0'))->toBe(['type' => 'text', 'label' => 'Text'])
             ->and($english->json('data.17'))->toBe(['type' => 'barcode', 'label' => 'Barcode'])
+            ->and($english->json('data.18'))->toBe(['type' => 'file', 'label' => 'Attached file'])
+            ->and($english->json('data.19'))->toBe(['type' => 'photo', 'label' => 'Photo'])
             ->and($french->json('data.1'))->toBe(['type' => 'textarea', 'label' => 'Texte long'])
             ->and(array_column($english->json('data'), 'type'))->toBe(app(FieldTypes::class)->keys());
     });

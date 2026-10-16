@@ -38,7 +38,7 @@ function attachmentStorageUsed(Workspace $workspace): int
 
 describe('the tables', function (): void {
     it('have the columns the models read', function (): void {
-        expect(Schema::hasColumns('attachments', ['id', 'ulid', 'item_id', 'field_id', 'disk', 'path', 'thumbnail_path', 'name', 'mime', 'size', 'width', 'height', 'uploaded_by', 'created_at', 'updated_at']))->toBeTrue()
+        expect(Schema::hasColumns('attachments', ['id', 'ulid', 'inventory_id', 'item_id', 'field_id', 'disk', 'path', 'thumbnail_path', 'name', 'mime', 'size', 'width', 'height', 'uploaded_by', 'created_at', 'updated_at']))->toBeTrue()
             ->and(Schema::hasColumn('workspaces', 'storage_used'))->toBeTrue();
     });
 
@@ -85,7 +85,7 @@ describe('uploading a file', function (): void {
         $file = attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated()->json('data.attachments.0');
         $attachment = Attachment::query()->sole();
 
-        expect(array_keys($file))->toBe(['id', 'field', 'name', 'mime', 'size', 'width', 'height', 'has_thumbnail', 'uploaded_at', 'url', 'thumbnail_url'])
+        expect(array_keys($file))->toBe(['id', 'field', 'name', 'mime', 'size', 'width', 'height', 'has_thumbnail', 'uploaded_at', 'uploaded_by', 'url', 'thumbnail_url'])
             ->and($file['id'])->toBe($attachment->ulid)
             ->and($file['field'])->toBeNull()
             ->and($file['name'])->toBe('invoice.pdf')
@@ -95,6 +95,7 @@ describe('uploading a file', function (): void {
             ->and($file['height'])->toBeNull()
             ->and($file['has_thumbnail'])->toBeFalse()
             ->and($file['uploaded_at'])->toStartWith(substr(now()->toIso8601String(), 0, 10))
+            ->and($file['uploaded_by'])->toBe(['id' => $case['team']['owner']->id, 'name' => 'Owner'])
             ->and($file['url'])->toBe($case['files'].'/'.$attachment->ulid)
             ->and($file['thumbnail_url'])->toBeNull();
     });
@@ -638,22 +639,53 @@ describe('the item', function (): void {
             ->and(array_keys($one))->toBe(['id', 'values', 'attachments', 'created_at', 'updated_at']);
     });
 
-    it('loads the files of a whole page in one more query', function (): void {
+    it('names who uploaded each file, and nobody once their account is deleted', function (): void {
+        $case = attachmentCase();
+        attachmentTo($case['inventory'], $case['item'], attachmentPdf('a.pdf'), $case['team']['editor']);
+        attachmentTo($case['inventory'], $case['item'], attachmentPdf('b.pdf'), $case['team']['owner']);
+
+        $uploaders = fn (): array => array_column(inventoryCall($this, $case['team']['viewer'], 'GET', $case['uri'])->assertOk()->json('data.attachments'), 'uploaded_by');
+
+        expect($uploaders())->toBe([['id' => $case['team']['editor']->id, 'name' => 'Editor'], ['id' => $case['team']['owner']->id, 'name' => 'Owner']]);
+
+        $case['team']['editor']->delete();
+
+        expect($uploaders())->toBe([null, ['id' => $case['team']['owner']->id, 'name' => 'Owner']])
+            ->and(Attachment::query()->count())->toBe(2);
+    });
+
+    it('answers the creation of an item, the upload and the removal of a file in the standard envelope', function (): void {
+        $case = attachmentCase();
+
+        $created = inventoryCall($this, $case['team']['owner'], 'POST', "/api/v1/inventories/{$case['inventory']->ulid}/items", ['values' => []])->assertCreated();
+        $uploaded = attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        $removed = inventoryCall($this, $case['team']['owner'], 'DELETE', $case['files'].'/'.Attachment::query()->sole()->ulid)->assertOk();
+
+        foreach ([$created, $uploaded, $removed] as $response) {
+            expect(array_keys($response->json()))->toBe(['data'])
+                ->and(array_keys($response->json('data')))->toBe(['id', 'values', 'attachments', 'created_at', 'updated_at']);
+        }
+    });
+
+    it('loads the files of a whole page in one more query, and the names of those who uploaded them in another', function (): void {
         $case = attachmentCase();
 
         foreach (range(1, 2) as $_) {
             attachmentTo($case['inventory'], itemIn($case['inventory']));
         }
 
-        $count = fn (): int => count(array_filter(statementsOf(fn () => inventoryCall($this, $case['team']['viewer'], 'GET', "/api/v1/inventories/{$case['inventory']->ulid}/items")->assertOk()), fn (string $sql): bool => str_contains($sql, 'attachments')));
-        $few = $count();
+        $list = fn (): array => statementsOf(fn () => inventoryCall($this, $case['team']['viewer'], 'GET', "/api/v1/inventories/{$case['inventory']->ulid}/items")->assertOk());
+        $reading = fn (string $table): int => count(array_filter($list(), fn (string $sql): bool => str_contains($sql, "from \"{$table}\"") || str_contains($sql, "from `{$table}`")));
+        $files = $reading('attachments');
+        $names = $reading('users');
 
         foreach (range(1, 5) as $_) {
-            attachmentTo($case['inventory'], itemIn($case['inventory']));
+            attachmentTo($case['inventory'], itemIn($case['inventory']), null, inventoryPerson('Another'));
         }
 
-        expect($few)->toBe(1)
-            ->and($count())->toBe(1);
+        expect($files)->toBe(1)
+            ->and($reading('attachments'))->toBe(1)
+            ->and($reading('users'))->toBe($names);
     });
 
     it('has the files of an item that was just changed', function (): void {

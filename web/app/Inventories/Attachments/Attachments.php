@@ -6,10 +6,14 @@ namespace App\Inventories\Attachments;
 
 use App\Database\DeadlockRetries;
 use App\Inventories\Exceptions\AttachmentLimitReachedException;
+use App\Inventories\Exceptions\FieldFileLimitReachedException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
+use App\Inventories\Fields\FieldTypes;
+use App\Inventories\Fields\UploadedFilesType;
 use App\Inventories\ItemRevisions;
 use App\Models\Attachment;
 use App\Models\Inventory;
+use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\ItemRevision;
 use App\Models\User;
@@ -19,10 +23,16 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
  * Attaching files to items and removing them.
+ *
+ * A file is a plain attachment of the item, or the content of one of its file or photo fields ({@see UploadedFilesType}): then
+ * the ULID of the attachment is also appended to the value of the field (and taken out when the file is removed), in the
+ * same transaction, under the lock of the item, so that the list and the files cannot disagree. A photo field takes images
+ * only, and refuses one that cannot be read.
  *
  * A file is written to the disk **before** the transaction that records it, so that the transaction stays short and holds its
  * locks for no longer than the database needs: if that transaction fails (the quota is reached, the item was deleted
@@ -45,6 +55,7 @@ final class Attachments
         private readonly WorkspaceStorage $usage,
         private readonly Thumbnails $thumbnails,
         private readonly ItemRevisions $revisions,
+        private readonly FieldTypes $types,
     ) {}
 
     /**
@@ -64,24 +75,31 @@ final class Attachments
      * Attaches an uploaded file to an item.
      *
      * The type is detected from the content and the name is cleaned up ({@see IncomingFile}). A JPEG, PNG, WebP or GIF image
-     * gets a thumbnail, when one can be made ({@see Thumbnails}); the file is kept without one when it cannot.
+     * gets a thumbnail, when one can be made ({@see Thumbnails}); the file is kept without one when it cannot, unless it is for
+     * a photo field, which refuses an image that cannot be read.
      *
      * @param  User  $uploader  The person who uploads it.
+     * @param  string|null  $field  The ULID (in any case) of the file or photo field of the inventory the file fills, or null for a plain attachment.
      *
      * @throws AttachmentLimitReachedException When the item already holds as many files as allowed.
+     * @throws FieldFileLimitReachedException When the field already holds as many files as its `max_files`.
      * @throws StorageLimitReachedException When the file would take the workspace beyond its storage.
+     * @throws ValidationException When the field is not a file or photo field of the inventory, or the file is not what a photo field takes.
      * @throws ModelNotFoundException When the workspace, the inventory or the item was deleted in the meantime.
      */
-    public function upload(Inventory $inventory, Item $item, UploadedFile $file, User $uploader): Attachment
+    public function upload(Inventory $inventory, Item $item, UploadedFile $file, User $uploader, ?string $field = null): Attachment
     {
         $incoming = IncomingFile::from($file);
+        $fieldUlid = $field === null ? null : strtolower($field);
+        // Looked at before the transaction to know what to check the file against; judged again under the locks.
+        $imagesOnly = $fieldUlid !== null && $this->fieldOf($inventory, $fieldUlid)->imagesOnly;
         $disk = $this->storage->diskName();
         $attachment = new Attachment;
         $attachment->ulid = strtolower((string) Str::ulid());
         $attachment->path = AttachmentStorage::itemDirectory($this->workspaceUlid($inventory), $inventory->ulid, $item->ulid).'/'.$attachment->ulid;
 
         $image = $incoming->isImage() ? $this->thumbnails->inspect($incoming->path, $incoming->mime) : null;
-        $thumbnail = $image === null ? null : $this->thumbnailOf($incoming, $image);
+        $thumbnail = $this->thumbnailOf($incoming, $image, $imagesOnly);
         $written = [];
 
         try {
@@ -101,7 +119,7 @@ final class Attachments
             $attachment->width = $image?->displayWidth();
             $attachment->height = $image?->displayHeight();
 
-            return DeadlockRetries::run(fn (): Attachment => $this->db->transaction(fn (): Attachment => $this->record($inventory, $item, $uploader, $attachment)));
+            return DeadlockRetries::run(fn (): Attachment => $this->db->transaction(fn (): Attachment => $this->record($inventory, $item, $uploader, $attachment, $fieldUlid)));
         } catch (Throwable $failure) {
             $this->storage->forgetNow($disk, $written);
 
@@ -128,9 +146,17 @@ final class Attachments
             $current = Attachment::query()->whereKey($attachment->getKey())->where('item_id', $lockedItem->getKey())->first()
                 ?? throw (new ModelNotFoundException)->setModel(Attachment::class, [$attachment->getKey()]);
 
+            $fieldUlid = $current->field_id === null ? null : InventoryField::query()->whereKey($current->field_id)->value('ulid');
+            $fieldUlid = is_string($fieldUlid) ? $fieldUlid : null;
+
             $this->usage->move($workspace, -$current->size);
             $current->delete();
-            $this->revisions->attachment($lockedItem, $editor, ItemRevision::ATTACHMENT_REMOVED, $current->ulid, $current->name, null);
+
+            if ($fieldUlid !== null) {
+                $this->takeOutOfValue($lockedItem, $fieldUlid, $current->ulid, $editor);
+            }
+
+            $this->revisions->attachment($lockedItem, $editor, ItemRevision::ATTACHMENT_REMOVED, $current->ulid, $current->name, $fieldUlid);
             $this->storage->purgeAfterCommit($current->disk, array_values(array_filter([$current->path, $current->thumbnail_path])));
         }));
     }
@@ -138,15 +164,33 @@ final class Attachments
     /**
      * Writes the row of a file whose bytes are on the disk already, in the transaction that judges the limits.
      *
+     * @param  string|null  $fieldUlid  The field the file fills, in lowercase.
+     *
      * @throws AttachmentLimitReachedException
+     * @throws FieldFileLimitReachedException
      * @throws StorageLimitReachedException
+     * @throws ValidationException
      */
-    private function record(Inventory $inventory, Item $item, User $uploader, Attachment $attachment): Attachment
+    private function record(Inventory $inventory, Item $item, User $uploader, Attachment $attachment, ?string $fieldUlid): Attachment
     {
         $this->locks->author($uploader);
         $workspace = $this->usage->lock($inventory->workspace_id);
         $locked = $this->locks->inventory($inventory->getKey());
         $lockedItem = $this->locks->itemOf($locked, $item);
+
+        // Read last, once every lock is taken: the first plain read of the transaction opens its snapshot.
+        $field = null;
+        $files = [];
+
+        if ($fieldUlid !== null) {
+            $field = $this->fieldOf($locked, $fieldUlid);
+            $files = $lockedItem->values[$fieldUlid] ?? [];
+            $files = is_array($files) ? array_values($files) : [];
+
+            if (count($files) >= $field->maxFiles) {
+                throw new FieldFileLimitReachedException($field->maxFiles);
+            }
+        }
 
         $perItem = config()->integer('inventories.max_attachments_per_item');
 
@@ -163,24 +207,103 @@ final class Attachments
         // A fresh instance each time the transaction is tried: the one that was prepared may have been saved by a try that was rolled back.
         $row = new Attachment;
         $row->forceFill($attachment->getAttributes());
+        $row->inventory_id = $locked->getKey();
         $row->item_id = $lockedItem->getKey();
+        $row->field_id = $field?->field->getKey();
         $row->uploaded_by = $uploader->getKey();
         $row->save();
 
         $this->usage->move($workspace, $row->size);
-        $this->revisions->attachment($lockedItem, $uploader, ItemRevision::ATTACHMENT_ADDED, $row->ulid, $row->name, null);
+
+        if ($field !== null) {
+            $values = $lockedItem->values;
+            $values[$field->field->ulid] = [...$files, $row->ulid];
+            $lockedItem->values = $values;
+            $lockedItem->updated_by = $uploader->getKey();
+            $lockedItem->save();
+        }
+
+        $this->revisions->attachment($lockedItem, $uploader, ItemRevision::ATTACHMENT_ADDED, $row->ulid, $row->name, $field?->field->ulid);
 
         return $row;
     }
 
     /**
-     * The thumbnail of an image, or null when none is made (the image is too large to decode, or cannot be decoded).
+     * Takes the ULID of a file out of the value of its field in the item, in the transaction that removes the file. The key
+     * goes when the list is empty (nothing empty is stored).
      */
-    private function thumbnailOf(IncomingFile $file, ImageInfo $image): ?Thumbnail
+    private function takeOutOfValue(Item $item, string $fieldUlid, string $attachment, User $editor): void
     {
+        $values = $item->values;
+        $files = $values[$fieldUlid] ?? [];
+        $kept = is_array($files) ? array_values(array_filter($files, fn (mixed $ulid): bool => $ulid !== $attachment)) : [];
+
+        if ($kept === $files) {
+            return;
+        }
+
+        if ($kept === []) {
+            unset($values[$fieldUlid]);
+        } else {
+            $values[$fieldUlid] = $kept;
+        }
+
+        $item->values = $values;
+        $item->updated_by = $editor->getKey();
+        $item->save();
+    }
+
+    /**
+     * The field of an inventory that a file is for, and what it takes.
+     *
+     * @param  string  $ulid  In lowercase.
+     *
+     * @throws ValidationException When the inventory has no such field, or it is not a file or photo field.
+     */
+    private function fieldOf(Inventory $inventory, string $ulid): TargetField
+    {
+        $field = $inventory->fields()->get()->first(fn (InventoryField $candidate): bool => $candidate->ulid === $ulid);
+
+        if ($field === null) {
+            throw ValidationException::withMessages(['field' => [__('This field does not exist in this inventory.')]]);
+        }
+
+        $type = $this->types->of($field);
+
+        if (! $type instanceof UploadedFilesType) {
+            throw ValidationException::withMessages(['field' => [__('This field does not take files.')]]);
+        }
+
+        return new TargetField($field, $type->maxFiles($field), $type->imagesOnly());
+    }
+
+    /**
+     * The thumbnail of an image, or null when none is made.
+     *
+     * For a photo field (`$strict`) the file must be an image that can be read: anything else is refused. Anywhere else an
+     * image that cannot be decoded, or is too large to be, is kept without a thumbnail.
+     *
+     * @param  ImageInfo|null  $image  What the header says, null when the file is not an image of a supported type or its header is unreadable.
+     *
+     * @throws ValidationException When `$strict` and the file is not a readable image.
+     */
+    private function thumbnailOf(IncomingFile $file, ?ImageInfo $image, bool $strict): ?Thumbnail
+    {
+        if ($image === null) {
+            if ($strict) {
+                throw ValidationException::withMessages(['file' => [$file->isImage() ? __('This image could not be read.') : __('This field only takes images: JPEG, PNG, WebP or GIF.')]]);
+            }
+
+            return null;
+        }
+
         try {
             return $this->thumbnails->make($file->path, $file->mime, $image);
         } catch (UnreadableImageException) {
+            if ($strict) {
+                throw ValidationException::withMessages(['file' => [__('This image could not be read.')]]);
+            }
+
             return null;
         }
     }

@@ -80,6 +80,7 @@ final class SaveFieldRequest extends FormRequest
     {
         return [
             'options.max_length' => __('maximum length'),
+            'options.max_files' => __('maximum number of files'),
             'options.decimals' => __('number of decimals'),
             'options.min' => __('minimum'),
             'options.max' => __('maximum'),
