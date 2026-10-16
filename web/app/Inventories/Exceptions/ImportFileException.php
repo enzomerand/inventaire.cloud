@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Inventories\Exceptions;
 
+use App\Inventories\Imports\ImportRows;
+use Illuminate\Support\Number;
 use RuntimeException;
 use Throwable;
 
 /**
  * A file that cannot be imported, whatever the rows say: not a format the import reads, damaged, empty, unpacking to more than
- * the import allows, or using more columns than it takes. The API answers 422 on `file` with the `reason` as `code`.
+ * the import allows, using more columns than it takes, or more lines than a spreadsheet holds. The API answers 422 on `file` with the `reason` as `code`.
  */
 final class ImportFileException extends RuntimeException
 {
@@ -28,6 +30,9 @@ final class ImportFileException extends RuntimeException
     /** A row uses more columns than the import takes. */
     public const TOO_MANY_COLUMNS = 'too_many_columns';
 
+    /** The file has more lines than a spreadsheet holds, the empty ones counted. */
+    public const TOO_MANY_LINES = 'too_many_lines';
+
     /**
      * Remembers why, and says it to a person.
      */
@@ -38,6 +43,7 @@ final class ImportFileException extends RuntimeException
             self::EMPTY => __('This file holds no row.'),
             self::UNPACKED_TOO_LARGE => __('This spreadsheet is too large once unpacked.'),
             self::TOO_MANY_COLUMNS => trans_choice('This file uses more than :count column.|This file uses more than :count columns.', config()->integer('inventories.import_max_columns')),
+            self::TOO_MANY_LINES => __('This file has more than :count lines, the empty ones included. Delete the empty lines at the end of the file.', ['count' => Number::format(ImportRows::MAX_LINES, locale: app()->getLocale())]),
             default => __('This file could not be read. It may be damaged or protected by a password.'),
         }, 0, $previous);
     }

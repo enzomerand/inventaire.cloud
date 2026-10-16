@@ -11,6 +11,7 @@ use DateInterval;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Generator;
+use Illuminate\Support\Facades\Log;
 use OpenSpout\Common\Entity\Cell;
 use OpenSpout\Common\Entity\Cell\EmptyCell;
 use OpenSpout\Common\Entity\Cell\FormulaCell;
@@ -32,8 +33,11 @@ use Throwable;
  * The sheet read is the one that was active when the spreadsheet was saved, else the first visible one; a CSV has one. A row is a
  * list of {@see ImportCell}, the empty ones at its end cut off, and is given with its number in the file, counted from 1 with the
  * empty rows counted too: the number an error is reported with is the one the person sees in their spreadsheet. A row with nothing in
- * it is not given, and a run of more than {@see self::MAX_EMPTY_RUN} of them ends the file (a spreadsheet often ends with a million
- * rows that were formatted and hold nothing).
+ * it is not given. A spreadsheet often ends with a million rows that were formatted and hold nothing (OpenDocument writes them as one
+ * row that is repeated), and they are read to the end all the same, as it takes a fraction of a second: a rule that stopped reading after
+ * some empty rows would drop, without a word, the rows that came after a long gap. What bounds the reading is the number of lines of
+ * the file, empty ones included ({@see self::MAX_LINES}, a little more than a spreadsheet application holds), and a file that goes past
+ * it is refused.
  *
  * A formula is read as its calculated value, or as the text of the formula when the file holds none. In a CSV, the apostrophe that the
  * export puts in front of a text a spreadsheet would run as a formula (it starts with `=`, `+`, `-`, `@`, a tab or a return) is taken
@@ -46,8 +50,8 @@ final class ImportRows
     /** The characters that, after an apostrophe, mean the apostrophe was put there by an export. */
     private const FORMULA_STARTS = ['=', '+', '-', '@', "\t", "\r"];
 
-    /** Empty rows in a row after which the rest of the file is not looked at: no data is that far from the data before it. */
-    public const MAX_EMPTY_RUN = 100000;
+    /** Most lines a file may have, the empty ones counted: a little more than the rows of a spreadsheet application (1 048 576). */
+    public const MAX_LINES = 1100000;
 
     private bool $closed = false;
 
@@ -91,7 +95,7 @@ final class ImportRows
      *
      * @return Generator<int, list<ImportCell>>
      *
-     * @throws ImportFileException When the file cannot be read, or a row uses too many columns.
+     * @throws ImportFileException When the file cannot be read, has more lines than {@see self::MAX_LINES}, or a row uses too many columns.
      */
     public function rows(): Generator
     {
@@ -106,29 +110,21 @@ final class ImportRows
             $reader->open($this->path);
             $sheet = $this->sheet($reader);
             $number = 0;
-            $gap = 0;
 
             foreach ($sheet->getRowIterator() as $row) {
-                $number++;
+                if (++$number > self::MAX_LINES) {
+                    throw new ImportFileException(ImportFileException::TOO_MANY_LINES);
+                }
+
                 $cells = $this->cells($row->cells);
 
                 if (count($cells) > $columns) {
                     throw new ImportFileException(ImportFileException::TOO_MANY_COLUMNS);
                 }
 
-                if ($cells === []) {
-                    // A spreadsheet often ends with a million empty rows that were formatted (OpenDocument writes them as one repeated row):
-                    // after a very long run of them, the data is taken to be over.
-                    if (++$gap > self::MAX_EMPTY_RUN) {
-                        return;
-                    }
-
-                    continue;
+                if ($cells !== []) {
+                    yield $number => $cells;
                 }
-
-                $gap = 0;
-
-                yield $number => $cells;
             }
         } catch (ImportFileException $failure) {
             throw $failure;
@@ -137,8 +133,9 @@ final class ImportRows
         } finally {
             try {
                 $reader->close();
-            } catch (Throwable) {
-                // Nothing more can be done for a file that is being given up on.
+            } catch (Throwable $failure) {
+                // Nothing more can be done for a file that is being given up on, but a reader that cannot be closed is worth knowing.
+                Log::warning('The reader of an import file could not be closed.', ['format' => $this->format->value, 'exception' => $failure]);
             }
         }
     }

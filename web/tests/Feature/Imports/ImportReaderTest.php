@@ -6,6 +6,7 @@ use App\Inventories\Exceptions\ImportFileException;
 use App\Inventories\Imports\ImportCsv;
 use App\Inventories\Imports\ImportFormat;
 use App\Inventories\Imports\ImportRows;
+use App\Inventories\Imports\ImportWidthGuard;
 use OpenSpout\Common\Entity\Cell\FormulaCell;
 
 require_once __DIR__.'/../../Support/imports.php';
@@ -119,12 +120,72 @@ describe('a CSV', function (): void {
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS)->and($failure->getMessage())->toBe('This file uses more than 3 columns.'));
     });
 
-    it('stops at a very long run of empty rows, which is how a spreadsheet ends, and reads on after a shorter one', function (): void {
-        $short = importFile("Name\r\nDrill\r\n".str_repeat("\r\n", ImportRows::MAX_EMPTY_RUN)."Saw\r\n");
-        $long = importFile("Name\r\nDrill\r\n".str_repeat("\r\n", ImportRows::MAX_EMPTY_RUN + 1)."Saw\r\n");
+    it('reads on after a very long run of empty lines, and drops no row', function (): void {
+        $long = importFile("Name\r\nDrill\r\n".str_repeat("\r\n", 150000)."Saw\r\n");
 
-        expect(importRead($short, ImportFormat::Csv)['rows'])->toBe([1 => ['Name'], 2 => ['Drill'], ImportRows::MAX_EMPTY_RUN + 3 => ['Saw']])
-            ->and(importRead($long, ImportFormat::Csv)['rows'])->toBe([1 => ['Name'], 2 => ['Drill']]);
+        expect(importRead($long, ImportFormat::Csv)['rows'])->toBe([1 => ['Name'], 2 => ['Drill'], 150003 => ['Saw']]);
+    });
+
+    it('is refused when it has more lines than a spreadsheet holds, the empty ones counted', function (): void {
+        $path = importFile(str_repeat("\n", ImportRows::MAX_LINES)."Late\n");
+
+        expect(fn () => importRead($path, ImportFormat::Csv))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_LINES)
+                ->and($failure->getMessage())->toBe('This file has more than 1,100,000 lines, the empty ones included. Delete the empty lines at the end of the file.'));
+    });
+
+    it('is refused when a record has more fields than a spreadsheet has columns, before the record is built', function (string $text): void {
+        expect(fn () => importRead(importFile($text), ImportFormat::Csv))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        'separators' => ['a'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
+        'a quote that does not open a field does not hide the separators' => ['a"b'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
+        'a field closed by its quote, and the separators after it' => ['"a"'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
+        'a doubled quote inside quotes does not close the field' => ['"a""b",'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
+        'after lines that are not wide' => ["a,b\nc,d\n".str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)],
+        'spaces before the quote' => ['  "a"'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)],
+    ]);
+
+    it('lets through a record that holds its separators in quotes, and rows that end with a few empty fields', function (): void {
+        $commas = str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS + 10);
+        $path = importFile("Name,Notes\r\n\"{$commas}\",x\r\n\"a\"\"{$commas}\",y\r\nz,w".str_repeat(',', 300)."\r\n");
+
+        $rows = importRead($path, ImportFormat::Csv)['rows'];
+
+        expect($rows[2])->toBe([$commas, 'x'])
+            ->and($rows[3])->toBe(['a"'.$commas, 'y'])
+            ->and($rows[4])->toBe(['z', 'w']);
+    });
+
+    it('counts the separators the same way wherever the megabyte that is read at a time ends', function (): void {
+        $wide = str_repeat(',', 20000);
+
+        // A doubled quote is a quote in the text and the field goes on; a lone one closes it and the separators after it separate.
+        foreach ([1048573, 1048574, 1048575] as $padding) {
+            $inside = importFile('"'.str_repeat('x', $padding).'""'.$wide."\"\n");
+            $outside = importFile('"'.str_repeat('x', $padding).'"'.$wide."\n");
+
+            expect(fn () => ImportWidthGuard::csv($inside, ','))->not->toThrow(ImportFileException::class)
+                ->and(fn () => ImportWidthGuard::csv($outside, ','))
+                ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+        }
+    });
+
+    it('counts the fields of a record with the separator it is given, and judges the width against the limit of the application', function (): void {
+        $line = fn (int $fields, string $separator): string => implode($separator, array_fill(0, $fields, 'x'))."\n";
+
+        foreach ([',', ';', "\t"] as $separator) {
+            expect(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::SPREADSHEET_COLUMNS, $separator)), $separator))->not->toThrow(ImportFileException::class)
+                ->and(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::SPREADSHEET_COLUMNS + 1, $separator)), $separator))->toThrow(ImportFileException::class)
+                // The other characters are text.
+                ->and(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::SPREADSHEET_COLUMNS + 1, $separator === ',' ? ';' : ',')), $separator))->not->toThrow(ImportFileException::class);
+        }
+
+        // A larger limit of the import widens the one of the guard.
+        config(['inventories.import_max_columns' => 20000]);
+
+        expect(fn () => ImportWidthGuard::csv(importFile($line(20000, ',')), ','))->not->toThrow(ImportFileException::class)
+            ->and(fn () => ImportWidthGuard::csv(importFile($line(20001, ',')), ','))->toThrow(ImportFileException::class);
     });
 
     it('takes a file of empty lines for a file with no row', function (): void {
@@ -230,6 +291,29 @@ describe('a spreadsheet', function (): void {
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNPACKED_TOO_LARGE));
     })->with(['xlsx', 'ods']);
 
+    it('counts the bytes that really come out of the archive, not the sizes the archive announces (a forged zip bomb)', function (string $format): void {
+        config(['inventories.import_max_unpacked_size' => 100000]);
+        // The archive says the part weighs a hundred bytes; it weighs two hundred thousand.
+        $path = importForgedArchive($format, 100, 200000);
+        $zip = new ZipArchive;
+        $zip->open($path, ZipArchive::RDONLY);
+
+        expect($zip->statIndex(0)['size'])->toBe(100)
+            ->and(filesize($path))->toBeLessThan(2000)
+            ->and(fn () => importRead($path, ImportFormat::from($format)))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNPACKED_TOO_LARGE));
+    })->with(['xlsx', 'ods']);
+
+    it('lets through an archive that unpacks to what it announces, up to the limit', function (): void {
+        $path = importSpreadsheet('xlsx', [['Name'], ['Drill']]);
+        $zip = new ZipArchive;
+        $zip->open($path, ZipArchive::RDONLY);
+        $unpacked = array_sum(array_map(fn (int $index): int => $zip->statIndex($index)['size'], range(0, $zip->numFiles - 1)));
+        config(['inventories.import_max_unpacked_size' => $unpacked]);
+
+        expect(importRead($path, ImportFormat::Xlsx)['rows'])->toBe([1 => ['Name'], 2 => ['Drill']]);
+    });
+
     it('is refused when it holds more parts than a spreadsheet does', function (): void {
         $path = importFile('', 'xlsx');
         $zip = new ZipArchive;
@@ -251,6 +335,76 @@ describe('a spreadsheet', function (): void {
 
         expect(fn () => importRead(importSpreadsheet('xlsx', [['a', 'b', 'c', 'd']]), ImportFormat::Xlsx))
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    });
+});
+
+describe('a worksheet of a workbook that announces a width no sheet has', function (): void {
+    it('is refused before the sheet is filled to that width', function (string $from, string $to): void {
+        $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace($from, $to, $xml));
+
+        expect(fn () => importRead($path, ImportFormat::Xlsx))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        'a dimension' => ['<dimension ref="A1:B1"/>', '<dimension ref="A1:ZZZZZZ1"/>'],
+        'a dimension past the last column' => ['<dimension ref="A1:B1"/>', '<dimension ref="A1:XFE1"/>'],
+        'the spans of a row' => ['spans="1:2"', 'spans="1:50000000"'],
+        'a cell far to the right' => ['<c r="B1"', '<c r="ZZZZZZ1"'],
+        'a cell past the last column' => ['<c r="B1"', '<c r="XFE1"'],
+    ]);
+
+    it('is read when it is as wide as a sheet can be', function (): void {
+        config(['inventories.import_max_columns' => 20000]);
+        $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace(['<dimension ref="A1:B1"/>', 'spans="1:2"', '<c r="B1"'], ['<dimension ref="A1:XFD1"/>', 'spans="1:16384"', '<c r="XFD1"'], $xml));
+
+        $row = importRead($path, ImportFormat::Xlsx)['rows'][1];
+
+        expect($row[0])->toBe('a')
+            ->and($row[16383])->toBe('b');
+    });
+});
+
+describe('an OpenDocument sheet whose cells are repeated', function (): void {
+    it('is refused when a row would be built wider than a sheet can be', function (string $cells): void {
+        $path = importPatch(importSpreadsheet('ods', [['a'], ['b']]), 'content.xml', fn (string $xml): string => preg_replace('~</table:table-row>~', $cells.'</table:table-row>', $xml, 1) ?? $xml);
+
+        expect(fn () => importRead($path, ImportFormat::Ods))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        'a cell with a value, repeated fifty million times' => ['<table:table-cell office:value-type="string" table:number-columns-repeated="50000000"><text:p>x</text:p></table:table-cell>'],
+        'an empty cell that is not the last one of the row' => ['<table:table-cell table:number-columns-repeated="50000000"/><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell>'],
+        'an empty cell at the end of a row that holds something' => ['<table:table-cell table:number-columns-repeated="50000000"/>'],
+        'cells repeated a few times each' => [str_repeat('<table:table-cell office:value-type="string" table:number-columns-repeated="1000"><text:p>x</text:p></table:table-cell>', 20)],
+    ]);
+
+    it('is read when a spreadsheet application pads its rows, as it does', function (int $padding, int $columns): void {
+        // `a` is the first cell; the padding is a cell repeated up to the width of the sheet, as LibreOffice (1 024 columns, or 16 384 in
+        // recent versions) and Excel write it.
+        $path = importPatch(importSpreadsheet('ods', [['a', 'b'], ['c', 'd']]), 'content.xml', fn (string $xml): string => str_replace('</table:table-row>', '<table:table-cell table:number-columns-repeated="'.$padding.'"/></table:table-row>', $xml));
+
+        expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['a', 'b'], 2 => ['c', 'd']]);
+    })->with([
+        'a sheet of 1 024 columns' => [1022, 1024],
+        'a sheet of 16 384 columns' => [16382, 16384],
+        'a little less' => [16000, 16002],
+    ]);
+
+    it('gives a row with nothing in it one empty cell, however many it repeats', function (): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['a'], ['b']]), 1, '<table:table-row table:number-rows-repeated="3"><table:table-cell table:number-columns-repeated="50000000"/></table:table-row>');
+
+        expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['a'], 5 => ['b']]);
+    });
+
+    it('is read to its end when it ends with a million rows that hold nothing, and the rows after them are not lost', function (): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['Name'], ['Drill'], ['Saw']]), 2, '<table:table-row table:number-rows-repeated="1048000"><table:table-cell table:number-columns-repeated="16384"/></table:table-row>');
+
+        expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['Name'], 2 => ['Drill'], 1048003 => ['Saw']]);
+    });
+
+    it('is refused when it has more lines than a spreadsheet holds, the empty ones counted', function (): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['Name'], ['Drill']]), 2, '<table:table-row table:number-rows-repeated="'.ImportRows::MAX_LINES.'"><table:table-cell/></table:table-row>');
+
+        expect(fn () => importRead($path, ImportFormat::Ods))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_LINES));
     });
 });
 

@@ -114,6 +114,67 @@ function importCell(mixed $value): Cell
 }
 
 /**
+ * Rewrites a part of a spreadsheet (a zip archive) in place with a function of its text: the way to give a file what the library that
+ * writes spreadsheets never writes (a cell repeated fifty million times, a sheet that announces thousands of columns...).
+ *
+ * @param  callable(string): string  $change
+ */
+function importPatch(string $path, string $part, callable $change): string
+{
+    $zip = new ZipArchive;
+    $zip->open($path);
+    $zip->addFromString($part, $change((string) $zip->getFromName($part)));
+    $zip->close();
+
+    return $path;
+}
+
+/**
+ * Puts some XML of an OpenDocument sheet after the n-th row of the first sheet (the first row is 1).
+ */
+function importOdsAfterRow(string $path, int $row, string $xml): string
+{
+    return importPatch($path, 'content.xml', function (string $content) use ($row, $xml): string {
+        $seen = 0;
+
+        return (string) preg_replace_callback('~</table:table-row>~', function (array $found) use (&$seen, $row, $xml): string {
+            return ++$seen === $row ? $found[0].$xml : $found[0];
+        }, $content);
+    });
+}
+
+/**
+ * A spreadsheet archive that says its one part weighs `$announced` bytes and unpacks to `$real`: the sizes are rewritten in the headers
+ * of the archive, where whoever makes the file can put anything.
+ *
+ * @param  'xlsx'|'ods'  $format
+ */
+function importForgedArchive(string $format, int $announced, int $real): string
+{
+    $path = importFile('', $format);
+    $zip = new ZipArchive;
+    $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+    $zip->addFromString($format === 'xlsx' ? 'xl/workbook.xml' : 'content.xml', str_repeat('a', $real));
+    $zip->close();
+
+    $bytes = (string) file_get_contents($path);
+
+    // The central directory (`PK\1\2`) keeps the size at 24 bytes into its entry, the header of the part (`PK\3\4`) at 22.
+    foreach (["PK\x01\x02" => 24, "PK\x03\x04" => 22] as $signature => $offset) {
+        $position = 0;
+
+        while (($position = strpos($bytes, $signature, $position)) !== false) {
+            $bytes = substr_replace($bytes, pack('V', $announced), $position + $offset, 4);
+            $position += 4;
+        }
+    }
+
+    file_put_contents($path, $bytes);
+
+    return $path;
+}
+
+/**
  * What a file holds as the import reads it: the raw value of each cell of each row, by row number.
  *
  * @return array{rows: array<int, list<mixed>>, delimiter: string|null, encoding: string|null}
