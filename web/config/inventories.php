@@ -26,4 +26,16 @@ return [
 
     'max_items' => (int) env('INVENTORIES_MAX_ITEMS', 10000),
 
+    /*
+    |--------------------------------------------------------------------------
+    | History of the items
+    |--------------------------------------------------------------------------
+    |
+    | Every change to an item writes a revision (who, when, which values before
+    | and after). An item keeps this many; the oldest ones are deleted when a
+    | newer one is written.
+    |
+    */
+    'max_revisions_per_item' => (int) env('INVENTORIES_MAX_REVISIONS_PER_ITEM', 100),
+
 ];

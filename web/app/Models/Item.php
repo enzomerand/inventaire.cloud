@@ -13,6 +13,7 @@ use Database\Factories\ItemFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -70,5 +71,16 @@ final class Item extends Model
     public function inventory(): BelongsTo
     {
         return $this->belongsTo(Inventory::class);
+    }
+
+    /**
+     * The history of the item. Unordered: the caller reads the latest changes first. It goes with the item (the foreign
+     * key cascades).
+     *
+     * @return HasMany<ItemRevision, $this>
+     */
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(ItemRevision::class);
     }
 }

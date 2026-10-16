@@ -30,7 +30,9 @@ use Illuminate\Validation\ValidationException;
  *   is left behind that points to a field that is gone;
  * - an update merges into what the item holds now (the copy the request read may be older), one update after the other;
  * - the text the item is searched by ({@see ItemSearchText}) is built from the values and the fields read under that
- *   same lock, and written with them.
+ *   same lock, and written with them;
+ * - the history of the item ({@see ItemRevisions}) gets its line in the same transaction, from the values as they were and
+ *   as they become, so that a change that is rolled back leaves no trace and a change that happens always leaves one.
  *
  * The account of the person who writes is locked first (see {@see self::lockAuthor()}). Each write is one transaction,
  * retried when the database picks it as the loser of a deadlock.
@@ -56,6 +58,7 @@ final class Items
         private readonly Locks $locks,
         private readonly ItemValues $values,
         private readonly ItemSearchText $searchText,
+        private readonly ItemRevisions $revisions,
     ) {}
 
     /**
@@ -90,6 +93,7 @@ final class Items
             $item->updated_by = $author->getKey();
             $item->save();
             $this->moveCount($locked, $inventory, 1);
+            $this->revisions->created($item, $author, $stored);
 
             return $item;
         }));
@@ -117,10 +121,12 @@ final class Items
             $merged = $this->values->apply($fields, $values, $current->values, false);
 
             if (! $this->same($merged, $current->values)) {
+                $before = $current->values;
                 $current->values = $merged;
                 $current->search_text = $this->searchText->build($fields, $merged);
                 $current->updated_by = $editor->getKey();
                 $current->save();
+                $this->revisions->updated($current, $editor, $before, $merged);
             }
 
             return $current;

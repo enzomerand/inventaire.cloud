@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\FieldTypeController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryFieldController;
 use App\Http\Controllers\Api\V1\ItemController;
+use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
@@ -74,6 +75,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::get('/inventories/{inventory}/items/{item}', [ItemController::class, 'show'])->name('inventories.items.show');
             Route::patch('/inventories/{inventory}/items/{item}', [ItemController::class, 'update'])->name('inventories.items.update');
             Route::delete('/inventories/{inventory}/items/{item}', [ItemController::class, 'destroy'])->name('inventories.items.destroy');
+            Route::get('/inventories/{inventory}/items/{item}/revisions', [ItemRevisionController::class, 'index'])->name('inventories.items.revisions.index');
         });
 
         // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a
