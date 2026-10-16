@@ -62,9 +62,11 @@ final class ApiError
 
     /**
      * A 422 about one field, with a machine-readable reason (the shape the framework gives validation failures, plus `code`).
+     *
+     * @param  array<string, mixed>  $extra  More machine-readable facts, such as the limit that was crossed.
      */
-    public static function invalid(string $message, string $field, string $code): JsonResponse
+    public static function invalid(string $message, string $field, string $code, array $extra = []): JsonResponse
     {
-        return new JsonResponse(['message' => $message, 'errors' => [$field => [$message]], 'code' => $code], 422);
+        return new JsonResponse(['message' => $message, 'errors' => [$field => [$message]], 'code' => $code] + $extra, 422);
     }
 }

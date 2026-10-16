@@ -939,5 +939,10 @@
     "Page :page / :pages": "Page :page / :pages",
     ":count item|:count items": ":count article|:count articles",
     ":count photo|:count photos": ":count photo|:count photos",
-    ":count file|:count files": ":count fichier|:count fichiers"
+    ":count file|:count files": ":count fichier|:count fichiers",
+    "You can have :count export at a time: delete one, or wait for one to expire.|You can have :count exports at a time: delete one, or wait for one to expire.": "Vous pouvez avoir :count export à la fois : supprimez-en un, ou attendez qu'un export expire.|Vous pouvez avoir :count exports à la fois : supprimez-en un, ou attendez qu'un export expire.",
+    "A PDF of this inventory cannot hold more than :count item: choose another format, or a view with fewer items.|A PDF of this inventory cannot hold more than :count items: choose another format, or a view with fewer items.": "Un PDF de cet inventaire ne peut pas contenir plus de :count article : choisissez un autre format, ou une vue avec moins d'articles.|Un PDF de cet inventaire ne peut pas contenir plus de :count articles : choisissez un autre format, ou une vue avec moins d'articles.",
+    "None of these items has a file to put in the zip.": "Aucun de ces articles n'a de fichier à mettre dans le zip.",
+    "This export is not ready yet.": "Cet export n'est pas encore prêt.",
+    "This export has expired.": "Cet export a expiré."
 }

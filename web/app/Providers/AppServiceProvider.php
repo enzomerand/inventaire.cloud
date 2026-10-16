@@ -68,7 +68,7 @@ class AppServiceProvider extends ServiceProvider
      * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the two
      * of the catalogue of templates, keyed on the user when there is one, else on the network: the one of its API endpoints
      * (`templates_per_minute`) and the one of its public pages and the sitemap (`public_pages_per_minute`), which do not
-     * share a count.
+     * share a count. And the one of the endpoint that asks for an export (`exports_per_minute`), keyed on the user.
      */
     private function registerInventoryLimiters(): void
     {
@@ -85,6 +85,10 @@ class AppServiceProvider extends ServiceProvider
         // limit is higher, and their count is not the one of the API (a crawler must not use up what a client of the API has).
         RateLimiter::for('public-pages', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.public_pages_per_minute'))
             ->by('public-pages:'.$this->signedInKey($request)));
+
+        // Asking for an export queues a job that reads a whole inventory (`exports_per_minute`), keyed on the user.
+        RateLimiter::for('exports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.exports_per_minute'))
+            ->by('exports:'.$this->signedInKey($request)));
     }
 
     /**

@@ -33,8 +33,8 @@ final class ListItemsRequest extends FormRequest
 
     /**
      * The page asked for, the search (`q`, at most 200 characters; white space only is no search), what to sort by (`sort`
-     * and `direction`), the conditions on the fields (`filter`, an object of objects) and the fields to add up (`totals`, a
-     * list of at most as many ids as an inventory has fields).
+     * and `direction`), the conditions on the fields (`filter`, an object of objects: see {@see self::viewRules()}) and the fields
+     * to add up (`totals`, a list of at most as many ids as an inventory has fields).
      *
      * @return array<string, list<mixed>>
      */
@@ -42,12 +42,27 @@ final class ListItemsRequest extends FormRequest
     {
         return [
             'page' => ['nullable', 'integer', 'min:1', 'max:1000000'],
-            'q' => ['nullable', 'string', 'max:'.self::SEARCH_MAX_LENGTH],
-            'sort' => ['nullable', 'string', 'max:'.self::SORT_MAX_LENGTH],
-            'direction' => ['nullable', 'string', 'max:'.self::SORT_MAX_LENGTH],
-            'filter' => ['nullable', 'array'],
+            ...self::viewRules(),
             'totals' => ['nullable', 'array', 'max:'.config()->integer('inventories.max_fields')],
             'totals.*' => ['string', 'max:'.self::SORT_MAX_LENGTH],
+        ];
+    }
+
+    /**
+     * The rules of what makes a view of the items: the search (`q`), what to sort by (`sort` and `direction`) and the conditions
+     * on the fields (`filter`). The page and the totals are not part of a view. An export of the current view takes the same rules,
+     * under the `query` of its request.
+     *
+     * @param  string  $prefix  What the names are under, with its dot (`query.`), or nothing.
+     * @return array<string, list<mixed>>
+     */
+    public static function viewRules(string $prefix = ''): array
+    {
+        return [
+            $prefix.'q' => ['nullable', 'string', 'max:'.self::SEARCH_MAX_LENGTH],
+            $prefix.'sort' => ['nullable', 'string', 'max:'.self::SORT_MAX_LENGTH],
+            $prefix.'direction' => ['nullable', 'string', 'max:'.self::SORT_MAX_LENGTH],
+            $prefix.'filter' => ['nullable', 'array'],
         ];
     }
 }
