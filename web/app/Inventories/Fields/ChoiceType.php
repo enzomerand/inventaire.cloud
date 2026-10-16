@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
 use App\Inventories\SearchText;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
@@ -36,7 +38,7 @@ abstract class ChoiceType extends AbstractFieldType
     /** The colors a choice may have: names the interface maps to its palette. */
     public const COLORS = ['gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink'];
 
-    /** @var WeakMap<InventoryField, array{options: mixed, labels: array<string, string>, ids: array<string, string>}>|null The lookups of the fields seen by {@see self::choiceIdOf()}. */
+    /** @var WeakMap<InventoryField, array{options: mixed, folded: array<string, string>, labels: array<string, string>, ids: array<string, string>, separators: int}>|null The lookups of the fields seen by {@see self::choiceIdOf()}. */
     private ?WeakMap $lookups = null;
 
     /** The characters of the id of a choice. */
@@ -251,20 +253,76 @@ abstract class ChoiceType extends AbstractFieldType
     }
 
     /**
-     * The id of the choice a text stands for: the choice with that label, whatever the case and the accents, else the choice with that
-     * id. Null when there is none.
+     * The id of the choice a text stands for: the choice with that label as it is written (the case folded, the two ways of writing an
+     * accented letter being one), else the choice with that label whatever the accents, else the choice with that id. Null when there is
+     * none. The accents are looked at last so that two choices that differ by them (`Été` and `Ete`) stay two: each is found by its own label.
      */
     protected function choiceIdOf(string $text, InventoryField $field): ?string
     {
         $lookup = $this->lookup($field);
 
-        return $lookup['labels'][SearchText::normalize($text)] ?? $lookup['ids'][strtolower(trim($text))] ?? null;
+        return $lookup['folded'][SingleLineText::fold($text)] ?? $lookup['labels'][SearchText::normalize($text)] ?? $lookup['ids'][strtolower(trim($text))] ?? null;
     }
 
     /**
-     * The choices of a field by folded label and by id, worked out once for a field as it is: an import looks up thousands of cells.
+     * The ids of the choices a cell lists: the whole cell when it is the label of one choice, else its pieces, cut at the commas,
+     * semicolons and line breaks, each put to a choice. A label may hold a comma (`Big, red`), so the pieces are joined again where they
+     * make the label of a choice: from each piece, the longest run of pieces that is a label wins, and a piece that starts no such run
+     * has to be a choice itself. `Red, dark, Bac` is then `Red, dark` and `Bac` if `Red, dark` is a choice, and `Red` and `Bac` and an
+     * unknown `dark` if it is not.
      *
-     * @return array{options: mixed, labels: array<string, string>, ids: array<string, string>}
+     * @return list<string>
+     *
+     * @throws InvalidImportValue When a piece is no choice.
+     */
+    protected function choiceIdsOf(ImportCell $cell, InventoryField $field): array
+    {
+        $whole = $this->choiceIdOf($cell->line(), $field);
+
+        if ($whole !== null) {
+            return [$whole];
+        }
+
+        $pieces = $cell->pieces();
+        $count = count($pieces);
+        $longest = $this->lookup($field)['separators'];
+        $ids = [];
+
+        for ($start = 0; $start < $count; $start++) {
+            if (SingleLineText::trim($pieces[$start]['text']) === '') {
+                continue;
+            }
+
+            for ($end = min($count - 1, $start + $longest); $end > $start; $end--) {
+                $text = '';
+
+                for ($piece = $start; $piece <= $end; $piece++) {
+                    $text .= $pieces[$piece]['text'].($piece < $end ? $pieces[$piece]['separator'] : '');
+                }
+
+                $id = $this->choiceIdOf(SingleLineText::trim($text), $field);
+
+                if ($id !== null) {
+                    $ids[$id] = $id;
+                    $start = $end;
+
+                    continue 2;
+                }
+            }
+
+            $part = SingleLineText::trim($pieces[$start]['text']);
+            $id = $this->choiceIdOf($part, $field) ?? throw new InvalidImportValue(__('Unknown choice: ":value".', ['value' => $part]));
+            $ids[$id] = $id;
+        }
+
+        return array_values($ids);
+    }
+
+    /**
+     * The choices of a field by folded label, by label whatever the accents and by id, and the most separators a label holds (how many
+     * pieces a label may have been cut into), worked out once for a field as it is: an import looks up thousands of cells.
+     *
+     * @return array{options: mixed, folded: array<string, string>, labels: array<string, string>, ids: array<string, string>, separators: int}
      */
     private function lookup(InventoryField $field): array
     {
@@ -275,14 +333,18 @@ abstract class ChoiceType extends AbstractFieldType
             return $cached;
         }
 
+        $folded = [];
         $labels = [];
         $ids = [];
+        $separators = 0;
 
         foreach (self::choicesOf($field->options) as $choice) {
+            $folded[SingleLineText::fold($choice['label'])] ??= $choice['id'];
             $labels[SearchText::normalize($choice['label'])] ??= $choice['id'];
             $ids[$choice['id']] = $choice['id'];
+            $separators = max($separators, (int) preg_match_all('/[,;]+/u', $choice['label']));
         }
 
-        return $this->lookups[$field] = ['options' => $field->options, 'labels' => $labels, 'ids' => $ids];
+        return $this->lookups[$field] = ['options' => $field->options, 'folded' => $folded, 'labels' => $labels, 'ids' => $ids, 'separators' => $separators];
     }
 }

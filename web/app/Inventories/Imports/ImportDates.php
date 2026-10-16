@@ -19,6 +19,11 @@ use Exception;
  * `.` or `-` between them. Years of two digits are 1970 to 2069. A time may follow, after a space, a `T` or a comma: `HH:MM`, `HH:MM:SS`
  * or `9h30`, and an offset (`Z`, `+02:00`, `+0200`, `+02`) when the moment is a date and time; without one a moment is in the time zone of
  * the application, and a day alone is midnight. A number cell is not a date: the year `2024` would be taken for a day of 1905.
+ *
+ * A moment written without an offset is a wall clock reading, and the clocks of a time zone skip one hour in spring and show another
+ * twice in autumn: a reading in the hour that is skipped (`02:30` the night the clocks of Paris go forward) names no instant and is refused,
+ * and a reading in the hour that is shown twice is the first of the two (the summer time, an hour earlier than the winter one), so that the
+ * same file always gives the same moment.
  */
 final class ImportDates
 {
@@ -64,16 +69,49 @@ final class ImportDates
             $parts = self::parse($cell, $context) ?? throw $failure;
         }
 
+        $wall = sprintf('%04d-%02d-%02d %02d:%02d:%02d', $parts['year'], $parts['month'], $parts['day'], $parts['hour'], $parts['minute'], $parts['second']);
+
         try {
-            $moment = new DateTimeImmutable(
-                sprintf('%04d-%02d-%02d %02d:%02d:%02d', $parts['year'], $parts['month'], $parts['day'], $parts['hour'], $parts['minute'], $parts['second']),
-                new DateTimeZone($parts['offset'] ?? $context->zone),
-            );
+            $zone = new DateTimeZone($parts['offset'] ?? $context->zone);
+            $reading = (new DateTimeImmutable($wall, new DateTimeZone('UTC')))->getTimestamp();
         } catch (Exception) {
             throw $failure;
         }
 
-        return $moment->format('Y-m-d\TH:i:sP');
+        $instant = self::instantOf($reading, $zone);
+
+        if ($instant === null) {
+            throw new InvalidImportValue(__('":value" does not exist: the clocks skip that hour.', ['value' => $cell->excerpt()]));
+        }
+
+        return (new DateTimeImmutable('@'.$instant))->setTimezone($zone)->format('Y-m-d\TH:i:sP');
+    }
+
+    /**
+     * The instant a wall clock reading names in a time zone, as a Unix timestamp: the reading as if it were UTC less an offset of the
+     * zone, the one that was in force at that instant. Around a change of offset two offsets are possible: when both fit the reading is shown
+     * twice and the earlier instant is taken, when neither does the clocks skipped it and there is none (null).
+     *
+     * @param  int  $reading  The reading as a timestamp of the same figures in UTC.
+     */
+    private static function instantOf(int $reading, DateTimeZone $zone): ?int
+    {
+        // The offsets a day either side of the reading: no zone changes twice in two days.
+        $offsets = array_unique([
+            $zone->getOffset(new DateTimeImmutable('@'.($reading - 86400))),
+            $zone->getOffset(new DateTimeImmutable('@'.($reading + 86400))),
+        ]);
+        $instants = [];
+
+        foreach ($offsets as $offset) {
+            $instant = $reading - $offset;
+
+            if ($zone->getOffset(new DateTimeImmutable('@'.$instant)) === $offset) {
+                $instants[] = $instant;
+            }
+        }
+
+        return $instants === [] ? null : min($instants);
     }
 
     /**
@@ -97,10 +135,16 @@ final class ImportDates
         }
 
         if (is_int($value) || is_float($value)) {
-            // A time in a spreadsheet is a fraction of a day.
-            $minutes = $value >= 0 && $value < 1 ? (int) round($value * 1440) : 1440;
+            if ($value < 0 || $value >= 1) {
+                throw $failure;
+            }
 
-            return $minutes >= 1440 ? throw $failure : sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
+            // A time in a spreadsheet is a fraction of a day. The seconds are cut off, as those of a text are, and not rounded up to the next
+            // minute (9:30:50 is 09:30, and 23:59:59 must not become 24:00). A float cannot hold most times exactly (07:05 is 424.99999999999994
+            // minutes): the small number keeps a time that falls just short of its minute in it.
+            $minutes = min(1439, (int) floor($value * 1440 + 1e-7));
+
+            return sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
         }
 
         if (! is_string($value) || preg_match('/^(\d{1,2})\s*[:h]\s*(\d{2})?(?::(\d{2})(?:[.,]\d+)?)?$/iu', self::spaces($value), $found) !== 1) {

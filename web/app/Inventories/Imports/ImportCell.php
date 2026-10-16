@@ -87,6 +87,25 @@ final readonly class ImportCell
     }
 
     /**
+     * The pieces of a cell that holds a list, as {@see self::parts()} cuts it but untouched: each is the text between two separators as it
+     * is written, with the separator that follows it (empty for the last one). That is what lets a label that holds a comma be put
+     * back together out of the pieces a comma cut it into.
+     *
+     * @return list<array{text: string, separator: string}>
+     */
+    public function pieces(): array
+    {
+        $tokens = preg_split('/([,;\r\n\x{2028}\x{2029}]+)/u', $this->text(), -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        $pieces = [];
+
+        for ($position = 0; $position < count($tokens); $position += 2) {
+            $pieces[] = ['text' => $tokens[$position], 'separator' => $tokens[$position + 1] ?? ''];
+        }
+
+        return $pieces;
+    }
+
+    /**
      * The cell cut to a length, for a message that quotes it.
      */
     public function excerpt(int $length = 40): string

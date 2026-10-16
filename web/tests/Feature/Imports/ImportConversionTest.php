@@ -222,6 +222,31 @@ describe('a date and time', function (): void {
         expect(fn () => importConvert('datetime', $value))->toThrow(InvalidImportValue::class);
     })->with([['2026-07-01 25:00'], ['2026-07-01 12:60'], ['31/02/2026 10:00'], ['noon'], ['2026-07-01 12:30 +99:99']]);
 
+    it('reads the hour the clocks show twice as the first of the two, and an hour around the change as it is', function (string $value, string $zone, string $expected): void {
+        expect(importConvert('datetime', $value, zone: $zone))->toBe($expected);
+    })->with([
+        'the clocks of Paris go back: the first 02:30' => ['2026-10-25 02:30', 'Europe/Paris', '2026-10-25T02:30:00+02:00'],
+        'the last second of the first hour' => ['2026-10-25 02:59:59', 'Europe/Paris', '2026-10-25T02:59:59+02:00'],
+        'an hour before' => ['2026-10-25 01:59', 'Europe/Paris', '2026-10-25T01:59:00+02:00'],
+        'an hour after' => ['2026-10-25 03:00', 'Europe/Paris', '2026-10-25T03:00:00+01:00'],
+        'the clocks of New York go back: the first 01:30' => ['2026-11-01 01:30', 'America/New_York', '2026-11-01T01:30:00-04:00'],
+        'the clocks of Paris go forward, just before' => ['2026-03-29 01:59', 'Europe/Paris', '2026-03-29T01:59:00+01:00'],
+        'the clocks of Paris go forward, just after' => ['2026-03-29 03:00', 'Europe/Paris', '2026-03-29T03:00:00+02:00'],
+        'a zone with no change' => ['2026-10-25 02:30', 'Asia/Kolkata', '2026-10-25T02:30:00+05:30'],
+        'an offset that is given has no hour to skip' => ['2026-03-29 02:30 +01:00', 'Europe/Paris', '2026-03-29T02:30:00+01:00'],
+    ]);
+
+    it('refuses a reading in the hour the clocks skip when they go forward, and says so', function (string $value, string $zone): void {
+        expect(fn () => importConvert('datetime', $value, zone: $zone))
+            ->toThrow(InvalidImportValue::class, 'does not exist: the clocks skip that hour.');
+    })->with([
+        'Paris' => ['2026-03-29 02:30', 'Europe/Paris'],
+        'Paris, the first second' => ['2026-03-29 02:00:00', 'Europe/Paris'],
+        'Paris, the last second' => ['29/03/2026 02:59:59', 'Europe/Paris'],
+        'a date and time cell' => ['@2026-03-29 02:30:00', 'Europe/Paris'],
+        'New York' => ['2026-03-08 02:30', 'America/New_York'],
+    ]);
+
     it('is stored the way the field takes it', function (): void {
         $field = importField('datetime');
         $value = importConvert($field, '2026-07-01 12:30');
@@ -244,6 +269,11 @@ describe('a time', function (): void {
         'the last minute' => ['23:59', '23:59'],
         'half a day' => [0.5, '12:00'],
         'a fraction of a day' => [0.3958333333, '09:30'],
+        'a time a float cannot hold exactly' => [425 / 1440, '07:05'],
+        'the seconds are cut off, not rounded up' => [(9 * 3600 + 30 * 60 + 50) / 86400, '09:30'],
+        'the last second of the day is in the last minute' => [86399 / 86400, '23:59'],
+        'a fraction just under a day' => [0.9999999999, '23:59'],
+        'midnight' => [0.0, '00:00'],
         'a duration cell' => [new DateInterval('PT7H5M'), '07:05'],
         'a date cell' => ['@1899-12-30 07:05:00', '07:05'],
     ]);
@@ -268,6 +298,29 @@ describe('a choice', function (): void {
             ->and(fn () => importConvert($field, 'Shelf'))->toThrow(InvalidImportValue::class, 'Unknown choice: "Shelf".');
     });
 
+    it('tells two choices apart that differ by an accent only: each is found by its own label first', function (array $labels): void {
+        $field = importField('select', ['choices' => array_map(fn (string $label): array => ['label' => $label], $labels)]);
+        $ids = array_column(ChoiceType::choicesOf($field->options), 'id', 'label');
+
+        expect(importConvert($field, 'Été'))->toBe($ids['Été'])
+            ->and(importConvert($field, 'Ete'))->toBe($ids['Ete'])
+            ->and(importConvert($field, 'été'))->toBe($ids['Été'])
+            ->and(importConvert($field, 'ETE'))->toBe($ids['Ete'])
+            // Neither is written as it is: the accents are not looked at, and the first of the two is taken.
+            ->and(importConvert($field, 'Eté'))->toBe($ids[$labels[0]]);
+    })->with([
+        'the accent first' => [['Été', 'Ete']],
+        'the accent last' => [['Ete', 'Été']],
+    ]);
+
+    it('is found without its accents when no choice is spelled as it is', function (): void {
+        $field = importField('select', ['choices' => [['label' => 'Été'], ['label' => 'Hiver']]]);
+        $ids = array_column(ChoiceType::choicesOf($field->options), 'id', 'label');
+
+        expect(importConvert($field, 'ete'))->toBe($ids['Été'])
+            ->and(importConvert($field, 'HIVER'))->toBe($ids['Hiver']);
+    });
+
     it('lists several choices for a multiple choice, and one whose label holds a comma', function (): void {
         $field = importField('multiselect', ['choices' => [['label' => 'Fragile'], ['label' => 'Heavy'], ['label' => 'Big, red']]]);
         [$fragile, $heavy, $big] = array_column(ChoiceType::choicesOf($field->options), 'id');
@@ -280,6 +333,30 @@ describe('a choice', function (): void {
             ->and(importConvert($field, 'Fragile,, ,'))->toBe([$fragile])
             ->and(importConvert($field, null))->toBeNull()
             ->and(fn () => importConvert($field, 'Fragile, Light'))->toThrow(InvalidImportValue::class, 'Unknown choice: "Light".');
+    });
+
+    it('puts a label that holds a comma back together wherever it is in the list, before it fails a piece', function (): void {
+        $field = importField('multiselect', ['choices' => [['label' => 'Fragile'], ['label' => 'Big, red'], ['label' => 'Red'], ['label' => 'Red, dark, glossy'], ['label' => 'Heavy; tall']]]);
+        [$fragile, $big, $red, $glossy, $tall] = array_column(ChoiceType::choicesOf($field->options), 'id');
+
+        expect(importConvert($field, 'Fragile, Big, red'))->toBe([$fragile, $big])
+            ->and(importConvert($field, 'Big, red, Fragile'))->toBe([$big, $fragile])
+            ->and(importConvert($field, 'Fragile; big, RED ;fragile'))->toBe([$fragile, $big])
+            ->and(importConvert($field, "Fragile\nBig, red\nRed"))->toBe([$fragile, $big, $red])
+            // The longest label wins: Red, dark, glossy is one choice and not Red and two pieces that are not choices.
+            ->and(importConvert($field, 'Red, dark, glossy, Fragile'))->toBe([$glossy, $fragile])
+            ->and(importConvert($field, 'Red, Fragile'))->toBe([$red, $fragile])
+            ->and(importConvert($field, 'heavy; tall, fragile'))->toBe([$tall, $fragile])
+            // A label cut in two that is not whole is two pieces that must be choices.
+            ->and(fn () => importConvert($field, 'Red, dark'))->toThrow(InvalidImportValue::class, 'Unknown choice: "dark".')
+            ->and(fn () => importConvert($field, 'Big, Fragile'))->toThrow(InvalidImportValue::class, 'Unknown choice: "Big".');
+    });
+
+    it('does not look for labels that hold a comma when none does', function (): void {
+        $field = importField('multiselect', ['choices' => [['label' => 'A'], ['label' => 'B'], ['label' => 'C']]]);
+        [$a, $b, $c] = array_column(ChoiceType::choicesOf($field->options), 'id');
+
+        expect(importConvert($field, implode(', ', array_fill(0, 500, 'B')).', C, A'))->toBe([$b, $c, $a]);
     });
 });
 

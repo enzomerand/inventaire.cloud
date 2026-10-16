@@ -962,6 +962,7 @@
     "\":value\" is not a date.": "« :value » n'est pas une date.",
     "\":value\" is not a date and time.": "« :value » n'est pas une date et une heure.",
     "\":value\" is not a time of day.": "« :value » n'est pas une heure de la journée.",
+    "\":value\" does not exist: the clocks skip that hour.": "« :value » n'existe pas : les horloges sautent cette heure.",
     "The number \":value\" has too many digits.": "Le nombre « :value » a trop de chiffres.",
     "\":value\" is not a number.": "« :value » n'est pas un nombre.",
     "This file is not a spreadsheet or a text file the import can read. Use an XLSX, ODS, CSV, TSV or TXT file.": "Ce fichier n'est pas un tableur ni un fichier texte que l'import sait lire. Utilisez un fichier XLSX, ODS, CSV, TSV ou TXT.",

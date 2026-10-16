@@ -139,7 +139,9 @@ final class TagsType extends AbstractFieldType
     }
 
     /**
-     * The tags the cell lists, cut at the commas, semicolons and line breaks.
+     * The tags the cell lists, cut at the commas, semicolons and line breaks. A tag that holds a comma is cut in two: unlike the label
+     * of a choice, a tag is not one of a list known beforehand, so there is nothing to put the pieces back together by (and an export
+     * writes the tags separated by commas, so the cell of a tag with a comma could not be told from two tags anyway).
      */
     public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
     {
