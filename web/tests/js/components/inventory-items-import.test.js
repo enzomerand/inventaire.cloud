@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import inventoryItems from '../../../resources/js/components/inventory-items.js';
-import { HttpError, http } from '../../../resources/js/lib/http.js';
+import { HttpError, http, uploadTimeoutFor } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
 import { onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
@@ -174,6 +174,28 @@ describe('the import dialog', () => {
         });
     }
 
+    /**
+     * Makes the polls of the import `id` answer what the test says (the last answer repeats), whatever mounted the component.
+     */
+    function answerPolls(id, ...answers) {
+        const others = http.get.getMockImplementation();
+        const left = [...answers];
+
+        http.get.mockImplementation(async (url, options) => {
+            if (url !== `${IMPORTS}/${id}`) {
+                return others(url, options);
+            }
+
+            const next = left.length > 1 ? left.shift() : left[0];
+
+            if (next instanceof Error) {
+                throw next;
+            }
+
+            return { data: next };
+        });
+    }
+
     /** The body the last request that sent one carried. */
     const lastBody = (method = 'post') => http[method].mock.calls.at(-1)[1];
 
@@ -227,6 +249,108 @@ describe('the import dialog', () => {
             await component.openImport();
 
             expect(component.importOnFile).toBe(true);
+        });
+
+        it('leaves the page when the inventory is gone, as every other request of the dialog does', async () => {
+            mount({ list: [new HttpError(404, 'Gone.')] });
+
+            await component.openImport();
+
+            expect(redirectTo).toHaveBeenCalledWith('/app/w/shop');
+            expect(component.importOnFile).toBe(false);
+        });
+
+        it('does not hide a bug behind the choice of a file', async () => {
+            mount({ list: [[uploaded()]] });
+            const bug = new TypeError('boom');
+
+            vi.spyOn(component, 'showImport').mockImplementation(() => {
+                throw bug;
+            });
+
+            await expect(component.openImport()).rejects.toBe(bug);
+            expect(component.importOnFile).toBe(false);
+        });
+
+        it('says nothing of a reading the closing of the dialog cancelled', async () => {
+            mount();
+            http.get.mockImplementation(
+                (url, { signal }) =>
+                    new Promise((resolve, reject) => {
+                        signal.addEventListener('abort', () =>
+                            reject(new DOMException('The operation was aborted.', 'AbortError')),
+                        );
+                    }),
+            );
+
+            const opening = component.openImport();
+
+            component.onImportHidden();
+
+            await expect(opening).resolves.toBeUndefined();
+            expect(redirectTo).not.toHaveBeenCalled();
+            expect(component.importOnFile).toBe(false);
+        });
+
+        describe('the cursor', () => {
+            /** The dialog with its three steps, in the page, so that the cursor can be on something. */
+            function dialogInPage() {
+                const modal = component.$refs.importModal;
+
+                modal.innerHTML = ['file', 'mapping', 'result']
+                    .map(
+                        (step) =>
+                            `<div data-import-step="${step}"><h3 tabindex="-1" data-import-heading>${step}</h3>` +
+                            (step === 'file' ? '<input type="file" id="import-file">' : '') +
+                            '</div>',
+                    )
+                    .join('');
+                document.body.append(modal);
+
+                return modal;
+            }
+
+            afterEach(() => {
+                component.$refs.importModal.remove();
+            });
+
+            it('goes to the file chooser when the file step shows, and to the title of the other steps', async () => {
+                http.post.mockResolvedValue({ data: uploaded() });
+                http.delete.mockResolvedValue({});
+                mount();
+                const modal = dialogInPage();
+
+                await component.openImport();
+
+                expect(component.importOnFile).toBe(true);
+                expect(document.activeElement).toBe(modal.querySelector('#import-file'));
+
+                await component.onImportFile(picked(csv()));
+
+                expect(document.activeElement).toBe(modal.querySelector('[data-import-step="mapping"] h3'));
+
+                await component.cancelImport();
+
+                expect(component.importOnFile).toBe(true);
+                expect(document.activeElement).toBe(modal.querySelector('#import-file'));
+            });
+
+            it('goes to the file chooser even when the imports took their time, as the step only shows then', async () => {
+                const answer = Promise.withResolvers();
+
+                mount();
+                const modal = dialogInPage();
+
+                http.get.mockReturnValue(answer.promise);
+                const opening = component.openImport();
+
+                expect(document.activeElement).toBe(document.body);
+
+                answer.resolve({ data: [] });
+                await opening;
+
+                expect(document.activeElement).toBe(modal.querySelector('#import-file'));
+            });
         });
 
         it('listens to the closing of the dialog once, however many times it opens', async () => {
@@ -499,15 +623,30 @@ describe('the import dialog', () => {
 
             await component.reanalyzeImport();
 
-            expect(http.patch).toHaveBeenCalledWith(`${IMPORTS}/i1`, {
-                has_header: true,
-                delimiter: 'comma',
-                encoding: 'utf-8',
-            });
+            expect(http.patch).toHaveBeenCalledWith(
+                `${IMPORTS}/i1`,
+                { has_header: true, delimiter: 'comma', encoding: 'utf-8' },
+                { timeout: uploadTimeoutFor(2048) },
+            );
             expect(component.importMappingRows.map((row) => row.header)).toEqual(['Name;Weight']);
             expect(component.importDelimiter).toBe('comma');
             expect(component.importStatus).toBe('The file was read again. The columns have been matched anew.');
             expect(component.importWorking).toBe(false);
+        });
+
+        it('gives the reading of a large file the time an upload of it would have', async () => {
+            const size = 20 * 1024 * 1024;
+
+            component.importRecord = { ...component.importRecord, size };
+            http.patch.mockResolvedValue({ data: uploaded('i1', { size }) });
+            component.importHasHeader = false;
+
+            await component.reanalyzeImport();
+
+            const { timeout } = http.patch.mock.calls.at(-1)[2];
+
+            expect(timeout).toBe(uploadTimeoutFor(size));
+            expect(timeout).toBeGreaterThan(uploadTimeoutFor(2048));
         });
 
         it('asks again when the row of the headers is the one that changed', async () => {
@@ -907,7 +1046,36 @@ describe('the import dialog', () => {
             expect(http.post).toHaveBeenCalledTimes(1);
         });
 
-        it('tells with a toast, and follows nothing, when the dialog was closed while the request was on its way', async () => {
+        it('tells with a toast, and watches the import, when the dialog was closed while the request was on its way', async () => {
+            vi.useFakeTimers();
+            const starting = Promise.withResolvers();
+
+            http.post.mockReturnValue(starting.promise);
+            answerPolls('i1', record('i1', 'running'), completed('i1', { rows_imported: 12 }));
+            const sending = component.startImport();
+
+            component.onImportHidden();
+            starting.resolve({ data: record('i1', 'pending') });
+            await sending;
+
+            expect(notify).toHaveBeenCalledWith('success', 'Import started. It will be done in a moment.');
+            expect(component.importOpen).toBe(false);
+            expect(pollsOf('i1')).toHaveLength(0);
+
+            await vi.advanceTimersByTimeAsync(5000);
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(pollsOf('i1')).toHaveLength(2);
+            expect(notify).toHaveBeenLastCalledWith('success', 'Import finished: 12 items imported.');
+            expect(itemReads()).toHaveLength(1);
+
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(2);
+            expect(itemReads()).toHaveLength(1);
+        });
+
+        it('tells the end at once when the import was over by the time the request answered and the dialog was closed', async () => {
             vi.useFakeTimers();
             const starting = Promise.withResolvers();
 
@@ -915,11 +1083,13 @@ describe('the import dialog', () => {
             const sending = component.startImport();
 
             component.onImportHidden();
-            starting.resolve({ data: record('i1', 'pending') });
+            starting.resolve({ data: completed('i1', { rows_imported: 3 }) });
             await sending;
             await vi.advanceTimersByTimeAsync(60_000);
 
-            expect(notify).toHaveBeenCalledWith('success', 'Import started. It will be done in a moment.');
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith('success', 'Import finished: 3 items imported.');
+            expect(itemReads()).toHaveLength(1);
             expect(pollsOf('i1')).toHaveLength(0);
         });
 
@@ -1135,22 +1305,57 @@ describe('the import dialog', () => {
             expect(component.importError).toBe('This import is no longer available. Choose the file again.');
         });
 
-        it('stops reading when the dialog closes, and when the page is taken apart', async () => {
+        it('hands the import to the slower watch when the dialog closes', async () => {
             await startFollowing([record('i1', 'running')]);
             await vi.advanceTimersByTimeAsync(2000);
 
             expect(pollsOf('i1')).toHaveLength(1);
 
             component.onImportHidden();
-            await vi.advanceTimersByTimeAsync(60_000);
+            await vi.advanceTimersByTimeAsync(4999);
 
             expect(pollsOf('i1')).toHaveLength(1);
 
+            await vi.advanceTimersByTimeAsync(1);
+
+            expect(pollsOf('i1')).toHaveLength(2);
+        });
+
+        it('stops reading when the page is taken apart, open or closed', async () => {
             await startFollowing([record('i1', 'running')]);
+            await vi.advanceTimersByTimeAsync(2000);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+
             component.destroy();
             await vi.advanceTimersByTimeAsync(60_000);
 
             expect(pollsOf('i1')).toHaveLength(1);
+
+            // The last event of the dialog may come after the page went: it starts nothing.
+            component.onImportHidden();
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+        });
+
+        it('shows the message of the server for whatever made the import fail', async () => {
+            await startFollowing([
+                record('i1', 'failed', { error: 'The file holds more rows than an import can take.' }),
+            ]);
+
+            await vi.advanceTimersByTimeAsync(2000);
+
+            expect(component.importResultTitle).toBe('Import failed');
+            expect(component.importFailureText).toBe('The file holds more rows than an import can take.');
+        });
+
+        it('says the import failed when the server gives no reason', async () => {
+            await startFollowing([record('i1', 'failed', { error: null })]);
+
+            await vi.advanceTimersByTimeAsync(2000);
+
+            expect(component.importFailureText).toBe('The import failed.');
         });
 
         it('drops the answer of a reading that was cancelled', async () => {
@@ -1177,6 +1382,242 @@ describe('the import dialog', () => {
             expect(component.importOnFile).toBe(true);
             expect(component.importRecord).toBeNull();
             expect(component.importError).toBe('');
+        });
+    });
+
+    describe('watching the import while the dialog is closed', () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        /** Opens the dialog on an import a worker has, with the answers of the polls that follow, then closes it. */
+        async function closeWhileRunning(polls, list = [[record('i1', 'running')]]) {
+            mount({ list, polls });
+            await component.openImport();
+            component.onImportHidden();
+        }
+
+        it('asks every five seconds, silently, until the import has ended, then reads the grid once and tells with a toast', async () => {
+            await closeWhileRunning([
+                record('i1', 'running'),
+                record('i1', 'running'),
+                completed('i1', { rows_imported: 7 }),
+            ]);
+
+            await vi.advanceTimersByTimeAsync(4999);
+
+            expect(pollsOf('i1')).toHaveLength(0);
+
+            await vi.advanceTimersByTimeAsync(1);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+            expect(pollsOf('i1')[0][1]).toEqual(expect.objectContaining({ silent: true }));
+
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(pollsOf('i1')).toHaveLength(2);
+            expect(itemReads()).toHaveLength(0);
+            expect(notify).not.toHaveBeenCalled();
+
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(pollsOf('i1')).toHaveLength(3);
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith('success', 'Import finished: 7 items imported.');
+
+            const urls = http.get.mock.calls.map((call) => call[0]);
+
+            expect(urls.filter((url) => url === INVENTORY)).toHaveLength(1);
+            expect(urls.filter((url) => url === ITEMS)).toHaveLength(1);
+            expect(urls.indexOf(INVENTORY)).toBeLessThan(urls.indexOf(ITEMS));
+            expect(http.get.mock.calls.find((call) => call[0] === ITEMS)[1].params).toHaveProperty('page', 1);
+
+            // It ended: nothing is asked any more, and the grid is not read again.
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(3);
+            expect(itemReads()).toHaveLength(1);
+        });
+
+        it('tells with the message of the server when the import failed, and does not read the grid', async () => {
+            await closeWhileRunning([
+                record('i1', 'failed', { error: 'The file holds more rows than an import can take.' }),
+            ]);
+
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith('danger', 'The file holds more rows than an import can take.');
+            expect(itemReads()).toHaveLength(0);
+        });
+
+        it('says the import failed when the server gives no reason', async () => {
+            await closeWhileRunning([record('i1', 'failed', { error: null })]);
+
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(notify).toHaveBeenCalledWith('danger', 'The import failed.');
+        });
+
+        it('has one question on its way at a time', async () => {
+            await closeWhileRunning([record('i1', 'running')]);
+            const unanswered = Promise.withResolvers();
+
+            http.get.mockImplementation(async (url) => (url === `${IMPORTS}/i1` ? unanswered.promise : { data: [] }));
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+
+            unanswered.resolve({ data: record('i1', 'running') });
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(pollsOf('i1')).toHaveLength(2);
+        });
+
+        it('cancels the question on its way when the page is taken apart, and asks nothing after', async () => {
+            await closeWhileRunning([record('i1', 'running')]);
+            let signal = null;
+
+            http.get.mockImplementation(async (url, options) => {
+                signal = options.signal;
+
+                return new Promise(() => {});
+            });
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(signal.aborted).toBe(false);
+
+            component.destroy();
+
+            expect(signal.aborted).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+        });
+
+        it('starts no watch for a request that answers after the page was taken apart', async () => {
+            mount({ list: [[uploaded()]] });
+            await component.openImport();
+            const starting = Promise.withResolvers();
+
+            http.post.mockReturnValue(starting.promise);
+            answerPolls('i1', record('i1', 'running'));
+            const sending = component.startImport();
+
+            component.onImportHidden();
+            component.destroy();
+            starting.resolve({ data: record('i1', 'pending') });
+            await sending;
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(0);
+        });
+
+        it('hands the import to the dialog when it opens, and takes it back when it closes', async () => {
+            await closeWhileRunning([record('i1', 'running')]);
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+
+            await component.openImport();
+
+            expect(component.importOnResult).toBe(true);
+
+            // Open: every two seconds, and only the dialog asks.
+            await vi.advanceTimersByTimeAsync(2000);
+            await vi.advanceTimersByTimeAsync(2000);
+
+            expect(pollsOf('i1')).toHaveLength(3);
+
+            component.onImportHidden();
+            await vi.advanceTimersByTimeAsync(4999);
+
+            expect(pollsOf('i1')).toHaveLength(3);
+
+            await vi.advanceTimersByTimeAsync(1);
+
+            expect(pollsOf('i1')).toHaveLength(4);
+        });
+
+        it('does not read the grid again when the dialog opens on the end of an import the toast already told', async () => {
+            await closeWhileRunning([completed('i1')], [[record('i1', 'running')], [completed('i1')]]);
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(itemReads()).toHaveLength(1);
+            expect(notify).toHaveBeenCalledTimes(1);
+
+            await component.openImport();
+            await vi.advanceTimersByTimeAsync(0);
+
+            // The dialog still opens on the result, to read the report.
+            expect(component.importOnResult).toBe(true);
+            expect(component.importCompleted).toBe(true);
+            expect(itemReads()).toHaveLength(1);
+            expect(notify).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks again after a failure that may pass', async () => {
+            await closeWhileRunning([
+                new HttpError(500, 'Down.'),
+                new HttpError(0, 'Offline.', { kind: 'network' }),
+                new HttpError(429, 'Slow down.'),
+                completed('i1'),
+            ]);
+
+            await vi.advanceTimersByTimeAsync(15_000);
+
+            expect(pollsOf('i1')).toHaveLength(3);
+            expect(notify).not.toHaveBeenCalled();
+
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(pollsOf('i1')).toHaveLength(4);
+            expect(notify).toHaveBeenCalledWith('success', 'Import finished: 12 items imported.');
+        });
+
+        it.each([404, 403])('gives up, quietly, on an import that answers %i', async (status) => {
+            await closeWhileRunning([new HttpError(status, 'No.')], [[record('i1', 'running')], []]);
+
+            await vi.advanceTimersByTimeAsync(5000);
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(1);
+            expect(notify).not.toHaveBeenCalled();
+            expect(itemReads()).toHaveLength(0);
+
+            await component.openImport();
+
+            expect(component.importOnFile).toBe(true);
+        });
+
+        it('watches nothing that waits for its mapping, or that ended in front of the person', async () => {
+            await closeWhileRunning([record('i1', 'running')], [[uploaded('i1')]]);
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(0);
+
+            component.onImportHidden();
+            mount({ list: [[completed('i2')]] });
+            await component.openImport();
+            component.onImportHidden();
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i2')).toHaveLength(0);
+            expect(notify).not.toHaveBeenCalled();
+        });
+
+        it('forgets an import that is no longer listed when the dialog opens, and does not watch it afterwards', async () => {
+            await closeWhileRunning([record('i1', 'running')], [[record('i1', 'running')], []]);
+
+            await component.openImport();
+
+            expect(component.importOnFile).toBe(true);
+
+            component.onImportHidden();
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(pollsOf('i1')).toHaveLength(0);
         });
     });
 

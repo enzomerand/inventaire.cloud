@@ -14,8 +14,11 @@ import { defaultDelimiter } from '../export/exports.js';
 import { pageLocale } from '../fields/locale.js';
 import { t, tn } from '../lib/i18n.js';
 
-/** How long the dialog waits before it asks again while an import is on its way, in milliseconds. */
+/** How long the dialog waits before it asks again while an import is on its way and the dialog is open, in milliseconds. */
 export const POLL_INTERVAL_MS = 2000;
+
+/** How long to wait before asking again while the dialog is closed: nobody is looking at the progress, so it is rarer. */
+export const BACKGROUND_POLL_INTERVAL_MS = 5000;
 
 /** The largest file the dialog accepts when the page does not say, in bytes (the server's own default). */
 export const DEFAULT_MAX_SIZE = 10 * 1024 * 1024;
@@ -52,9 +55,6 @@ const NOT_IMPORTABLE = ['file', 'photo'];
 
 /** The separators of a CSV file, as the API names them. */
 export const DELIMITERS = ['semicolon', 'comma', 'tab'];
-
-/** The encodings of a CSV file, as the API names them. */
-export const ENCODINGS = ['utf-8', 'windows-1252', 'utf-16'];
 
 /** The decimal signs a number can be written with. */
 export const DECIMALS = ['comma', 'point'];

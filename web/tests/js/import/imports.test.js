@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    BACKGROUND_POLL_INTERVAL_MS,
     NEW_FIELD_TYPES,
     POLL_INTERVAL_MS,
     analysisBody,
@@ -117,8 +118,9 @@ describe('the imports', () => {
             expect(statuses.map((status) => isFinished({ status }))).toEqual([false, false, false, true, true]);
         });
 
-        it('asks again every two seconds', () => {
+        it('asks again every two seconds, and every five while nobody looks at the dialog', () => {
             expect(POLL_INTERVAL_MS).toBe(2000);
+            expect(BACKGROUND_POLL_INTERVAL_MS).toBe(5000);
         });
     });
 

@@ -19,6 +19,8 @@
 
     The report of the rows in error is an ARIA table made of divs rather than a <table>: on a phone each row is a card (the row
     and the column on one line, the problem under them), from the "md" breakpoint they are three columns under a header row.
+    The header row is not displayed on a phone (and so is out of the accessibility tree too), so each cell carries its own
+    caption there, which is not read nor shown from the "md" breakpoint, where the header names the columns.
 
     Do not put a display utility (d-flex...) on an element that carries :hidden or x-show: the utility wins and it never hides.
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
@@ -233,9 +235,18 @@
                             </div>
                             <template x-for="line in importReport" :key="line.key">
                                 <div role="row" class="row g-2 border-bottom py-2" data-import-error>
-                                    <div role="cell" class="col-4 col-md-2" x-text="line.row"></div>
-                                    <div role="cell" class="col-8 col-md-3 text-break" x-text="line.column"></div>
-                                    <div role="cell" class="col-12 col-md-7 text-break" x-text="line.message"></div>
+                                    <div role="cell" class="col-4 col-md-2">
+                                        <div class="text-secondary small d-md-none">{{ __('Row') }}</div>
+                                        <div x-text="line.row"></div>
+                                    </div>
+                                    <div role="cell" class="col-8 col-md-3 text-break">
+                                        <div class="text-secondary small d-md-none">{{ __('Column') }}</div>
+                                        <div x-text="line.column"></div>
+                                    </div>
+                                    <div role="cell" class="col-12 col-md-7 text-break">
+                                        <div class="text-secondary small d-md-none">{{ __('Problem') }}</div>
+                                        <div x-text="line.message"></div>
+                                    </div>
                                 </div>
                             </template>
                         </div>
@@ -255,7 +266,7 @@
                     {{ __('Cancel the import') }}
                 </button>
                 <button type="button" class="btn" data-bs-dismiss="modal">{{ __('Close') }}</button>
-                <button type="button" class="btn btn-primary" x-show="importOnMapping" x-ref="importStart" :disabled="importWorking" :aria-busy="importStarting" @click="startImport">
+                <button type="button" class="btn btn-primary" x-show="importOnMapping" :disabled="importWorking" :aria-busy="importStarting" @click="startImport">
                     <span class="spinner-border spinner-border-sm me-2" :hidden="!importStarting" aria-hidden="true"></span>
                     {{ __('Start the import') }}
                 </button>

@@ -19,8 +19,10 @@
  *   offers to try again. When the import has ended, the grid is read again.
  *
  * Whatever is on its way is not lost by closing the dialog: it opens again where the import is (the most recent one the
- * API lists that has not ended), or, if the import ended meanwhile, on its result. A reading that is on its way when the
- * dialog closes is cancelled.
+ * API lists that has not ended), or, if the import ended meanwhile, on its result. The import is also watched while the
+ * dialog is closed (the dialog says "you can close this window"): a quiet poll every few seconds, one request at a time,
+ * until the import ends; the grid is then read again, once, and a toast tells how it ended. The watch is the dialog's
+ * poll with another pace, never both at once: opening the dialog hands the import back to it.
  *
  * The source file is deleted by the server as soon as the job is over, so an import that ended cannot be restarted: the
  * person picks the file again.
@@ -37,6 +39,7 @@ import { notify } from '../lib/notify.js';
 import { defaultDelimiter } from '../export/exports.js';
 import {
     ACCEPTED_EXTENSIONS,
+    BACKGROUND_POLL_INTERVAL_MS,
     NEW_FIELD_TYPES,
     POLL_INTERVAL_MS,
     analysisBody,
@@ -88,9 +91,15 @@ export default function importDialog() {
     /** @type {AbortController | null} */
     let reading = null;
     let hiddenBound = false;
-    // The import the person was waiting for when they closed the dialog, until its end has been shown to them.
+    // The import the person was waiting for when they closed the dialog, until its end has been shown to them in the dialog.
     /** @type {string | null} */
     let unseen = null;
+    // The import that is not over and whose end the grid is waiting for, whether the dialog is open or not (null once it
+    // has ended, or is gone). While the dialog is closed it is the one that is watched.
+    /** @type {string | null} */
+    let watched = null;
+    // Set when the page is taken apart: nothing is watched any more, even if the dialog's last event comes late.
+    let destroyed = false;
     // The imports whose end has already made the grid read its items again.
     const reloaded = new Set();
     // What the decimal sign and the order of the dates were last set to by the dialog itself: a choice of the person is
@@ -364,23 +373,31 @@ export default function importDialog() {
         },
 
         /**
-         * The dialog has been closed, however it was: nothing is read any more, and what it showed is forgotten (it is read
-         * again from the API when it opens).
+         * The dialog has been closed, however it was: what it showed is forgotten (it is read again from the API when it
+         * opens), the reading that was on its way is cancelled, and an import that is not over is watched from now on in
+         * the background, so that the grid is read again when it ends.
          *
          * @returns {void}
          */
         onImportHidden() {
             this.importOpen = false;
-            this.stopImportPolling();
+            cancelReading();
             this.resetImport();
+
+            if (watched !== null) {
+                this.planImportWatch();
+            }
         },
 
         /**
-         * Stops asking about the import: the next poll is not waited for and the reading that is on its way is cancelled.
+         * Stops asking about the import for good, when the page is taken apart: the next reading is not waited for, the one
+         * that is on its way is cancelled, and nothing is watched in the background any more.
          *
          * @returns {void}
          */
         stopImportPolling() {
+            destroyed = true;
+            watched = null;
             cancelReading();
         },
 
@@ -433,14 +450,22 @@ export default function importDialog() {
                 const found = pickResumable(answer.data, unseen);
 
                 if (found === null) {
+                    // Nothing is under way any more, so there is nothing left to watch either.
+                    watched = null;
                     this.goToImportStep('file');
                 } else {
                     this.showImport(found);
                 }
-            } catch {
-                // A cancelled reading is not a failure: it is no longer the one in `reading` (the helper lets the abort through).
-                if (reading === mine) {
-                    this.goToImportStep('file');
+            } catch (error) {
+                if (error instanceof HttpError) {
+                    // Only the latest reading speaks for the dialog. A 404 on the address of the imports is the inventory's own:
+                    // it is gone, and so is everything on this page.
+                    if (reading === mine && !this.leaveIfGone(error)) {
+                        this.goToImportStep('file');
+                    }
+                } else if (error?.name !== 'AbortError') {
+                    // Not a failure of the request (the helper lets a cancellation through as an AbortError): a bug, which must show.
+                    throw error;
                 }
             } finally {
                 if (reading === mine) {
@@ -482,6 +507,7 @@ export default function importDialog() {
                 this.settleImport(record);
             } else {
                 unseen = record.id;
+                watched = record.id;
                 this.planImportPoll();
             }
         },
@@ -495,11 +521,41 @@ export default function importDialog() {
          */
         settleImport(record) {
             unseen = null;
+            watched = null;
             this.announceImport(endNotice(record));
+            this.reloadOnce(record);
+        },
 
+        /**
+         * Reads the items again for an import that was completed, unless it already has: however many times the end of an
+         * import is found (by the dialog, by the watch, by the dialog again when it opens on the result), the grid is read
+         * once.
+         *
+         * @param {ImportRecord} record An import that is over.
+         * @returns {void}
+         */
+        reloadOnce(record) {
             if (record.status === 'completed' && !reloaded.has(record.id)) {
                 reloaded.add(record.id);
                 this.reloadAfterImport();
+            }
+        },
+
+        /**
+         * Tells the end of an import that came while the dialog was closed: a toast, as nobody is looking at the dialog, and
+         * the grid is read again. The import stays the one the dialog opens on, so that the person can read its report.
+         *
+         * @param {ImportRecord} record An import that is over.
+         * @returns {void}
+         */
+        settleInBackground(record) {
+            watched = null;
+            this.reloadOnce(record);
+
+            if (record.status === 'completed') {
+                notify('success', endNotice(record));
+            } else {
+                notify('danger', failureText(record));
             }
         },
 
@@ -573,6 +629,90 @@ export default function importDialog() {
                     } else {
                         this.importFollowFailed = true;
                     }
+                }
+            } finally {
+                if (reading === mine) {
+                    reading = null;
+                }
+            }
+        },
+
+        /**
+         * Plans the next reading of the import that is watched while the dialog is closed, a few seconds from now (a closed
+         * dialog shows nothing, so the readings are rarer than the dialog's own). Plans nothing, and forgets the reading that
+         * was planned, when no import is watched, when the dialog is open (it follows the import itself) or when the page is
+         * taken apart.
+         *
+         * @returns {void}
+         */
+        planImportWatch() {
+            if (pollTimer !== null) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+
+            if (watched !== null && !this.importOpen && !destroyed) {
+                pollTimer = setTimeout(() => {
+                    pollTimer = null;
+                    this.readWatchedImport();
+                }, BACKGROUND_POLL_INTERVAL_MS);
+            }
+        },
+
+        /**
+         * Reads the import that is watched, silently, one request at a time (the next is planned once this one has answered).
+         * When the import is over the grid is read again and a toast tells how it ended; otherwise the next reading is
+         * planned. An import that is gone, or that the person may not read any more, is given up; a failure that may pass
+         * (the server is down, the network is out, the throttling) is tried again.
+         *
+         * @returns {Promise<void>}
+         */
+        async readWatchedImport() {
+            const id = watched;
+
+            if (id === null || this.importOpen) {
+                return;
+            }
+
+            cancelReading();
+
+            const mine = new AbortController();
+
+            reading = mine;
+
+            try {
+                const answer = await http.get(this.importUrl(id), { signal: mine.signal, silent: true });
+
+                // A reading that was cancelled (the dialog opened, the page went) or that is about another import is not the
+                // watch's any more.
+                if (reading !== mine || watched !== id) {
+                    return;
+                }
+
+                if (isFinished(answer.data)) {
+                    this.settleInBackground(answer.data);
+                } else {
+                    this.planImportWatch();
+                }
+            } catch (error) {
+                if (reading !== mine) {
+                    return;
+                }
+
+                if (!(error instanceof HttpError)) {
+                    // A bug, not a failure of the request: it must show.
+                    throw error;
+                }
+
+                if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+                    // Gone (404) or refused: asking again would get the same answer.
+                    if (unseen === id) {
+                        unseen = null;
+                    }
+
+                    watched = null;
+                } else {
+                    this.planImportWatch();
                 }
             } finally {
                 if (reading === mine) {
@@ -735,6 +875,8 @@ export default function importDialog() {
                         },
                         this.importIsCsv,
                     ),
+                    // The API reads the whole file again: as long as for the upload.
+                    { timeout: uploadTimeoutFor(record.size) },
                 );
 
                 this.importRecord = answer.data;
@@ -858,11 +1000,18 @@ export default function importDialog() {
                 const next =
                     isWaiting(reported) || isFinished(reported) ? reported : { ...reported, status: 'pending' };
 
-                // The dialog was closed while the request was on its way: there is nothing to follow, so the toast tells, and
-                // the dialog shows the import when it opens again.
+                // The dialog was closed while the request was on its way: the import is watched from the background (a toast
+                // tells how it ends), and the dialog shows it when it opens again.
                 if (!this.importOpen) {
                     unseen = next.id;
-                    notify('success', t('imports.notice.started'));
+
+                    if (isFinished(next)) {
+                        this.settleInBackground(next);
+                    } else {
+                        watched = next.id;
+                        notify('success', t('imports.notice.started'));
+                        this.planImportWatch();
+                    }
 
                     return;
                 }
@@ -923,6 +1072,10 @@ export default function importDialog() {
                 unseen = null;
             }
 
+            if (this.importRecord !== null && watched === this.importRecord.id) {
+                watched = null;
+            }
+
             this.resetImport();
             this.importError = reason ?? '';
             this.goToImportStep('file');
@@ -977,8 +1130,9 @@ export default function importDialog() {
         },
 
         /**
-         * Puts the dialog on a step, tells it, and puts the cursor on the title of the step, so that a person who cannot see
-         * the dialog change knows where they are.
+         * Puts the dialog on a step, and puts the cursor where the person goes on from: the file chooser for the file (the
+         * step is only visible now, so the focus the dialog asked for when it opened could not go there), the title of the
+         * step for the others, so that a person who cannot see the dialog change knows where they are.
          *
          * @param {'file' | 'mapping' | 'result'} step
          * @returns {void}
@@ -988,7 +1142,10 @@ export default function importDialog() {
 
             this.importStep = step;
             this.$nextTick(() => {
-                refs.importModal?.querySelector?.(`[data-import-step="${step}"] [data-import-heading]`)?.focus();
+                const selector =
+                    step === 'file' ? '#import-file' : `[data-import-step="${step}"] [data-import-heading]`;
+
+                refs.importModal?.querySelector?.(selector)?.focus();
             });
         },
 

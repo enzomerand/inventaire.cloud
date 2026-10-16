@@ -4147,11 +4147,12 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 await choose(importDialog().querySelector('#import-delimiter'), 'tab');
 
-                expect(http.patch).toHaveBeenCalledWith(`${IMPORTS}/i1`, {
-                    has_header: true,
-                    delimiter: 'tab',
-                    encoding: 'utf-8',
-                });
+                expect(http.patch).toHaveBeenCalledWith(
+                    `${IMPORTS}/i1`,
+                    { has_header: true, delimiter: 'tab', encoding: 'utf-8' },
+                    { timeout: expect.any(Number) },
+                );
+                expect(http.patch.mock.calls[0][2].timeout).toBeGreaterThanOrEqual(120_000);
                 expect(columnsOf()).toHaveLength(1);
                 expect(importDialog().querySelector('#import-delimiter').value).toBe('tab');
             });
@@ -4164,19 +4165,19 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 await tick(importDialog().querySelector('#import-header'), false);
 
-                expect(http.patch).toHaveBeenLastCalledWith(`${IMPORTS}/i1`, {
-                    has_header: false,
-                    delimiter: 'semicolon',
-                    encoding: 'utf-8',
-                });
+                expect(http.patch).toHaveBeenLastCalledWith(
+                    `${IMPORTS}/i1`,
+                    { has_header: false, delimiter: 'semicolon', encoding: 'utf-8' },
+                    { timeout: expect.any(Number) },
+                );
 
                 await choose(importDialog().querySelector('#import-encoding'), 'windows-1252');
 
-                expect(http.patch).toHaveBeenLastCalledWith(`${IMPORTS}/i1`, {
-                    has_header: false,
-                    delimiter: 'semicolon',
-                    encoding: 'windows-1252',
-                });
+                expect(http.patch).toHaveBeenLastCalledWith(
+                    `${IMPORTS}/i1`,
+                    { has_header: false, delimiter: 'semicolon', encoding: 'windows-1252' },
+                    { timeout: expect.any(Number) },
+                );
             });
 
             it('does not read the file again for the options of the cells', async () => {
@@ -4286,7 +4287,7 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 const rows = [...stepOf('result').querySelectorAll('[data-import-error]')];
 
-                expect(rows.map((one) => [...one.children].map((cell) => cell.textContent))).toEqual([
+                expect(rows.map((one) => [...one.children].map((cell) => cell.lastElementChild.textContent))).toEqual([
                     ['4', 'Weight', 'Not a number.'],
                     ['9', 'Created on', 'Not a date.'],
                 ]);
@@ -4402,6 +4403,43 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(stepOf('result').textContent).toContain('The import is running.');
                 expect(visible(stepOf('result').querySelector('.alert-warning'))).toBe(false);
             });
+
+            it('puts the cursor on the file chooser once the file step shows', async () => {
+                await openDialog();
+
+                expect(visible(stepOf('file'))).toBe(true);
+                expect(document.activeElement).toBe(importDialog().querySelector('#import-file'));
+            });
+
+            it('labels each cell of the rows in error on a phone, where the header row is not displayed', async () => {
+                await openOnMapping();
+                http.post.mockResolvedValue({
+                    data: record('i1', 'failed', {
+                        error: 'Some rows are not valid, so nothing was imported.',
+                        rows_failed: 1,
+                        errors: [{ row: 4, column: 'Weight', message: 'Not a number.' }],
+                    }),
+                });
+
+                await press('Start the import', importDialog());
+
+                const header = stepOf('result').querySelector('[role="row"]:not([data-import-error])');
+                const [row] = stepOf('result').querySelectorAll('[data-import-error]');
+                const captions = [...row.querySelectorAll('[role="cell"]')].map((cell) => cell.firstElementChild);
+
+                // On a phone the header row is `display: none`, so out of the accessibility tree too...
+                expect(header.classList.contains('d-none')).toBe(true);
+                expect(header.classList.contains('d-md-flex')).toBe(true);
+                // ...which is why each cell names its column itself, in view and for a screen reader, up to the "md" breakpoint
+                // where the header row takes over (a caption that is not displayed is not read either).
+                expect(captions.map((one) => one.textContent)).toEqual(['Row', 'Column', 'Problem']);
+                expect(captions.map((one) => one.textContent)).toEqual(
+                    [...header.querySelectorAll('[role="columnheader"]')].map((one) => one.textContent),
+                );
+                expect(captions.every((one) => one.classList.contains('d-md-none'))).toBe(true);
+                expect(captions.every((one) => !one.hasAttribute('aria-hidden'))).toBe(true);
+            });
+
             describe('when the values of a column look like fractions', () => {
                 const WARNING =
                     'These values look like fractions (0.125 for 12.5%): they will be imported as they are.';
