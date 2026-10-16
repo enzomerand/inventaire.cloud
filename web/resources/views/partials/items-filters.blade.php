@@ -1,5 +1,6 @@
 {{--
-    The panel of the filters of the items of an inventory: one row for each field, with the conditions its kind takes (a
+    The panel of the filters of the items of an inventory: one row for each field the server can query (a field of a type it
+    does not know is left out), with the conditions its kind takes (a
     lowest and a highest value for a number or a date, an answer for a yes / no, the choices for a choice) and, for every
     kind, whether it holds a value or none.
 
@@ -15,7 +16,7 @@
     </div>
     <form class="d-flex flex-column flex-grow-1 overflow-hidden" @submit.prevent="applyFilters" novalidate>
         <div class="offcanvas-body">
-            <template x-for="field in fields" :key="field.id">
+            <template x-for="field in filterableFields" :key="field.id">
                 <fieldset class="mb-4">
                     <legend class="form-label fs-4 text-break" x-text="field.name"></legend>
 

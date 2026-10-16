@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { isSortable, isSummable, queryKindOf } from '../../../resources/js/fields/index.js';
+import { isFilterable, isSortable, isSummable, queryKindOf } from '../../../resources/js/fields/index.js';
 import { FIELD_TYPES } from '../../../resources/js/fields/types.js';
 import { field, queryFacts } from '../support/inventory.js';
 
@@ -56,13 +56,35 @@ describe('the way the list treats a field', () => {
         expect(isSummable({ ...field('f', 'number'), summable: false })).toBe(false);
     });
 
-    it('is a text, added up by nothing, for a field the API gives no word about (a type the server does not know)', () => {
+    it('is nothing, added up by nothing, for a field the API gives no word about (a type the server does not know)', () => {
         const unknown = { id: 'f', name: 'F', type: 'hologram', options: {}, required: false, position: 0 };
 
-        expect(queryKindOf(unknown)).toBe('text');
-        expect(queryKindOf({ ...unknown, query_kind: null })).toBe('text');
+        expect(queryKindOf(unknown)).toBeNull();
+        expect(queryKindOf({ ...unknown, query_kind: null })).toBeNull();
         expect(isSummable(unknown)).toBe(false);
         expect(isSummable({ ...unknown, summable: null })).toBe(false);
+    });
+
+    it('is neither sorted nor filtered for a field the server cannot query, not even as a text', () => {
+        const unknown = { id: 'f', name: 'F', type: 'hologram', options: {}, required: false, position: 0 };
+
+        for (const one of [unknown, { ...unknown, query_kind: null }, field('f', 'hologram')]) {
+            expect(isSortable(one)).toBe(false);
+            expect(isFilterable(one)).toBe(false);
+        }
+
+        // A text is both, so the refusal comes from the missing word of the API and not from the shape of the field.
+        expect(isSortable(field('f', 'text'))).toBe(true);
+        expect(isFilterable(field('f', 'text'))).toBe(true);
+    });
+
+    it('lets the list filter every kind the server can query, the ones it cannot sort included', () => {
+        for (const type of Object.keys(FIELD_TYPES)) {
+            expect(isFilterable(field('f', type)), type).toBe(true);
+        }
+
+        expect(isSortable(field('f', 'tags'))).toBe(false);
+        expect(isFilterable(field('f', 'tags'))).toBe(true);
     });
 
     it('lets the list sort all but the kinds that hold several values', () => {

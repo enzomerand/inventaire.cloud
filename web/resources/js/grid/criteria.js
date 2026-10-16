@@ -11,7 +11,7 @@
  * from the first page. An older answer never replaces a newer one: that is for the component's `loadItems` to see. When the
  * server refuses some of the criteria, only those are taken out ({@link dropRefused}), never the whole view.
  */
-import { isSortable } from '../fields/index.js';
+import { isFilterable, isSortable } from '../fields/index.js';
 import { currentSearch, replaceSearch } from '../lib/location.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideOffcanvas, showOffcanvas } from '../lib/offcanvas.js';
@@ -80,6 +80,11 @@ export default function gridCriteria() {
         /** The filters as removable chips. */
         get chips() {
             return chipsOf(this.fields, this.query.filters);
+        },
+
+        /** The fields the filters panel offers: all but the ones the server cannot query (a type it does not know). */
+        get filterableFields() {
+            return this.fields.filter(isFilterable);
         },
 
         /** What the sort select offers: the newest first, the dates of the items, and the fields that can be sorted. */

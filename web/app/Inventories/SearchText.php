@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories;
 
+use App\Inventories\Fields\FieldType;
 use Normalizer;
 
 /**
@@ -24,10 +25,19 @@ use Normalizer;
 final class SearchText
 {
     /**
-     * The version of the form a text is stored in. Bump it whenever {@see self::normalize()} would give another text for
-     * the same input (a step added or changed) or {@see self::WRITTEN_OUT} changes: `inventaire:upgrade` compares it with
-     * the version the stored texts were built with ({@see DerivedData}) and, when they differ, builds every text again.
-     * Searching for a word whose form changed would otherwise miss the items written before the change.
+     * The version of the form a text is stored in. Bump it whenever the text stored for the same item would come out
+     * different:
+     *
+     * - {@see self::normalize()} would give another text for the same input (a step added or changed);
+     * - {@see self::WRITTEN_OUT} changes;
+     * - {@see ItemSearchText::SEPARATOR} changes (how the parts of an item are joined);
+     * - the {@see FieldType::searchText()} of any type of field would say something else (a type that starts to be
+     *   searched, one that stops, another way to read a value, such as what the label of a choice is).
+     *
+     * `inventaire:upgrade` compares it with the version the stored texts were built with ({@see DerivedData}) and, when
+     * they differ, builds every text again. Searching for a word whose form changed would otherwise miss the items written
+     * before the change. The golden test of the text (tests/Feature/Inventories/SearchTextGoldenTest.php) fails when any of
+     * these changes: update what it expects together with this number.
      */
     public const VERSION = 1;
 

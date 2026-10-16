@@ -13,7 +13,7 @@ use Closure;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\LazyCollection;
-use JsonException;
+use Throwable;
 
 /**
  * Brings right the data that is derived from other data, which `inventaire:upgrade` ({@see UpgradeCommand}) does after
@@ -28,6 +28,9 @@ use JsonException;
  * Each inventory is one transaction under its own row lock ({@see Locks::inventories()}): the writes to that inventory wait
  * for it, the others go on, and the lock is not held for longer than one inventory takes. Both steps can be run as often as
  * needed.
+ *
+ * A search text that cannot be built for one inventory (a value that is not JSON, a deadlock that went on, a disk that is
+ * full) does not stop the others: it is logged and counted, and the next run tries again.
  */
 final class DerivedData
 {
@@ -47,31 +50,41 @@ final class DerivedData
     /**
      * Builds the search text of the items again when the version of its form ({@see SearchText::VERSION}) is not the one
      * the texts were built with (or none was ever recorded), then records the version; otherwise builds it only for the
-     * items that have none, which is every item written before the column existed.
+     * items that have none (null: never built, see {@see ItemSearchText}), which is every item written before the column
+     * existed. An inventory with no item in that case is not even locked.
      *
-     * The version is recorded when every inventory was done, not before: a run that fails is run again in full.
-     *
-     * @return bool Whether every text was built again (the version changed), and not only the missing ones.
-     *
-     * @throws JsonException When the values of an item are not JSON.
+     * An inventory that fails is logged and counted, and the others go on. The version is recorded when every inventory
+     * was done, not before: a run that fails somewhere is run again in full.
      */
-    public function rebuildSearchText(): bool
+    public function rebuildSearchText(): SearchTextRebuild
     {
         $current = $this->settings->searchTextVersion() === SearchText::VERSION;
+        $failed = 0;
 
         foreach ($this->inventoryIds() as $id) {
-            $this->inTransaction($id, function (Inventory $inventory) use ($current): null {
-                $this->searchText->refresh($inventory, $inventory->fields()->get(), onlyMissing: $current);
+            try {
+                // Locking an inventory to find nothing to do would make the writes to it wait for nothing.
+                if ($current && ! $this->searchText->hasMissing($id)) {
+                    continue;
+                }
 
-                return null;
-            });
+                $this->inTransaction($id, function (Inventory $inventory) use ($current): null {
+                    $this->searchText->refresh($inventory, $inventory->fields()->get(), onlyMissing: $current);
+
+                    return null;
+                });
+            } catch (Throwable $exception) {
+                $failed++;
+
+                Log::error('The search text of the items of an inventory could not be built: it will be tried again by the next upgrade.', ['inventory_id' => $id, 'exception' => $exception]);
+            }
         }
 
-        if (! $current) {
+        if (! $current && $failed === 0) {
             $this->settings->recordSearchTextVersion(SearchText::VERSION);
         }
 
-        return ! $current;
+        return new SearchTextRebuild(everything: ! $current, failed: $failed);
     }
 
     /**

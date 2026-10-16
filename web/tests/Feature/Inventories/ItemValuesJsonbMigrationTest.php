@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Tests\Support\CommitsDatabaseChanges;
 
 require_once __DIR__.'/../../Support/inventories.php';
@@ -83,6 +84,42 @@ describe('the migration that stores the values as jsonb', function (): void {
             ->and(json_decode((string) $stored, true))->toEqual($values)
             // The item reads the same, whatever order the keys come in.
             ->and($item->fresh()?->values)->toEqual($values);
+    });
+
+    it('drops the null characters a json value holds instead of failing, and only those', function (): void {
+        if (DB::getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('Only PostgreSQL has a jsonb column to convert to.');
+        }
+
+        // The first release let an email value carry a null character: a `json` column keeps its escape as text, `jsonb` refuses it,
+        // and a migration that fails keeps `inventaire:upgrade` (so a container) failing for good.
+        $migration = require database_path('migrations/2026_10_21_000002_store_item_values_as_jsonb_on_postgres.php');
+        $inventory = inventoryIn(inventoryTeam()['workspace']);
+        $before = valuesColumnType();
+        // In order: a null character inside a text, a backslash followed by the text u0000 (not a null character), a backslash
+        // then a null character, two in a row, one after an escaped quote, and one in a key.
+        $raw = <<<'JSON'
+{"a":"x\u0000y","b":"x\\u0000y","c":"\\\u0000","d":"\u0000\u0000","e":"\"\u0000","k\u0000ey":"v"}
+JSON;
+
+        try {
+            $migration->down();
+            DB::table('items')->insert(['ulid' => (string) Str::ulid(), 'inventory_id' => $inventory->id, 'values' => $raw, 'created_at' => now(), 'updated_at' => now()]);
+            $migration->up();
+            $type = valuesColumnType();
+            $stored = DB::table('items')->where('inventory_id', $inventory->id)->value('values');
+        } finally {
+            // Gone first: a column cannot go back to jsonb while a row holds what it refuses (a failed conversion would leave it stuck).
+            DB::table('items')->where('inventory_id', $inventory->id)->delete();
+
+            if (valuesColumnType() !== $before) {
+                $migration->{$before === 'jsonb' ? 'up' : 'down'}();
+            }
+        }
+
+        expect($type)->toBe('jsonb')
+            ->and(json_decode((string) $stored, true))->toEqual(['a' => 'xy', 'b' => 'x\\u0000y', 'c' => '\\', 'd' => '', 'e' => '"', 'key' => 'v'])
+            ->and(valuesColumnType())->toBe($before);
     });
 
     it('lets the list sort, filter and add up the values of a json column too', function (): void {

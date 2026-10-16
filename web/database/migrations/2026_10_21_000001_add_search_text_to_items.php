@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * The text is in a form that ignores the case and the accents, which no database collation does the same way on
  * PostgreSQL, MySQL and MariaDB: it is built in PHP (`App\Inventories\ItemSearchText`) and the search is a plain `LIKE`
- * on it. The column is nullable: an item that holds nothing to search for has no text, and so does every item that
- * existed before the column.
+ * on it. The column is nullable, and null means "never built": every item that existed before the column has no text, while
+ * one that holds nothing to search for has an empty one.
  *
  * A migration does not call the application's code, which is the code of the day it runs and not of the day it was
  * written: the texts of the items that already exist are built by `inventaire:upgrade` (`App\Inventories\DerivedData`),

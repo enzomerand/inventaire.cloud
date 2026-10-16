@@ -189,8 +189,9 @@ describe('finding items by words', function (): void {
 
         expect(searchFinds($this, $team['owner'], $inventory, 'a', $name))->toBe(['Hammer'])
             ->and(searchFinds($this, $team['owner'], $inventory, '', $name))->toBe(['(no name)', '(no name)', 'Hammer'])
-            ->and(searchTextOf($empty))->toBeNull()
-            ->and(searchTextOf($onlyNumber))->toBeNull();
+            // An empty text, not null: null is for the items whose text was never built.
+            ->and(searchTextOf($empty))->toBe('')
+            ->and(searchTextOf($onlyNumber))->toBe('');
     });
 
     it('stays in the inventory that is asked for', function (): void {
@@ -384,9 +385,9 @@ describe('what is searched', function (): void {
         $builder = app(ItemSearchText::class);
 
         expect($builder->build($fields, [$first->ulid => 'Été', $second->ulid => 'Pomme', $number->ulid => '5', '01j0000000000000000000000x' => 'stray']))->toBe("pomme\nete")
-            ->and($builder->build($fields, [$number->ulid => '5']))->toBeNull()
-            ->and($builder->build($fields, []))->toBeNull()
-            ->and($builder->build($fields, [$first->ulid => '   ']))->toBeNull();
+            ->and($builder->build($fields, [$number->ulid => '5']))->toBe('')
+            ->and($builder->build($fields, []))->toBe('')
+            ->and($builder->build($fields, [$first->ulid => '   ']))->toBe('');
     });
 });
 
@@ -406,12 +407,12 @@ describe('the search text of an item', function (): void {
             ->and(searchFinds($this, $team['viewer'], $inventory, 'electricite', $name))->toBe([])
             ->and(searchFinds($this, $team['viewer'], $inventory, 'plomberie prise', $name))->toBe(['Plomberie']);
 
-        // Clearing a value takes its words out; clearing the last one leaves no text.
+        // Clearing a value takes its words out; clearing the last one leaves an empty text (not null: it was built).
         inventoryCall($this, $team['editor'], 'PATCH', $uri, ['values' => [$name->ulid => null]])->assertOk();
         expect(searchTextOf($item))->toBe('prise murale');
 
         inventoryCall($this, $team['editor'], 'PATCH', $uri, ['values' => [$notes->ulid => '']])->assertOk();
-        expect(searchTextOf($item))->toBeNull()
+        expect(searchTextOf($item))->toBe('')
             ->and(searchFinds($this, $team['viewer'], $inventory, 'prise', $name))->toBe([]);
     });
 
@@ -421,6 +422,30 @@ describe('the search text of an item', function (): void {
         $item = itemIn($inventory, [$name->ulid => 'Ŕéßumé']);
 
         expect(searchTextOf($item))->toBe('ressume')->and($item->search_text)->toBe('ressume');
+    });
+
+    it('is empty, never null, for an item that holds nothing to search, whoever writes it: null means it was never built', function (): void {
+        ['team' => $team, 'inventory' => $inventory, 'name' => $name] = searchableInventory([]);
+        $number = fieldIn($inventory, 'number', 'Weight');
+        $uri = "/api/v1/inventories/{$inventory->ulid}/items";
+
+        $created = inventoryCall($this, $team['owner'], 'POST', $uri, ['values' => [$number->ulid => '12']])->assertCreated();
+        $viaService = itemIn($inventory);
+        $viaFactory = Item::factory()->for($inventory)->create();
+        $viaFactoryNumber = Item::factory()->for($inventory)->create(['values' => [$number->ulid => '12']]);
+        // An item that had a text and lost its last word through the API.
+        $edited = itemIn($inventory, [$name->ulid => 'Hammer']);
+        inventoryCall($this, $team['owner'], 'PATCH', "{$uri}/{$edited->ulid}", ['values' => [$name->ulid => null]])->assertOk();
+
+        expect(DB::table('items')->where('ulid', $created->json('data.id'))->value('search_text'))->toBe('')
+            ->and(searchTextOf($viaService))->toBe('')
+            ->and(searchTextOf($viaFactory))->toBe('')
+            ->and(searchTextOf($viaFactoryNumber))->toBe('')
+            ->and(searchTextOf($edited))->toBe('')
+            ->and(DB::table('items')->whereNull('search_text')->count())->toBe(0)
+            // The model says the same as the database.
+            ->and($viaFactory->search_text)->toBe('')
+            ->and($viaFactoryNumber->search_text)->toBe('');
     });
 
     it('is written by the item factory too, the way the application writes it, unless a test gives one', function (): void {
@@ -434,10 +459,10 @@ describe('the search text of an item', function (): void {
         $stranger = Item::factory()->for($inventory)->create(['values' => ['01unknownfield' => 'Nothing']]);
 
         expect(searchTextOf($built))->toBe("electricite\nfragile etagere")->and($built->search_text)->toBe("electricite\nfragile etagere")
-            ->and(searchTextOf($empty))->toBeNull()
+            ->and(searchTextOf($empty))->toBe('')
             ->and(searchTextOf($given))->toBe('given')
             ->and(searchTextOf($none))->toBeNull()
-            ->and(searchTextOf($stranger))->toBeNull()
+            ->and(searchTextOf($stranger))->toBe('')
             ->and(searchFinds($this, $team['owner'], $inventory, 'ELECTRICITE etagere', $name))->toBe(['Électricité']);
     });
 
@@ -547,8 +572,8 @@ describe('the search text when the fields change', function (): void {
         inventoryCall($this, $team['owner'], 'DELETE', "/api/v1/inventories/{$inventory->ulid}/fields/{$name->ulid}")->assertNoContent();
 
         expect(searchFinds($this, $team['viewer'], $inventory, 'hammer', $name))->toBe([])
-            ->and(searchTextOf($held))->toBeNull()
-            ->and(searchTextOf($other))->toBeNull()
+            ->and(searchTextOf($held))->toBe('')
+            ->and(searchTextOf($other))->toBe('')
             ->and(DB::table('items')->where('updated_at', '!=', '2020-01-01 00:00:00')->count())->toBe(0);
     });
 

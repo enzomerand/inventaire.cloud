@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Inventories\DerivedData;
 use App\Inventories\SearchText;
 use App\Models\Inventory;
+use App\Models\Item;
 use App\Settings\InstanceSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -15,8 +16,9 @@ require_once __DIR__.'/../../Support/inventories.php';
 
 /*
  * What `inventaire:upgrade` brings right after the migrations: the text the items are searched by (built again when its
- * version changes, and for the items that have none) and the counters of items (counted again, the wrong ones corrected and
- * logged). The command itself is in tests/Feature/Installer/UpgradeCommandTest.php.
+ * version changes, and for the items that have none: null, never built) and the counters of items (counted again, the wrong
+ * ones corrected and logged). An inventory that fails does not stop the others. The command itself is in
+ * tests/Feature/Installer/UpgradeCommandTest.php.
  */
 
 uses(RefreshDatabase::class);
@@ -58,11 +60,13 @@ describe('the search text', function (): void {
         $made = derivedInventories('stale');
         expect(app(InstanceSettings::class)->searchTextVersion())->toBeNull();
 
-        $everything = app(DerivedData::class)->rebuildSearchText();
+        $rebuild = app(DerivedData::class)->rebuildSearchText();
 
-        expect($everything)->toBeTrue()
+        expect($rebuild->everything)->toBeTrue()
+            ->and($rebuild->failed)->toBe(0)
             ->and(derivedText($made['items']['special']))->toBe('electricite')
-            ->and(derivedText($made['items']['nothing']))->toBeNull()
+            // Built, and found to say nothing: an empty text, not null (which would say it was never built).
+            ->and(derivedText($made['items']['nothing']))->toBe('')
             ->and(derivedText($made['items']['mixed']))->toBe('bleu rouge')
             ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION)
             // The items did not change, the way they are found did: they keep their dates.
@@ -73,7 +77,7 @@ describe('the search text', function (): void {
         $made = derivedInventories('stale');
         app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION - 1);
 
-        expect(app(DerivedData::class)->rebuildSearchText())->toBeTrue()
+        expect(app(DerivedData::class)->rebuildSearchText()->everything)->toBeTrue()
             ->and(derivedText($made['items']['special']))->toBe('electricite')
             ->and(derivedText($made['items']['mixed']))->toBe('bleu rouge')
             ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
@@ -83,7 +87,7 @@ describe('the search text', function (): void {
         $made = derivedInventories('stale');
         DB::table('settings')->insert(['key' => InstanceSettings::SEARCH_TEXT_VERSION, 'value' => json_encode('one'), 'created_at' => now(), 'updated_at' => now()]);
 
-        expect(app(DerivedData::class)->rebuildSearchText())->toBeTrue()
+        expect(app(DerivedData::class)->rebuildSearchText()->everything)->toBeTrue()
             ->and(derivedText($made['items']['special']))->toBe('electricite')
             ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
     });
@@ -94,10 +98,10 @@ describe('the search text', function (): void {
         DB::table('items')->where('id', $made['items']['nothing'])->update(['search_text' => null]);
         app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION);
 
-        expect(app(DerivedData::class)->rebuildSearchText())->toBeFalse()
-            // No text: built (and an item that says nothing stays without one).
+        expect(app(DerivedData::class)->rebuildSearchText()->everything)->toBeFalse()
+            // No text (null): built, and an item that says nothing gets an empty one, so that it is not looked at again.
             ->and(derivedText($made['items']['special']))->toBe('electricite')
-            ->and(derivedText($made['items']['nothing']))->toBeNull()
+            ->and(derivedText($made['items']['nothing']))->toBe('')
             // A text, however stale: the version says it is right, so it is not read again.
             ->and(derivedText($made['items']['mixed']))->toBe('stale');
     });
@@ -145,9 +149,142 @@ describe('the search text', function (): void {
                 throw new RuntimeException('The disk is full.');
             }
         });
+        Log::spy();
 
-        expect(fn () => app(DerivedData::class)->rebuildSearchText())->toThrow(RuntimeException::class)
+        $rebuild = app(DerivedData::class)->rebuildSearchText();
+
+        // Every inventory failed, none of them stopped the upgrade, and nothing was written.
+        expect($rebuild->failed)->toBe(2)
+            ->and($rebuild->everything)->toBeTrue()
+            ->and(app(InstanceSettings::class)->searchTextVersion())->toBeNull()
+            ->and(derivedText($made['items']['special']))->toBe('stale');
+    });
+
+    it('goes on with the other inventories when one fails, counts and logs the failure, and does not record the version', function (): void {
+        $made = derivedInventories('stale');
+        // The second item of the first inventory: its first item is written before, and the rollback takes that write back.
+        $failing = $made['items']['nothing'];
+        DB::listen(function ($query) use ($failing): void {
+            if (str_starts_with(strtolower($query->sql), 'update') && str_contains($query->sql, 'search_text') && end($query->bindings) == $failing) {
+                throw new RuntimeException('The disk is full.');
+            }
+        });
+        Log::spy();
+
+        $rebuild = app(DerivedData::class)->rebuildSearchText();
+
+        expect($rebuild->failed)->toBe(1)
+            ->and($rebuild->everything)->toBeTrue()
+            // The inventory that failed is as it was: its transaction was rolled back as a whole.
+            ->and(derivedText($made['items']['special']))->toBe('stale')
+            ->and(derivedText($made['items']['nothing']))->toBe('stale')
+            // The other one was done.
+            ->and(derivedText($made['items']['mixed']))->toBe('bleu rouge')
             ->and(app(InstanceSettings::class)->searchTextVersion())->toBeNull();
+
+        Log::shouldHaveReceived('error')->once();
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'search text')
+            && $context['inventory_id'] === $made['tools']->id && $context['exception'] instanceof RuntimeException);
+    });
+
+    it('records the version on the run after a failure, once nothing fails any more', function (): void {
+        $made = derivedInventories('stale');
+        $listener = true;
+        DB::listen(function ($query) use (&$listener): void {
+            if ($listener && str_starts_with(strtolower($query->sql), 'update') && str_contains($query->sql, 'search_text')) {
+                throw new RuntimeException('The disk is full.');
+            }
+        });
+        Log::spy();
+
+        expect(app(DerivedData::class)->rebuildSearchText()->failed)->toBe(2)
+            ->and(app(InstanceSettings::class)->searchTextVersion())->toBeNull();
+
+        $listener = false;
+        $second = app(DerivedData::class)->rebuildSearchText();
+
+        // No version was recorded, so everything is built again in full.
+        expect($second->failed)->toBe(0)
+            ->and($second->everything)->toBeTrue()
+            ->and(derivedText($made['items']['special']))->toBe('electricite')
+            ->and(derivedText($made['items']['mixed']))->toBe('bleu rouge')
+            ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
+    });
+
+    it('goes on with the other inventories when one fails to be read for the missing texts only', function (): void {
+        $made = derivedInventories('stale');
+        DB::table('items')->update(['search_text' => null]);
+        app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION);
+        $failing = $made['items']['special'];
+        DB::listen(function ($query) use ($failing): void {
+            if (str_starts_with(strtolower($query->sql), 'update') && str_contains($query->sql, 'search_text') && end($query->bindings) == $failing) {
+                throw new RuntimeException('Deadlock.');
+            }
+        });
+        Log::spy();
+
+        $rebuild = app(DerivedData::class)->rebuildSearchText();
+
+        expect($rebuild->failed)->toBe(1)
+            ->and($rebuild->everything)->toBeFalse()
+            ->and(derivedText($made['items']['special']))->toBeNull()
+            ->and(derivedText($made['items']['mixed']))->toBe('bleu rouge')
+            ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
+    });
+
+    it('does not lock an inventory that has no item without a text when only the missing ones are built', function (): void {
+        $made = derivedInventories('stale');
+        // Only the first inventory holds an item that was never built: the other one holds a text, however stale.
+        DB::table('items')->where('id', $made['items']['special'])->update(['search_text' => null]);
+        app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION);
+        $locked = [];
+        DB::listen(function ($query) use (&$locked): void {
+            $sql = strtolower($query->sql);
+
+            if (str_contains($sql, 'for update') && preg_match('/from [`"]inventories[`"]/', $sql) === 1) {
+                $locked[] = $query->bindings;
+            }
+        });
+
+        $rebuild = app(DerivedData::class)->rebuildSearchText();
+
+        expect($rebuild->everything)->toBeFalse()
+            ->and($locked)->toHaveCount(1)
+            ->and(derivedText($made['items']['special']))->toBe('electricite')
+            ->and(derivedText($made['items']['mixed']))->toBe('stale');
+    });
+
+    it('does not lock any inventory when every item has a text, and does not read the items to find out', function (): void {
+        derivedInventories('stale');
+        app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION);
+        $seen = [];
+        DB::listen(function ($query) use (&$seen): void {
+            $seen[] = strtolower($query->sql);
+        });
+
+        app(DerivedData::class)->rebuildSearchText();
+
+        expect(array_filter($seen, fn (string $sql): bool => str_contains($sql, 'for update')))->toBe([])
+            ->and(array_filter($seen, fn (string $sql): bool => str_starts_with($sql, 'select') && preg_match('/from [`"]items[`"]/', $sql) === 1 && ! str_contains($sql, 'search_text')))->toBe([]);
+    });
+
+    it('treats an empty text as built, not as missing: an item that says nothing is not looked at again', function (): void {
+        $made = derivedInventories(null);
+        app(DerivedData::class)->rebuildSearchText();
+        expect(derivedText($made['items']['nothing']))->toBe('');
+        $writes = [];
+        DB::listen(function ($query) use (&$writes): void {
+            if (preg_match('/^(update|insert)/i', $query->sql) === 1) {
+                $writes[] = $query->sql;
+            }
+        });
+
+        $second = app(DerivedData::class)->rebuildSearchText();
+
+        // Nothing is null any more: the inventories are not even locked, let alone written.
+        expect($second->everything)->toBeFalse()
+            ->and($writes)->toBe([])
+            ->and(Item::query()->whereNull('search_text')->count())->toBe(0);
     });
 
     it('takes the lock of each inventory before it reads or writes in it, in a transaction of its own', function (): void {

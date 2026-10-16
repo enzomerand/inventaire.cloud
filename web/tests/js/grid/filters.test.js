@@ -103,6 +103,19 @@ describe('the filters of the list of items', () => {
     });
 
     describe('from the boxes of the panel to the filter', () => {
+        it('makes no filter for a field the server cannot query, whatever the boxes hold', () => {
+            const hologram = field('holo', 'hologram');
+
+            expect(filterFromDraft(hologram, { ...blankDraft(), presence: 'empty' })).toEqual({
+                filter: null,
+                errors: {},
+            });
+            expect(filterFromDraft(hologram, { ...blankDraft(), presence: 'filled', min: 'x' })).toEqual({
+                filter: null,
+                errors: {},
+            });
+        });
+
         it('reads a number the way it is typed, with a comma or a dot, into the canonical form', () => {
             const { filter, errors } = filterFromDraft(PRICE, { ...blankDraft(), min: '89,90', max: ' 1 200.5 ' });
 

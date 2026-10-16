@@ -14,6 +14,7 @@ import {
     INVENTORY,
     ITEMS,
     deferred,
+    field,
     inventoryAnswer,
     item,
     mountComponent,
@@ -711,6 +712,23 @@ describe('the criteria of the items of an inventory', () => {
             answer([item('i1')]);
             await component.init();
             http.get.mockClear();
+        });
+
+        it('leaves a field the server cannot query out of the panel, and drops a filter on it when the panel is applied', async () => {
+            const hologram = field('holo', 'hologram');
+            component.fields = [...FIELDS, hologram];
+            component.query = { ...component.query, filters: { holo: { empty: true }, price: { min: '5' } } };
+
+            expect(component.filterableFields.map((one) => one.id)).toEqual(FIELDS.map((one) => one.id));
+            expect(component.sortOptions.map((option) => option.key)).not.toContain('holo');
+            expect(component.isSortable(hologram)).toBe(false);
+            expect(component.fieldAriaSort(hologram)).toBeNull();
+
+            component.openFilters();
+            component.applyFilters();
+            await settle();
+
+            expect(lastParams()).toEqual({ page: 1, 'filter[price][min]': '5', ...ASK_TOTALS });
         });
 
         it('opens the panel with its boxes holding the filters in force', async () => {

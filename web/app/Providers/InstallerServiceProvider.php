@@ -16,6 +16,7 @@ use App\Installer\PostMigrationHook;
 use App\Installer\Probes\FilesystemStorageProbe;
 use App\Installer\Probes\StorageProbe;
 use App\Installer\ProcessEnvironment;
+use App\Installer\RecordSearchTextVersion;
 use App\Installer\SetupToken;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Application;
@@ -62,7 +63,7 @@ final class InstallerServiceProvider extends ServiceProvider
 
         $this->app->singleton(InstallerSettings::class);
         $this->app->singleton(SetupToken::class);
-        $this->app->tag([CreateAdministrator::class], PostMigrationHook::TAG);
+        $this->app->tag([CreateAdministrator::class, RecordSearchTextVersion::class], PostMigrationHook::TAG);
         $this->app->when(InstallationFinalizer::class)->needs('$hooks')->giveTagged(PostMigrationHook::TAG);
         $this->app->bind(StorageProbe::class, FilesystemStorageProbe::class);
         $this->app->singleton(ApplicationKey::class);

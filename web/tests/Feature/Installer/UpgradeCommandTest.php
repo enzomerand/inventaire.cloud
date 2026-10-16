@@ -10,6 +10,7 @@ use App\Settings\InstanceSettings;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
 
@@ -215,6 +216,78 @@ describe('the derived data', function (): void {
         expect(DB::table('items')->where('id', $item->id)->value('search_text'))->toBe('electricite');
     });
 
+    /**
+     * Makes the write of the search text of one item fail, the way a full disk or a deadlock that goes on would.
+     */
+    function failSearchTextOf(int $itemId): void
+    {
+        DB::listen(function ($query) use ($itemId): void {
+            if (str_starts_with(strtolower($query->sql), 'update') && str_contains($query->sql, 'search_text') && end($query->bindings) == $itemId) {
+                throw new RuntimeException('The disk is full.');
+            }
+        });
+    }
+
+    it('warns of the inventories whose search text could not be built, logs them, and still succeeds', function (): void {
+        $team = inventoryTeam();
+        $tools = inventoryIn($team['workspace'], 'Tools');
+        $colors = inventoryIn($team['workspace'], 'Colors');
+        $name = fieldIn($tools, 'text', 'Name');
+        $shade = fieldIn($colors, 'text', 'Shade');
+        $tool = itemIn($tools, [$name->ulid => 'Électricité']);
+        $color = itemIn($colors, [$shade->ulid => 'Rouge']);
+        DB::table('items')->update(['search_text' => 'stale']);
+        failSearchTextOf($tool->id);
+        Log::spy();
+
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain('The search text of the items of 1 inventory could not be built (see the log)')
+            ->doesntExpectOutputToContain('was built again')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
+
+        // The other inventory was done; the version is not recorded, so the next upgrade builds everything again.
+        expect(DB::table('items')->where('id', $color->id)->value('search_text'))->toBe('rouge')
+            ->and(DB::table('items')->where('id', $tool->id)->value('search_text'))->toBe('stale')
+            ->and(DB::table('settings')->where('key', InstanceSettings::SEARCH_TEXT_VERSION)->count())->toBe(0);
+
+        Log::shouldHaveReceived('error')->once();
+    });
+
+    it('does not fail the upgrade when the derived data cannot be brought right at all: it warns, logs, and goes on', function (): void {
+        inventoryIn(inventoryTeam()['workspace']);
+        // The inventories cannot even be listed. The message of the exception names a value that must not reach the console.
+        DB::listen(function ($query): void {
+            if (str_starts_with(strtolower($query->sql), 'select') && preg_match('/from [`"]inventories[`"]/', strtolower($query->sql)) === 1) {
+                throw new RuntimeException('Lost the connection while reading jane@example.test.');
+            }
+        });
+        Log::spy();
+
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain('could not be brought right (RuntimeException, see the log)')
+            ->doesntExpectOutputToContain('jane@example.test')
+            ->expectsOutputToContain('The caches were cleared.')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'derived data')
+            && $context['exception'] instanceof RuntimeException);
+    });
+
+    it('warns in French of what could not be brought right', function (): void {
+        $this->useLanguage('fr');
+        $tools = inventoryIn(inventoryTeam()['workspace']);
+        $tool = itemIn($tools);
+        DB::table('items')->update(['search_text' => 'stale']);
+        failSearchTextOf($tool->id);
+        Log::spy();
+
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain("Le texte de recherche des articles de 1 inventaire n'a pas pu être construit (voir le journal)")
+            ->assertExitCode(0);
+    });
+
     it('speaks French', function (): void {
         $this->useLanguage('fr');
         $inventory = inventoryIn(inventoryTeam()['workspace']);
@@ -261,6 +334,24 @@ describe('--optimize', function (): void {
         expect($ran->getArrayCopy())->toBe([]);
 
         $this->artisan('inventaire:upgrade', ['--optimize' => true])->assertExitCode(0);
+
+        expect($ran->getArrayCopy())->toBe($commands);
+    });
+
+    it('still rebuilds the caches when the derived data could not be brought right', function () use ($commands): void {
+        $ran = new ArrayObject;
+        app()->instance(ArtisanRunner::class, recordingRunner($ran));
+        DB::listen(function ($query): void {
+            if (str_starts_with(strtolower($query->sql), 'select') && preg_match('/from [`"]inventories[`"]/', strtolower($query->sql)) === 1) {
+                throw new RuntimeException('Lost the connection.');
+            }
+        });
+        Log::spy();
+
+        $this->artisan('inventaire:upgrade', ['--optimize' => true])
+            ->expectsOutputToContain('could not be brought right')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
 
         expect($ran->getArrayCopy())->toBe($commands);
     });

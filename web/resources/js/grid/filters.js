@@ -15,6 +15,7 @@ import {
     fromInput,
     inputModeOf,
     inputTypeOf,
+    isFilterable,
     queryKindOf,
     toInput,
 } from '../fields/index.js';
@@ -144,12 +145,18 @@ export function draftOf(field, filter) {
  * Asking for the items with no value leaves nothing else to ask. Asking for the ones with a value is said only when
  * nothing else is asked, since any other condition needs a value already.
  *
+ * A field the server cannot query (see `isFilterable`) has no filter, whatever the draft holds.
+ *
  * @param {Field} field
  * @param {Draft} draft
  * @returns {{ filter: Filter | null, errors: Record<string, string> }} The filter (null for none), and the message for
  *   each of `min` and `max` that was refused.
  */
 export function filterFromDraft(field, draft) {
+    if (!isFilterable(field)) {
+        return { filter: null, errors: {} };
+    }
+
     if (draft.presence === 'empty') {
         return { filter: { empty: true }, errors: {} };
     }

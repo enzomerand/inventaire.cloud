@@ -25,6 +25,8 @@ use Illuminate\Support\Carbon;
  *
  * `search_text` is what the item is searched by, built from its values ({@see ItemSearchText}) in a form that ignores
  * the case and the accents. It is a derivative of `values`, only for the database to look into: it is never given out.
+ * It is empty when the item holds nothing to search for, and null only when it was never built (an item that existed before
+ * the column did).
  *
  * @property int $id
  * @property string $ulid
