@@ -865,5 +865,20 @@
     ":grade out of :max": ":grade sur :max",
     "You need a workspace where you can add inventories to use a template.": "Il vous faut un espace de travail où vous pouvez ajouter des inventaires pour utiliser un modèle.",
     "Browse the templates": "Parcourir les modèles",
-    "Free inventory templates for home, IT equipment, stock, collections and more. Pick one and start in a minute.": "Modèles d'inventaire gratuits : logement, parc informatique, stock, collections et plus encore. Choisissez-en un et démarrez en une minute."
+    "Free inventory templates for home, IT equipment, stock, collections and more. Pick one and start in a minute.": "Modèles d'inventaire gratuits : logement, parc informatique, stock, collections et plus encore. Choisissez-en un et démarrez en une minute.",
+    "How do you want to start?": "Comment voulez-vous commencer ?",
+    "Start from scratch": "Partir de zéro",
+    "An empty inventory: you add its fields yourself.": "Un inventaire vide : vous ajoutez vous-même ses champs.",
+    "Start from a template": "Partir d'un modèle",
+    "Fields ready to use: home, shop, cellar, tools...": "Des champs prêts à l'emploi : logement, boutique, cave, outils...",
+    "Search a template": "Rechercher un modèle",
+    "Categories": "Catégories",
+    "The templates could not be loaded.": "Les modèles n'ont pas pu être chargés.",
+    "No template matches your search.": "Aucun modèle ne correspond à votre recherche.",
+    "This template could not be loaded.": "Ce modèle n'a pas pu être chargé.",
+    "All templates": "Tous les modèles",
+    "Template: :name": "Modèle : :name",
+    "This template does not exist. Pick one from the list.": "Ce modèle n'existe pas : choisissez-en un dans la liste.",
+    ":count template": ":count modèle",
+    ":count templates": ":count modèles"
 }

@@ -15,7 +15,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { HttpError, http, scheduleNavigation } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
-import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
+import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 import { attachment, deferred, queryFacts, ulid, withUlids } from '../support/inventory.js';
@@ -1045,6 +1045,12 @@ describe('the pages under the real Alpine CSP build', () => {
 
         const dialog = () => document.querySelector('#inventory-create-title').closest('.modal');
 
+        /** Takes the first step of the dialog: an empty inventory, which leads to the form. */
+        async function startFromScratch() {
+            dialog().querySelector('[data-step="choose"] [data-autofocus]').click();
+            await flush();
+        }
+
         it('lists the inventories as cards, each linking to its page, with what it holds', async () => {
             await open();
 
@@ -1140,6 +1146,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
             expect(showModal).toHaveBeenCalledWith(dialog());
 
+            await startFromScratch();
+
             const form = dialog().querySelector('form');
             const create = form.querySelector('button[type="submit"]');
 
@@ -1166,6 +1174,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 new HttpError(422, 'Invalid.', { errors: { name: ['The name is too long.'] } }),
             );
             await press('New inventory');
+            await startFromScratch();
             const form = dialog().querySelector('form');
 
             await type(form.querySelector('#inventory-create-name'), 'x');
@@ -1184,6 +1193,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 new HttpError(409, 'Conflict', { code: 'inventory_limit_reached', body: { limit: 100 } }),
             );
             await press('New inventory');
+            await startFromScratch();
             const form = dialog().querySelector('form');
 
             await type(form.querySelector('#inventory-create-name'), 'x');
@@ -1193,6 +1203,571 @@ describe('the pages under the real Alpine CSP build', () => {
 
             expect(visible(alert)).toBe(true);
             expect(alert.textContent).toBe('Inventory limit reached (100 per workspace).');
+        });
+
+        describe('starting from a template', () => {
+            const CATALOGUE = [
+                {
+                    slug: 'home-inventory',
+                    category: 'home',
+                    category_label: 'Home',
+                    icon: 'home',
+                    name: 'Home inventory',
+                    summary: 'Everything you own, for your insurer.',
+                    fields_count: 3,
+                    url: '/templates/home-inventory',
+                },
+                {
+                    slug: 'wine-cellar',
+                    category: 'home',
+                    category_label: 'Home',
+                    icon: 'bottle',
+                    name: 'Wine cellar',
+                    summary: 'Bottles, vintages and where they lie.',
+                    fields_count: 1,
+                    url: '/templates/wine-cellar',
+                },
+                {
+                    slug: 'it-equipment',
+                    category: 'it',
+                    category_label: 'IT',
+                    icon: 'device-laptop',
+                    name: 'IT equipment',
+                    summary: 'Laptops, phones and licences.',
+                    fields_count: 2,
+                    url: '/templates/it-equipment',
+                },
+            ];
+
+            /** A field of a template, as the API describes it. */
+            const templateField = (key, name, type, typeLabel, required = false) => ({
+                key,
+                name,
+                type,
+                type_label: typeLabel,
+                required,
+                options: {},
+            });
+
+            const DETAILS = {
+                'home-inventory': {
+                    ...CATALOGUE[0],
+                    description: ['A first paragraph.'],
+                    fields: [
+                        templateField('room', 'Room', 'select', 'Choice'),
+                        templateField('item', 'Item', 'text', 'Text', true),
+                        templateField('price', 'Purchase price', 'money', 'Amount'),
+                    ],
+                    examples: [],
+                },
+                'it-equipment': {
+                    ...CATALOGUE[2],
+                    description: [],
+                    fields: [
+                        templateField('serial', 'Serial number', 'text', 'Text', true),
+                        templateField('bought', 'Bought on', 'date', 'Date'),
+                    ],
+                    examples: [],
+                },
+            };
+
+            /** Answers the three routes the dialog reads: the inventories, the catalogue, and a template by its slug. */
+            function serve({ catalogue = CATALOGUE } = {}) {
+                http.get.mockImplementation(async (url) => {
+                    // One inventory, so that the page offers a single "New inventory" button.
+                    if (url === '/api/v1/workspaces/shop/inventories') {
+                        return { data: INVENTORIES.slice(0, 1) };
+                    }
+
+                    if (url === '/api/v1/templates') {
+                        return { data: catalogue };
+                    }
+
+                    const slug = url.match(/^\/api\/v1\/templates\/(.+)$/)?.[1];
+
+                    if (slug !== undefined && slug in DETAILS) {
+                        return { data: DETAILS[slug] };
+                    }
+
+                    throw new HttpError(404, 'Not found');
+                });
+            }
+
+            const STEPS = ['choose', 'pick', 'preview', 'form'];
+            const step = (name) => dialog().querySelector(`[data-step="${name}"]`);
+
+            /** The steps of the dialog that are on screen: there is always exactly one. */
+            const shown = () => STEPS.filter((name) => visible(step(name)));
+
+            /** The templates of the picker, as the cards show them. */
+            const cards = () => [...step('pick').querySelectorAll('.app-choice')];
+            const cardNames = () => cards().map((card) => card.querySelector('.fw-bold').textContent);
+
+            /** A button of the dialog, by its text (hidden or not). */
+            const button = (label) =>
+                [...dialog().querySelectorAll('button')].find((candidate) => candidate.textContent.trim() === label);
+
+            /** A paragraph of the picker, by its text. */
+            const note = (text) =>
+                [...step('pick').querySelectorAll('p')].find((paragraph) => paragraph.textContent === text);
+
+            const search = () => dialog().querySelector('#inventory-template-search');
+            const chips = () => [...step('pick').querySelectorAll('[aria-pressed]')];
+            const announcement = () => dialog().querySelector('[aria-live="polite"]').textContent;
+
+            /** Takes the second choice of the first step: a template. */
+            async function startFromTemplate() {
+                dialog().querySelector('[data-step="choose"] button:not([data-autofocus])').click();
+                await flush();
+            }
+
+            /** Opens the page and its dialog, and takes the way of the templates up to the picker. */
+            async function openPicker() {
+                serve();
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromTemplate();
+            }
+
+            /** Picks the template of that name in the picker, and waits for its preview. */
+            async function pick(name) {
+                cards()
+                    .find((card) => card.querySelector('.fw-bold').textContent === name)
+                    .click();
+                await flush();
+            }
+
+            it('asks first whether to start from scratch or from a template, and reads no template yet', async () => {
+                serve();
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+
+                expect(shown()).toEqual(['choose']);
+
+                const choices = [...step('choose').querySelectorAll('button')];
+
+                expect(choices.map((choice) => choice.getAttribute('aria-labelledby'))).toEqual([
+                    'inventory-choice-scratch',
+                    'inventory-choice-template',
+                ]);
+                expect(document.getElementById('inventory-choice-scratch').textContent).toBe('Start from scratch');
+                expect(document.getElementById('inventory-choice-template').textContent).toBe('Start from a template');
+                expect(visible(button('Back'))).toBe(false);
+                expect(http.get.mock.calls.map(([url]) => url)).toEqual(['/api/v1/workspaces/shop/inventories']);
+            });
+
+            it('reads the catalogue when the picker opens, once per page, and lists the templates as cards', async () => {
+                await openPicker();
+
+                expect(shown()).toEqual(['pick']);
+                expect(http.get).toHaveBeenCalledWith('/api/v1/templates');
+                expect(cardNames()).toEqual(['Home inventory', 'Wine cellar', 'IT equipment']);
+                expect(cards()[0].querySelector('.app-clamp').textContent).toBe(
+                    'Everything you own, for your insurer.',
+                );
+                expect(cards().map((card) => card.querySelector('.small:last-child').textContent)).toEqual([
+                    '3 fields',
+                    '1 field',
+                    '2 fields',
+                ]);
+                expect(dialog().querySelector('.modal-dialog').classList.contains('modal-lg')).toBe(true);
+                expect(document.activeElement).toBe(search());
+
+                // The dialog is closed and opened again: the catalogue is not read a second time.
+                http.get.mockClear();
+                onModalHidden.mock.calls.at(-1)[1]();
+                await press('New inventory');
+
+                expect(dialog().querySelector('.modal-dialog').classList.contains('modal-lg')).toBe(false);
+
+                await startFromTemplate();
+
+                expect(cardNames()).toHaveLength(3);
+                expect(http.get).not.toHaveBeenCalled();
+            });
+
+            it('narrows the templates by search, whatever the case or the accents, and says how many are left', async () => {
+                await openPicker();
+
+                expect(announcement()).toBe('3 templates');
+
+                await type(search(), 'CELLÁR');
+
+                expect(cardNames()).toEqual(['Wine cellar']);
+                expect(announcement()).toBe('1 template');
+
+                await type(search(), 'insurer own');
+
+                expect(cardNames()).toEqual(['Home inventory']);
+
+                await type(search(), 'nothing like this');
+
+                expect(cardNames()).toEqual([]);
+                expect(visible(note('No template matches your search.'))).toBe(true);
+                expect(announcement()).toBe('0 templates');
+
+                await type(search(), '');
+
+                expect(cardNames()).toHaveLength(3);
+                expect(visible(note('No template matches your search.'))).toBe(false);
+            });
+
+            it('narrows the templates by category, with buttons that say which one is in force', async () => {
+                await openPicker();
+
+                expect(chips().map((chip) => [chip.textContent, chip.getAttribute('aria-pressed')])).toEqual([
+                    ['All templates', 'true'],
+                    ['Home', 'false'],
+                    ['IT', 'false'],
+                ]);
+
+                chips()[2].click();
+                await flush();
+
+                expect(cardNames()).toEqual(['IT equipment']);
+                expect(chips().map((chip) => chip.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true']);
+
+                // The search and the category narrow together.
+                chips()[1].click();
+                await flush();
+                await type(search(), 'wine');
+
+                expect(cardNames()).toEqual(['Wine cellar']);
+
+                chips()[0].click();
+                await type(search(), '');
+
+                expect(cardNames()).toHaveLength(3);
+            });
+
+            it('offers no categories when the catalogue has only one', async () => {
+                serve({ catalogue: CATALOGUE.slice(0, 2) });
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromTemplate();
+
+                expect(cardNames()).toHaveLength(2);
+                expect(visible(step('pick').querySelector('[role="group"]'))).toBe(false);
+            });
+
+            it('says when there is no template at all', async () => {
+                serve({ catalogue: [] });
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromTemplate();
+
+                expect(visible(note('No template is available yet.'))).toBe(true);
+                expect(visible(note('No template matches your search.'))).toBe(false);
+            });
+
+            it('says when the catalogue could not be read, and reads it again on request', async () => {
+                http.get.mockImplementation(async (url) => {
+                    if (url === '/api/v1/templates') {
+                        throw new HttpError(500, 'Server down');
+                    }
+
+                    return { data: INVENTORIES };
+                });
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromTemplate();
+
+                const alert = step('pick').querySelector('.alert-danger');
+
+                expect(visible(alert)).toBe(true);
+                expect(alert.textContent).toContain('The templates could not be loaded.');
+                expect(cards()).toHaveLength(0);
+
+                serve();
+                await press('Try again', alert);
+
+                expect(visible(alert)).toBe(false);
+                expect(cardNames()).toHaveLength(3);
+            });
+
+            it('previews a template: its summary, and its fields with their type and a mark on the required ones', async () => {
+                await openPicker();
+                await pick('Home inventory');
+
+                expect(shown()).toEqual(['preview']);
+                expect(http.get).toHaveBeenCalledWith('/api/v1/templates/home-inventory', { silent: true });
+
+                const preview = step('preview');
+
+                expect(preview.querySelector('h3').textContent).toBe('Home inventory');
+                expect(document.activeElement).toBe(preview.querySelector('h3'));
+                expect(preview.querySelector('.badge').textContent).toBe('Home');
+                expect(preview.textContent).toContain('Everything you own, for your insurer.');
+
+                const rows = [...preview.querySelectorAll('li')].map((row) => [
+                    row.querySelector('.app-grow').textContent,
+                    row.querySelectorAll('.badge')[1].textContent,
+                    visible(row.querySelectorAll('.badge')[0]),
+                ]);
+
+                expect(rows).toEqual([
+                    ['Room', 'Choice', false],
+                    ['Item', 'Text', true],
+                    ['Purchase price', 'Amount', false],
+                ]);
+                expect(visible(button('Use this template'))).toBe(true);
+                expect(visible(button('Back'))).toBe(true);
+            });
+
+            it('shows what the API says as text, never as markup', async () => {
+                serve({
+                    catalogue: [{ ...CATALOGUE[0], name: '<img src=x onerror=alert(1)>', summary: '<b>bold</b>' }],
+                });
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromTemplate();
+
+                expect(dialog().querySelector('img')).toBeNull();
+                expect(dialog().querySelector('.app-choice b')).toBeNull();
+                expect(cardNames()).toEqual(['<img src=x onerror=alert(1)>']);
+                expect(cards()[0].querySelector('.app-clamp').textContent).toBe('<b>bold</b>');
+            });
+
+            it('shows what it knows while the fields are being read, and offers to read them again when that failed', async () => {
+                await openPicker();
+                const reading = deferred();
+
+                http.get.mockImplementation(() => reading.promise);
+                await pick('Home inventory');
+
+                // What the catalogue says is shown meanwhile, and the template can already be used.
+                expect(step('preview').querySelector('h3').textContent).toBe('Home inventory');
+                expect(visible(step('preview').querySelector('[role="status"]'))).toBe(true);
+                expect(button('Use this template').disabled).toBe(false);
+
+                reading.reject(new HttpError(500, 'Server down'));
+                await flush();
+
+                const alert = step('preview').querySelector('.alert-danger');
+
+                expect(visible(alert)).toBe(true);
+                expect(visible(step('preview').querySelector('[role="status"]'))).toBe(false);
+                expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+
+                serve();
+                await press('Try again', alert);
+
+                expect(visible(alert)).toBe(false);
+                expect(step('preview').querySelectorAll('li')).toHaveLength(3);
+            });
+
+            it('goes on to the form with the name and the description the template proposes, and creates from it', async () => {
+                await openPicker();
+                await pick('Home inventory');
+                await press('Use this template');
+
+                expect(shown()).toEqual(['form']);
+                expect(dialog().querySelector('#inventory-create-name').value).toBe('Home inventory');
+                expect(dialog().querySelector('#inventory-create-description').value).toBe(
+                    'Everything you own, for your insurer.',
+                );
+                expect(step('form').querySelector('p').textContent).toBe('Template: Home inventory');
+                expect(visible(step('form').querySelector('p'))).toBe(true);
+                expect(document.activeElement).toBe(dialog().querySelector('#inventory-create-name'));
+                expect(button('Create the inventory').disabled).toBe(false);
+
+                await type(dialog().querySelector('#inventory-create-name'), 'My flat');
+                http.post.mockResolvedValue({ data: { id: 'flat', name: 'My flat', description: null } });
+                await submit(dialog().querySelector('form'));
+
+                expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/inventories', {
+                    name: 'My flat',
+                    description: 'Everything you own, for your insurer.',
+                    template: 'home-inventory',
+                });
+                expect(redirectTo).toHaveBeenCalledWith('/app/w/shop/inventories/flat');
+            });
+
+            it('goes back one step at a time, and keeps what was typed for the same template', async () => {
+                await openPicker();
+                await pick('Home inventory');
+                await press('Use this template');
+                await type(dialog().querySelector('#inventory-create-name'), 'My flat');
+
+                await press('Back');
+
+                expect(shown()).toEqual(['preview']);
+
+                await press('Use this template');
+
+                expect(dialog().querySelector('#inventory-create-name').value).toBe('My flat');
+
+                await press('Back');
+                await press('Back');
+
+                expect(shown()).toEqual(['pick']);
+                expect(document.activeElement).toBe(search());
+
+                await pick('IT equipment');
+                await press('Use this template');
+
+                expect(dialog().querySelector('#inventory-create-name').value).toBe('IT equipment');
+                expect(step('form').querySelector('p').textContent).toBe('Template: IT equipment');
+
+                await press('Back');
+                await press('Back');
+                await press('Back');
+
+                expect(shown()).toEqual(['choose']);
+                expect(visible(button('Back'))).toBe(false);
+            });
+
+            it('starts from an empty form when the person turns to starting from scratch after a template', async () => {
+                await openPicker();
+                await pick('Home inventory');
+                await press('Use this template');
+                await press('Back');
+                await press('Back');
+                await press('Back');
+                await startFromScratch();
+
+                expect(shown()).toEqual(['form']);
+                expect(dialog().querySelector('#inventory-create-name').value).toBe('');
+                expect(dialog().querySelector('#inventory-create-description').value).toBe('');
+                expect(visible(step('form').querySelector('p'))).toBe(false);
+
+                http.post.mockResolvedValue({ data: { id: 'new', name: 'Garden', description: null } });
+                await type(dialog().querySelector('#inventory-create-name'), 'Garden');
+                await submit(dialog().querySelector('form'));
+
+                expect(http.post.mock.calls[0][1]).toStrictEqual({ name: 'Garden', description: null });
+            });
+
+            it('goes back from the form of an empty inventory to the first step', async () => {
+                serve();
+                await mount('app/workspace.blade.php');
+                await press('New inventory');
+                await startFromScratch();
+
+                expect(document.activeElement).toBe(dialog().querySelector('#inventory-create-name'));
+
+                await press('Back');
+
+                expect(shown()).toEqual(['choose']);
+            });
+
+            it('starts again from the first step each time the dialog opens', async () => {
+                await openPicker();
+                await pick('Home inventory');
+                await press('Use this template');
+
+                // Bootstrap tells the component when the dialog has been closed, whichever way it was.
+                onModalHidden.mock.calls.at(-1)[1]();
+                await flush();
+
+                expect(shown()).toEqual(['choose']);
+                expect(dialog().querySelector('#inventory-create-name').value).toBe('');
+                expect(search().value).toBe('');
+            });
+
+            it('never submits the form from another step, whatever the Enter key does', async () => {
+                await openPicker();
+                await type(search(), 'wine');
+
+                const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+                search().dispatchEvent(enter);
+                await submit(dialog().querySelector('form'));
+
+                expect(enter.defaultPrevented).toBe(true);
+                expect(http.post).not.toHaveBeenCalled();
+            });
+
+            it('shows the refusals of the server at the top of the dialog', async () => {
+                await openPicker();
+                await pick('Home inventory');
+                await press('Use this template');
+
+                http.post.mockRejectedValueOnce(
+                    new HttpError(422, 'Invalid.', { errors: { template: ['The selected template is invalid.'] } }),
+                );
+                await submit(dialog().querySelector('form'));
+
+                const alert = dialog().querySelector('.modal-body > .alert');
+
+                expect(visible(alert)).toBe(true);
+                expect(alert.textContent).toBe('The selected template is invalid.');
+
+                http.post.mockRejectedValueOnce(
+                    new HttpError(409, 'Conflict', { code: 'field_limit_reached', body: { limit: 100 } }),
+                );
+                await submit(dialog().querySelector('form'));
+
+                expect(alert.textContent).toBe('Field limit reached (100 per inventory).');
+                expect(redirectTo).not.toHaveBeenCalled();
+            });
+
+            describe('from a link', () => {
+                /** Opens the page of the workspace at an address that may name a template. */
+                async function openAt(query) {
+                    window.history.replaceState(null, '', '/app/w/shop' + query);
+                    serve();
+                    await mount('app/workspace.blade.php');
+                }
+
+                const UNKNOWN = 'This template does not exist. Pick one from the list.';
+
+                it('opens the dialog on the preview of the template the address names, and cleans the address', async () => {
+                    await openAt('?template=home-inventory&view=cards');
+
+                    expect(showModal).toHaveBeenCalledWith(dialog());
+                    expect(shown()).toEqual(['preview']);
+                    expect(step('preview').querySelector('h3').textContent).toBe('Home inventory');
+                    expect(step('preview').querySelectorAll('li')).toHaveLength(3);
+                    expect(window.location.search).toBe('?view=cards');
+
+                    await press('Use this template');
+
+                    expect(dialog().querySelector('#inventory-create-name').value).toBe('Home inventory');
+                });
+
+                it('goes back from that preview to the picker', async () => {
+                    await openAt('?template=home-inventory');
+                    await press('Back');
+
+                    expect(shown()).toEqual(['pick']);
+                    expect(cardNames()).toHaveLength(3);
+                });
+
+                it('opens the picker, with a notice, when no template has that name', async () => {
+                    await openAt('?template=no-such-template');
+
+                    expect(notify).toHaveBeenCalledWith('warning', UNKNOWN);
+                    expect(showModal).toHaveBeenCalledWith(dialog());
+                    expect(shown()).toEqual(['pick']);
+                    expect(cardNames()).toHaveLength(3);
+                    expect(window.location.search).toBe('');
+                });
+
+                it('does not ask the server about what cannot be the name of a template', async () => {
+                    await openAt('?template=' + encodeURIComponent('../../me'));
+
+                    const asked = http.get.mock.calls.map(([url]) => url);
+
+                    expect(asked.filter((url) => url.startsWith('/api/v1/templates/'))).toEqual([]);
+                    expect(notify).toHaveBeenCalledWith('warning', UNKNOWN);
+                    expect(shown()).toEqual(['pick']);
+                });
+
+                it('opens nothing for a person who may not add inventories, and cleans the address all the same', async () => {
+                    PAGE.abilities = { create: false };
+                    await openAt('?template=home-inventory');
+
+                    expect(showModal).not.toHaveBeenCalled();
+                    expect(window.location.search).toBe('');
+                });
+
+                it('leaves the dialog and the address alone when the address names no template', async () => {
+                    await openAt('?view=cards');
+
+                    expect(showModal).not.toHaveBeenCalled();
+                    expect(window.location.search).toBe('?view=cards');
+                });
+            });
         });
     });
 

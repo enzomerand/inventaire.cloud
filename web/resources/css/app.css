@@ -249,3 +249,27 @@
     flex: 1 1 auto;
     min-width: 0;
 }
+
+/*
+ * A choice laid out as a card that is a button: the first step of the new inventory dialog (from scratch, or from a
+ * template) and each template of its picker. The text of a button is centred and its padding is the browser's: both are
+ * undone, so that the card reads like the cards of a list.
+ */
+.app-choice {
+    width: 100%;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.app-choice:focus-visible {
+    outline: 2px solid var(--tblr-primary);
+    outline-offset: 2px;
+}
+
+/* A heading that takes the cursor when its step opens (so that a screen reader reads it): the cursor is not drawn on it. */
+.modal-body [tabindex='-1']:focus {
+    outline: none;
+}

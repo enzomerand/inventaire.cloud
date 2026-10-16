@@ -1,21 +1,25 @@
 /**
- * Alpine component of the page of a workspace: its inventories as cards, and the form that adds one.
+ * Alpine component of the page of a workspace: its inventories as cards, and the dialog that adds one.
  *
  * The list is read from the API (`GET /workspaces/{workspace}/inventories`, by name, each with its counts). People who
  * may edit the workspace (the page says so in `data-can-create`) get a "New inventory" button and a dialog; once the
- * inventory is created the person is taken to its page, where its fields are next. The endpoint and the link of a card
- * come from the markup (`data-url`, `data-inventory-url` on the root), because the CSP build of Alpine does not allow
- * Blade to inject values into expressions.
+ * inventory is created the person is taken to its page, where its fields are next. The dialog starts from scratch (a name
+ * and a description) or from a template (see `inventory-templates/picker.js`, which this component is merged with), and
+ * `?template=<slug>` on the address opens it on a template. The endpoints and the link of a card come from the markup
+ * (`data-url`, `data-inventory-url`, `data-templates-url`, `data-template-url` on the root), because the CSP build of
+ * Alpine does not allow Blade to inject values into expressions.
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the form that caused them, or as a toast.
  */
+import { compose } from '../lib/compose.js';
 import { firstMessages, fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
+import templatePicker from '../inventory-templates/picker.js';
 
 /**
  * @typedef {object} InventorySummary An inventory, as `InventoryResource` describes it in a list.
@@ -30,7 +34,7 @@ import { redirectTo } from '../lib/page.js';
  * @returns {Record<string, any>}
  */
 export default function workspaceInventories() {
-    return {
+    return compose(templatePicker(), {
         /** The inventories of the workspace. */
         items: [],
 
@@ -52,19 +56,31 @@ export default function workspaceInventories() {
         /** Why the form was refused when it is not about one input ("" when it was not). */
         formError: '',
 
+        /** The element the component is set on, kept when the page opens (see `rootElement`); null until then. */
+        rootNode: null,
+
+        /**
+         * The element the component is set on, which carries the endpoints and the abilities (`data-*`). Taken when the page
+         * opens rather than asked of Alpine each time: Alpine stops answering `$root` to a call made from the scope of an
+         * element that has been taken out of the page since, and a reading that such a call started still needs them.
+         */
+        get rootElement() {
+            return this.rootNode ?? this.$root;
+        },
+
         /** Endpoint of the inventories of the workspace (GET, POST), from `data-url` on the component root. */
         get url() {
-            return this.$root.dataset.url;
+            return this.rootElement.dataset.url;
         },
 
         /** Page of an inventory, with `__id__` where its ULID goes, from `data-inventory-url` on the component root. */
         get inventoryUrl() {
-            return this.$root.dataset.inventoryUrl;
+            return this.rootElement.dataset.inventoryUrl;
         },
 
         /** Whether the person may add inventories to the workspace, from `data-can-create` on the component root. */
         get canCreate() {
-            return this.$root.dataset.canCreate === '1';
+            return this.rootElement.dataset.canCreate === '1';
         },
 
         /** Whether the workspace is known to hold no inventory (not when the list could not be read). */
@@ -78,12 +94,19 @@ export default function workspaceInventories() {
         },
 
         /**
-         * Reads the inventories when the page opens, and forgets the form whenever the dialog is closed.
+         * Reads the inventories when the page opens, forgets the form whenever the dialog is closed, and opens the dialog on
+         * the template the address names, if it names one. The dialog is not there yet when the component starts, hence the
+         * wait for the next tick.
          *
          * @returns {Promise<void>}
          */
         async init() {
-            this.$nextTick(() => onModalHidden(this.$refs.modal, () => this.resetForm()));
+            this.rootNode = this.$root;
+            this.$nextTick(() => {
+                this.modalNode = this.$refs.modal;
+                onModalHidden(this.modalElement, () => this.resetForm());
+                this.openLinkedTemplate();
+            });
 
             await this.load();
         },
@@ -129,17 +152,17 @@ export default function workspaceInventories() {
         },
 
         /**
-         * Opens the dialog that adds an inventory.
+         * Opens the dialog that adds an inventory, on its first step.
          *
          * @returns {void}
          */
         startCreate() {
             this.resetForm();
-            showModal(this.$refs.modal);
+            showModal(this.modalElement);
         },
 
         /**
-         * Forgets what was typed and the refusals.
+         * Forgets what was typed, the refusals and the path taken in the dialog.
          *
          * @returns {void}
          */
@@ -147,10 +170,23 @@ export default function workspaceInventories() {
             this.form = { name: '', description: '' };
             this.errors = {};
             this.formError = '';
+            this.resetPicker();
         },
 
         /**
-         * Creates the inventory, then takes the person to its page.
+         * What the form does when it is submitted: only its own step creates the inventory (the other steps hold no form
+         * control that could submit it, but the Enter key must never get there).
+         *
+         * @returns {Promise<void>}
+         */
+        async submit() {
+            if (this.step === 'form') {
+                await this.create();
+            }
+        },
+
+        /**
+         * Creates the inventory, from the template the form is for if there is one, then takes the person to its page.
          *
          * @returns {Promise<void>}
          */
@@ -165,10 +201,16 @@ export default function workspaceInventories() {
 
             try {
                 const description = this.form.description.trim();
-                const answer = await http.post(this.url, {
+                const payload = {
                     name: this.form.name.trim(),
                     description: description === '' ? null : description,
-                });
+                };
+
+                if (this.formTemplate !== null) {
+                    payload.template = this.formTemplate.slug;
+                }
+
+                const answer = await http.post(this.url, payload);
 
                 hideModal(this.$refs.modal);
                 redirectTo(this.pageUrl(answer.data));
@@ -200,9 +242,11 @@ export default function workspaceInventories() {
                     other !== undefined ? messages[other] : Object.keys(messages).length === 0 ? error.message : '';
             } else if (error.status === 409 && error.code === 'inventory_limit_reached') {
                 this.formError = t('inventories.error.limit', { count: error.body?.limit ?? '' });
+            } else if (error.status === 409 && error.code === 'field_limit_reached') {
+                this.formError = t('fields.error.limit', { count: error.body?.limit ?? '' });
             } else {
                 notify('danger', error.message);
             }
         },
-    };
+    });
 }
