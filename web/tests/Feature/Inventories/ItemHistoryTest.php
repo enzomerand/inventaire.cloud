@@ -11,8 +11,9 @@ use App\Models\ItemRevision;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
-require_once __DIR__.'/../../Support/inventories.php';
+require_once __DIR__.'/../../Support/attachments.php';
 
 /*
  * The history of an item: a revision for every creation and every change of values (written in the transaction of the
@@ -52,9 +53,23 @@ function historyRows(Item $item): array
 
 describe('the table', function (): void {
     it('has the columns the model reads, and an index for the history of an item', function (): void {
-        expect(Schema::hasColumns('item_revisions', ['id', 'inventory_id', 'item_id', 'user_id', 'action', 'changes', 'created_at']))->toBeTrue()
+        expect(Schema::hasColumns('item_revisions', ['id', 'ulid', 'inventory_id', 'item_id', 'user_id', 'action', 'changes', 'created_at']))->toBeTrue()
             ->and(Schema::hasColumn('item_revisions', 'updated_at'))->toBeFalse()
-            ->and(collect(Schema::getIndexes('item_revisions'))->contains(fn (array $index): bool => $index['columns'] === ['item_id', 'id']))->toBeTrue();
+            ->and(collect(Schema::getIndexes('item_revisions'))->contains(fn (array $index): bool => $index['columns'] === ['item_id', 'id']))->toBeTrue()
+            ->and(collect(Schema::getIndexes('item_revisions'))->contains(fn (array $index): bool => $index['columns'] === ['ulid'] && $index['unique']))->toBeTrue();
+    });
+
+    it('gives every revision a ULID of its own when it is written, in lowercase, and keeps the number for the order', function (): void {
+        $case = historyCase();
+        app(Items::class)->update($case['inventory'], $case['item'], [$case['name']->ulid => 'Saw'], $case['team']['owner']);
+        app(Items::class)->update($case['inventory'], $case['item'], [$case['name']->ulid => 'File'], $case['team']['owner']);
+
+        $rows = historyRows($case['item']);
+
+        expect($rows)->toHaveCount(3)
+            ->and(array_unique(array_map(fn (ItemRevision $revision): string => $revision->ulid, $rows)))->toHaveCount(3)
+            ->and(array_filter($rows, fn (ItemRevision $revision): bool => preg_match('/^[0-9a-z]{26}$/', $revision->ulid) !== 1))->toBe([])
+            ->and(collect($rows)->pluck('id')->all())->toBe(collect($rows)->pluck('id')->sort()->values()->all());
     });
 });
 
@@ -224,19 +239,33 @@ describe('reading the history', function (): void {
         $response = inventoryCall($this, $case['team']['viewer'], 'GET', $case['uri'].'/revisions')->assertOk();
         $data = $response->json('data');
 
+        [$created, $updated] = array_reverse(historyRows($case['item']));
+
         expect($data)->toHaveCount(2)
             ->and(array_keys($data[0]))->toBe(['id', 'action', 'user', 'created_at', 'changes'])
+            ->and($data[0]['id'])->toBe($created->ulid)
+            ->and($data[1]['id'])->toBe($updated->ulid)
             ->and($data[0]['action'])->toBe('updated')
-            ->and($data[0]['user'])->toBe(['id' => $case['team']['owner']->id, 'name' => 'Owner'])
+            ->and($data[0]['user'])->toBe(['name' => 'Owner'])
             ->and($data[0]['created_at'])->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}|Z$/')
             ->and($data[0]['changes'])->toBe([
                 ['field' => ['id' => $case['price']->ulid, 'name' => 'Price', 'type' => 'money'], 'before' => '12.50', 'after' => '15.00'],
                 ['field' => ['id' => $case['state']->ulid, 'name' => 'State', 'type' => 'select'], 'before' => null, 'after' => $case['used']],
             ])
             ->and($data[1]['action'])->toBe('created')
-            ->and($data[1]['user'])->toBe(['id' => $case['team']['editor']->id, 'name' => 'Editor'])
-            ->and($data[1]['changes'][0])->toBe(['field' => ['id' => $case['name']->ulid, 'name' => 'Name', 'type' => 'text'], 'before' => null, 'after' => 'Hammer'])
-            ->and($data[0]['id'])->toBeGreaterThan($data[1]['id']);
+            ->and($data[1]['user'])->toBe(['name' => 'Editor'])
+            ->and($data[1]['changes'][0])->toBe(['field' => ['id' => $case['name']->ulid, 'name' => 'Name', 'type' => 'text'], 'before' => null, 'after' => 'Hammer']);
+    });
+
+    it('never gives out a number: not the one of a revision, not the one of the person who wrote it', function (): void {
+        $case = historyCase();
+        inventoryCall($this, $case['team']['owner'], 'PATCH', $case['uri'], ['values' => [$case['price']->ulid => '15']])->assertOk();
+
+        $data = inventoryCall($this, $case['team']['viewer'], 'GET', $case['uri'].'/revisions')->assertOk()->json('data');
+
+        expect($data)->toHaveCount(2)
+            ->and(array_map(fn (array $revision): bool => is_string($revision['id']) && strlen($revision['id']) === 26, $data))->toBe([true, true])
+            ->and(array_map(fn (array $revision): array => array_keys($revision['user']), $data))->toBe([['name'], ['name']]);
     });
 
     it('is readable by every member, and by nobody else', function (): void {
@@ -290,16 +319,92 @@ describe('reading the history', function (): void {
             ->and(historyRows($case['item'])[0]->user_id)->toBeNull();
     });
 
-    it('shows a field that is gone as no field, with the values as they were stored', function (): void {
+    it('serves no value of a field that is gone: they are taken out of the history with the field', function (): void {
         $case = historyCase();
         app(InventoryFields::class)->delete($case['inventory'], $case['price']);
 
-        $changes = inventoryCall($this, $case['team']['owner'], 'GET', $case['uri'].'/revisions')->assertOk()->json('data.0.changes');
+        $response = inventoryCall($this, $case['team']['owner'], 'GET', $case['uri'].'/revisions')->assertOk();
 
-        expect($changes)->toBe([
+        expect($response->json('data.0.changes'))->toBe([
             ['field' => ['id' => $case['name']->ulid, 'name' => 'Name', 'type' => 'text'], 'before' => null, 'after' => 'Hammer'],
-            ['field' => null, 'before' => null, 'after' => '12.50'],
-        ]);
+        ])
+            ->and((string) $response->getContent())->not->toContain('12.50')
+            ->and(DB::table('item_revisions')->where('item_id', $case['item']->id)->value('changes'))->not->toContain($case['price']->ulid)->not->toContain('12.50');
+    });
+
+    it('takes a deleted field out of every revision of the inventory, and deletes the revisions that have nothing left', function (): void {
+        $case = historyCase();
+        $other = itemIn($case['inventory'], [$case['price']->ulid => '99.00'], $case['team']['editor']);
+        app(Items::class)->update($case['inventory'], $case['item'], [$case['price']->ulid => '15'], $case['team']['owner']);
+        app(Items::class)->update($case['inventory'], $case['item'], [$case['name']->ulid => 'Saw', $case['price']->ulid => '16'], $case['team']['owner']);
+        $elsewhere = inventoryIn($case['team']['workspace'], 'Elsewhere');
+        $elsewherePrice = fieldIn($elsewhere, 'money', 'Price', ['currency' => 'EUR']);
+        $foreign = itemIn($elsewhere, [$elsewherePrice->ulid => '5.00']);
+
+        app(InventoryFields::class)->delete($case['inventory'], $case['price']);
+
+        $left = fn (Item $item): array => array_map(fn (ItemRevision $revision): array => [$revision->action, array_keys($revision->changes)], historyRows($item));
+
+        // The item: its creation (the name stays), then the change of price alone is gone, then the change of name stays.
+        expect($left($case['item']))->toBe([['created', [$case['name']->ulid]], ['updated', [$case['name']->ulid]]])
+            // The other item only ever had a price: its creation has nothing left to say.
+            ->and($left($other))->toBe([])
+            // Another inventory is not touched.
+            ->and($left($foreign))->toBe([['created', [$elsewherePrice->ulid]]]);
+    });
+
+    it('keeps the revisions of the files of a deleted field, which no longer name the field', function (): void {
+        attachmentDisk();
+        $case = historyCase();
+        $photos = fieldIn($case['inventory'], 'photo', 'Photos');
+        attachmentTo($case['inventory'], $case['item'], attachmentImage('a.png'), $case['team']['owner'], $photos);
+        attachmentTo($case['inventory'], $case['item'], attachmentPdf('plain.pdf'), $case['team']['owner']);
+
+        app(InventoryFields::class)->delete($case['inventory'], $photos);
+
+        $revisions = array_values(array_filter(historyRows($case['item']), fn (ItemRevision $revision): bool => $revision->action === 'attachment_added'));
+        $shown = inventoryCall($this, $case['team']['owner'], 'GET', $case['uri'].'/revisions')->assertOk()->json('data');
+
+        expect($revisions)->toHaveCount(2)
+            ->and($revisions[0]->changes)->toEqual(['attachment' => $revisions[0]->changes['attachment'], 'name' => 'a.png', 'field' => null])
+            ->and($revisions[1]->changes['field'])->toBeNull()
+            ->and($revisions[1]->changes['name'])->toBe('plain.pdf')
+            ->and(array_column($shown, 'action'))->toBe(['attachment_added', 'attachment_added', 'created'])
+            ->and($shown[1]['changes'][0]['field'])->toBeNull()
+            ->and(DB::table('item_revisions')->where('item_id', $case['item']->id)->pluck('changes')->implode(''))->not->toContain($photos->ulid);
+    });
+
+    it('takes the field out of the history in the transaction that deletes it', function (): void {
+        $case = historyCase();
+        $before = DB::table('item_revisions')->where('item_id', $case['item']->id)->value('changes');
+
+        expect(fn () => DB::transaction(function () use ($case): void {
+            app(InventoryFields::class)->delete($case['inventory'], $case['price']);
+
+            throw new RuntimeException('The request failed afterwards.');
+        }))->toThrow(RuntimeException::class);
+
+        expect(DB::table('item_revisions')->where('item_id', $case['item']->id)->value('changes'))->toBe($before)
+            ->and($before)->toContain($case['price']->ulid);
+    });
+
+    it('takes it out of a history longer than one chunk', function (): void {
+        $case = historyCase();
+        $rows = [];
+
+        foreach (range(1, 1200) as $number) {
+            $rows[] = ['ulid' => strtolower((string) Str::ulid()), 'inventory_id' => $case['inventory']->id, 'item_id' => $case['item']->id, 'user_id' => null, 'action' => 'updated', 'created_at' => now(),
+                'changes' => json_encode($number % 2 === 0 ? [$case['price']->ulid => ['before' => '1', 'after' => '2']] : [$case['price']->ulid => ['before' => '1', 'after' => '2'], $case['name']->ulid => ['before' => 'a', 'after' => 'b']])];
+        }
+
+        foreach (array_chunk($rows, 200) as $chunk) {
+            DB::table('item_revisions')->insert($chunk);
+        }
+
+        app(InventoryFields::class)->delete($case['inventory'], $case['price']);
+
+        expect(DB::table('item_revisions')->where('item_id', $case['item']->id)->count())->toBe(1 + 600)
+            ->and(DB::table('item_revisions')->where('item_id', $case['item']->id)->where('changes', 'like', '%'.$case['price']->ulid.'%')->count())->toBe(0);
     });
 
     it('shows a value through the field as it is now: a choice deleted since is gone', function (): void {
@@ -322,7 +427,7 @@ describe('reading the history', function (): void {
 
     it('gives no change for a stray revision whose changes are not what is expected', function (): void {
         $case = historyCase();
-        DB::table('item_revisions')->insert(['inventory_id' => $case['inventory']->id, 'item_id' => $case['item']->id, 'user_id' => null, 'action' => 'updated', 'changes' => '{"x":5}', 'created_at' => now()]);
+        DB::table('item_revisions')->insert(['ulid' => strtolower((string) Str::ulid()), 'inventory_id' => $case['inventory']->id, 'item_id' => $case['item']->id, 'user_id' => null, 'action' => 'updated', 'changes' => '{"x":5}', 'created_at' => now()]);
 
         $data = inventoryCall($this, $case['team']['owner'], 'GET', $case['uri'].'/revisions')->assertOk()->json('data');
 

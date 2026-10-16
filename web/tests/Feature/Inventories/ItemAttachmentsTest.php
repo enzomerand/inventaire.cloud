@@ -95,7 +95,7 @@ describe('uploading a file', function (): void {
             ->and($file['height'])->toBeNull()
             ->and($file['has_thumbnail'])->toBeFalse()
             ->and($file['uploaded_at'])->toStartWith(substr(now()->toIso8601String(), 0, 10))
-            ->and($file['uploaded_by'])->toBe(['id' => $case['team']['owner']->id, 'name' => 'Owner'])
+            ->and($file['uploaded_by'])->toBe(['name' => 'Owner'])
             ->and($file['url'])->toBe($case['files'].'/'.$attachment->ulid)
             ->and($file['thumbnail_url'])->toBeNull();
     });
@@ -527,7 +527,7 @@ describe('removing a file', function (): void {
         $revisions = inventoryCall($this, $case['team']['viewer'], 'GET', $case['uri'].'/revisions')->assertOk()->json('data');
 
         expect(array_column($revisions, 'action'))->toBe(['attachment_removed', 'attachment_added', 'created'])
-            ->and($revisions[0]['user'])->toBe(['id' => $case['team']['editor']->id, 'name' => 'Editor'])
+            ->and($revisions[0]['user'])->toBe(['name' => 'Editor'])
             ->and($revisions[0]['changes'])->toBe([['attachment' => ['id' => $attachment->ulid, 'name' => 'a.pdf'], 'field' => null]])
             ->and($revisions[1]['changes'])->toBe([['attachment' => ['id' => $attachment->ulid, 'name' => 'a.pdf'], 'field' => null]]);
     });
@@ -646,11 +646,11 @@ describe('the item', function (): void {
 
         $uploaders = fn (): array => array_column(inventoryCall($this, $case['team']['viewer'], 'GET', $case['uri'])->assertOk()->json('data.attachments'), 'uploaded_by');
 
-        expect($uploaders())->toBe([['id' => $case['team']['editor']->id, 'name' => 'Editor'], ['id' => $case['team']['owner']->id, 'name' => 'Owner']]);
+        expect($uploaders())->toBe([['name' => 'Editor'], ['name' => 'Owner']]);
 
         $case['team']['editor']->delete();
 
-        expect($uploaders())->toBe([null, ['id' => $case['team']['owner']->id, 'name' => 'Owner']])
+        expect($uploaders())->toBe([null, ['name' => 'Owner']])
             ->and(Attachment::query()->count())->toBe(2);
     });
 

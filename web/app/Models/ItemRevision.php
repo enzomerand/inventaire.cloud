@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Inventories\ItemRevisions;
 use App\Inventories\Items;
 use App\Models\Casts\JsonObject;
+use App\Models\Concerns\HasUlidRouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
@@ -16,7 +17,9 @@ use Illuminate\Support\Carbon;
  *
  * It is written by {@see ItemRevisions}, in the transaction of the change it describes, and never changed afterwards. It
  * goes with its item (deleted by {@see Items::delete()}) and with its inventory (the foreign key cascades); when the account
- * that wrote it is deleted the revision stays and forgets the person (`user_id` is null). `changes` is a JSON object whose shape depends on the `action`:
+ * that wrote it is deleted the revision stays and forgets the person (`user_id` is null). The numeric `id` orders the history and
+ * prunes it and stays inside the application; `ulid` is what the API gives out ({@see HasUlidRouteKey}). `changes` is a JSON
+ * object whose shape depends on the `action`:
  *
  * - `created` and `updated`: the stored values that changed, keyed by the ULID of the field, each as
  *   `{"before": <stored value or null>, "after": <stored value or null>}`. For `created` that is every value the item was
@@ -26,6 +29,7 @@ use Illuminate\Support\Carbon;
  *   of the file or photo field>|null"}`.
  *
  * @property int $id
+ * @property string $ulid
  * @property int $inventory_id
  * @property int $item_id
  * @property int|null $user_id
@@ -35,6 +39,8 @@ use Illuminate\Support\Carbon;
  */
 final class ItemRevision extends Model
 {
+    use HasUlidRouteKey;
+
     /** The item was added. */
     public const CREATED = 'created';
 

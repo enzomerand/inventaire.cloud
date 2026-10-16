@@ -11,6 +11,7 @@ use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
 use App\Models\Inventory;
 use App\Models\InventoryField;
+use App\Models\ItemRevision;
 use App\Rules\SingleLineText;
 use App\Workspaces\Locks;
 use Closure;
@@ -173,6 +174,10 @@ final class InventoryFields
      * the field they had a value for is gone. The text the items are searched by loses what the field said in the same
      * pass. The positions of the fields left are closed up.
      *
+     * The history goes the same way: the values the field held are taken out of every revision of the inventory (they are
+     * the raw values of a field that no longer exists, which nobody should be handed any more), and a revision that has
+     * nothing left to say is deleted. The revisions of files stay, and no longer name the field.
+     *
      * @throws ModelNotFoundException When the inventory or the field was deleted in the meantime.
      */
     public function delete(Inventory $inventory, InventoryField $field): void
@@ -191,6 +196,7 @@ final class InventoryFields
             $remaining = $fields->reject(fn (InventoryField $other): bool => $other->is($current))->values();
 
             $this->rewriteValues($locked, $current->ulid, fn (array $values): array => array_diff_key($values, [$current->ulid => true]), $remaining);
+            $this->forgetInHistory($locked, $current->ulid);
             $current->delete();
 
             $this->renumber($remaining);
@@ -321,6 +327,60 @@ final class InventoryFields
 
             return $values;
         }, $fields);
+    }
+
+    /**
+     * Takes a deleted field out of the history of the items of the inventory, one chunk at a time: its values leave the
+     * revisions of values (the revision is deleted when nothing else is left in it), and the revisions of files that were
+     * attached to the field no longer name it.
+     *
+     * Through the query builder and by chunks of the primary key, like {@see self::rewriteValues()}, with the JSON edited in
+     * PHP (not portable in SQL); the inventory is locked by the caller, so no revision is written meanwhile.
+     *
+     * @param  string  $ulid  The key of the field.
+     *
+     * @throws JsonException
+     */
+    private function forgetInHistory(Inventory $inventory, string $ulid): void
+    {
+        $this->db->table('item_revisions')
+            ->where('inventory_id', $inventory->getKey())
+            ->chunkById(self::PURGE_CHUNK, function (Collection $rows) use ($ulid): void {
+                foreach ($rows as $row) {
+                    $json = (string) $row->changes;
+
+                    // Most revisions never mention the field: a cheap look before decoding.
+                    if (! str_contains($json, $ulid)) {
+                        continue;
+                    }
+
+                    $changes = json_decode($json, true);
+
+                    if (! is_array($changes)) {
+                        continue;
+                    }
+
+                    if (in_array($row->action, [ItemRevision::ATTACHMENT_ADDED, ItemRevision::ATTACHMENT_REMOVED], true)) {
+                        if (($changes['field'] ?? null) !== $ulid) {
+                            continue;
+                        }
+
+                        $changes['field'] = null;
+                    } elseif (array_key_exists($ulid, $changes)) {
+                        unset($changes[$ulid]);
+
+                        if ($changes === []) {
+                            $this->db->table('item_revisions')->where('id', $row->id)->delete();
+
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+
+                    $this->db->table('item_revisions')->where('id', $row->id)->update(['changes' => json_encode($changes, JSON_THROW_ON_ERROR)]);
+                }
+            }, 'id');
     }
 
     /**

@@ -10,8 +10,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * How the API describes a file attached to an item: its ULID, the file or photo field it fills (or none), its name, type
- * and size, the size of an image, whether it has a thumbnail, when it was uploaded and by whom (`uploaded_by`: the `id` and
- * `name` of the person, or null when their account was deleted since) and the addresses to fetch it from.
+ * and size, the size of an image, whether it has a thumbnail, when it was uploaded and by whom (`uploaded_by`: the `name` of
+ * the person, never their number, or null when their account was deleted since) and the addresses to fetch it from.
  *
  * The uploader is read from the `uploader` relation: load it with the files (`attachments.uploader`) to spare a query for each.
  *
@@ -55,7 +55,7 @@ final class AttachmentResource extends JsonResource
             'height' => $this->height,
             'has_thumbnail' => $this->resource->hasThumbnail(),
             'uploaded_at' => $this->created_at?->toIso8601String(),
-            'uploaded_by' => $this->resource->uploader === null ? null : ['id' => $this->resource->uploader->getKey(), 'name' => $this->resource->uploader->name],
+            'uploaded_by' => $this->resource->uploader === null ? null : ['name' => $this->resource->uploader->name],
             'url' => route('api.v1.inventories.items.attachments.show', $parameters, false),
             'thumbnail_url' => $this->resource->hasThumbnail() ? route('api.v1.inventories.items.attachments.thumbnail', $parameters, false) : null,
         ];
