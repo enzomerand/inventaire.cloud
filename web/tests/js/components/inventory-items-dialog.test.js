@@ -712,16 +712,16 @@ describe('the dialog of an item while its requests are on their way', () => {
             http.post.mockReturnValue(sending.promise);
             const receiving = component.receive([picked('front.jpg')], 'photos');
 
-            expect(component.uploadAnnouncement).toBe('Sending front.jpg…');
+            expect(component.announcement).toBe('Sending front.jpg…');
 
             sending.resolve({ data: SAW_WITH_FRONT });
             await receiving;
 
-            expect(component.uploadAnnouncement).toBe('File sent: front.jpg');
+            expect(component.announcement).toBe('File sent: front.jpg');
 
             resetFromOutside();
 
-            expect(component.uploadAnnouncement).toBe('');
+            expect(component.announcement).toBe('');
         });
 
         it('says nothing about a file that failed: its row says why', async () => {
@@ -731,7 +731,7 @@ describe('the dialog of an item while its requests are on their way', () => {
 
             await component.receive([picked('front.jpg')], 'photos');
 
-            expect(component.uploadAnnouncement).toBe('');
+            expect(component.announcement).toBe('');
         });
     });
 });

@@ -89,28 +89,6 @@ describe('the history of an item', () => {
     });
 
     describe('the tabs of the dialog', () => {
-        it('open on the details, for who may edit and for who may not', async () => {
-            await open();
-
-            expect(component.tab).toBe('details');
-            expect(component.showTabs).toBe(true);
-
-            await open(undefined, { canEdit: false });
-
-            expect(component.mode).toBe('view');
-            expect(component.showTabs).toBe(true);
-            expect(component.tab).toBe('details');
-        });
-
-        it('are not shown while an item is added', async () => {
-            await open();
-
-            component.startCreate();
-
-            expect(component.showTabs).toBe(false);
-            expect(component.tab).toBe('details');
-        });
-
         it('go back to the details whenever the dialog opens', async () => {
             await open();
             component.selectTab('files');

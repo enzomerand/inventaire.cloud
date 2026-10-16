@@ -112,7 +112,7 @@ final class Attachments
             if ($thumbnail !== null) {
                 $attachment->thumbnail_path = AttachmentStorage::thumbnailPath($attachment->path);
                 $written[] = $attachment->thumbnail_path;
-                $this->storage->write($disk, $attachment->thumbnail_path, $thumbnail->jpeg);
+                $this->storage->write($disk, $attachment->thumbnail_path, $thumbnail);
             }
 
             $attachment->disk = $disk;
@@ -141,7 +141,7 @@ final class Attachments
     {
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($inventory, $item, $attachment, $editor): void {
             $this->locks->author($editor);
-            $workspace = $this->usage->lock($inventory->workspace_id);
+            $workspace = $this->locks->workspace($inventory->workspace_id);
             $locked = $this->locks->inventory($inventory->getKey());
             $lockedItem = $this->locks->itemOf($locked, $item);
 
@@ -177,7 +177,7 @@ final class Attachments
     private function record(Inventory $inventory, Item $item, User $uploader, Attachment $attachment, ?string $fieldUlid): Attachment
     {
         $this->locks->author($uploader);
-        $workspace = $this->usage->lock($inventory->workspace_id);
+        $workspace = $this->locks->workspace($inventory->workspace_id);
         $locked = $this->locks->inventory($inventory->getKey());
         $lockedItem = $this->locks->itemOf($locked, $item);
 
@@ -281,7 +281,7 @@ final class Attachments
     }
 
     /**
-     * The thumbnail of an image, or null when none is made.
+     * The thumbnail of an image (the bytes of a JPEG), or null when none is made.
      *
      * A photo field (`$imagesOnly`) refuses a file whose content is not an image of a type that gets a thumbnail. An image of
      * one of those types is kept when it has no thumbnail, in a photo field as anywhere else: its header may give no size, GD
@@ -291,7 +291,7 @@ final class Attachments
      *
      * @throws ValidationException When `$imagesOnly` and the file is not an image of one of the supported types.
      */
-    private function thumbnailOf(IncomingFile $file, ?ImageInfo $image, bool $imagesOnly): ?Thumbnail
+    private function thumbnailOf(IncomingFile $file, ?ImageInfo $image, bool $imagesOnly): ?string
     {
         if ($imagesOnly && ! $file->isImage()) {
             throw ValidationException::withMessages(['file' => [__('This field only takes images: JPEG, PNG, WebP or GIF.')]]);

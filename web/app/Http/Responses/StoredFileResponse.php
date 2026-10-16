@@ -66,7 +66,8 @@ final class StoredFileResponse
 
         $headers = $revalidation + [
             'Content-Type' => $attachment->mime,
-            'Content-Disposition' => self::disposition($shown ? 'inline' : 'attachment', $attachment->name),
+            // The name as an ASCII fallback and as UTF-8 (RFC 6266).
+            'Content-Disposition' => HeaderUtils::makeDisposition($shown ? 'inline' : 'attachment', $attachment->name, FileNames::asciiFallback($attachment->name)),
             'X-Content-Type-Options' => 'nosniff',
             'Content-Security-Policy' => $shown && $attachment->mime === 'application/pdf' ? self::PDF_VIEWER : self::SANDBOX,
             'Content-Length' => (string) $attachment->size,
@@ -161,13 +162,5 @@ final class StoredFileResponse
         Log::error('A stored file could not be read from its disk.', ['disk' => $diskName, 'path' => $path, 'exception' => $failure]);
 
         return ApiError::unavailable(__('This file cannot be read right now. Try again in a moment.'), 'file_unavailable');
-    }
-
-    /**
-     * The `Content-Disposition` header: the disposition, with the name as an ASCII fallback and as UTF-8 (RFC 6266).
-     */
-    private static function disposition(string $disposition, string $name): string
-    {
-        return HeaderUtils::makeDisposition($disposition, $name, str_replace(['%', '/', '\\'], '_', FileNames::asciiFallback($name)));
     }
 }

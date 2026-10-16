@@ -7,36 +7,24 @@ namespace App\Inventories\Attachments;
 use App\Models\Workspace;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Log;
 
 /**
  * The number of bytes the files of a workspace use, kept on the workspace's row (`storage_used`) so that nothing has to
  * add up the attachments to judge a quota.
  *
- * The workspace is locked by whoever moves the counter ({@see self::lock()}, before the inventory: see {@see Locks}), so the
+ * The workspace is locked by whoever moves the counter ({@see Locks::workspace()}, before the inventory), so the
  * value read with the lock is the one to move, and the quota is judged on it by the same transaction that writes the file's
  * row. Only this class moves the counter, in the transaction that adds or removes the attachment.
  */
 final class WorkspaceStorage
 {
     /**
-     * Gets the database and the locks.
+     * Gets the database.
      */
     public function __construct(
         private readonly DatabaseManager $db,
-        private readonly Locks $locks,
     ) {}
-
-    /**
-     * Locks the workspace and returns it as it is now.
-     *
-     * @throws ModelNotFoundException When it was deleted in the meantime.
-     */
-    public function lock(int|string $workspaceId): Workspace
-    {
-        return $this->locks->workspace($workspaceId);
-    }
 
     /**
      * Moves the counter of a locked workspace by the bytes just added or removed.

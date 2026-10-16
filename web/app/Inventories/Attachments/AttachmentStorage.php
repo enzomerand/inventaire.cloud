@@ -105,13 +105,13 @@ final class AttachmentStorage
     }
 
     /**
-     * Writes a file of the local disk, or some text, to a disk.
+     * Writes some bytes, or a stream to read them from, to a disk.
      *
-     * @param  string  $contents  The bytes to write.
+     * @param  string|resource  $contents  The bytes to write, or an open stream to read them from (it is not closed).
      *
      * @throws RuntimeException When the disk refuses it.
      */
-    public function write(string $disk, string $path, string $contents): void
+    public function write(string $disk, string $path, mixed $contents): void
     {
         if ($this->disk($disk)->put($path, $contents) === false) {
             throw new RuntimeException("A file could not be written to the disk [{$disk}].");
@@ -134,15 +134,11 @@ final class AttachmentStorage
         }
 
         try {
-            $written = $this->disk($disk)->put($path, $stream);
+            $this->write($disk, $path, $stream);
         } finally {
             if (is_resource($stream)) {
                 fclose($stream);
             }
-        }
-
-        if ($written === false) {
-            throw new RuntimeException("A file could not be written to the disk [{$disk}].");
         }
     }
 

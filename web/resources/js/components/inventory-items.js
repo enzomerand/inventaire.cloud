@@ -49,7 +49,7 @@ import {
 } from '../fields/index.js';
 import { firstMessages, fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
-import { t } from '../lib/i18n.js';
+import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
@@ -1210,7 +1210,7 @@ export default function inventoryItems() {
                         );
                     }
                 } else {
-                    notify('warning', this.partialNotice(failed));
+                    notify('warning', tn('files.notice.partial', failed));
                 }
 
                 await this.loadItems(creating ? 1 : this.page);

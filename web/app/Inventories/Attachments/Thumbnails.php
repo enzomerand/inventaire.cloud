@@ -58,15 +58,15 @@ final class Thumbnails
     }
 
     /**
-     * The thumbnail of an image, or null when none is made on purpose: GD is not there, the image has too many pixels, or
-     * PHP has not the memory to decode it.
+     * The thumbnail of an image (the bytes of a JPEG without metadata), or null when none is made on purpose: GD is not there,
+     * the image has too many pixels, or PHP has not the memory to decode it.
      *
      * @param  string  $mime  The type detected from the content.
      * @param  ImageInfo  $info  What {@see self::inspect()} said about the file.
      *
      * @throws UnreadableImageException When the image cannot be decoded.
      */
-    public function make(string $path, string $mime, ImageInfo $info): ?Thumbnail
+    public function make(string $path, string $mime, ImageInfo $info): ?string
     {
         if (! function_exists('imagecreatetruecolor') || $info->width * $info->height > self::MAX_PIXELS || ! $this->fitsInMemory($info)) {
             return null;
@@ -102,7 +102,7 @@ final class Thumbnails
             return null;
         }
 
-        return new Thumbnail($jpeg, $thumbWidth, $thumbHeight);
+        return $jpeg;
     }
 
     /**

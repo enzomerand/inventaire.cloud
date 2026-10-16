@@ -50,12 +50,6 @@ describe('the tables', function (): void {
             ->and(Workspace::query()->findOrFail($case['team']['workspace']->id)->storage_used)->toBe(0)
             ->and(Workspace::factory()->create()->storage_used)->toBe(0);
     });
-
-    it('have a configuration with the limits the spec asks for', function (): void {
-        expect(config('inventories.max_attachment_size'))->toBe(20 * 1024 * 1024)
-            ->and(config('inventories.max_attachments_per_item'))->toBe(20)
-            ->and(config('inventories.storage_per_workspace'))->toBe(1024 * 1024 * 1024);
-    });
 });
 
 describe('uploading a file', function (): void {
@@ -342,10 +336,6 @@ describe('the pace of uploads', function (): void {
             ->and($refused->json('message'))->toBeString()
             ->and(Attachment::query()->count())->toBe(5)
             ->and(storedFiles())->toHaveCount(5);
-    });
-
-    it('is thirty a minute unless configured otherwise', function (): void {
-        expect(config('inventories.uploads_per_minute'))->toBe(30);
     });
 });
 

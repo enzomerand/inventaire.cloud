@@ -17,6 +17,9 @@ use Illuminate\Support\Facades\Schema;
  * table that is itself reached by a cascade from two levels above are therefore kept out of the schema: everything that
  * hangs from an inventory hangs from the inventory itself.
  *
+ * Like every model the API hands out, a revision is known to the outside world by its `ulid`; its numeric key stays what orders
+ * and prunes the history.
+ *
  * The author column forgets the person (not the revision) when an account is deleted, the way the author columns of the
  * items do. `changes` is a JSON object whose shape depends on the `action` (see `App\Models\ItemRevision`); it is only
  * ever read back whole, never searched, so it is a plain `json` column on every engine. The history of an item is read
@@ -31,6 +34,7 @@ return new class extends Migration
     {
         Schema::create('item_revisions', function (Blueprint $table) {
             $table->id();
+            $table->ulid('ulid')->unique();
             // PostgreSQL does not index a foreign key by itself; deleting an inventory needs it.
             $table->foreignId('inventory_id')->index()->constrained()->cascadeOnDelete();
             // No foreign key: see above. The index below serves the history of an item.

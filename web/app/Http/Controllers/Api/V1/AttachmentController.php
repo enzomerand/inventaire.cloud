@@ -113,6 +113,6 @@ final class AttachmentController extends Controller
      */
     private function describe(Inventory $inventory, Item $item): ItemResource
     {
-        return new ItemResource($item->refresh()->load('attachments.uploader:id,name'), $inventory->fields()->get(), $inventory);
+        return new ItemResource($item->refresh(), $inventory->fields()->get(), $inventory);
     }
 }

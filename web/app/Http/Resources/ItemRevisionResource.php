@@ -73,26 +73,15 @@ final class ItemRevisionResource extends JsonResource
 
         foreach ($this->fields as $ulid => $field) {
             if (isset($stored[$ulid]) && is_array($stored[$ulid])) {
-                $changes[] = $this->valueChange($field, $stored[$ulid]);
+                $changes[] = [
+                    'field' => $this->describeField($field),
+                    'before' => $this->show($field, $stored[$ulid]['before'] ?? null),
+                    'after' => $this->show($field, $stored[$ulid]['after'] ?? null),
+                ];
             }
         }
 
         return $changes;
-    }
-
-    /**
-     * One change of value.
-     *
-     * @param  array<array-key, mixed>  $change  `before` and `after`, as stored.
-     * @return array{field: array{id: string, name: string, type: string}, before: mixed, after: mixed}
-     */
-    private function valueChange(InventoryField $field, array $change): array
-    {
-        return [
-            'field' => ['id' => $field->ulid, 'name' => $field->name, 'type' => $field->type],
-            'before' => $this->show($field, $change['before'] ?? null),
-            'after' => $this->show($field, $change['after'] ?? null),
-        ];
     }
 
     /**
@@ -107,7 +96,7 @@ final class ItemRevisionResource extends JsonResource
 
         return [[
             'attachment' => ['id' => $stored['attachment'] ?? null, 'name' => $stored['name'] ?? null],
-            'field' => $this->describeField($field),
+            'field' => $field === null ? null : $this->describeField($field),
         ]];
     }
 
@@ -129,12 +118,12 @@ final class ItemRevisionResource extends JsonResource
     }
 
     /**
-     * The field as the history names it, or null when it is gone.
+     * The field as the history names it.
      *
-     * @return array{id: string, name: string, type: string}|null
+     * @return array{id: string, name: string, type: string}
      */
-    private function describeField(?InventoryField $field): ?array
+    private function describeField(InventoryField $field): array
     {
-        return $field === null ? null : ['id' => $field->ulid, 'name' => $field->name, 'type' => $field->type];
+        return ['id' => $field->ulid, 'name' => $field->name, 'type' => $field->type];
     }
 }

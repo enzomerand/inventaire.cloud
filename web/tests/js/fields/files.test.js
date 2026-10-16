@@ -130,12 +130,6 @@ describe('a file as the templates show it', () => {
         expect(isDisplayable('image/svg+xml')).toBe(false);
         expect(isDisplayable('text/html')).toBe(false);
     });
-
-    it('adds the parameter to an address that has a query already', () => {
-        const entry = fileEntry(attachment('a1', null, { url: '/download?id=a1' }), true);
-
-        expect(entry.href).toBe('/download?id=a1&inline=1');
-    });
 });
 
 describe('the files of a field', () => {

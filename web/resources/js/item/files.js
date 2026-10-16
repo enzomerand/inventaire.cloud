@@ -98,34 +98,20 @@ function endsBatch(error) {
 }
 
 /**
- * Which icon stands for a file that is not on the server yet.
- *
- * @param {string} mime The type the browser gave the file ("" when it did not).
- * @returns {'image' | 'pdf' | 'file'}
- */
-function iconOfMime(mime) {
-    return PHOTO_TYPES.includes(mime) ? 'image' : mime === 'application/pdf' ? 'pdf' : 'file';
-}
-
-/**
  * A file the browser holds, shown like one the server holds (a name, a size, an icon; no thumbnail, no link).
  *
  * @param {Staged} staged
  * @returns {FileEntry}
  */
 function stagedEntry(staged) {
-    return {
+    return fileEntry({
         id: staged.key,
         name: staged.file.name,
         mime: staged.file.type,
         size: staged.file.size,
-        sizeText: formatSize(staged.file.size),
-        icon: iconOfMime(staged.file.type),
-        download: '',
-        thumb: null,
-        href: null,
-        target: null,
-    };
+        has_thumbnail: false,
+        url: '',
+    });
 }
 
 /**
@@ -157,7 +143,10 @@ export default function itemFiles() {
         /** Whether a file was added or removed since the list of items was last read: the list is read again when the dialog closes. */
         filesChanged: false,
 
-        /** What the live region of the dialog says of the uploads ("Sending front.jpg…"). */
+        /**
+         * What the live region of the dialog says of the uploads ("Sending front.jpg…"). The region is on the page from the
+         * start, which is what makes it announce.
+         */
         announcement: '',
 
         /** The size of the largest file the server takes, in bytes, from `data-max-attachment-size` on the component root. */
@@ -190,11 +179,6 @@ export default function itemFiles() {
         /** Whether a file is on its way up, or waiting for its turn. */
         get uploading() {
             return this.uploads.some((upload) => upload.state === 'sending' || upload.state === 'queued');
-        },
-
-        /** What the live region of the dialog says about the uploads (it is there from the start, which is what makes it announce). */
-        get uploadAnnouncement() {
-            return this.announcement;
         },
 
         /** The attachments of the item of the dialog. */
@@ -511,10 +495,10 @@ export default function itemFiles() {
          * Sends the files chosen while the item was added, now that it exists, one after the other.
          *
          * @param {string} itemId
-         * @param {number} [token] The dialog they were chosen in.
+         * @param {number} token The dialog they were chosen in.
          * @returns {Promise<Outcome>}
          */
-        async sendStaged(itemId, token = this.dialogToken) {
+        async sendStaged(itemId, token) {
             const files = this.staged;
 
             this.staged = [];
@@ -532,10 +516,10 @@ export default function itemFiles() {
          *
          * @param {string} itemId
          * @param {Staged[]} files
-         * @param {number} [token] The dialog the batch belongs to, taken once for the whole batch.
+         * @param {number} token The dialog the batch belongs to, taken once for the whole batch.
          * @returns {Promise<Outcome>}
          */
-        async sendFiles(itemId, files, token = this.dialogToken) {
+        async sendFiles(itemId, files, token) {
             let failed = 0;
             let next = 0;
             /** @type {{ reason: string, retryable: boolean } | null} */
@@ -688,14 +672,13 @@ export default function itemFiles() {
          *
          * @param {string} itemId
          * @param {Staged} one
-         * @param {number} [token] The dialog the file belongs to.
+         * @param {number} token The dialog the file belongs to.
          * @returns {Promise<UploadResult>} Whether the file was added, and why the batch ends when the refusal ends it.
          */
-        async sendFile(itemId, one, token = this.dialogToken) {
+        async sendFile(itemId, one, token) {
             const known = this.knownAttachmentIds(itemId);
 
             if (token === this.dialogToken) {
-                this.queueUploads([one], token);
                 this.setUpload(one.key, { state: 'sending', message: '' });
                 this.announcement = t('files.status.sending', { name: one.file.name });
             }
@@ -1043,16 +1026,6 @@ export default function itemFiles() {
             this.removing = null;
             this.pickedField = null;
             this.announcement = '';
-        },
-
-        /**
-         * The number of files of the dialog that failed, for the sentence that tells the person.
-         *
-         * @param {number} count
-         * @returns {string}
-         */
-        partialNotice(count) {
-            return tn('files.notice.partial', count);
         },
     };
 }

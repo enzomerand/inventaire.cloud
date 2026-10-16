@@ -94,17 +94,6 @@ export function acceptOf(field) {
 }
 
 /**
- * Adds a parameter to an address, with the right separator.
- *
- * @param {string} url
- * @param {string} parameter For example `inline=1`.
- * @returns {string}
- */
-function withParameter(url, parameter) {
-    return url + (url.includes('?') ? '&' : '?') + parameter;
-}
-
-/**
  * Whether a browser can display a file in the page (the server serves only these inline).
  *
  * @param {string} mime
@@ -134,7 +123,7 @@ export function fileEntry(attachment, linked = false) {
         icon: PHOTO_TYPES.includes(attachment.mime) ? 'image' : attachment.mime === 'application/pdf' ? 'pdf' : 'file',
         download: attachment.url,
         thumb: attachment.has_thumbnail && attachment.thumbnail_url ? attachment.thumbnail_url : null,
-        href: !linked ? null : displayable ? withParameter(attachment.url, 'inline=1') : attachment.url,
+        href: !linked ? null : displayable ? `${attachment.url}?inline=1` : attachment.url,
         target: linked && displayable ? '_blank' : null,
     };
 }

@@ -260,7 +260,7 @@
                     <div class="modal-body">
                         {{-- Where the progress of the uploads is told to assistive technology. It is on the page from the start: a live
                              region that is added together with its message is not reliably announced. --}}
-                        <div class="visually-hidden" role="status" aria-live="polite" x-text="uploadAnnouncement"></div>
+                        <div class="visually-hidden" role="status" aria-live="polite" x-text="announcement"></div>
 
                         <div class="alert alert-danger" role="alert" x-show="formError" x-text="formError"></div>
 
