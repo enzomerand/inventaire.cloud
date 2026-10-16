@@ -315,12 +315,17 @@ describe('the dialog of an item while its requests are on their way', () => {
             await open();
             component.open({ id: 'i2' });
             http.post.mockRejectedValue(new HttpError(404, 'Not found'));
-            http.get.mockImplementation(async (url) =>
-                url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]),
-            );
+            http.get.mockImplementation(async (url) => {
+                if (url === `${ITEMS}/i2`) {
+                    throw new HttpError(404, 'Not found');
+                }
+
+                return url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]);
+            });
 
             await component.receive([picked('front.jpg'), picked('side.jpg')], 'photos');
 
+            expect(http.get).toHaveBeenCalledWith(`${ITEMS}/i2`, { silent: true });
             expect(hideModal).toHaveBeenCalledWith(component.$refs.modal);
             expect(component.items.map((one) => one.id)).toEqual(['i3']);
             // The second file was not even tried: the item is gone.
@@ -346,14 +351,75 @@ describe('the dialog of an item while its requests are on their way', () => {
             component.open({ id: 'i2' });
             component.askRemove({ id: 'a1', name: 'front.jpg' });
             http.delete.mockRejectedValue(new HttpError(404, 'Not found'));
-            http.get.mockImplementation(async (url) =>
-                url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]),
-            );
+            http.get.mockImplementation(async (url) => {
+                if (url === `${ITEMS}/i2`) {
+                    throw new HttpError(404, 'Not found');
+                }
+
+                return url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]);
+            });
 
             await component.confirmRemove();
 
             expect(hideModal).toHaveBeenCalledWith(component.$refs.modal);
             expect(component.removing).toBeNull();
+        });
+
+        it('keeps the dialog when the item is only missing from the page that was read again, and shows it as the server holds it', async () => {
+            await open([SAW_WITH_FRONT, PLANE]);
+            component.open({ id: 'i2' });
+            component.askRemove({ id: 'a1', name: 'front.jpg' });
+            http.delete.mockRejectedValue(new HttpError(404, 'Not found'));
+            http.get.mockImplementation(async (url) => {
+                if (url === `${ITEMS}/i2`) {
+                    return { data: SAW };
+                }
+
+                return url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]);
+            });
+
+            await component.confirmRemove();
+
+            expect(hideModal).not.toHaveBeenCalled();
+            expect(component.items.map((one) => one.id)).toEqual(['i3']);
+            expect(component.dialogItem).toBe(SAW);
+            expect(component.filesOf(PHOTOS)).toEqual([]);
+        });
+
+        it('keeps the dialog when a file is refused with a 404 and the item is missing from the page but still there', async () => {
+            await open();
+            component.open({ id: 'i2' });
+            http.post.mockRejectedValue(new HttpError(404, 'Not found'));
+            http.get.mockImplementation(async (url) => {
+                if (url === `${ITEMS}/i2`) {
+                    return { data: SAW };
+                }
+
+                return url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]);
+            });
+
+            await component.receive([picked('front.jpg')], 'photos');
+
+            expect(hideModal).not.toHaveBeenCalled();
+            expect(component.dialogItem).toBe(SAW);
+        });
+
+        it('keeps the dialog when the server cannot say whether the item is there', async () => {
+            await open();
+            component.open({ id: 'i2' });
+            http.post.mockRejectedValue(new HttpError(404, 'Not found'));
+            http.get.mockImplementation(async (url) => {
+                if (url === `${ITEMS}/i2`) {
+                    throw new HttpError(0, 'Network error.', { kind: 'network' });
+                }
+
+                return url === INVENTORY ? inventoryAnswer(FILE_FIELDS, 1) : page([PLANE]);
+            });
+
+            await component.receive([picked('front.jpg')], 'photos');
+
+            expect(hideModal).not.toHaveBeenCalled();
+            expect(component.itemId).toBe('i2');
         });
 
         it('shows the item as the list holds it when only the file is gone', async () => {
@@ -598,6 +664,38 @@ describe('the dialog of an item while its requests are on their way', () => {
                 'An item cannot hold more than 20 files.',
                 'An item cannot hold more than 20 files.',
             ]);
+        });
+
+        it('ends when the server throttles the uploads: the files that follow are not sent, and can be sent again', async () => {
+            await open();
+            component.open({ id: 'i2' });
+            http.post.mockRejectedValue(new HttpError(429, 'Too many attempts.', { retryAfter: 30 }));
+
+            await component.receive([picked('front.jpg'), picked('side.jpg'), picked('back.jpg')], 'photos');
+
+            expect(http.post).toHaveBeenCalledTimes(1);
+            expect(component.uploads.map((upload) => [upload.state, upload.message, upload.retryable])).toEqual([
+                ['error', 'Too many attempts.', true],
+                ['error', 'Too many attempts.', true],
+                ['error', 'Too many attempts.', true],
+            ]);
+            expect(component.uploading).toBe(false);
+        });
+
+        it('settles every file even when reading the list again fails after the item was found gone', async () => {
+            await open();
+            component.open({ id: 'i2' });
+            http.post.mockRejectedValue(new HttpError(404, 'Not found'));
+            vi.spyOn(component, 'loadItems').mockRejectedValue(new Error('The list could not be read.'));
+
+            await component.receive([picked('front.jpg'), picked('side.jpg')], 'photos');
+
+            expect(http.post).toHaveBeenCalledTimes(1);
+            expect(component.uploads.map((upload) => [upload.state, upload.retryable])).toEqual([
+                ['error', false],
+                ['error', false],
+            ]);
+            expect(component.uploading).toBe(false);
         });
 
         it('goes on after a refusal that only concerns the file', async () => {

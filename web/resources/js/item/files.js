@@ -14,9 +14,9 @@
  * shows as waiting from the start, and a batch belongs to the dialog that was open when it began. A dialog that is closed
  * (or opened on something else) while a batch is on its way does not get what the batch has left: the files not yet sent
  * are given up, and the person is told. A refusal that will be the same for the files that follow (the item is gone, the
- * space is full) ends the batch too. An upload that was cut (the connection broke, or the time ran out) may have been
- * stored all the same: the item is read again to see, before the file is declared failed. A file that failed can be sent
- * again; the browser keeps it for that.
+ * space is full, the uploads are throttled) ends the batch too. An upload that was cut (the connection broke, or the time
+ * ran out) may have been stored all the same: the item is read again to see, before the file is declared failed. A file
+ * that failed can be sent again; the browser keeps it for that.
  *
  * The endpoints come from the address of the item (`data-item-url` of the component root): `/attachments` to add a file,
  * `/attachments/{attachment}` to remove one. The largest file the server takes is `data-max-attachment-size`, in bytes.
@@ -82,8 +82,8 @@ function isCutShort(error) {
 }
 
 /**
- * Whether a refusal will be the same for the files that follow it in a batch: the item is gone, or the space it takes
- * files from is full.
+ * Whether a refusal will be the same for the files that follow it in a batch: the item is gone, the space it takes
+ * files from is full, or the server throttles the uploads (the allowance renews with the minute, not with the next file).
  *
  * @param {unknown} error
  * @returns {boolean}
@@ -92,6 +92,7 @@ function endsBatch(error) {
     return (
         error instanceof HttpError &&
         (error.status === 404 ||
+            error.status === 429 ||
             (error.status === 409 &&
                 (error.code === 'storage_limit_reached' || error.code === 'attachment_limit_reached')))
     );
@@ -765,15 +766,31 @@ export default function itemFiles() {
             }
 
             if (gone) {
+                await this.followGone(token);
+            }
+
+            return { added: false, endsBatch: endsBatch(error) ? { reason, retryable: !gone } : null };
+        },
+
+        /**
+         * Reads the list again after a refusal that said the item is gone, and settles what the dialog shows. A failure of
+         * that is left aside: the row of the file already says what became of it, and the batch it belongs to must go on
+         * with the rows it has left (none may stay waiting).
+         *
+         * @param {number} token The dialog the file belongs to.
+         * @returns {Promise<void>}
+         */
+        async followGone(token) {
+            try {
                 this.totalsFor = null;
                 await this.loadItems(this.page);
 
                 if (token === this.dialogToken) {
-                    this.syncDialogItem();
+                    await this.syncDialogItem();
                 }
+            } catch {
+                // The row of the file says what became of it: the dialog is left as it is.
             }
-
-            return { added: false, endsBatch: endsBatch(error) ? { reason, retryable: !gone } : null };
         },
 
         /**
@@ -981,7 +998,7 @@ export default function itemFiles() {
                     await this.loadItems(this.page);
 
                     if (token === this.dialogToken) {
-                        this.syncDialogItem();
+                        await this.syncDialogItem();
                     }
                 } else {
                     this.fail(error);
@@ -992,17 +1009,34 @@ export default function itemFiles() {
         },
 
         /**
-         * Shows the item of the dialog as the list holds it now; the dialog closes when the item is not on the page any more
-         * (it was deleted, or it is not on this page now).
+         * Shows the item of the dialog as the server holds it now, once a refusal said that something is gone (the item or a
+         * file of it). The dialog closes only when the server answers that the item itself is gone: the list says nothing of
+         * it when it is merely on another page, or no longer matches the search. When the server cannot say (the connection
+         * broke), the dialog shows the item as the list holds it, or is left as it is.
          *
-         * @returns {void}
+         * @returns {Promise<void>}
          */
-        syncDialogItem() {
-            const fresh = this.items.find((one) => one.id === this.itemId);
+        async syncDialogItem() {
+            const itemId = this.itemId;
+            const token = this.dialogToken;
+            let fresh = this.items.find((one) => one.id === itemId);
 
-            if (fresh === undefined) {
-                this.closeDialog();
+            try {
+                const answered = (await http.get(fillUrl(this.itemUrl, itemId), { silent: true }))?.data;
 
+                if (answered?.id === itemId) {
+                    fresh = answered;
+                }
+            } catch (error) {
+                if (token === this.dialogToken && error instanceof HttpError && error.status === 404) {
+                    this.closeDialog();
+
+                    return;
+                }
+            }
+
+            // The dialog moved on while the server was asked.
+            if (token !== this.dialogToken || fresh === undefined) {
                 return;
             }
 
