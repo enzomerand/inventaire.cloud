@@ -1,0 +1,69 @@
+{
+    "category": "home",
+    "icon": "home",
+    "name": { "fr": "Inventaire du logement", "en": "Home inventory" },
+    "summary": {
+        "fr": "Listez vos biens pièce par pièce, avec leur valeur, leur facture et leur garantie.",
+        "en": "List your belongings room by room, with their value, invoice and warranty."
+    },
+    "description": {
+        "fr": [
+            "Ce modèle sert à garder une trace de tout ce que contient votre logement, par exemple pour votre assurance habitation.",
+            "Ajoutez une photo et la facture de chaque bien : en cas de sinistre, tout est déjà prêt."
+        ],
+        "en": [
+            "This template keeps track of everything your home holds, for your home insurance for instance.",
+            "Add a photo and the invoice of each item: if something goes wrong, everything is ready."
+        ]
+    },
+    "fields": [
+        { "key": "name", "type": "text", "required": true, "name": { "fr": "Nom", "en": "Name" } },
+        {
+            "key": "room",
+            "type": "select",
+            "name": { "fr": "Pièce", "en": "Room" },
+            "options": {
+                "choices": [
+                    { "key": "kitchen", "label": { "fr": "Cuisine", "en": "Kitchen" }, "color": "blue" },
+                    { "key": "living", "label": { "fr": "Salon", "en": "Living room" }, "color": "green" },
+                    { "key": "bedroom", "label": { "fr": "Chambre", "en": "Bedroom" }, "color": "purple" },
+                    { "key": "garage", "label": { "fr": "Garage", "en": "Garage" } }
+                ]
+            }
+        },
+        {
+            "key": "kinds",
+            "type": "multiselect",
+            "name": { "fr": "Catégories", "en": "Categories" },
+            "options": {
+                "choices": [
+                    { "key": "appliance", "label": { "fr": "Électroménager", "en": "Appliance" }, "color": "orange" },
+                    { "key": "furniture", "label": { "fr": "Meuble", "en": "Furniture" }, "color": "teal" },
+                    { "key": "electronics", "label": { "fr": "Électronique", "en": "Electronics" }, "color": "indigo" }
+                ]
+            }
+        },
+        { "key": "price", "type": "money", "name": { "fr": "Prix d'achat", "en": "Purchase price" }, "options": { "currency": "EUR" } },
+        { "key": "bought_on", "type": "date", "name": { "fr": "Date d'achat", "en": "Purchase date" } },
+        { "key": "warranty_until", "type": "date", "name": { "fr": "Garantie jusqu'au", "en": "Warranty until" } },
+        { "key": "condition", "type": "rating", "name": { "fr": "État", "en": "Condition" }, "options": { "max": 5 } },
+        { "key": "insured", "type": "boolean", "name": { "fr": "Assuré", "en": "Insured" } },
+        { "key": "weight", "type": "number", "name": { "fr": "Poids", "en": "Weight" }, "options": { "decimals": 1, "min": "0", "unit": "kg" } },
+        { "key": "tags", "type": "tags", "name": { "fr": "Étiquettes", "en": "Tags" } },
+        { "key": "notes", "type": "textarea", "name": { "fr": "Notes", "en": "Notes" } },
+        { "key": "photo", "type": "photo", "name": { "fr": "Photo", "en": "Photo" }, "options": { "max_files": 3 } },
+        { "key": "invoice", "type": "file", "name": { "fr": "Facture", "en": "Invoice" } }
+    ],
+    "examples": {
+        "fr": [
+            { "name": "Lave-linge", "room": "kitchen", "kinds": ["appliance"], "price": "649.00", "bought_on": "2023-09-14", "warranty_until": "2026-09-14", "condition": 4, "insured": true, "weight": "68.5", "tags": ["garantie", "cuisine"] },
+            { "name": "Canapé d'angle", "room": "living", "kinds": ["furniture"], "price": "1290.00", "bought_on": "2022-02-03", "condition": 5, "insured": true },
+            { "name": "Perceuse à percussion", "room": "garage", "kinds": ["electronics", "appliance"], "price": "89.90", "condition": 3, "insured": false, "notes": "Prêtée au voisin en mai." }
+        ],
+        "en": [
+            { "name": "Washing machine", "room": "kitchen", "kinds": ["appliance"], "price": "649.00", "bought_on": "2023-09-14", "warranty_until": "2026-09-14", "condition": 4, "insured": true, "weight": "68.5", "tags": ["warranty", "kitchen"] },
+            { "name": "Corner sofa", "room": "living", "kinds": ["furniture"], "price": "1290.00", "bought_on": "2022-02-03", "condition": 5, "insured": true },
+            { "name": "Hammer drill", "room": "garage", "kinds": ["electronics", "appliance"], "price": "89.90", "condition": 3, "insured": false, "notes": "Lent to the neighbour in May." }
+        ]
+    }
+}

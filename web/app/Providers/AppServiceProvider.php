@@ -9,6 +9,7 @@ use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Inventories\Fields\FieldTypes;
+use App\Inventories\Templates\TemplateCatalogue;
 use App\Models\User;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
@@ -37,6 +38,9 @@ class AppServiceProvider extends ServiceProvider
 
         // The field types are stateless objects: one registry for the whole process.
         $this->app->singleton(FieldTypes::class, fn (): FieldTypes => FieldTypes::standard());
+
+        // The catalogue of inventory templates is read from its files once per process (see the class).
+        $this->app->singleton(TemplateCatalogue::class);
     }
 
     /**

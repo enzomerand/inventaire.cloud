@@ -74,4 +74,21 @@ return [
 
     'uploads_per_minute' => (int) env('INVENTORIES_UPLOADS_PER_MINUTE', 30),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Inventory templates
+    |--------------------------------------------------------------------------
+    |
+    | - `templates_path`: the folder of the template files, one `<slug>.json` each
+    |   (`inventory-templates/` of the application by default). They are the
+    |   catalogue: the public gallery, the API and the "new inventory" dialog read
+    |   them, and a file that is not valid is ignored and logged.
+    | - `templates_per_minute`: requests per minute and per address the public
+    |   endpoints of the catalogue answer (`INVENTORIES_TEMPLATES_PER_MINUTE`, 60).
+    |
+    */
+    'templates_path' => base_path('inventory-templates'),
+
+    'templates_per_minute' => (int) env('INVENTORIES_TEMPLATES_PER_MINUTE', 60),
+
 ];

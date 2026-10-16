@@ -843,5 +843,12 @@
     "File sent: :name": "Fichier envoyé : :name",
     ":count file was not sent, as the dialog was closed.": ":count fichier n'a pas été envoyé : la fenêtre a été fermée.",
     ":count files were not sent, as the dialog was closed.": ":count fichiers n'ont pas été envoyés : la fenêtre a été fermée.",
-    "Waiting…": "En attente…"
+    "Waiting…": "En attente…",
+    "Home and family": "Maison et famille",
+    "Business and retail": "Commerce et entreprise",
+    "IT and electronics": "Informatique et électronique",
+    "Collections": "Collections",
+    "Hobbies and workshop": "Loisirs et atelier",
+    "Food and drink": "Alimentation et boissons",
+    "Associations and clubs": "Associations et clubs"
 }
