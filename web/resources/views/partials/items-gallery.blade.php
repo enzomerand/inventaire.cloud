@@ -24,6 +24,15 @@
         <template x-for="card in cards" :key="card.id">
             <div class="col-12 col-sm-6 col-lg-4 col-xl-3">
                 <div class="card h-100 app-row-link" @click="openFromRow(card, $event)">
+                    {{-- The first photo of the item, when it has one: its thumbnail, with the file name as alternative text. --}}
+                    <template x-if="card.cover">
+                        <div class="position-relative">
+                            <img class="card-img-top app-cover" :src="card.cover.src" :alt="card.cover.alt" loading="lazy">
+                            <template x-if="card.cover.more">
+                                <span class="badge bg-dark text-white position-absolute bottom-0 end-0 m-2" x-text="card.cover.more"></span>
+                            </template>
+                        </div>
+                    </template>
                     <div class="card-body">
                         <h3 class="card-title text-break mb-3">
                             <button type="button" class="btn btn-link p-0 text-start text-reset fw-bold text-break" :class="{ 'fst-italic text-secondary': card.untitled }" :aria-label="openLabel + ': ' + card.title" @click.stop="open(card)" x-text="card.title"></button>
