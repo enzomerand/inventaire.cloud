@@ -23,6 +23,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\MessageBag;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 
 /**
  * Sorts, filters and totals the items of an inventory as a list asks for them, against the fields the inventory has.
@@ -32,7 +33,8 @@ use Illuminate\Validation\ValidationException;
  * mistake is reported at once, as a `422` whose error keys name what is wrong (`sort`, `direction`, `filter.<ulid>` and
  * `filter.<ulid>.<operator>`). The SQL itself, which differs from one engine to another, is {@see JsonValues}'s.
  *
- * **Sort**: `sort` is `created_at`, `updated_at` or the ULID of a field, `direction` is `asc` (the default) or `desc`.
+ * **Sort**: `sort` is `created_at`, `updated_at` or the ULID of a field, `direction` is `asc` (the default) or `desc`
+ * (both read in any case).
  * The way a value is sorted comes from the kind of its field ({@see QueryKind}): text with the collation of the
  * connection, numbers as numbers, dates, moments, times and yes/no as their fixed-width text, a choice by its place in the
  * choices of the field. An item with no value for the field always comes last, whichever the direction, and so does one
@@ -89,6 +91,7 @@ final class ItemQuery
 
         $sort = $input['sort'] ?? null;
         $direction = $input['direction'] ?? 'asc';
+        $direction = is_string($direction) ? strtolower($direction) : $direction;
 
         if ($direction !== 'asc' && $direction !== 'desc') {
             $errors->add('direction', __('The direction must be asc or desc.'));
@@ -118,6 +121,8 @@ final class ItemQuery
      * @param  EloquentBuilder<Item>|Relation<Item, Inventory, *>  $items  The query the list runs, whatever its order: only the matching items count, not the page.
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory.
      * @return array<string, string>
+     *
+     * @throws LogicException When the database answers with a total that is not a decimal number.
      */
     public function totals(EloquentBuilder|Relation $items, Collection $fields): array
     {
@@ -139,11 +144,16 @@ final class ItemQuery
         $totals = [];
 
         foreach ($summed as $key => [$field, $type]) {
+            // No sum (null) is no row holding a value: zero. A sum that is not a number is not that, and not to be hidden.
             $sum = $sums[$key] ?? null;
-            $sum = Decimal::tryFrom(is_string($sum) || is_int($sum) ? (string) $sum : '0');
+            $sum = $sum === null ? Decimal::tryFrom('0') : Decimal::tryFrom(is_string($sum) || is_int($sum) ? (string) $sum : null);
             $places = $type instanceof DecimalType ? $type->decimals($field) : 0;
 
-            $totals[$key] = $sum === null ? '0' : $sum->format(max($places, $sum->scale()));
+            if ($sum === null) {
+                throw new LogicException("The database gave a total for the field {$key} that is not a decimal number.");
+            }
+
+            $totals[$key] = $sum->format(max($places, $sum->scale()));
         }
 
         return $totals;

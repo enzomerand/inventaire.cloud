@@ -161,6 +161,26 @@ describe('finding items by words', function (): void {
         expect(searchFinds($this, $team['owner'], $inventory, $typed, $name))->toBe(['(no name)', 'Hammer', 'Saw']);
     })->with(['an empty search' => '', 'spaces' => '   ', 'tabs and line breaks' => " \t\n "]);
 
+    it('answers a search that holds control characters, the null character included, as white space (never a server error)', function (): void {
+        ['team' => $team, 'inventory' => $inventory, 'name' => $name] = searchableInventory(['Hammer', 'Saw blade']);
+
+        // The null character is white space: two words, "a" and "b", which "Saw blade" holds and "Hammer" does not.
+        expect(searchFinds($this, $team['owner'], $inventory, "a\0b", $name))->toBe(['Saw blade'])
+            ->and(searchFinds($this, $team['owner'], $inventory, "ham\0mer", $name))->toBe(['Hammer'])
+            ->and(searchFinds($this, $team['owner'], $inventory, "saw\0\x01blade", $name))->toBe(['Saw blade'])
+            ->and(searchFinds($this, $team['owner'], $inventory, "\0hammer\x7F", $name))->toBe(['Hammer'])
+            ->and(searchFinds($this, $team['owner'], $inventory, "\0", $name))->toBe(['Hammer', 'Saw blade'])
+            ->and(searchFinds($this, $team['owner'], $inventory, "\x01\x02 \x1F", $name))->toBe(['Hammer', 'Saw blade']);
+    });
+
+    it('finds a final sigma by the sigma and the other way round, the same on every engine', function (): void {
+        ['team' => $team, 'inventory' => $inventory, 'name' => $name] = searchableInventory(['Οδυσσεύς', 'Ulysse']);
+
+        foreach (['οδυσσευς', 'οδυσσευσ', 'ΟΔΥΣΣΕΥΣ', 'Οδυσσεύς', 'δυσσευς', 'σσευσ'] as $typed) {
+            expect(searchFinds($this, $team['owner'], $inventory, $typed, $name))->toBe(['Οδυσσεύς']);
+        }
+    });
+
     it('never finds an item that holds nothing to search', function (): void {
         ['team' => $team, 'inventory' => $inventory, 'name' => $name] = searchableInventory(['Hammer']);
         $number = fieldIn($inventory, 'number', 'Weight');
@@ -403,6 +423,24 @@ describe('the search text of an item', function (): void {
         expect(searchTextOf($item))->toBe('ressume')->and($item->search_text)->toBe('ressume');
     });
 
+    it('is written by the item factory too, the way the application writes it, unless a test gives one', function (): void {
+        ['team' => $team, 'inventory' => $inventory, 'name' => $name] = searchableInventory([]);
+        $notes = fieldIn($inventory, 'text', 'Notes');
+
+        $built = Item::factory()->for($inventory)->create(['values' => [$name->ulid => 'Électricité', $notes->ulid => 'Fragile  ÉTAGÈRE']]);
+        $empty = Item::factory()->for($inventory)->create();
+        $given = Item::factory()->for($inventory)->create(['values' => [$name->ulid => 'Hammer'], 'search_text' => 'given']);
+        $none = Item::factory()->for($inventory)->create(['values' => [$name->ulid => 'Saw'], 'search_text' => null]);
+        $stranger = Item::factory()->for($inventory)->create(['values' => ['01unknownfield' => 'Nothing']]);
+
+        expect(searchTextOf($built))->toBe("electricite\nfragile etagere")->and($built->search_text)->toBe("electricite\nfragile etagere")
+            ->and(searchTextOf($empty))->toBeNull()
+            ->and(searchTextOf($given))->toBe('given')
+            ->and(searchTextOf($none))->toBeNull()
+            ->and(searchTextOf($stranger))->toBeNull()
+            ->and(searchFinds($this, $team['owner'], $inventory, 'ELECTRICITE etagere', $name))->toBe(['Électricité']);
+    });
+
     it('is not written when an update changes nothing', function (): void {
         ['team' => $team, 'inventory' => $inventory, 'name' => $name] = searchableInventory(['Hammer']);
         $item = Item::query()->sole();
@@ -520,7 +558,7 @@ describe('the search text when the fields change', function (): void {
         $inventory = inventoryIn($team['workspace']);
         $name = fieldIn($inventory, 'text', 'Name');
         $notes = fieldIn($inventory, 'text', 'Notes');
-        $item = Item::factory()->for($inventory)->create(['values' => [$name->ulid => 'Hammer', $notes->ulid => 'Fragile']]);
+        $item = Item::factory()->for($inventory)->create(['values' => [$name->ulid => 'Hammer', $notes->ulid => 'Fragile'], 'search_text' => null]);
 
         expect(searchTextOf($item))->toBeNull();
 

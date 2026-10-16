@@ -14,6 +14,10 @@ use Illuminate\Support\Facades\Schema;
  * grows with the inventory. The counter is read in O(1) and is only ever written with the inventory locked (see
  * `App\Inventories\Items`), so it cannot drift under concurrent writes. The inventories that already exist are counted
  * once here, with one statement that reads the same on PostgreSQL, MySQL and MariaDB.
+ *
+ * MySQL and MariaDB cannot undo a change of schema: when the counting fails after the column was added, the column stays
+ * and the migration is not recorded. `up()` can therefore be run again: it adds the column only when it is not there, and
+ * counts (the count is the same however many times it runs).
  */
 return new class extends Migration
 {
@@ -22,9 +26,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('inventories', function (Blueprint $table) {
-            $table->unsignedInteger('items_count')->default(0);
-        });
+        if (! Schema::hasColumn('inventories', 'items_count')) {
+            Schema::table('inventories', function (Blueprint $table) {
+                $table->unsignedInteger('items_count')->default(0);
+            });
+        }
 
         DB::update('UPDATE inventories SET items_count = (SELECT COUNT(*) FROM items WHERE items.inventory_id = inventories.id)');
     }

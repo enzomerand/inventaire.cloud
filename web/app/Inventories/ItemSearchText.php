@@ -99,8 +99,12 @@ final class ItemSearchText
      * Keeps the items whose text holds every word of what was typed, in whatever order, wherever in the text.
      *
      * The words are in the form of the text ({@see SearchText::words()}), each looked for with `LIKE ... ESCAPE '!'` (the
-     * same on the three engines, and a collation does not matter: both sides are already plain), in which the wildcards a
-     * person may type (`%`, `_`) and the escape character are escaped: they stand for themselves.
+     * same on the three engines), in which the wildcards a person may type (`%`, `_`) and the escape character are
+     * escaped: they stand for themselves.
+     * Both sides are already plain, so the collation of the column hardly matters, but it is not nothing: on MySQL and
+     * MariaDB `LIKE` follows it (`utf8mb4_unicode_ci`), and it may take two characters for one that PHP and PostgreSQL
+     * keep apart (`ς` and `σ`, which {@see SearchText::normalize()} therefore writes the same). A collation only ever
+     * equates more, never less: a word of the text is always found by itself.
      * Nothing is filtered when nothing is left to look for (an empty text, or white space only).
      *
      * @param  EloquentBuilder<Item>|Relation<Item, Inventory, *>  $query  A query on the items.

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Inventories\ItemSearchText;
 use App\Models\Inventory;
 use App\Models\Item;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -15,19 +16,36 @@ use Illuminate\Support\Facades\DB;
  * The values are written as given, without being validated against the fields of the inventory (that is what
  * `App\Inventories\Items` does); a test that wants a realistic item gives the values in their canonical form. The item
  * is counted in the `items_count` of its inventory, as `Items` does, so that the counter stays true to the rows. The text
- * it is searched by (`search_text`) is left empty unless the test gives it: it needs the fields, which `Items` has.
+ * it is searched by (`search_text`) is built from its values and the fields the inventory has when the item is created,
+ * as `Items` does, unless the test gives one (even null): the fields added to the inventory afterwards are not taken into
+ * account, which is what `InventoryFields` is for.
  *
  * @extends Factory<Item>
  */
 class ItemFactory extends Factory
 {
     /**
-     * Counts each item built in the counter of its inventory, the way the application does when it adds one.
+     * Counts each item built in the counter of its inventory, and writes its search text, the way the application does
+     * when it adds one.
      */
     public function configure(): static
     {
         return $this->afterCreating(function (Item $item): void {
             DB::table('inventories')->where('id', $item->inventory_id)->increment('items_count');
+
+            // An item without values has no text, and one that was given a text (or null) on purpose keeps it.
+            if ($item->values === [] || array_key_exists('search_text', $item->getAttributes())) {
+                return;
+            }
+
+            $fields = $item->inventory()->firstOrFail()->fields()->get();
+            $text = app(ItemSearchText::class)->build($fields, $item->values);
+
+            if ($text !== null) {
+                DB::table('items')->where('id', $item->getKey())->update(['search_text' => $text]);
+                $item->setAttribute('search_text', $text);
+                $item->syncOriginalAttribute('search_text');
+            }
         });
     }
 

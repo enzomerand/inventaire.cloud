@@ -10,6 +10,14 @@ use Tests\Support\CommitsDatabaseChanges;
 
 require_once __DIR__.'/../../Support/inventories.php';
 
+/**
+ * The counter of items kept on an inventory, as the database holds it (not as a model read earlier says).
+ */
+function concurrencyItemsCount(Inventory $inventory): int
+{
+    return (int) DB::table('inventories')->where('id', $inventory->id)->value('items_count');
+}
+
 /*
  * What several requests do to one inventory at the same moment, in separate PHP processes against the real database (a
  * single process cannot show it: see tests/Feature/Admin/AdminConcurrencyTest.php). Every write to an inventory locks it
@@ -36,7 +44,8 @@ describe('requests for the last place of a quota', function (): void {
             ], ['INVENTORIES_MAX_ITEMS' => '3']);
 
             expect($outcomes)->toBe(['created', 'refused:item_limit_reached'])
-                ->and(Item::query()->where('inventory_id', $inventory->id)->count())->toBe(3);
+                ->and(Item::query()->where('inventory_id', $inventory->id)->count())->toBe(3)
+                ->and(concurrencyItemsCount($inventory))->toBe(3);
 
             removeConcurrencyRows();
         }
@@ -50,7 +59,8 @@ describe('requests for the last place of a quota', function (): void {
         $outcomes = actTogether($this->sandbox->root, array_fill(0, 5, ['create-item', $team['owner']->id, $inventory->id]), ['INVENTORIES_MAX_ITEMS' => '2']);
 
         expect($outcomes)->toBe(['created', 'refused:item_limit_reached', 'refused:item_limit_reached', 'refused:item_limit_reached', 'refused:item_limit_reached'])
-            ->and(Item::query()->where('inventory_id', $inventory->id)->count())->toBe(2);
+            ->and(Item::query()->where('inventory_id', $inventory->id)->count())->toBe(2)
+            ->and(concurrencyItemsCount($inventory))->toBe(2);
     });
 
     it('give it to one of two inventories created at the same moment', function (): void {
@@ -83,6 +93,49 @@ describe('requests for the last place of a quota', function (): void {
 
             expect($outcomes)->toBe(['created', 'refused:field_limit_reached'])
                 ->and(InventoryField::query()->where('inventory_id', $inventory->id)->count())->toBe(2);
+
+            removeConcurrencyRows();
+        }
+    });
+});
+
+describe('items created and deleted at the same moment', function (): void {
+    it('are counted one after the other: the counter is the number of items that are there', function (): void {
+        foreach (range(1, 4) as $_) {
+            $team = inventoryTeam();
+            $inventory = inventoryIn($team['workspace']);
+            $items = [itemIn($inventory), itemIn($inventory), itemIn($inventory), itemIn($inventory)];
+
+            $outcomes = actTogether($this->sandbox->root, [
+                ['delete-item', $inventory->id, $items[0]->id],
+                ['delete-item', $inventory->id, $items[1]->id],
+            ]);
+
+            expect($outcomes)->toBe(['deleted', 'deleted'])
+                ->and(Item::query()->where('inventory_id', $inventory->id)->count())->toBe(2)
+                ->and(Item::query()->whereKey([$items[0]->id, $items[1]->id])->exists())->toBeFalse()
+                ->and(concurrencyItemsCount($inventory))->toBe(2);
+
+            removeConcurrencyRows();
+        }
+    });
+
+    it('leave a counter that matches the items when an item is added as another is deleted', function (): void {
+        foreach (range(1, 4) as $_) {
+            $team = inventoryTeam();
+            $inventory = inventoryIn($team['workspace']);
+            $kept = itemIn($inventory);
+            $gone = itemIn($inventory);
+
+            $outcomes = actTogether($this->sandbox->root, [
+                ['delete-item', $inventory->id, $gone->id],
+                ['create-item', $team['owner']->id, $inventory->id],
+            ]);
+
+            expect($outcomes)->toBe(['created', 'deleted'])
+                ->and(Item::query()->where('inventory_id', $inventory->id)->count())->toBe(2)
+                ->and(Item::query()->whereKey($kept->id)->exists())->toBeTrue()
+                ->and(concurrencyItemsCount($inventory))->toBe(2);
 
             removeConcurrencyRows();
         }

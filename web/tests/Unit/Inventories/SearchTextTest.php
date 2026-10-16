@@ -17,13 +17,33 @@ describe('the form a text is searched in', function (): void {
         'the letters written with two' => ['Œuvre Æther Straße STRAẞE', 'oeuvre aether strasse strasse'],
         'ligatures and full-width letters' => ['ﬁnal ＡＢＣ ①', 'final abc 1'],
         'a capital I with a dot' => ['İstanbul', 'istanbul'],
+        'the final sigma is the sigma, accents apart' => ['Οδυσσεύς ΟΔΥΣΣΕΥΣ οδυσσευσ', 'οδυσσευσ οδυσσευσ οδυσσευσ'],
+        'a sigma before a letter and a final one' => ['Σίσυφος', 'σισυφοσ'],
     ]);
+
+    it('writes the final sigma as the sigma, which MySQL and MariaDB take for it in a LIKE', function (): void {
+        expect(SearchText::normalize('ς'))->toBe('σ')
+            ->and(SearchText::normalize('ΣΑΣ'))->toBe(SearchText::normalize('σας'))
+            ->and(SearchText::normalize('σας'))->toBe(SearchText::normalize('σασ'));
+    });
 
     it('makes every run of white space one space and trims the ends', function (): void {
         expect(SearchText::normalize("  a \t b\n\nc\u{00A0}\u{00A0}d\u{2003}e  "))->toBe('a b c d e')
             ->and(SearchText::normalize(" \n\t "))->toBe('')
             ->and(SearchText::normalize(''))->toBe('');
     });
+
+    it('makes the control characters white space, the null character first of all', function (string $text, string $searched): void {
+        expect(SearchText::normalize($text))->toBe($searched);
+    })->with([
+        'a null character inside' => ["a\0b", 'a b'],
+        'a null character alone' => ["\0", ''],
+        'null characters at the ends' => ["\0\0a\0", 'a'],
+        'other control characters' => ["a\x01\x02b\x1Fc\x7Fd", 'a b c d'],
+        'a run of them with white space' => ["a \0\x01 \t\0 b", 'a b'],
+        'the C1 controls' => ["a\u{0085}b\u{009F}c", 'a b c'],
+        'the escape character of a terminal' => ["\x1B[31mred", '[31mred'],
+    ]);
 
     it('is the same whatever the form the text arrives in', function (): void {
         expect(SearchText::normalize("Caf\u{00E9}"))->toBe(SearchText::normalize("Cafe\u{0301}"))

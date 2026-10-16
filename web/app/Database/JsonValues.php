@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use InvalidArgumentException;
 use LogicException;
+use WeakMap;
 
 /**
  * Reaches into the JSON object an item keeps its values in (`items.values`, keyed by the ULID of the field), the same way
@@ -34,8 +35,10 @@ use LogicException;
  *   before the dot hold the sum of any number of values below 1e15). A bound given to compare with is cast the same way, so
  *   both sides are exact decimals ({@see self::number()}, {@see self::numberBound()});
  * - text is sorted with the collation the application configured for the connection on MySQL and MariaDB (the result of a
- *   JSON function is binary there, so capitals and accents would otherwise decide the order), and with the default one of
- *   the database on PostgreSQL ({@see self::sortableText()});
+ *   JSON function is binary there, so capitals and accents would otherwise decide the order), and with the ICU root
+ *   collation (`und-x-icu`) on PostgreSQL, which orders the same way (the case and the accents only break ties): the
+ *   default collation of a PostgreSQL database is chosen when it is created and may be `C`, which puts every capital and
+ *   every accent after the lowercase letters. A PostgreSQL built without ICU keeps its default ({@see self::sortableText()});
  * - a list holds a value when its JSON array contains it ({@see self::whereContainsAny()}).
  *
  * The SQL is handed to the builder as {@see RawSql}. {@see ItemQuery} builds the sorts, filters and totals of the list of
@@ -48,6 +51,16 @@ final class JsonValues
 
     /** The comparisons {@see self::whereNumber()} and {@see self::whereText()} accept. */
     private const OPERATORS = ['=', '>=', '<='];
+
+    /** The collation PostgreSQL sorts text with when it was built with ICU: the Unicode root order, which ignores the case and counts the accents last. */
+    private const ICU_COLLATION = 'und-x-icu';
+
+    /**
+     * Whether each PostgreSQL connection knows {@see self::ICU_COLLATION}, asked once per connection.
+     *
+     * @var WeakMap<Connection, bool>|null
+     */
+    private static ?WeakMap $icu = null;
 
     /**
      * Gets the connection whose engine decides the SQL, and the JSON column to read.
@@ -72,16 +85,25 @@ final class JsonValues
 
     /**
      * The SQL of the value as text to sort by: on MySQL and MariaDB with the collation configured for the connection
-     * (`utf8mb4_unicode_ci` by default, which ignores the case and puts the accents beside their letter), on PostgreSQL
-     * with the default collation of the database.
+     * (`utf8mb4_unicode_ci` by default, which ignores the case and puts the accents beside their letter); on PostgreSQL
+     * with the ICU root collation (`und-x-icu`), which does the same (the case and the accents only decide between values
+     * that are otherwise equal), whatever the collation the database was created with. When the PostgreSQL in use has no
+     * ICU (the collation is not in `pg_collation`; asked once per connection), the default collation of the database is
+     * all there is, and the order is the one it gives.
      */
     public function sortableText(string $key): string
     {
         $text = $this->text($key);
+
+        if ($this->driver() === 'pgsql') {
+            // Parenthesized: COLLATE binds tighter than ->>, so without them it would apply to the key and not to the text.
+            return $this->hasIcu() ? '('.$text.') collate "'.self::ICU_COLLATION.'"' : $text;
+        }
+
         $collation = $this->connection->getConfig('collation');
 
         // The result of a JSON function is utf8mb4: a collation of another character set would be refused by the engine.
-        if ($this->driver() === 'pgsql' || ! is_string($collation) || preg_match('/^utf8mb4_[A-Za-z0-9_]+$/D', $collation) !== 1) {
+        if (! is_string($collation) || preg_match('/^utf8mb4_[A-Za-z0-9_]+$/D', $collation) !== 1) {
             return $text;
         }
 
@@ -261,7 +283,8 @@ final class JsonValues
 
     /**
      * The exact sum of the values of each key over the rows of the query, in one aggregate query: the sum of a key is null
-     * when no row holds a value for it. Only the rows the query matches count, whatever its order and its limits.
+     * when no row holds a value for it. Only the rows the query matches count, whatever its order and its limits: the
+     * order, the limit and the offset of the query are left out (an offset would otherwise skip the one row the sum is in).
      *
      * @param  list<string>  $keys
      * @return array<string, mixed> The sum of each key (as the database gives it: a string of digits), by key.
@@ -278,7 +301,11 @@ final class JsonValues
             $selects[] = new RawSql('sum('.$this->number($key).') as sum_'.$position);
         }
 
-        $row = (array) ($query->clone()->reorder()->select($selects)->first() ?? []);
+        $aggregate = $query->clone()->reorder()->select($selects);
+        $aggregate->limit = null;
+        $aggregate->offset = null;
+
+        $row = (array) ($aggregate->first() ?? []);
         $sums = [];
 
         foreach ($keys as $position => $key) {
@@ -286,6 +313,24 @@ final class JsonValues
         }
 
         return $sums;
+    }
+
+    /**
+     * Whether the PostgreSQL connection has the ICU collation, asked to the database the first time and kept for the
+     * connection after that.
+     */
+    private function hasIcu(): bool
+    {
+        self::$icu ??= new WeakMap;
+
+        if (! isset(self::$icu[$this->connection])) {
+            self::$icu[$this->connection] = (bool) $this->connection->scalar(
+                "select exists (select 1 from pg_collation where collname = ? and collprovider = 'i')",
+                [self::ICU_COLLATION],
+            );
+        }
+
+        return self::$icu[$this->connection];
     }
 
     /**

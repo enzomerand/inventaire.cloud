@@ -2,10 +2,17 @@
 
 declare(strict_types=1);
 
+use App\Database\JsonValues;
 use App\Inventories\Fields\ChoiceType;
+use App\Inventories\Fields\Decimal;
+use App\Inventories\Fields\FieldTypes;
+use App\Inventories\ItemQuery;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
+use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\PostgresConnection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
@@ -169,12 +176,10 @@ describe('sorting', function (): void {
             ->and(listingOrder($this, $made, $sort + ['direction' => 'desc']))->toBe(['one', 'three', 'two', 'blank too', 'blank']);
     });
 
-    it('ignores the case and the accents of text on MySQL and MariaDB, where the collation is the one of the connection', function (): void {
-        if (DB::getDriverName() === 'pgsql') {
-            // PostgreSQL uses the collation of its database, which an installation chooses: nothing to assume.
-            expect(true)->toBeTrue();
-
-            return;
+    it('ignores the case and the accents of text, the same on the three engines', function (): void {
+        // MySQL and MariaDB sort with the collation of the connection, PostgreSQL with its ICU root collation (und-x-icu).
+        if (DB::getDriverName() === 'pgsql' && ! DB::scalar("select exists (select 1 from pg_collation where collname = 'und-x-icu' and collprovider = 'i')")) {
+            $this->markTestSkipped('This PostgreSQL was built without ICU: it sorts with the collation of its database, which an installation chooses.');
         }
 
         $made = listingOf(['label' => ['text']]);
@@ -183,7 +188,8 @@ describe('sorting', function (): void {
             listingAdd($made, $label, ['label' => $label]);
         }
 
-        expect(listingOrder($this, $made, ['sort' => listingKey($made, 'label')]))->toBe(['Alice', 'bob', 'Éric', 'eve', 'zed']);
+        expect(listingOrder($this, $made, ['sort' => listingKey($made, 'label')]))->toBe(['Alice', 'bob', 'Éric', 'eve', 'zed'])
+            ->and(listingOrder($this, $made, ['sort' => listingKey($made, 'label'), 'direction' => 'desc']))->toBe(['zed', 'eve', 'Éric', 'bob', 'Alice']);
     });
 
     it('sorts numbers as numbers, empty values last', function (): void {
@@ -337,7 +343,20 @@ describe('sorting', function (): void {
         $made = listingOf();
 
         expect(listingRefused(listingAsk($this, $made, ['sort' => 'created_at', 'direction' => $direction])))->toBe(['direction']);
-    })->with(['up', 'ASC', 'descending', '1']);
+    })->with(['up', 'ascending', 'descending', '1']);
+
+    it('reads the direction in any case, like the field it sorts by', function (string $direction, array $order): void {
+        $made = listingOf(['qty' => ['number']]);
+        listingAdd($made, 'big', ['qty' => '5']);
+        listingAdd($made, 'small', ['qty' => '1']);
+
+        expect(listingOrder($this, $made, ['sort' => strtoupper(listingKey($made, 'qty')), 'direction' => $direction]))->toBe($order);
+    })->with([
+        'DESC' => ['DESC', ['big', 'small']],
+        'Desc' => ['Desc', ['big', 'small']],
+        'ASC' => ['ASC', ['small', 'big']],
+        'aSc' => ['aSc', ['small', 'big']],
+    ]);
 
     it('is open to a viewer', function (): void {
         $made = listingOf(['qty' => ['number']]);
@@ -904,5 +923,65 @@ describe('totals', function (): void {
         listingAdd($other, 'theirs', ['qty' => '1000']);
 
         expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([listingKey($made, 'qty') => '4']);
+    });
+
+    it('adds up the items the query matches, whatever its order, its limit and its offset', function (): void {
+        $made = listingOf(['qty' => ['number']]);
+        $key = listingKey($made, 'qty');
+
+        foreach (range(1, 5) as $number) {
+            listingAdd($made, "n{$number}", ['qty' => (string) $number]);
+        }
+
+        $sum = fn (EloquentBuilder $items): ?string => Decimal::tryFrom((new JsonValues(DB::connection()))->sums($items->toBase(), [$key])[$key])?->format(0);
+        $inventory = fn (): EloquentBuilder => Item::query()->where('inventory_id', $made['inventory']->id);
+        $ids = $inventory()->orderBy('id')->pluck('id')->all();
+
+        // A limit and an offset would otherwise cut the one row of the aggregate away (an offset) or count it out of order.
+        expect($sum($inventory()))->toBe('15')
+            ->and($sum($inventory()->orderBy('id')->limit(2)))->toBe('15')
+            ->and($sum($inventory()->orderByDesc('id')->limit(2)->offset(3)))->toBe('15')
+            ->and($sum($inventory()->offset(10)))->toBe('15')
+            ->and($sum($inventory()->where('id', '>', $ids[2])->limit(1)->offset(1)))->toBe('9')
+            ->and(app(ItemQuery::class)->totals($inventory()->orderBy('id')->limit(2)->offset(1), $made['inventory']->fields()->get()))->toBe([$key => '15']);
+    });
+
+    it('shows zero when no item holds a value, and refuses a total that is not a number rather than showing zero', function (): void {
+        $made = listingOf(['qty' => ['number']]);
+        $key = listingKey($made, 'qty');
+        $fields = $made['inventory']->fields()->get();
+
+        // A connection that answers the aggregate with the sum it is told to, whatever the query.
+        $answering = function (mixed $sum) use ($fields): array {
+            $connection = new class(fn () => throw new LogicException('Never connected.'), 'db', '', ['driver' => 'pgsql']) extends PostgresConnection
+            {
+                public mixed $sum = null;
+
+                /**
+                 * @param  string  $query
+                 * @param  array<mixed>  $bindings
+                 * @param  bool  $useReadPdo
+                 * @param  array<mixed>  $fetchUsing
+                 * @return list<object>
+                 */
+                public function select($query, $bindings = [], $useReadPdo = true, array $fetchUsing = [])
+                {
+                    return [(object) ['sum_0' => $this->sum]];
+                }
+            };
+            $connection->sum = $sum;
+            $manager = Mockery::mock(DatabaseManager::class);
+            $manager->shouldReceive('connection')->andReturn($connection);
+
+            return (new ItemQuery($manager, app(FieldTypes::class)))->totals((new EloquentBuilder($connection->query()->from('items')))->setModel(new Item), $fields);
+        };
+
+        expect($answering(null))->toBe([$key => '0'])
+            ->and($answering('12.500000'))->toBe([$key => '12.5'])
+            ->and($answering(7))->toBe([$key => '7'])
+            ->and(fn () => $answering('oops'))->toThrow(LogicException::class)
+            ->and(fn () => $answering(''))->toThrow(LogicException::class)
+            ->and(fn () => $answering(1.5))->toThrow(LogicException::class)
+            ->and(fn () => $answering(['1']))->toThrow(LogicException::class);
     });
 });

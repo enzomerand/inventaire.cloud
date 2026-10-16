@@ -13,6 +13,7 @@
 //        php concurrent-action.php <go file> delete-field <inventory id> <field id>
 //        php concurrent-action.php <go file> create-item <user id> <inventory id> [<field ULID> <value>]
 //        php concurrent-action.php <go file> update-item <user id> <inventory id> <item id> <field ULID> <value>
+//        php concurrent-action.php <go file> delete-item <inventory id> <item id>
 //
 // It follows the protocol of Tests\Support\ConcurrentChild: boots, says "ready", waits for the go file and only then
 // acts. It prints what happened as one JSON line: {"result": "deleted"}, {"result": "refused", "reason":
@@ -163,6 +164,10 @@ function changeInventories(Application $app, string $action, array $arguments): 
             $app->make(Items::class)->create(Inventory::query()->findOrFail((int) $arguments[1]), isset($arguments[2]) ? [$arguments[2] => $arguments[3]] : [], User::query()->findOrFail((int) $arguments[0]));
 
             return ['result' => 'created'];
+        case 'delete-item':
+            $app->make(Items::class)->delete(Inventory::query()->findOrFail((int) $arguments[0]), Item::query()->findOrFail((int) $arguments[1]));
+
+            return ['result' => 'deleted'];
         case 'update-item':
             $app->make(Items::class)->update(Inventory::query()->findOrFail((int) $arguments[1]), Item::query()->findOrFail((int) $arguments[2]), [$arguments[3] => $arguments[4]], User::query()->findOrFail((int) $arguments[0]));
 
@@ -176,7 +181,7 @@ try {
     $outcome = match ($action) {
         'hold-admin-lock' => holdAdministratorLock($app->make(Locks::class), $go, (int) $arguments[0]),
         'insert-user' => insertUserWhileLocked($go),
-        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item' => changeInventories($app, $action, $arguments),
+        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
 } catch (AccountDeletionRefused $refusal) {

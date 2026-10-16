@@ -223,6 +223,7 @@ describe('a value that is accepted', function (): void {
 
         $cases['tags: an empty list'] = ['tags', []];
         $cases['tags: only blank tags'] = ['tags', ['', ' ']];
+        $cases['text: a null character, which is trimmed away'] = ['text', "\0"];
         $cases['boolean: null'] = ['boolean', null];
         $cases['boolean: an empty string'] = ['boolean', ''];
 
@@ -242,11 +243,13 @@ describe('a value that is refused', function (): void {
         'text: a line break' => ['text', [], "a\nb"],
         'text: a tab inside' => ['text', [], "a\tb"],
         'text: a text direction control' => ['text', [], "a\u{202E}b"],
+        'text: a null character, which PostgreSQL cannot read back' => ['text', [], "a\0b"],
         'text: not valid UTF-8' => ['text', [], "bad \xB1 text"],
         'text: a number' => ['text', [], 12],
         'text: a boolean' => ['text', [], true],
         'text: a list' => ['text', [], ['a']],
         'textarea: a control character' => ['textarea', [], "a\x07b"],
+        'textarea: a null character' => ['textarea', [], "a\0b"],
         'textarea: a line separator' => ['textarea', [], "a\u{2028}b"],
         'textarea: a text direction control' => ['textarea', [], "a\u{202E}b"],
         'textarea: too long' => ['textarea', [], str_repeat('x', 10001)],
@@ -308,14 +311,17 @@ describe('a value that is refused', function (): void {
         'url: no scheme' => ['url', [], 'example.com'],
         'url: no host' => ['url', [], 'https://'],
         'url: a space in the host' => ['url', [], 'https://exa mple.com'],
+        'url: a null character' => ['url', [], "https://example.com/a\0b"],
         'url: too long' => ['url', [], 'https://example.com/'.str_repeat('a', 2040)],
         'email: no domain' => ['email', [], 'name@'],
         'email: no at sign' => ['email', [], 'plain'],
+        'email: a null character' => ['email', [], "na\0me@example.com"],
         'email: too long' => ['email', [], str_repeat('a', 250).'@b.co'],
         'phone: two digits' => ['phone', [], '12'],
         'phone: letters' => ['phone', [], 'call me'],
         'phone: a plus in the middle' => ['phone', [], '33 +1 23 45'],
         'phone: a line break' => ['phone', [], "123\n456"],
+        'phone: a null character' => ['phone', [], "123\0456"],
         'phone: too long' => ['phone', [], str_repeat('1', 33)],
         'rating: zero' => ['rating', [], 0],
         'rating: above the maximum' => ['rating', [], 6],
@@ -327,12 +333,15 @@ describe('a value that is refused', function (): void {
         'color: three digits' => ['color', [], '#abc'],
         'color: no hash' => ['color', [], 'aabbcc'],
         'color: not hexadecimal' => ['color', [], '#gggggg'],
+        'color: a null character' => ['color', [], "#aabb\0c"],
         'tags: thirty-one' => ['tags', [], array_map(fn (int $number): string => "tag {$number}", range(1, 31))],
         'tags: a tag of 51 characters' => ['tags', [], [str_repeat('a', 51)]],
         'tags: a line break in a tag' => ['tags', [], ["a\nb"]],
+        'tags: a null character in a tag' => ['tags', [], ["a\0b"]],
         'tags: a number' => ['tags', [], ['a', 1]],
         'tags: text instead of a list' => ['tags', [], 'red'],
         'barcode: a space in any' => ['barcode', [], 'has space'],
+        'barcode: a null character' => ['barcode', [], "ab\0cd"],
         'barcode: 65 characters of any' => ['barcode', [], str_repeat('a', 65)],
         'barcode: a wrong EAN-13 check digit' => ['barcode', ['format' => 'ean13'], '4006381333932'],
         'barcode: twelve digits for an EAN-13' => ['barcode', ['format' => 'ean13'], '400638133393'],

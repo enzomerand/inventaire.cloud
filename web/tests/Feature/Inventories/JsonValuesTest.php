@@ -17,17 +17,45 @@ use Illuminate\Database\SQLiteConnection;
  */
 
 /**
- * A connection to an engine that is never opened: only its driver, its grammar and its configuration are used.
+ * A connection to an engine that is never opened: only its driver, its grammar and its configuration are used. The
+ * PostgreSQL one answers the question whether the database has the ICU collation (the only one asked) without a database,
+ * and counts the times it was asked.
  *
  * @param  array<string, mixed>  $config
+ * @param  bool  $icu  What a PostgreSQL connection says when asked whether it has the ICU collation.
  */
-function jsonValuesConnection(string $driver, array $config = []): Connection
+function jsonValuesConnection(string $driver, array $config = [], bool $icu = true): Connection
 {
     $pdo = fn () => throw new LogicException('Never connected.');
     $config += ['driver' => $driver, 'collation' => 'utf8mb4_unicode_ci'];
 
     return match ($driver) {
-        'pgsql' => new PostgresConnection($pdo, 'db', '', $config),
+        'pgsql' => new class($pdo, 'db', '', $config, $icu) extends PostgresConnection
+        {
+            /** How many times the connection was asked about the ICU collation. */
+            public int $asked = 0;
+
+            /**
+             * @param  array<string, mixed>  $config
+             */
+            public function __construct(Closure $pdo, string $database, string $prefix, array $config, private readonly bool $icu)
+            {
+                parent::__construct($pdo, $database, $prefix, $config);
+            }
+
+            /**
+             * @param  string  $query
+             * @param  array<mixed>  $bindings
+             * @param  bool  $useReadPdo
+             */
+            public function selectOne($query, $bindings = [], $useReadPdo = true): object
+            {
+                expect($query)->toContain('pg_collation')->and($bindings)->toBe(['und-x-icu']);
+                $this->asked++;
+
+                return (object) ['exists' => $this->icu];
+            }
+        },
         'mysql' => new MySqlConnection($pdo, 'db', '', $config),
         'mariadb' => new MariaDbConnection($pdo, 'db', '', $config),
         default => new SQLiteConnection($pdo, 'db', '', $config),
@@ -53,15 +81,47 @@ describe('the SQL of a value', function (): void {
         'MariaDB' => ['mariadb', 'cast(%s as decimal(40,6))', 'cast(? as decimal(40,6))'],
     ]);
 
-    it('sorts text with the collation of the connection on MySQL and MariaDB, and the default one on PostgreSQL', function (string $driver, string $suffix): void {
+    it('sorts text with the collation of the connection on MySQL and MariaDB', function (string $driver): void {
         $values = new JsonValues(jsonValuesConnection($driver, ['collation' => 'utf8mb4_0900_ai_ci']));
 
-        expect($values->sortableText('01abc'))->toBe($values->text('01abc').$suffix);
-    })->with([
-        'PostgreSQL' => ['pgsql', ''],
-        'MySQL' => ['mysql', ' collate utf8mb4_0900_ai_ci'],
-        'MariaDB' => ['mariadb', ' collate utf8mb4_0900_ai_ci'],
-    ]);
+        expect($values->sortableText('01abc'))->toBe($values->text('01abc').' collate utf8mb4_0900_ai_ci');
+    })->with(['MySQL' => 'mysql', 'MariaDB' => 'mariadb']);
+
+    it('sorts text with the ICU root collation on PostgreSQL, whatever the collation of the database', function (): void {
+        $values = new JsonValues(jsonValuesConnection('pgsql', ['collation' => 'utf8mb4_0900_ai_ci']));
+
+        // The text is in parentheses: COLLATE binds tighter than ->>, so it would otherwise apply to the key alone.
+        expect($values->sortableText('01abc'))->toBe('("items"."values"->>\'01abc\') collate "und-x-icu"');
+    });
+
+    it('keeps the default collation of a PostgreSQL that was built without ICU', function (): void {
+        $values = new JsonValues(jsonValuesConnection('pgsql', icu: false));
+
+        expect($values->sortableText('01abc'))->toBe($values->text('01abc'));
+    });
+
+    it('asks a PostgreSQL connection about ICU once, and each connection for itself', function (): void {
+        $icu = jsonValuesConnection('pgsql');
+        $plain = jsonValuesConnection('pgsql', icu: false);
+
+        foreach (range(1, 3) as $_) {
+            (new JsonValues($icu))->sortableText('01abc');
+            (new JsonValues($plain))->sortableText('01abc');
+        }
+
+        expect($icu->asked)->toBe(1)->and($plain->asked)->toBe(1)
+            ->and((new JsonValues($icu))->sortableText('01abc'))->toContain('collate "und-x-icu"')
+            ->and((new JsonValues($plain))->sortableText('01abc'))->not->toContain('collate');
+    });
+
+    it('does not ask about ICU for anything but a sort', function (): void {
+        $connection = jsonValuesConnection('pgsql');
+        $values = new JsonValues($connection);
+        $values->text('01abc');
+        $values->number('01abc');
+
+        expect($connection->asked)->toBe(0);
+    });
 
     it('leaves out a collation that is not one of utf8mb4, which the engine would refuse', function (string $driver, mixed $collation): void {
         $values = new JsonValues(jsonValuesConnection($driver, ['collation' => $collation]));

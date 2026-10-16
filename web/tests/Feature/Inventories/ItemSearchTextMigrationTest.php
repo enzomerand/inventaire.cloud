@@ -91,4 +91,26 @@ describe('the migration that adds the search text', function (): void {
 
         expect(Schema::hasColumn('items', 'search_text'))->toBeTrue();
     });
+
+    it('can be run again over the column an earlier run that failed after adding it left behind', function (): void {
+        // MySQL and MariaDB cannot undo the change of schema: the column stays, the migration is not recorded, and the next
+        // run starts with the column in place and texts that are missing or half written.
+        $migration = require database_path('migrations/2026_10_21_000001_add_search_text_to_items.php');
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $name = fieldIn($inventory, 'text', 'Name');
+        $first = itemIn($inventory, [$name->ulid => 'Électricité']);
+        $second = itemIn($inventory, [$name->ulid => 'Plomberie']);
+        DB::table('items')->where('id', $first->id)->update(['search_text' => null]);
+        DB::table('items')->where('id', $second->id)->update(['search_text' => 'stale']);
+
+        expect(Schema::hasColumn('items', 'search_text'))->toBeTrue();
+
+        $migration->up();
+        $migration->up();
+
+        expect(Schema::hasColumn('items', 'search_text'))->toBeTrue()
+            ->and(DB::table('items')->where('id', $first->id)->value('search_text'))->toBe('electricite')
+            ->and(DB::table('items')->where('id', $second->id)->value('search_text'))->toBe('plomberie');
+    });
 });

@@ -17,22 +17,27 @@ use Normalizer;
  *
  * The form is: the compatibility decomposition of Unicode (NFKD: an accented letter becomes the letter and its accents,
  * a ligature or a full-width letter becomes plain letters), the combining marks dropped, the case lowered, `œ`, `æ` and
- * `ß` written out, `ø`, `ł` and `đ` made `o`, `l` and `d`, every run of white space made one space, the ends trimmed.
+ * `ß` written out, `ø`, `ł` and `đ` made `o`, `l` and `d`, the final `ς` made `σ`, every run of control characters and
+ * white space made one space, the ends trimmed. The control characters go because the null character cannot be stored
+ * or compared by PostgreSQL (it answers with an error, which would make a search a server error), and no word holds one.
  */
 final class SearchText
 {
     /**
      * The letters that decomposing does not split (the ligatures, and the letters with a stroke), written the way a person
-     * types them on a plain keyboard. The text is lowered before, so the capitals need no entry.
+     * types them on a plain keyboard, and the final sigma, which is the same letter as `σ`. The text is lowered before, so
+     * the capitals need no entry. `ς` is here because MySQL and MariaDB, whose `LIKE` follows the collation of the column
+     * (`utf8mb4_unicode_ci`), take it for `σ` while PHP and PostgreSQL do not: written out, the three agree.
      */
-    private const WRITTEN_OUT = ['œ' => 'oe', 'æ' => 'ae', 'ß' => 'ss', 'ø' => 'o', 'ł' => 'l', 'đ' => 'd'];
+    private const WRITTEN_OUT = ['œ' => 'oe', 'æ' => 'ae', 'ß' => 'ss', 'ø' => 'o', 'ł' => 'l', 'đ' => 'd', 'ς' => 'σ'];
 
     /** The character that escapes the wildcards of a `LIKE` pattern (see {@see self::pattern()}); the `ESCAPE` clause of {@see ItemSearchText::restrict()} names it. */
     public const ESCAPE = '!';
 
     /**
      * The text in the form it is searched in. What is not valid UTF-8 is replaced by `?` first, so that any input gives
-     * an answer.
+     * an answer; the control characters (the null character first of all, which PostgreSQL refuses in a text) are white
+     * space, like the line breaks and the tabs, which are some of them.
      */
     public static function normalize(string $text): string
     {
@@ -41,7 +46,7 @@ final class SearchText
         $plain = preg_replace('/\p{Mn}+/u', '', $decomposed === false ? $text : $decomposed) ?? $text;
         $written = strtr(mb_strtolower($plain), self::WRITTEN_OUT);
 
-        return trim(preg_replace('/\s+/u', ' ', $written) ?? $written);
+        return trim(preg_replace('/[\p{Cc}\s]+/u', ' ', $written) ?? $written);
     }
 
     /**

@@ -139,6 +139,9 @@ final class Items
      * builder, which does not touch `updated_at` (adding an item is not a change of the inventory). Both copies of the
      * inventory in memory, the locked one and the one the caller holds (the request's, which a resource may describe
      * afterwards), get the new value; it is set from the locked row, not added to the caller's copy, which may be older.
+     * The counter never goes below zero: the column is unsigned on MySQL and MariaDB, which refuse a negative value with an
+     * error (an unsigned underflow) instead of clamping it, so a counter that was already off (it should not be) must not
+     * turn a deletion into a failure.
      *
      * @param  Inventory  $locked  The inventory as just read under the lock.
      * @param  Inventory  $given  The copy the caller holds.
