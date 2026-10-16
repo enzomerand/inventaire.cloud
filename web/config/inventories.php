@@ -93,9 +93,12 @@ return [
     | - `export_ttl_hours`: hours a finished export is kept, then purged by
     |   `inventaire:prune-exports` (`INVENTORIES_EXPORT_TTL_HOURS`, 24).
     | - `pdf_max_items`: items a PDF may hold (`INVENTORIES_PDF_MAX_ITEMS`,
-    |   1000): the library lays the whole document out in memory. The API
-    |   answers 422 beyond; the other formats are streamed and have no limit but
-    |   the quota of items of an inventory.
+    |   500). The library lays the whole document out in memory, about 30 KB
+    |   for each value: 500 items of 8 fields take 110 MB and 2 seconds, 1000
+    |   take 200 MB, too close to a 256 MB `memory_limit`. The limit is for an
+    |   inventory of up to 8 fields, and lower in proportion beyond (12 fields:
+    |   333 items). The API answers 422 beyond; the other formats are streamed
+    |   and have no limit but the quota of items of an inventory.
     | - `export_stale_minutes`: minutes after which an export that is still
     |   waiting or running is given up as failed by `inventaire:prune-exports`
     |   (`INVENTORIES_EXPORT_STALE_MINUTES`, 60): its worker stopped.
@@ -107,7 +110,7 @@ return [
 
     'export_ttl_hours' => (int) env('INVENTORIES_EXPORT_TTL_HOURS', 24),
 
-    'pdf_max_items' => (int) env('INVENTORIES_PDF_MAX_ITEMS', 1000),
+    'pdf_max_items' => (int) env('INVENTORIES_PDF_MAX_ITEMS', 500),
 
     'export_stale_minutes' => (int) env('INVENTORIES_EXPORT_STALE_MINUTES', 60),
 

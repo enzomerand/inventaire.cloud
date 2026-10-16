@@ -929,5 +929,15 @@
     ":count templates": ":count modèles",
     "The view this export was made on is no longer valid: a field it uses was deleted or changed.": "La vue sur laquelle cet export a été demandé n'est plus valable : un champ qu'elle utilise a été supprimé ou modifié.",
     "The export could not be generated. Try again.": "L'export n'a pas pu être généré. Réessayez.",
-    "The export did not finish and was cancelled. Try again.": "L'export ne s'est pas terminé et a été annulé. Réessayez."
+    "The export did not finish and was cancelled. Try again.": "L'export ne s'est pas terminé et a été annulé. Réessayez.",
+    "Identifier": "Identifiant",
+    "Created on": "Créé le",
+    "Modified on": "Modifié le",
+    "Exported on :date": "Exporté le :date",
+    "filtered view": "vue filtrée",
+    "No item.": "Aucun article.",
+    "Page :page / :pages": "Page :page / :pages",
+    ":count item|:count items": ":count article|:count articles",
+    ":count photo|:count photos": ":count photo|:count photos",
+    ":count file|:count files": ":count fichier|:count fichiers"
 }
