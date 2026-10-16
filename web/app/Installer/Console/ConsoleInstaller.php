@@ -172,7 +172,10 @@ final class ConsoleInstaller
         foreach ($items as $item) {
             $tolerated = $this->fromEnv && $item->id === 'env';
 
-            if ($item->ok) {
+            if ($item->ok && $item->warning) {
+                $this->components->twoColumnDetail($item->label, '<fg=yellow>'.__('Warning').'</>');
+                $this->command->line('    '.($item->detail ?? ''));
+            } elseif ($item->ok) {
                 $this->components->twoColumnDetail($item->label, '<fg=green>'.__('Met').'</>');
             } else {
                 $this->components->twoColumnDetail($item->label, '<fg=red>'.__('Not met').'</>');

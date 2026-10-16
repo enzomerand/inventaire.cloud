@@ -10,6 +10,7 @@ use App\Installer\InstallStep;
 use App\Installer\Mail\MailAttemptStore;
 use App\Installer\Mail\MailVerification;
 use App\Installer\Probes\MailProbe;
+use App\Installer\RequirementsChecker;
 use App\Inventories\DerivedData;
 use App\Inventories\SearchText;
 use App\Settings\InstanceSettings;
@@ -204,6 +205,22 @@ describe('non-interactive installation', function (): void {
         $this->artisan('inventaire:install', ['--skip-mail-test' => true])
             ->expectsOutputToContain('only allowed in non-interactive mode')
             ->assertExitCode(2);
+    });
+
+    it('prints a missing recommended extension as a warning, with what is lost, and goes on', function (): void {
+        Artisan::call('db:wipe', ['--force' => true]);
+        $this->app->bind(RequirementsChecker::class, fn ($app): RequirementsChecker => new RequirementsChecker(
+            $app,
+            $app->make(EnvironmentFile::class),
+            $app->make(InstallerSettings::class),
+            fn (string $name): bool => $name !== 'exif' && extension_loaded($name),
+        ));
+
+        $this->artisan('inventaire:install', installOptions(['--skip-mail-test' => true]))
+            ->expectsOutputToContain('Warning')
+            ->expectsOutputToContain('thumbnails of photos taken sideways')
+            ->expectsOutputToContain('Installation complete')
+            ->assertSuccessful();
     });
 
     it('refuses to start when the requirements are not met', function (): void {

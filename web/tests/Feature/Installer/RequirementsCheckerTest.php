@@ -77,9 +77,29 @@ it('accepts either database driver but needs one', function (): void {
         ->and(requirement(checker($this, ['pdo_pgsql', 'pdo_mysql'])->check(), 'database-driver')->ok)->toBeFalse();
 });
 
-it('accepts either image library but needs one', function (): void {
-    expect(requirement(checker($this, ['gd'])->check(), 'image-library')->ok)->toBe(extension_loaded('imagick'))
-        ->and(requirement(checker($this, ['gd', 'imagick'])->check(), 'image-library')->ok)->toBeFalse();
+it('requires GD: Imagick alone does not do, since GD is the only image library the application uses', function (): void {
+    $withoutGd = checker($this, ['gd'])->check();
+    $withoutBoth = checker($this, ['gd', 'imagick'])->check();
+
+    expect(requirement($withoutGd, 'ext-gd')->ok)->toBeFalse()
+        ->and(requirement($withoutGd, 'ext-gd')->detail)->toContain('gd')
+        ->and(RequirementsChecker::passed($withoutGd))->toBeFalse()
+        ->and(RequirementsChecker::passed($withoutBoth))->toBeFalse()
+        ->and(requirement(checker($this)->check(), 'ext-gd')->ok)->toBeTrue()
+        ->and(collect($withoutBoth)->contains(fn (Requirement $requirement): bool => $requirement->id === 'image-library'))->toBeFalse();
+});
+
+it('reports a missing exif as a warning: the server can run the application, but photos taken sideways are not turned upright', function (): void {
+    $without = checker($this, ['exif'])->check();
+    $exif = requirement($without, 'ext-exif');
+
+    expect($exif->ok)->toBeTrue()
+        ->and($exif->warning)->toBeTrue()
+        ->and($exif->detail)->toContain('exif')
+        ->and(RequirementsChecker::passed($without))->toBeTrue()
+        ->and(requirement(checker($this)->check(), 'ext-exif')->warning)->toBeFalse()
+        ->and(requirement(checker($this)->check(), 'ext-exif')->ok)->toBeTrue()
+        ->and(requirement($without, 'ext-gd')->warning)->toBeFalse();
 });
 
 it('reports an .env file that cannot be written', function (): void {
@@ -97,7 +117,7 @@ it('reports an .env file that cannot be written', function (): void {
 });
 
 it('serializes for the browser', function (): void {
-    expect(requirement(checker($this)->check(), 'php')->toArray())->toHaveKeys(['id', 'label', 'ok', 'detail']);
+    expect(requirement(checker($this)->check(), 'php')->toArray())->toHaveKeys(['id', 'label', 'ok', 'warning', 'detail']);
 });
 
 it('does not require a writable .env or bootstrap/cache when every setting comes from the environment', function (): void {
