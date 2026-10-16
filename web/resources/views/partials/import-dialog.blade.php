@@ -145,7 +145,7 @@
                                     </div>
                                     <div class="col-12 col-md-5">
                                         <div class="text-secondary small d-md-none" aria-hidden="true">{{ __('Destination') }}</div>
-                                        <select class="form-select" :id="row.destinationId" :aria-label="row.destinationLabel" :aria-invalid="row.destinationInvalid" :aria-describedby="row.errorId" :disabled="importWorking" @change="setImportDestination(row, $event)">
+                                        <select class="form-select" :id="row.destinationId" :aria-label="row.destinationLabel" :aria-invalid="row.destinationInvalid" :aria-describedby="row.describedBy" :disabled="importWorking" @change="setImportDestination(row, $event)">
                                             <option value="ignore" :selected="row.value === 'ignore'">{{ __('Ignore this column') }}</option>
                                             <template x-if="canManageFields">
                                                 <option value="new" :selected="row.value === 'new'">{{ __('New field') }}</option>
@@ -169,13 +169,14 @@
                                                         </select>
                                                     </div>
                                                     <div class="col-12 col-sm-7">
-                                                        <input type="text" class="form-control" :id="row.nameId" :aria-label="row.nameLabel" :aria-invalid="row.nameInvalid" :aria-describedby="row.errorId" maxlength="120" autocomplete="off" :value="row.name" :disabled="importWorking" @input="setImportName(row, $event)">
+                                                        <input type="text" class="form-control" :id="row.nameId" :aria-label="row.nameLabel" :aria-invalid="row.nameInvalid" :aria-describedby="row.describedBy" maxlength="120" autocomplete="off" :value="row.name" :disabled="importWorking" @input="setImportName(row, $event)">
                                                     </div>
                                                 </div>
                                                 <div class="form-hint" :hidden="!row.isSelect">{{ __('The choices are made from the different values of the column.') }}</div>
                                             </div>
                                         </template>
                                         <div class="text-danger small mt-1" :id="row.errorId" :hidden="row.error === ''" x-text="row.error"></div>
+                                        <div class="alert alert-warning small py-2 px-3 mt-2 mb-0" :id="row.warningId" :hidden="row.warning === ''" x-text="row.warning"></div>
                                     </div>
                                 </div>
                             </li>

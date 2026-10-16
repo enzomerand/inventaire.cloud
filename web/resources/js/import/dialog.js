@@ -275,7 +275,7 @@ export default function importDialog() {
 
         /** The columns of the file as the dialog shows them, each with what is wrong with it if the last try said so. */
         get importMappingRows() {
-            return this.importRows.map((row) => rowView(row, this.importRowErrors[row.index] ?? ''));
+            return this.importRows.map((row) => rowView(row, this.importRowErrors[row.index] ?? '', this.fields));
         },
 
         /** What the mapping comes to: how many columns are imported, how many fields are created. */

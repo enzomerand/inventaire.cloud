@@ -15,6 +15,7 @@ import {
     destinationValue,
     endNotice,
     failureText,
+    fractionWarning,
     importableFields,
     isActive,
     isFinished,
@@ -44,6 +45,7 @@ vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/mess
 
 const ULID_NAME = '01HZX0000000000000000000NA';
 const ULID_QTY = '01HZX0000000000000000000QT';
+const ULID_DISCOUNT = '01HZX0000000000000000000DI';
 
 /** The fields of the inventory, with a required one, and the two types a column cannot go to. */
 const INVENTORY_FIELDS = [
@@ -52,6 +54,9 @@ const INVENTORY_FIELDS = [
     field('doc', 'file', {}, { name: 'Manual' }),
     field('pic', 'photo', {}, { name: 'Picture' }),
 ];
+
+/** The same fields and a percentage, for the columns that look like fractions. */
+const WITH_DISCOUNT = [...INVENTORY_FIELDS, field(ULID_DISCOUNT, 'percentage', { decimals: 1 }, { name: 'Discount' })];
 
 /** A column the API found. */
 function column(index, header, samples = [], guess = 'text') {
@@ -89,6 +94,7 @@ function rows(...specs) {
         header: `Column ${index}`,
         samples: [],
         guess: 'text',
+        fractionLike: false,
         target,
         field: '',
         type: 'text',
@@ -400,6 +406,58 @@ describe('the imports', () => {
                 destinationInvalid: 'true',
                 nameInvalid: 'false',
             });
+        });
+
+        it('knows which columns hold values that look like fractions, and only when the API says so', () => {
+            const state = mappingRows(
+                [
+                    { ...column(0, 'Rate', ['12.5%']), fraction_like: true },
+                    { ...column(1, 'Weight', ['1.5']), fraction_like: false },
+                    column(2, 'Other', ['x']),
+                    { ...column(3, 'Odd', ['0.1']), fraction_like: 'yes' },
+                ],
+                null,
+                context,
+            );
+
+            expect(state.map((row) => row.fractionLike)).toEqual([true, false, false, false]);
+        });
+
+        it('warns about fractions only for a column that goes to a percentage field, existing or to create', () => {
+            const fraction = { fractionLike: true };
+            const toDiscount = rows([0, 'field', { ...fraction, field: ULID_DISCOUNT }])[0];
+            const toWeight = rows([0, 'field', { ...fraction, field: ULID_QTY }])[0];
+            const message = 'These values look like fractions (0.125 for 12.5%): they will be imported as they are.';
+
+            expect(fractionWarning(toDiscount, WITH_DISCOUNT)).toBe(message);
+            expect(fractionWarning(rows([0, 'new', { ...fraction, type: 'percentage' }])[0], WITH_DISCOUNT)).toBe(
+                message,
+            );
+            // Not a percentage: a number between -1 and 1 is just a number.
+            expect(fractionWarning(toWeight, WITH_DISCOUNT)).toBe('');
+            expect(fractionWarning(rows([0, 'new', { ...fraction, type: 'number' }])[0], WITH_DISCOUNT)).toBe('');
+            // Nowhere to go, or a field that is not (any more) one of the inventory's.
+            expect(fractionWarning(rows([0, 'ignore', { ...fraction, type: 'percentage' }])[0], WITH_DISCOUNT)).toBe(
+                '',
+            );
+            expect(fractionWarning(rows([0, 'field', { ...fraction, field: 'gone' }])[0], WITH_DISCOUNT)).toBe('');
+            // Whole percentages are fine.
+            expect(
+                fractionWarning(rows([0, 'field', { fractionLike: false, field: ULID_DISCOUNT }])[0], WITH_DISCOUNT),
+            ).toBe('');
+        });
+
+        it('gives the warning to the view of a column, and describes the controls by it', () => {
+            const [row] = rows([5, 'field', { fractionLike: true, field: ULID_DISCOUNT }]);
+
+            expect(rowView(row, '', WITH_DISCOUNT)).toMatchObject({
+                warning: 'These values look like fractions (0.125 for 12.5%): they will be imported as they are.',
+                warningId: 'import-warning-5',
+                errorId: 'import-error-5',
+                describedBy: 'import-error-5 import-warning-5',
+            });
+            // Without the fields of the inventory the view cannot tell where the column goes: no warning, no reference to it.
+            expect(rowView(row)).toMatchObject({ warning: '', describedBy: 'import-error-5' });
         });
 
         it('sums the mapping up: the columns imported and the fields created', () => {

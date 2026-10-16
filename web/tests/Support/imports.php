@@ -22,7 +22,9 @@ use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -405,4 +407,20 @@ function importPendingOn(array $case, array $mapping, array $values, string $hea
     $import->forceFill(['path' => $path])->save();
 
     return $import;
+}
+
+/**
+ * Runs something once, right after the first statement that matches the pattern has been executed: the way to make something happen at a precise
+ * moment of a piece of code, in the same transaction.
+ */
+function importAfterStatement(string $pattern, Closure $then): void
+{
+    $done = false;
+
+    Event::listen(QueryExecuted::class, function (QueryExecuted $query) use ($pattern, $then, &$done): void {
+        if (! $done && preg_match($pattern, $query->sql) === 1) {
+            $done = true;
+            $then();
+        }
+    });
 }

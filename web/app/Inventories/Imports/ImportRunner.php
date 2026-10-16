@@ -53,7 +53,10 @@ use Throwable;
  *    everything in that case: then nothing is written.
  *
  * The import ends `completed`, with its report and the end of its life (the report stays as long as an export does), or `failed` with
- * a code ({@see ImportError}); the source file is deleted either way and `path` is emptied. A person who no longer may change the items
+ * a code ({@see ImportError}); the source file is deleted either way and `path` is emptied. The completion is recorded **inside** the
+ * transaction of the writer, by a conditional update that wants the import still `running`: an import that was given up on while
+ * it ran (the pruner took it for lost) or deleted has nothing to complete, and the rows it just wrote are taken back with it, so that
+ * a report that says "nothing was imported" is never wrong. The source file is deleted once that transaction is committed. A person who no longer may change the items
  * of the inventory by the time the job runs gets `not_allowed`. The messages are written in the language of the import, whatever the
  * language of the worker. An import deleted while it runs is not an error: the file is deleted by its folder, as the row that says
  * where it is is gone.
@@ -189,13 +192,14 @@ final class ImportRunner
         }
 
         try {
-            $written = $this->writer->write($inventory, $author, $plan, $rows, $options->onError);
+            $this->writer->write($inventory, $author, $plan, $rows, $options->onError, fn (ImportWritten $written) => $this->complete($import, $total, $written, $errors));
         } catch (ImportFailure $failure) {
             // The rows were counted and checked: the report says how many, and which were not valid.
             throw new ImportFailure($failure->error, $failure->errors !== [] ? $failure->errors : $errors->all(), $failure->failedRows > 0 ? $failure->failedRows : $errors->rows(), $total);
         }
 
-        $this->complete($import, $total, $written, $errors);
+        // The import is committed as completed: the source is not needed any more.
+        $this->files->delete($import->disk, $import->path);
     }
 
     /**
@@ -402,7 +406,7 @@ final class ImportRunner
      * Converts and checks every row of the file.
      *
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory.
-     * @return array{0: list<array{row: int, values: array<string, mixed>}>, 1: int, 2: ImportErrors} The rows that are valid with their stored values, how many rows the file holds, and the report of the others.
+     * @return array{0: array<int, array<string, mixed>>, 1: int, 2: ImportErrors} The stored values of the rows that are valid, by their number in the file (the rows are the biggest thing an import holds: nothing but the values is kept), how many rows the file holds, and the report of the others.
      *
      * @throws ImportFailure When the file holds more rows than an import takes.
      * @throws ImportFileException
@@ -432,7 +436,7 @@ final class ImportRunner
                 $found = $this->convertRow($number, $cells, $width, $plan, $context, $all, $labels);
 
                 if ($found['errors'] === []) {
-                    $rows[] = ['row' => $number, 'values' => $found['values']];
+                    $rows[$number] = $found['values'];
                 } else {
                     $errors->add($found['errors']);
                 }
@@ -498,14 +502,18 @@ final class ImportRunner
     }
 
     /**
-     * Records the result: `completed`, with the report, the end of its life, and the source file deleted.
+     * Records the result: `completed`, with the report, the end of its life, and no source any more (the file is deleted by the caller
+     * once this is committed). Called inside the transaction of the writer, so that the rows exist if and only if the import is completed.
+     *
+     * @throws ImportFailure `stale` when the import is no longer running: it was given up on or deleted while it ran, and what was
+     *                       written is taken back with the transaction.
      */
     private function complete(Import $import, int $total, ImportWritten $written, ImportErrors $errors): void
     {
         $failed = $errors->rows() + $written->skippedRows;
         $reported = array_slice([...$errors->all(), ...$written->skipped], 0, ImportErrors::MAX);
 
-        Import::query()
+        $completed = Import::query()
             ->whereKey($import->getKey())
             ->where('status', ImportStatus::Running->value)
             ->update([
@@ -521,8 +529,9 @@ final class ImportRunner
                 'updated_at' => now(),
             ]);
 
-        // Whatever the update did (the import may have been deleted meanwhile), the source is not needed any more.
-        $this->files->delete($import->disk, $import->path);
+        if ($completed !== 1) {
+            throw new ImportFailure(ImportError::Stale);
+        }
     }
 
     /**

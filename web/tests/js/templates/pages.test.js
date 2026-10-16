@@ -4402,6 +4402,84 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(stepOf('result').textContent).toContain('The import is running.');
                 expect(visible(stepOf('result').querySelector('.alert-warning'))).toBe(false);
             });
+            describe('when the values of a column look like fractions', () => {
+                const WARNING =
+                    'These values look like fractions (0.125 for 12.5%): they will be imported as they are.';
+                const DISCOUNT = { id: 'discount', name: 'Discount', type: 'percentage', options: {}, required: false };
+
+                /** The warning under a column (the element is always there: it is hidden when there is nothing to say). */
+                const warningOf = (index) => importDialog().querySelector(`#import-warning-${index}`);
+
+                /** Opens the mapping of a file whose second column looks like fractions and goes to the percentage field. */
+                async function openOnFractions() {
+                    http.post.mockResolvedValue({
+                        data: uploaded('i1', {
+                            columns: [
+                                column(0, 'Name', ['Hammer']),
+                                { ...column(1, 'Rate', ['0.125', '0.5'], 'percentage'), fraction_like: true },
+                                { ...column(2, 'Margin', ['12.5', '30'], 'percentage'), fraction_like: false },
+                            ],
+                            mapping: [
+                                { column: 0, target: 'field', field: 'name' },
+                                { column: 1, target: 'field', field: 'discount' },
+                                { column: 2, target: 'new', type: 'percentage', name: 'Margin' },
+                            ],
+                        }),
+                    });
+                    await openDialog([], {
+                        fields: [...FIELDS, { ...DISCOUNT, position: FIELDS.length, ...queryFacts('percentage') }],
+                    });
+                    await sendFile(csv());
+                }
+
+                it('warns under the column, and ties the warning to its controls', async () => {
+                    await openOnFractions();
+
+                    expect(visible(warningOf(1))).toBe(true);
+                    expect(warningOf(1).textContent).toBe(WARNING);
+                    expect(destination(1).getAttribute('aria-describedby')).toBe('import-error-1 import-warning-1');
+                    expect(columnsOf()[1].contains(warningOf(1))).toBe(true);
+                    // Values that are whole percentages, and a column that goes nowhere near, are left alone.
+                    expect(visible(warningOf(2))).toBe(false);
+                    expect(warningOf(2).textContent).toBe('');
+                    expect(visible(warningOf(0))).toBe(false);
+                    expect(nameInput(2).getAttribute('aria-describedby')).toBe('import-error-2');
+                });
+
+                it('follows the destination and the type of the field to create', async () => {
+                    await openOnFractions();
+
+                    await choose(destination(1), 'field:qty');
+
+                    expect(visible(warningOf(1))).toBe(false);
+                    expect(destination(1).getAttribute('aria-describedby')).toBe('import-error-1');
+
+                    await choose(destination(1), 'new');
+
+                    expect(typeSelect(1).value).toBe('percentage');
+                    expect(visible(warningOf(1))).toBe(true);
+                    expect(nameInput(1).getAttribute('aria-describedby')).toBe('import-error-1 import-warning-1');
+
+                    await choose(typeSelect(1), 'number');
+
+                    expect(visible(warningOf(1))).toBe(false);
+                });
+
+                it('does not hold the import back', async () => {
+                    await openOnFractions();
+                    http.post.mockResolvedValue({ data: record('i1', 'pending') });
+
+                    await press('Start the import', importDialog());
+
+                    expect(visible(stepOf('result'))).toBe(true);
+                    expect(http.post).toHaveBeenLastCalledWith(
+                        `${IMPORTS}/i1/start`,
+                        expect.objectContaining({
+                            mapping: expect.arrayContaining([{ column: 1, target: 'field', field: 'discount' }]),
+                        }),
+                    );
+                });
+            });
         });
 
         describe('the files and the history of an item', () => {

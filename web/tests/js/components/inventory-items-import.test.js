@@ -646,6 +646,82 @@ describe('the import dialog', () => {
         });
     });
 
+    describe('columns whose values look like fractions', () => {
+        const DISCOUNT = '01HZX0000000000000000000DI';
+        const WARNING = 'These values look like fractions (0.125 for 12.5%): they will be imported as they are.';
+
+        beforeEach(async () => {
+            http.post.mockResolvedValue({
+                data: uploaded('i1', {
+                    columns: [
+                        column(0, 'Name', ['Hammer']),
+                        { ...column(1, 'Rate', ['0.125', '0.5'], 'percentage'), fraction_like: true },
+                        { ...column(2, 'Weight', ['0.5', '1'], 'number'), fraction_like: true },
+                        { ...column(3, 'Margin', ['12.5', '30'], 'percentage'), fraction_like: false },
+                    ],
+                    mapping: [
+                        { column: 0, target: 'field', field: NAME },
+                        { column: 1, target: 'field', field: DISCOUNT },
+                        { column: 2, target: 'field', field: WEIGHT },
+                        { column: 3, target: 'new', type: 'percentage', name: 'Margin' },
+                    ],
+                }),
+            });
+            mount();
+            component.fields = [...FIELDS, field(DISCOUNT, 'percentage', { decimals: 1 }, { name: 'Discount' })];
+            await component.openImport();
+            await component.onImportFile(picked(csv()));
+        });
+
+        const warnings = () => component.importMappingRows.map((row) => row.warning);
+
+        it('warns about the column that looks like fractions and goes to a percentage field', () => {
+            expect(warnings()).toEqual(['', WARNING, '', '']);
+            expect(component.importMappingRows[1].describedBy).toBe('import-error-1 import-warning-1');
+            expect(component.importMappingRows[0].describedBy).toBe('import-error-0');
+        });
+
+        it('follows the destination and the type the person chooses', () => {
+            component.setImportDestination({ index: 1 }, changed(`field:${WEIGHT}`));
+            component.setImportDestination({ index: 2 }, changed(`field:${DISCOUNT}`));
+
+            expect(warnings()).toEqual(['', '', WARNING, '']);
+
+            component.setImportDestination({ index: 2 }, changed('new'));
+            component.setImportType({ index: 2 }, changed('percentage'));
+
+            expect(warnings()).toEqual(['', '', WARNING, '']);
+
+            component.setImportType({ index: 2 }, changed('number'));
+            component.setImportDestination({ index: 1 }, changed('ignore'));
+
+            expect(warnings()).toEqual(['', '', '', '']);
+        });
+
+        it('only warns: the import starts, and the values go as they are', async () => {
+            http.post.mockResolvedValue({ data: record('i1', 'pending') });
+
+            await component.startImport();
+
+            expect(component.importOnResult).toBe(true);
+            expect(lastBody().mapping[1]).toEqual({ column: 1, target: 'field', field: DISCOUNT });
+            expect(component.hasImportAlerts).toBe(false);
+        });
+
+        it('judges the columns of the file as it was read again', async () => {
+            http.patch.mockResolvedValue({
+                data: uploaded('i1', {
+                    columns: [{ ...column(0, 'Rate', ['12.5'], 'percentage'), fraction_like: false }],
+                    mapping: [{ column: 0, target: 'field', field: DISCOUNT }],
+                }),
+            });
+
+            await component.reanalyzeImport();
+
+            expect(warnings()).toEqual(['']);
+        });
+    });
+
     describe('when the person may not create fields', () => {
         beforeEach(async () => {
             http.post.mockResolvedValue({ data: uploaded() });

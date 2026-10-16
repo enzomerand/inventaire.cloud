@@ -92,6 +92,7 @@ const DELIMITER_ALIASES = { ';': 'semicolon', ',': 'comma', '\t': 'tab' };
  * @property {string} header Its name in the file (a made-up one, "Column C", when the file has none).
  * @property {string[]} samples Up to three values from the file.
  * @property {string | null} guess The type of field that fits what the column holds.
+ * @property {boolean} [fraction_like] Whether every number in the column is within [-1, 1] (a spreadsheet cell formatted as a percentage).
  *
  * @typedef {object} ImportMapping What becomes of a column, as the API takes and gives it.
  * @property {number} column
@@ -129,6 +130,7 @@ const DELIMITER_ALIASES = { ';': 'semicolon', ',': 'comma', '\t': 'tab' };
  * @property {string} header
  * @property {string[]} samples
  * @property {string | null} guess
+ * @property {boolean} fractionLike Whether the values of the column look like fractions of 1 (see {@link ImportColumn}).
  * @property {'ignore' | 'field' | 'new'} target
  * @property {string} field The ULID of the existing field the column goes to ("" for none yet).
  * @property {string} type The type of the field to create.
@@ -407,6 +409,7 @@ export function mappingRows(columns, mapping, { fields, canManageFields }) {
             header,
             samples: (Array.isArray(column.samples) ? column.samples : []).filter((one) => typeof one === 'string'),
             guess: typeof column.guess === 'string' ? column.guess : null,
+            fractionLike: column.fraction_like === true,
             target,
             field,
             type: newFieldType(entry.type ?? column.guess),
@@ -465,15 +468,41 @@ export function samplesText(samples) {
 }
 
 /**
+ * The warning a column deserves, if any: its numbers are all between -1 and 1 (typically a cell formatted as a percentage,
+ * which a spreadsheet stores as a fraction: 12.5 % is 0.125) and the column goes to a percentage field, existing or to
+ * create. The values are imported as they are, so 12.5 % would become 0.125.
+ *
+ * @param {ImportRow} row
+ * @param {import('../fields/types.js').Field[]} fields The fields of the inventory.
+ * @returns {string} "" when there is nothing to warn about.
+ */
+export function fractionWarning(row, fields) {
+    if (!row.fractionLike) {
+        return '';
+    }
+
+    const percentage =
+        row.target === 'new'
+            ? row.type === 'percentage'
+            : row.target === 'field' && fields.some((field) => field.id === row.field && field.type === 'percentage');
+
+    return percentage ? t('imports.warning.fraction') : '';
+}
+
+/**
  * A column as the dialog shows it: the state of the mapping with what the template needs to name its controls and to say
  * what is wrong with it.
  *
  * @param {ImportRow} row
  * @param {string} [error] What is wrong with the column ("" when nothing is).
+ * @param {import('../fields/types.js').Field[]} [fields] The fields of the inventory, to tell what a column goes to.
  * @returns {Record<string, any>}
  */
-export function rowView(row, error = '') {
+export function rowView(row, error = '', fields = []) {
     const labels = { column: row.header };
+    const warning = fractionWarning(row, fields);
+    const errorId = `import-error-${row.index}`;
+    const warningId = `import-warning-${row.index}`;
 
     return {
         index: row.index,
@@ -491,7 +520,11 @@ export function rowView(row, error = '') {
         destinationId: `import-destination-${row.index}`,
         typeId: `import-type-${row.index}`,
         nameId: `import-name-${row.index}`,
-        errorId: `import-error-${row.index}`,
+        errorId,
+        warning,
+        warningId,
+        // The controls are described by the refusal and, when there is one, by the warning.
+        describedBy: warning === '' ? errorId : `${errorId} ${warningId}`,
         destinationLabel: t('imports.label.destination', labels),
         typeLabel: t('imports.label.type', labels),
         nameLabel: t('imports.label.name', labels),

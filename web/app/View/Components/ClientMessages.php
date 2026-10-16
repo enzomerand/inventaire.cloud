@@ -277,6 +277,7 @@ class ClientMessages extends Component
             'imports.error.not_editable' => __('This import has already started and can no longer be changed.'),
             'imports.error.gone' => __('This import is no longer available. Choose the file again.'),
             'imports.error.failed' => __('The import failed.'),
+            'imports.warning.fraction' => __('These values look like fractions (0.125 for 12.5%): they will be imported as they are.'),
             'imports.status.pending' => __('Import waiting'),
             'imports.status.running' => __('Import in progress'),
             'imports.status.completed' => __('Import finished'),

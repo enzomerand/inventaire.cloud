@@ -22,6 +22,9 @@ use stdClass;
  */
 final class ItemRevisions
 {
+    /** Revisions written per statement when many items are added at once. */
+    private const BULK_CHUNK = 500;
+
     /**
      * Gets the database.
      */
@@ -44,8 +47,10 @@ final class ItemRevisions
     }
 
     /**
-     * Records that many items were added at once, each with every value it was given: the revisions are written in bulk, a few hundred
-     * a statement. No pruning is needed: an item that was just added has the one revision.
+     * Records that many items were added at once, each with every value it was given: the revisions are written in bulk, a statement
+     * for every {@see self::BULK_CHUNK} of them or {@see Items::BULK_BYTES} bytes of changes, whichever comes first (a statement is
+     * one packet, and the database refuses one that is too large). No pruning is needed: an item that was just added has the one
+     * revision.
      *
      * @param  int  $inventoryId  The inventory the items were added to.
      * @param  list<array{id: int, values: array<string, mixed>}>  $items  The numeric key and the stored values of each new item.
@@ -53,28 +58,36 @@ final class ItemRevisions
     public function createdMany(int $inventoryId, array $items, ?User $author): void
     {
         $now = now();
+        $rows = [];
+        $bytes = 0;
 
-        foreach (array_chunk($items, 500) as $chunk) {
-            $rows = [];
+        foreach ($items as $item) {
+            $changes = [];
 
-            foreach ($chunk as $item) {
-                $changes = [];
-
-                foreach ($item['values'] as $ulid => $value) {
-                    $changes[$ulid] = ['before' => null, 'after' => $value];
-                }
-
-                $rows[] = [
-                    'ulid' => strtolower((string) Str::ulid()),
-                    'inventory_id' => $inventoryId,
-                    'item_id' => $item['id'],
-                    'user_id' => $author?->getKey(),
-                    'action' => ItemRevision::CREATED,
-                    'changes' => json_encode($changes === [] ? new stdClass : $changes, JSON_THROW_ON_ERROR),
-                    'created_at' => $now,
-                ];
+            foreach ($item['values'] as $ulid => $value) {
+                $changes[$ulid] = ['before' => null, 'after' => $value];
             }
 
+            $row = [
+                'ulid' => strtolower((string) Str::ulid()),
+                'inventory_id' => $inventoryId,
+                'item_id' => $item['id'],
+                'user_id' => $author?->getKey(),
+                'action' => ItemRevision::CREATED,
+                'changes' => json_encode($changes === [] ? new stdClass : $changes, JSON_THROW_ON_ERROR),
+                'created_at' => $now,
+            ];
+            $rows[] = $row;
+            $bytes += strlen($row['changes']);
+
+            if (count($rows) >= self::BULK_CHUNK || $bytes >= Items::BULK_BYTES) {
+                $this->db->table('item_revisions')->insert($rows);
+                $rows = [];
+                $bytes = 0;
+            }
+        }
+
+        if ($rows !== []) {
             $this->db->table('item_revisions')->insert($rows);
         }
     }

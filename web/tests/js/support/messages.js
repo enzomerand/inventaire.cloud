@@ -199,6 +199,8 @@ export const MESSAGES = {
     'imports.error.not_editable': 'This import has already started and can no longer be changed.',
     'imports.error.gone': 'This import is no longer available. Choose the file again.',
     'imports.error.failed': 'The import failed.',
+    'imports.warning.fraction':
+        'These values look like fractions (0.125 for 12.5%): they will be imported as they are.',
     'imports.status.pending': 'Import waiting',
     'imports.status.running': 'Import in progress',
     'imports.status.completed': 'Import finished',
