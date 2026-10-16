@@ -10,10 +10,10 @@ use Illuminate\Support\Facades\Log;
 require_once __DIR__.'/../../Support/templates.php';
 
 /*
- * The catalogue keeps its verdict on the template files (the decoded templates that were accepted, the files that were left
- * out and why) in the application cache for a day, under a key made of the content of the files, the version of the rules
- * and the languages. The templates are rebuilt from the arrays that were kept, and the files that were left out are logged
- * when the verdict is made, not when it is read.
+ * The catalogue keeps its verdict on the template files (the decoded templates that were accepted) in the application cache
+ * for a day, under a key made of the content of the files, the version of the rules and the languages. The templates are
+ * rebuilt from the arrays that were kept, and the files that were left out are logged when the verdict is made, not when it
+ * is read.
  */
 
 afterEach(function (): void {
@@ -59,25 +59,22 @@ function templateNewProcess(): TemplateCatalogue
 }
 
 describe('the verdict', function (): void {
-    it('is kept as plain arrays for a day: the templates that were accepted and the files that were left out, with why', function (): void {
+    it('is kept as plain arrays for a day: the templates that were accepted, while the file that was left out is logged', function (): void {
         templateFolderWithOneBrokenFile();
-        $catalogue = app(TemplateCatalogue::class);
-        $catalogue->all();
+        Log::spy();
+        app(TemplateCatalogue::class)->all();
 
         $entries = templateCacheEntries();
         $entry = array_values($entries)[0];
 
         expect($entries)->toHaveCount(1)
-            ->and(array_keys($entries)[0])->toMatch('/^inventory-templates:v1:[0-9a-f]{32}$/D')
+            ->and(array_keys($entries)[0])->toMatch('/^inventory-templates:v2:[0-9a-f]{32}$/D')
             ->and($entry['expiresAt'] - microtime(true))->toBeGreaterThan(TemplateCatalogue::CACHE_TTL - 60)->toBeLessThan(TemplateCatalogue::CACHE_TTL + 1)
             ->and(TemplateCatalogue::CACHE_TTL)->toBe(24 * 3600)
-            ->and(array_keys($entry['value']))->toBe(['templates', 'rejected'])
-            ->and(array_keys($entry['value']['templates']))->toBe(['sample-shop'])
-            ->and($entry['value']['templates']['sample-shop'])->toBeArray()->and($entry['value']['templates']['sample-shop']['category'])->toBe('business')
-            ->and($entry['value']['rejected'])->toHaveCount(1)
-            ->and($entry['value']['rejected'][0]['file'])->toBe('broken.json')
-            ->and($entry['value']['rejected'][0]['reasons'][0])->toContain('not valid JSON')
-            ->and($catalogue->rejected())->toBe($entry['value']['rejected']);
+            ->and(array_keys($entry['value']))->toBe(['sample-shop'])
+            ->and($entry['value']['sample-shop'])->toBeArray()->and($entry['value']['sample-shop']['category'])->toBe('business');
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'not valid JSON') && str_ends_with($context['file'] ?? '', 'broken.json'))->once();
     });
 
     it('is read from the cache by another process, which rebuilds the templates from the arrays', function (): void {
@@ -106,8 +103,7 @@ describe('the verdict', function (): void {
         // Written when the verdict was made, and not when it was read.
         Log::shouldHaveReceived('warning')->once();
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_ends_with($context['file'] ?? '', 'broken.json'))->once();
-        expect($catalogue->rejected())->toHaveCount(1)
-            ->and(file_exists($folder.'/broken.json'))->toBeTrue();
+        expect(file_exists($folder.'/broken.json'))->toBeTrue();
     });
 
     it('is not kept for a folder that cannot be read', function (): void {

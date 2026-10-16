@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Templates;
 
+use App\Services\LocaleResolver;
 use Collator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -17,8 +18,8 @@ use JsonException;
  * starts with `_` or `.` is not a template (a draft, a note, a hidden file) and is not even looked at.
  *
  * Judging the files (decoding them, building the fields of each language, validating the examples) costs more than
- * reading them, so the verdict is kept in the application cache for a day: the decoded templates that were accepted, and the
- * names of the files that were left out with their reasons, as plain arrays. The key of the entry is a hash of what the
+ * reading them, so the verdict is kept in the application cache for a day: the decoded templates that were accepted, as plain
+ * arrays (the files that were left out are logged when the verdict is made, and are not kept). The key of the entry is a hash of what the
  * verdict depends on: the name and the content of every file, {@see TemplateValidator::VERSION} (the rules that judged
  * them) and the languages of the application. Editing a file, adding one, or a new version of the rules therefore needs no
  * invalidation: the next request finds no entry under the new key and judges again (the old entries expire by themselves),
@@ -40,7 +41,7 @@ final class TemplateCatalogue
     public const CACHE_TTL = 86400;
 
     /** The start of the key of the cache entry, with the form of what is kept: change it with the form. */
-    private const CACHE_KEY_PREFIX = 'inventory-templates:v1:';
+    private const CACHE_KEY_PREFIX = 'inventory-templates:v2:';
 
     /** The folder the templates were read from, or null while nothing was read. */
     private ?string $loadedFrom = null;
@@ -48,13 +49,13 @@ final class TemplateCatalogue
     /** @var array<string, Template> */
     private array $templates = [];
 
-    /** @var list<array{file: string, reasons: list<string>}> */
-    private array $rejected = [];
-
     /**
-     * Gets the validator every file goes through.
+     * Gets the validator every file goes through and the resolver that knows the supported languages.
      */
-    public function __construct(private readonly TemplateValidator $validator) {}
+    public function __construct(
+        private readonly TemplateValidator $validator,
+        private readonly LocaleResolver $locales,
+    ) {}
 
     /**
      * The slug a file of the folder is the template of, or null when it is not a template: not a `.json` file, or a name
@@ -120,26 +121,12 @@ final class TemplateCatalogue
     }
 
     /**
-     * The files that were left out, with why: the file name and one reason each (the problems the validator found, or what
-     * kept the file from being judged). Empty when all of them are used.
-     *
-     * @return list<array{file: string, reasons: list<string>}>
-     */
-    public function rejected(): array
-    {
-        $this->load();
-
-        return $this->rejected;
-    }
-
-    /**
      * Forgets what was read: the next question reads the folder again (the cache entry is kept).
      */
     public function flush(): void
     {
         $this->loadedFrom = null;
         $this->templates = [];
-        $this->rejected = [];
     }
 
     /**
@@ -180,14 +167,12 @@ final class TemplateCatalogue
             return;
         }
 
-        /** @var array{templates: array<string, array<string, mixed>>, rejected: list<array{file: string, reasons: list<string>}>} $verdict */
+        /** @var array<string, array<string, mixed>> $verdict */
         $verdict = Cache::remember($this->cacheKey($files), self::CACHE_TTL, fn (): array => $this->judge($path, $files));
 
-        foreach ($verdict['templates'] as $slug => $data) {
+        foreach ($verdict as $slug => $data) {
             $this->templates[(string) $slug] = Template::fromArray((string) $slug, $data);
         }
-
-        $this->rejected = $verdict['rejected'];
     }
 
     /**
@@ -232,7 +217,7 @@ final class TemplateCatalogue
     {
         $hash = hash_init('xxh128');
 
-        hash_update($hash, 'validator:'.TemplateValidator::VERSION."\0locales:".implode(',', array_map(strval(...), array_keys(config()->array('app.locale_names'))))."\0");
+        hash_update($hash, 'validator:'.TemplateValidator::VERSION."\0locales:".implode(',', $this->locales->supported())."\0");
 
         foreach ($files as $name => $file) {
             // Lengths first, so that no content can be taken for the start of the next file.
@@ -244,70 +229,43 @@ final class TemplateCatalogue
     }
 
     /**
-     * Judges every file: the templates that can be used, as the decoded content of their file, and the files that cannot,
-     * with why. Each file that is left out is logged here, which is to say once for each verdict, not each time it is read.
+     * Judges every file: the templates that can be used, as the decoded content of their file. Each file that is left out is
+     * logged here as a warning, which is to say once for each verdict, not each time it is read.
      *
      * @param  array<string, array{size: int|false, content: string|false}>  $files
-     * @return array{templates: array<string, array<string, mixed>>, rejected: list<array{file: string, reasons: list<string>}>}
+     * @return array<string, array<string, mixed>>
      */
     private function judge(string $path, array $files): array
     {
         $templates = [];
-        $rejected = [];
 
         foreach ($files as $name => $file) {
             $slug = (string) self::slugOf($name);
             $location = $path.'/'.$name;
-            $data = null;
-            $reasons = [];
 
             if ($file['content'] === false) {
-                $reasons = ['The file cannot be read or is too big.'];
                 Log::warning('An inventory template is ignored: the file cannot be read or is too big.', ['file' => $location, 'limit' => self::MAX_FILE_SIZE]);
-            } else {
-                try {
-                    $data = json_decode($file['content'], true, 32, JSON_THROW_ON_ERROR);
-                } catch (JsonException $exception) {
-                    $reasons = ['The file is not valid JSON ('.$exception->getMessage().').'];
-                    Log::warning('An inventory template is ignored: the file is not valid JSON.', ['file' => $location, 'error' => $exception->getMessage()]);
-                }
+
+                continue;
             }
 
-            if ($reasons === []) {
-                $reasons = $this->problemsWith($slug, $data, $location);
+            try {
+                $data = json_decode($file['content'], true, 32, JSON_THROW_ON_ERROR);
+            } catch (JsonException $exception) {
+                Log::warning('An inventory template is ignored: the file is not valid JSON.', ['file' => $location, 'error' => $exception->getMessage()]);
+
+                continue;
             }
 
-            if ($reasons !== []) {
-                $rejected[] = ['file' => $name, 'reasons' => $reasons];
+            $errors = $this->validator->validate($slug, $data);
+
+            if ($errors !== []) {
+                Log::warning('An inventory template is ignored: the file is not valid.', ['file' => $location, 'errors' => $errors]);
             } elseif (is_array($data)) {
                 $templates[$slug] = $data;
             }
         }
 
-        return ['templates' => $templates, 'rejected' => $rejected];
-    }
-
-    /**
-     * What is wrong with the decoded content of a file, logged as a warning; an empty list for a template that can be used.
-     *
-     * @return list<string>
-     */
-    private function problemsWith(string $slug, mixed $data, string $location): array
-    {
-        $format = is_array($data) ? TemplateValidator::formatOf($data) : null;
-
-        if ($format !== null && $format > TemplateValidator::FORMAT) {
-            Log::warning('An inventory template is ignored: it needs a newer inventaire.cloud.', ['file' => $location, 'format' => $format, 'supported' => TemplateValidator::FORMAT]);
-
-            return ['The file needs a newer inventaire.cloud (format '.$format.'; this version reads up to format '.TemplateValidator::FORMAT.').'];
-        }
-
-        $errors = $this->validator->validate($slug, $data);
-
-        if ($errors !== []) {
-            Log::warning('An inventory template is ignored: the file is not valid.', ['file' => $location, 'errors' => $errors]);
-        }
-
-        return $errors;
+        return $templates;
     }
 }

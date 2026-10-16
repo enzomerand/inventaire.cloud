@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
-use App\Services\LocaleResolver;
 use App\Support\PublicUrls;
 use Carbon\Carbon;
 use Closure;
@@ -23,7 +22,7 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * The routes of the other languages carry the code as the `{locale}` parameter. The language of the instance has one
  * address only, without a prefix: its prefixed address answers with a permanent redirect to it. A code the application does
- * not support does not match any route (404).
+ * not support does not match any route (404): the `where` constraint of the routes lists the supported codes.
  *
  * The permanent redirect is to an absolute address built from `APP_URL` ({@see PublicUrls}), not from the `Host` header of
  * the request: a shared cache must not be able to keep a redirect to a host somebody made up.
@@ -37,11 +36,6 @@ final class UseUrlLocale
     public const ATTRIBUTE = 'locale_from_url';
 
     /**
-     * Gets the resolver that knows the supported languages.
-     */
-    public function __construct(private readonly LocaleResolver $locales) {}
-
-    /**
      * Applies the language of the address for the rest of the request.
      *
      * @param  Closure(Request): Response  $next
@@ -52,10 +46,6 @@ final class UseUrlLocale
         $route = $request->route();
         $prefixed = $route !== null && $route->hasParameter('locale');
         $locale = $prefixed && is_string($route->parameter('locale')) ? $route->parameter('locale') : $default;
-
-        if (! $this->locales->isSupported($locale)) {
-            abort(404);
-        }
 
         $request->attributes->set(self::ATTRIBUTE, true);
 

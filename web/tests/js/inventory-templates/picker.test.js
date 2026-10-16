@@ -585,18 +585,6 @@ describe('the template picker of the new inventory dialog', () => {
             expect(component.fromTemplateLabel).toBe('Template: Home inventory');
         });
 
-        it('cuts what the template proposes to what an inventory can hold', async () => {
-            http.get.mockResolvedValue({
-                data: detail('a', { name: 'N'.repeat(130), summary: 'S'.repeat(2100) }),
-            });
-            await component.showTemplate('a');
-
-            component.useTemplate();
-
-            expect(component.form.name).toHaveLength(120);
-            expect(component.form.description).toHaveLength(2000);
-        });
-
         it('keeps what was typed when the person comes back to the same template, and replaces it for another', async () => {
             http.get.mockResolvedValueOnce({ data: detail('a', { name: 'A' }) });
             await component.showTemplate('a');

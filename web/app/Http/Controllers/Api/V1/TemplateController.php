@@ -30,13 +30,7 @@ final class TemplateController extends Controller
      */
     public function index(): AnonymousResourceCollection
     {
-        $templates = [];
-
-        foreach ($this->catalogue->grouped(app()->getLocale()) as $group) {
-            array_push($templates, ...$group);
-        }
-
-        return TemplateSummaryResource::collection($templates);
+        return TemplateSummaryResource::collection(array_merge(...array_values($this->catalogue->grouped(app()->getLocale()))));
     }
 
     /**

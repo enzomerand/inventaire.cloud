@@ -2,13 +2,10 @@
 
 declare(strict_types=1);
 
-use App\Inventories\Templates\Template;
 use App\Inventories\Templates\TemplateCatalogue;
-use App\Inventories\Templates\TemplatePresenter;
 use App\Support\PublicUrls;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../../Support/inventories.php';
 require_once __DIR__.'/../../Support/templates.php';
@@ -276,31 +273,6 @@ describe('the page of a template', function (): void {
         $page = templateDom($this->get('/en/templates/sample-records')->assertOk());
 
         expect(templateTexts($page, '(//table)[2]/tbody/tr[2]/td[4]'))->toBe(['May 18, 2024, 10:30 AM']);
-    });
-
-    it('shows a day or a moment it cannot format as the file writes it, and logs a warning', function (): void {
-        $data = templateData('sample-records');
-        $data['fields'][] = ['key' => 'released_on', 'type' => 'date', 'name' => ['fr' => 'Sorti le', 'en' => 'Released on']];
-        // The validator would never let these in: the template is built by hand to reach the presenter.
-        $data['examples']['en'][0]['bought_at'] = 'not a moment';
-        $data['examples']['en'][0]['released_on'] = 'not a day';
-        $template = Template::fromArray('records', $data);
-        Log::spy();
-
-        $examples = app(TemplatePresenter::class)->examples($template, 'en');
-        $texts = array_column(array_merge(...$examples['rows']), 'text');
-
-        expect($texts)->toContain('not a moment')->toContain('not a day');
-        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'A moment') && $context['value'] === 'not a moment' && $context['locale'] === 'en' && $context['exception'] instanceof Throwable)->once();
-        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'A day') && $context['value'] === 'not a day')->once();
-    });
-
-    it('writes a moment and a day it can format without a warning', function (): void {
-        Log::spy();
-
-        $this->get('/en/templates/sample-records')->assertOk();
-
-        Log::shouldNotHaveReceived('warning');
     });
 
     it('has a button that uses the template, at the top and at the end', function (): void {

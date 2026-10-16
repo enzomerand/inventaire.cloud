@@ -82,8 +82,8 @@ final class Inventories
      * It is one transaction, retried as a whole when the database picks it as the loser of a deadlock: the workspace is
      * locked, the quota of inventories is counted, the inventory is inserted, then its fields one by one with the checks
      * of a field made by hand (the quota of fields, the name, the options), whose insertion needs no lock of its own since
-     * nobody can see the inventory before the commit. A field that fails rolls the inventory back with it. The quota of
-     * fields is judged before anything is written.
+     * nobody can see the inventory before the commit. A field that fails (the quota of fields included) rolls the inventory
+     * back with it.
      *
      * @param  string  $name  Already validated and trimmed.
      * @param  string|null  $description  Already validated; null for none.
@@ -98,7 +98,7 @@ final class Inventories
         $definitions = $template->fields($locale);
 
         return DeadlockRetries::run(fn (): Inventory => $this->db->transaction(function () use ($workspace, $name, $description, $definitions): Inventory {
-            $inventory = $this->insert($workspace, $name, $description, count($definitions));
+            $inventory = $this->insert($workspace, $name, $description);
             $fields = new SupportCollection;
 
             foreach ($definitions as $definition) {
@@ -155,14 +155,10 @@ final class Inventories
     /**
      * Inserts an inventory under the lock of its workspace, inside the caller's transaction.
      *
-     * @param  int  $fields  How many fields the caller is about to add: more than an inventory may hold is refused here,
-     *                       before anything is written.
-     *
      * @throws InventoryLimitReachedException
-     * @throws FieldLimitReachedException
      * @throws ModelNotFoundException
      */
-    private function insert(Workspace $workspace, string $name, ?string $description, int $fields = 0): Inventory
+    private function insert(Workspace $workspace, string $name, ?string $description): Inventory
     {
         if ($this->locks->workspaces([$workspace->getKey()])->isEmpty()) {
             throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
@@ -172,12 +168,6 @@ final class Inventories
 
         if (Inventory::query()->where('workspace_id', $workspace->getKey())->count() >= $limit) {
             throw new InventoryLimitReachedException($limit);
-        }
-
-        $fieldLimit = config()->integer('inventories.max_fields');
-
-        if ($fields > $fieldLimit) {
-            throw new FieldLimitReachedException($fieldLimit);
         }
 
         $inventory = new Inventory(['name' => SingleLineText::normalize($name), 'description' => $description]);

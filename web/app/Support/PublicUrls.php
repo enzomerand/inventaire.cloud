@@ -13,8 +13,7 @@ use Closure;
  * address made from it could be made to point anywhere (the same rule as the welcome mail's link to the sign-in page).
  *
  * The pages of the gallery exist in every supported language: the one of the instance (`app.default_locale`) has no prefix
- * in its path, the others have their code (`/en/templates`). The routes that serve these paths are in `routes/web.php`;
- * `PublicPagesTest` checks that every address given here is served.
+ * in its path, the others have their code (`/en/templates`). The routes that serve these paths are in `routes/web.php`.
  */
 final class PublicUrls
 {
@@ -95,7 +94,7 @@ final class PublicUrls
     /**
      * The start of the path of the pages in a language: nothing for the language of the instance, `/<code>` for the others.
      */
-    public static function prefix(string $locale): string
+    private static function prefix(string $locale): string
     {
         return $locale === config()->string('app.default_locale') ? '' : '/'.$locale;
     }

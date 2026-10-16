@@ -156,19 +156,18 @@ describe('creating an inventory from a template', function (): void {
         expect(Inventory::query()->count())->toBe(0);
     })->with(['an unknown slug' => ['nothing'], 'capitals' => ['SAMPLE-TOOLS'], 'a number' => [12], 'a list' => [['sample-tools']], 'too long' => [str_repeat('a', 300)]]);
 
-    it('is made from the template the validation found, even when the catalogue lost it before the inventory is made', function (): void {
+    it('is a 422, never an empty inventory, when the catalogue loses the template between the validation and the use', function (): void {
         $request = SaveInventoryRequest::create('/api/v1/workspaces/any/inventories', 'POST', ['name' => 'Shop', 'template' => 'sample-shop']);
         $validator = Validator::make($request->all(), $request->rules());
 
-        expect($validator->passes())->toBeTrue();
+        expect($validator->passes())->toBeTrue()
+            ->and($request->template()?->slug)->toBe('sample-shop');
 
         // The file went away, or the cache was emptied, between the rule and the use.
         templateCatalogueFrom(storage_path('framework/testing/no-such-folder'));
 
         expect(app(TemplateCatalogue::class)->find('sample-shop'))->toBeNull()
-            ->and($request->template())->toBeInstanceOf(Template::class)
-            ->and($request->template()?->slug)->toBe('sample-shop')
-            ->and($request->template())->toBe($request->template());
+            ->and(fn () => $request->template())->toThrow(ValidationException::class, "Ce modèle n'existe pas.");
     });
 
     it('is never an empty inventory for a template that is named and cannot be found: it is a 422 like the validation', function (): void {

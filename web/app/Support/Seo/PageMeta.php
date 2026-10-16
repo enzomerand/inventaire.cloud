@@ -19,10 +19,9 @@ use App\Support\PublicUrls;
  */
 final readonly class PageMeta
 {
-    /** The Open Graph locale of the languages the application is most likely to be translated into. */
+    /** The Open Graph locale of the languages whose region is not the language written twice ("fr_FR", "de_DE"... need no entry). */
     private const OG_LOCALES = [
-        'fr' => 'fr_FR', 'en' => 'en_US', 'de' => 'de_DE', 'es' => 'es_ES', 'it' => 'it_IT', 'pt' => 'pt_PT', 'nl' => 'nl_NL',
-        'pl' => 'pl_PL', 'sv' => 'sv_SE', 'da' => 'da_DK', 'nb' => 'nb_NO', 'fi' => 'fi_FI', 'cs' => 'cs_CZ', 'ja' => 'ja_JP',
+        'en' => 'en_US', 'sv' => 'sv_SE', 'da' => 'da_DK', 'nb' => 'nb_NO', 'cs' => 'cs_CZ', 'ja' => 'ja_JP',
     ];
 
     /**

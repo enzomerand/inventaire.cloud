@@ -23,9 +23,9 @@ use Illuminate\Validation\ValidationException;
  * Who may do it is decided before anything is looked at (see {@see InventoryPolicy}), so that somebody who may not
  * learns nothing from the validation: a stranger is told the workspace or the inventory does not exist. Creating needs
  * a name; changing takes whichever of the two is sent, and a name that is sent cannot be empty. Creating may also name a
- * template of the catalogue (`template`, its slug), which only a new inventory can do. The template is looked up once
- * for the request: the one the validation found is the one the inventory is made from, so that a template that leaves the
- * catalogue in between (its file removed, the cache emptied) can never give an inventory without its fields; it is a `422`.
+ * template of the catalogue (`template`, its slug), which only a new inventory can do. A template that is named but cannot
+ * be found is never an inventory without its fields: it is a `422`, from the validation or, should the catalogue lose the
+ * template in between, from {@see self::template()}.
  */
 final class SaveInventoryRequest extends FormRequest
 {
@@ -34,12 +34,6 @@ final class SaveInventoryRequest extends FormRequest
 
     /** Longest description, in characters. */
     public const DESCRIPTION_MAX_LENGTH = 2000;
-
-    /** The template of the request, once it was looked up (null when the request names none, or one that does not exist). */
-    private ?Template $template = null;
-
-    /** Whether the template of the request was looked up. */
-    private bool $templateResolved = false;
 
     /**
      * Adding to a workspace or changing an inventory: the policy knows which roles may.
@@ -68,7 +62,7 @@ final class SaveInventoryRequest extends FormRequest
             // The slug of a template of the catalogue (`GET /api/v1/templates`): the inventory is made with its fields.
             'template' => $creating
                 ? ['bail', 'sometimes', 'nullable', 'string', 'max:'.TemplateValidator::SLUG_MAX_LENGTH, function (string $attribute, mixed $value, Closure $fail): void {
-                    if (! is_string($value) || $this->lookUpTemplate($value) === null) {
+                    if (! is_string($value) || app(TemplateCatalogue::class)->find($value) === null) {
                         $fail(__('This template does not exist.'));
                     }
                 }]
@@ -79,8 +73,8 @@ final class SaveInventoryRequest extends FormRequest
     /**
      * The template the inventory is to be made from, or null for an empty inventory (the request names none).
      *
-     * It is the one the validation found, kept for the rest of the request. A template that is named but cannot be found is
-     * not an empty inventory: it is the same `422` as the validation gives.
+     * The catalogue keeps what it read for the rest of the process, so this is the template the validation found. A template
+     * that is named but cannot be found is not an empty inventory: it is the same `422` as the validation gives.
      *
      * @throws ValidationException When the request names a template the catalogue does not have.
      */
@@ -92,20 +86,7 @@ final class SaveInventoryRequest extends FormRequest
             return null;
         }
 
-        return $this->lookUpTemplate($slug) ?? throw ValidationException::withMessages(['template' => [__('This template does not exist.')]]);
-    }
-
-    /**
-     * Looks the template up in the catalogue the first time it is asked for, and gives the same answer afterwards.
-     */
-    private function lookUpTemplate(string $slug): ?Template
-    {
-        if (! $this->templateResolved) {
-            $this->template = app(TemplateCatalogue::class)->find($slug);
-            $this->templateResolved = true;
-        }
-
-        return $this->template;
+        return app(TemplateCatalogue::class)->find($slug) ?? throw ValidationException::withMessages(['template' => [__('This template does not exist.')]]);
     }
 
     /**

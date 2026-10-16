@@ -11,6 +11,7 @@ use App\Inventories\Fields\FieldTypes;
 use App\Inventories\ItemValues;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
+use App\Services\LocaleResolver;
 use Closure;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
@@ -118,11 +119,12 @@ final class TemplateValidator
     private const MARKDOWN_PATTERN = '/\*\*|__|`|~~|\[[^\]]*\]\([^)]*\)|^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>)/';
 
     /**
-     * Gets the registry of field types and the checker of item values.
+     * Gets the registry of field types, the checker of item values and the resolver that knows the supported languages.
      */
     public function __construct(
         private readonly FieldTypes $types,
         private readonly ItemValues $values,
+        private readonly LocaleResolver $locales,
     ) {}
 
     /**
@@ -183,7 +185,7 @@ final class TemplateValidator
      *
      * @param  array<array-key, mixed>  $data
      */
-    public static function formatOf(array $data): ?int
+    private static function formatOf(array $data): ?int
     {
         if (! array_key_exists('format', $data)) {
             return 1;
@@ -246,7 +248,7 @@ final class TemplateValidator
      */
     private function localesOf(array $data, array &$errors): array
     {
-        $supported = array_map(strval(...), array_keys(config()->array('app.locale_names')));
+        $supported = $this->locales->supported();
         $locales = Template::REQUIRED_LOCALES;
         $name = $data['name'] ?? null;
 

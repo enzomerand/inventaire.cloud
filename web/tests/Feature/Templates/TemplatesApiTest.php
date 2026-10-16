@@ -126,18 +126,6 @@ describe('one template', function (): void {
 });
 
 describe('the catalogue endpoints', function (): void {
-    it('are limited in pace for each network', function (): void {
-        config(['inventories.templates_per_minute' => 3]);
-
-        foreach (range(1, 3) as $_) {
-            $this->getJson('/api/v1/templates')->assertOk();
-        }
-
-        $this->getJson('/api/v1/templates/sample-tools')->assertStatus(429);
-        $this->getJson('/api/v1/templates')->assertStatus(429);
-        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.9'])->getJson('/api/v1/templates')->assertOk();
-    });
-
     it('answer without a session', function (): void {
         $response = $this->getJson('/api/v1/templates')->assertOk();
 

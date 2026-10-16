@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Inventories\Templates\TemplateCatalogue;
-use App\Services\LocaleResolver;
 use App\Support\PublicUrls;
+use App\Support\Seo\PublicPageMeta;
 use Illuminate\Http\Response;
 use XMLWriter;
 
@@ -27,11 +27,11 @@ final class SitemapController extends Controller
     private const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
     /**
-     * Gets the catalogue and the resolver that knows the supported languages.
+     * Gets the catalogue and what says, for each page, in which languages it exists (the pages' own metadata).
      */
     public function __construct(
         private readonly TemplateCatalogue $catalogue,
-        private readonly LocaleResolver $locales,
+        private readonly PublicPageMeta $meta,
     ) {}
 
     /**
@@ -51,19 +51,19 @@ final class SitemapController extends Controller
 
         $this->entry($xml, PublicUrls::home(), []);
 
-        $gallery = PublicUrls::alternates(PublicUrls::templates(...));
+        // The alternates of a page are the ones the page itself announces, so that the two never disagree.
+        $locale = config()->string('app.default_locale');
+        $gallery = $this->meta->gallery([], $locale);
 
-        foreach ($gallery as $address) {
-            $this->entry($xml, $address, $gallery, PublicUrls::templates(config()->string('app.default_locale')));
+        foreach ($gallery->alternates as $address) {
+            $this->entry($xml, $address, $gallery->alternates, $gallery->default);
         }
 
         foreach ($this->catalogue->all() as $template) {
-            $written = array_values(array_intersect($this->locales->supported(), $template->locales()));
-            $pages = array_combine($written, array_map(fn (string $locale): string => PublicUrls::template($template->slug, $locale), $written));
-            $default = $pages[config()->string('app.default_locale')] ?? ($pages[$written[0] ?? ''] ?? '');
+            $page = $this->meta->template($template, $locale);
 
-            foreach ($pages as $address) {
-                $this->entry($xml, $address, $pages, $default);
+            foreach ($page->alternates as $address) {
+                $this->entry($xml, $address, $page->alternates, $page->default);
             }
         }
 

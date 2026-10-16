@@ -10,10 +10,8 @@ use App\Support\DisplayTime;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeZone;
-use Illuminate\Support\Facades\Log;
 use IntlDateFormatter;
 use NumberFormatter;
-use Throwable;
 
 /**
  * Turns a template into what a public page shows: the table of its fields and the table of its example rows, as plain
@@ -219,36 +217,25 @@ final class TemplatePresenter
 
     /**
      * A day (written YYYY-MM-DD) in the medium form of the language ("14 sept. 2023"), as it is: a day has no timezone.
+     * The validator refuses anything else, so the value is always one.
      */
     private function date(string $date, string $locale): string
     {
-        try {
-            $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE, 'UTC')
-                ?->format(new DateTimeImmutable($date.' 00:00:00', new DateTimeZone('UTC')));
-        } catch (Throwable $exception) {
-            // The page still shows the day as the file writes it; the validator should have refused it, so say so.
-            Log::warning('A day of an example of a template cannot be formatted: it is shown as it is written.', ['value' => $date, 'locale' => $locale, 'exception' => $exception]);
-
-            return $date;
-        }
+        $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE, 'UTC')
+            ?->format(new DateTimeImmutable($date.' 00:00:00', new DateTimeZone('UTC')));
 
         return is_string($formatted) ? $formatted : $date;
     }
 
     /**
      * A moment (written with its offset from UTC) in the medium form of the language, in the timezone of the instance.
+     * The validator refuses anything else, so the value is always one.
      */
     private function dateTime(string $moment, string $locale): string
     {
-        try {
-            $zone = DisplayTime::zone();
-            $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT, $zone)
-                ?->format(CarbonImmutable::parse($moment)->setTimezone($zone));
-        } catch (Throwable $exception) {
-            Log::warning('A moment of an example of a template cannot be formatted: it is shown as it is written.', ['value' => $moment, 'locale' => $locale, 'exception' => $exception]);
-
-            return $moment;
-        }
+        $zone = DisplayTime::zone();
+        $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT, $zone)
+            ?->format(CarbonImmutable::parse($moment)->setTimezone($zone));
 
         return is_string($formatted) ? $formatted : $moment;
     }

@@ -40,10 +40,10 @@
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** The longest slug of the catalogue. */
-export const MAX_SLUG_LENGTH = 60;
+const MAX_SLUG_LENGTH = 60;
 
 /** The name of the query parameter that opens the dialog on a template. */
-export const LINK_PARAMETER = 'template';
+const LINK_PARAMETER = 'template';
 
 /**
  * Whether a text can be the slug of a template. A text that cannot is never sent to the server: it cannot name one.

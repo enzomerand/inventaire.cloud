@@ -177,11 +177,10 @@ describe('a file that cannot be used', function (): void {
         templateCatalogueFrom($folder);
         $catalogue = app(TemplateCatalogue::class);
 
-        expect(array_map(fn (Template $template): string => $template->slug, $catalogue->all()))->toBe(['current-format', 'sample-shop'])
-            ->and($catalogue->rejected())->toBe([['file' => 'from-the-future.json', 'reasons' => ['The file needs a newer inventaire.cloud (format 2; this version reads up to format 1).']]]);
+        expect(array_map(fn (Template $template): string => $template->slug, $catalogue->all()))->toBe(['current-format', 'sample-shop']);
 
         Log::shouldHaveReceived('warning')->once();
-        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'needs a newer inventaire.cloud') && str_ends_with($context['file'] ?? '', 'from-the-future.json') && ($context['format'] ?? null) === 2)->once();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_ends_with($context['file'] ?? '', 'from-the-future.json') && ($context['errors'] ?? null) === ['format: this file needs a newer inventaire.cloud (format 2; this version reads up to format 1).'])->once();
     });
 
     it('is not looked at when its name starts with an underscore or a dot, nor is a file that is not JSON', function (): void {
@@ -201,7 +200,6 @@ describe('a file that cannot be used', function (): void {
 
         expect(array_map(fn (Template $template): string => $template->slug, $catalogue->all()))->toBe(['sample-shop'])
             ->and($catalogue->find('_sample-tools'))->toBeNull()
-            ->and($catalogue->rejected())->toBe([])
             ->and(TemplateCatalogue::slugOf('sample-shop.json'))->toBe('sample-shop')
             ->and(TemplateCatalogue::slugOf('_draft.json'))->toBeNull()
             ->and(TemplateCatalogue::slugOf('.hidden.json'))->toBeNull()

@@ -23,6 +23,7 @@ use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
 use App\Installer\InstallStep;
+use App\Services\LocaleResolver;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
@@ -35,7 +36,7 @@ Route::get('/', HomePageController::class)->name('home');
 // prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
 // permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale). They are public and
 // rendered from files, so they are limited in pace like the endpoints of the API (the `templates` limiter).
-$localeCodes = implode('|', array_map(fn (int|string $code): string => preg_quote((string) $code, '/'), array_keys(config()->array('app.locale_names'))));
+$localeCodes = implode('|', array_map(fn (string $code): string => preg_quote($code, '/'), app(LocaleResolver::class)->supported()));
 
 Route::middleware(['throttle:templates', UseUrlLocale::class])->group(function () use ($localeCodes): void {
     Route::get('/templates', TemplateGalleryController::class)->name('templates.index');

@@ -27,12 +27,6 @@ import { showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
 import { categoriesOf, filterTemplates, isSlug, linkedTemplate, withoutLinkedTemplate } from './catalogue.js';
 
-/** The longest name of an inventory, as the API takes it (the form's own `maxlength`). */
-const MAX_NAME = 120;
-
-/** The longest description of an inventory, as the API takes it (the form's own `maxlength`). */
-const MAX_DESCRIPTION = 2000;
-
 /**
  * Whether the body of a template answer is a template the preview can work with (the form takes its slug and its name).
  *
@@ -479,7 +473,7 @@ export default function templatePicker() {
          * @returns {void}
          */
         useTemplate() {
-            if ((this.template ?? null) === null) {
+            if (!this.canUseTemplate) {
                 return;
             }
 
@@ -489,8 +483,8 @@ export default function templatePicker() {
 
             if (this.formTemplate?.slug !== this.template.slug) {
                 this.form = {
-                    name: this.template.name.slice(0, MAX_NAME),
-                    description: (this.template.summary ?? '').slice(0, MAX_DESCRIPTION),
+                    name: this.template.name,
+                    description: this.template.summary ?? '',
                 };
             }
 
