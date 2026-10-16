@@ -205,6 +205,46 @@ export function toParams(query, { page = null } = {}) {
     return params;
 }
 
+/** The names that mean something to an object: never a key of the body built from the parameters. */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * The same view as {@link toParams}, as the nested object a JSON body carries instead of a query string: `filter[<field>][min]`
+ * becomes `{ filter: { <field>: { min } } }` and the numbered choices of `in` become a list. It is `toParams` turned back
+ * into the structure PHP builds from a query string, so the API takes it with the very rules it applies to the list (the
+ * export sends it as the `query` of the view it must reproduce) and the two can never drift apart.
+ *
+ * @param {Query} query
+ * @returns {Record<string, any>} Without the page; empty for the default view.
+ */
+export function toBody(query) {
+    /** @type {Record<string, any>} */
+    const body = {};
+
+    for (const [name, value] of Object.entries(toParams(query))) {
+        const path = name.split(/\]?\[|\]$/).filter((part) => part !== '');
+
+        if (path.some((part) => FORBIDDEN_KEYS.has(part))) {
+            continue;
+        }
+
+        let node = body;
+
+        path.forEach((part, index) => {
+            if (index === path.length - 1) {
+                node[part] = value;
+
+                return;
+            }
+
+            // The choices of a filter (`in[0]`, `in[1]`) are a list; every other level is an object.
+            node = node[part] ??= part === 'in' ? [] : {};
+        });
+    }
+
+    return body;
+}
+
 /**
  * The query string that writes a view in the address of the page: the parameters of the API, the page unless it is the
  * first one, and the way the items are laid out when the person chose one.

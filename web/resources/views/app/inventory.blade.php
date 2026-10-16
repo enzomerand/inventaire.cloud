@@ -10,6 +10,9 @@
     from it by the component. Everything goes through the API; the form of an item is generated from the fields of the
     inventory. Values are shown by partials/field-value (x-text, never x-html).
 
+    The toolbar's "Export" button opens partials/export-dialog (resources/js/export/dialog.js): the format, the items or the
+    current view, and the exports asked for lately, with a link to the file of each once it is ready.
+
     The dialog of an item that exists has three tabs: its details (the form, or the read-only list), its attachments
     (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
     partials/item-file-field. data-max-attachment-size is the largest file the server takes, in bytes.
@@ -235,6 +238,8 @@
         </div>
 
         @include('partials.items-filters')
+
+        @include('partials.export-dialog')
 
         <div class="modal modal-blur fade" tabindex="-1" x-ref="modal" role="dialog" aria-labelledby="item-modal-title" aria-hidden="true">
             <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
