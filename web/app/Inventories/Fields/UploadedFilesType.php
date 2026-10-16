@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Inventories\Fields;
 
 use App\Inventories\Attachments\Attachments;
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use Closure;
 
@@ -127,5 +130,13 @@ abstract class UploadedFilesType extends AbstractFieldType
         }
 
         return ExportValue::text(implode(', ', $names));
+    }
+
+    /**
+     * Never read from a cell: the files of an item are added by uploading them.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        throw new InvalidImportValue(__('This field is filled by uploading files.'));
     }
 }

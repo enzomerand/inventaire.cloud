@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use Closure;
 use Illuminate\Validation\Rule;
@@ -179,5 +181,25 @@ final class BarcodeType extends AbstractFieldType
     public function searchText(mixed $stored, InventoryField $field): ?string
     {
         return $this->stringSearchText($stored);
+    }
+
+    /**
+     * The code as written. A code of digits that a spreadsheet made a number loses its leading zeros: the formats that have a fixed
+     * length (EAN-13, EAN-8, UPC-A, ISBN-13) get them back.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        if ($cell->isEmpty()) {
+            return null;
+        }
+
+        $length = match ($this->format($field)) {
+            'ean13', 'isbn13' => 13,
+            'ean8' => 8,
+            'upca' => 12,
+            default => 0,
+        };
+
+        return is_int($cell->value) && $cell->value >= 0 ? str_pad($cell->line(), $length, '0', STR_PAD_LEFT) : $cell->line();
     }
 }

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use Illuminate\Validation\Rule;
 
@@ -70,5 +73,18 @@ final class SelectType extends ChoiceType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return ExportValue::text(implode(', ', is_string($stored) ? $this->choiceLabels([$stored], $field) : []));
+    }
+
+    /**
+     * The id of the choice the cell names: its label (whatever the case and the accents) or its id.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        if ($cell->isEmpty()) {
+            return null;
+        }
+
+        return $this->choiceIdOf($cell->line(), $field)
+            ?? throw new InvalidImportValue(__('Unknown choice: ":value".', ['value' => $cell->excerpt()]));
     }
 }

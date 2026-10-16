@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\SearchText;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
 use Closure;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use WeakMap;
 
 /**
  * What the choice and multiple choice fields share: a list of choices, each with an id that does not change, a label and
@@ -33,6 +35,9 @@ abstract class ChoiceType extends AbstractFieldType
 
     /** The colors a choice may have: names the interface maps to its palette. */
     public const COLORS = ['gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink'];
+
+    /** @var WeakMap<InventoryField, array{options: mixed, labels: array<string, string>, ids: array<string, string>}>|null The lookups of the fields seen by {@see self::choiceIdOf()}. */
+    private ?WeakMap $lookups = null;
 
     /** The characters of the id of a choice. */
     private const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -243,5 +248,41 @@ abstract class ChoiceType extends AbstractFieldType
         } while (isset($taken[$id]));
 
         return $id;
+    }
+
+    /**
+     * The id of the choice a text stands for: the choice with that label, whatever the case and the accents, else the choice with that
+     * id. Null when there is none.
+     */
+    protected function choiceIdOf(string $text, InventoryField $field): ?string
+    {
+        $lookup = $this->lookup($field);
+
+        return $lookup['labels'][SearchText::normalize($text)] ?? $lookup['ids'][strtolower(trim($text))] ?? null;
+    }
+
+    /**
+     * The choices of a field by folded label and by id, worked out once for a field as it is: an import looks up thousands of cells.
+     *
+     * @return array{options: mixed, labels: array<string, string>, ids: array<string, string>}
+     */
+    private function lookup(InventoryField $field): array
+    {
+        $this->lookups ??= new WeakMap;
+        $cached = $this->lookups[$field] ?? null;
+
+        if ($cached !== null && $cached['options'] === $field->options) {
+            return $cached;
+        }
+
+        $labels = [];
+        $ids = [];
+
+        foreach (self::choicesOf($field->options) as $choice) {
+            $labels[SearchText::normalize($choice['label'])] ??= $choice['id'];
+            $ids[$choice['id']] = $choice['id'];
+        }
+
+        return $this->lookups[$field] = ['options' => $field->options, 'labels' => $labels, 'ids' => $ids];
     }
 }

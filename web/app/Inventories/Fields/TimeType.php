@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
+use App\Inventories\Imports\ImportDates;
 use App\Models\InventoryField;
 use Closure;
 
@@ -58,5 +61,13 @@ final class TimeType extends AbstractFieldType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return is_string($stored) && preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]$/D', $stored) === 1 ? ExportValue::time($stored) : ExportValue::empty();
+    }
+
+    /**
+     * The time of the day the cell holds, as `HH:MM`: a time cell, a fraction of a day, or a text such as `9:30`, `09:30:15` or `9h30`.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : ImportDates::time($cell);
     }
 }

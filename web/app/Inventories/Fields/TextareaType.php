@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use App\Rules\MultiLineText;
 
@@ -66,5 +68,13 @@ final class TextareaType extends AbstractFieldType
     public function searchText(mixed $stored, InventoryField $field): ?string
     {
         return $this->stringSearchText($stored);
+    }
+
+    /**
+     * The text as written, with its line breaks (the other types fold them into spaces).
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : $cell->text();
     }
 }

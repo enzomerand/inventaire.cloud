@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
 use Closure;
@@ -134,5 +136,13 @@ final class TagsType extends AbstractFieldType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return ExportValue::text(is_array($stored) ? implode(', ', array_filter($stored, is_string(...))) : '');
+    }
+
+    /**
+     * The tags the cell lists, cut at the commas, semicolons and line breaks.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : $cell->parts();
     }
 }

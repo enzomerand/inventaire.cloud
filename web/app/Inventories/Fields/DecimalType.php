@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
+use App\Inventories\Imports\ImportNumbers;
 use App\Models\InventoryField;
 
 /**
@@ -78,5 +81,14 @@ abstract class DecimalType extends AbstractFieldType
         $stored = $field->option($option);
 
         return $stored === null ? null : Decimal::tryFrom($stored);
+    }
+
+    /**
+     * The number the cell holds, whichever way it is written (`1 234,56`, `12 €`, `12 %`), rounded to the decimals of the field, halves
+     * away from zero.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : ImportNumbers::decimal($cell, $context)->rounded($this->decimals($field));
     }
 }

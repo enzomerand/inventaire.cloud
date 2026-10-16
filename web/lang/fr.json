@@ -958,5 +958,19 @@
     "You are no longer allowed to change the items of this inventory, so nothing was imported.": "Vous n'avez plus le droit de modifier les articles de cet inventaire, donc rien n'a été importé.",
     "The file could not be read any more, so nothing was imported. Send it again.": "Le fichier n'a plus pu être lu, donc rien n'a été importé. Envoyez-le à nouveau.",
     "The import could not be done. Try again.": "L'import n'a pas pu être fait. Réessayez.",
-    "The import did not finish and was cancelled. Try again.": "L'import ne s'est pas terminé et a été annulé. Réessayez."
+    "The import did not finish and was cancelled. Try again.": "L'import ne s'est pas terminé et a été annulé. Réessayez.",
+    "\":value\" is not a date.": "« :value » n'est pas une date.",
+    "\":value\" is not a date and time.": "« :value » n'est pas une date et une heure.",
+    "\":value\" is not a time of day.": "« :value » n'est pas une heure de la journée.",
+    "The number \":value\" has too many digits.": "Le nombre « :value » a trop de chiffres.",
+    "\":value\" is not a number.": "« :value » n'est pas un nombre.",
+    "This file is not a spreadsheet or a text file the import can read. Use an XLSX, ODS, CSV, TSV or TXT file.": "Ce fichier n'est pas un tableur ni un fichier texte que l'import sait lire. Utilisez un fichier XLSX, ODS, CSV, TSV ou TXT.",
+    "This file holds no row.": "Ce fichier ne contient aucune ligne.",
+    "This spreadsheet is too large once unpacked.": "Ce tableur est trop volumineux une fois décompressé.",
+    "This file uses more than :count column.|This file uses more than :count columns.": "Ce fichier utilise plus de :count colonne.|Ce fichier utilise plus de :count colonnes.",
+    "This file holds more rows than an import may take.": "Ce fichier contient plus de lignes qu'un import n'en accepte.",
+    "This file could not be read. It may be damaged or protected by a password.": "Ce fichier n'a pas pu être lu. Il est peut-être endommagé ou protégé par un mot de passe.",
+    "\":value\" is not a yes or no.": "« :value » n'est pas un oui ou un non.",
+    "\":value\" is not a rating.": "« :value » n'est pas une note.",
+    "Unknown choice: \":value\".": "Choix inconnu : « :value »."
 }

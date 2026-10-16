@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
+use App\Inventories\Imports\ImportDates;
 use App\Models\InventoryField;
 use App\Support\DisplayTime;
 use Closure;
@@ -115,5 +118,14 @@ final class DateTimeType extends AbstractFieldType
         $moment = $utc === null ? false : DateTimeImmutable::createFromFormat(self::STORED_FORMAT, $utc, new DateTimeZone('UTC'));
 
         return $moment === false ? ExportValue::empty() : ExportValue::dateTime($moment->setTimezone(new DateTimeZone(DisplayTime::zone())));
+    }
+
+    /**
+     * The moment the cell holds, with its offset from UTC: the one the text says, else the one of the time zone of the application at
+     * that moment (a day alone is midnight).
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : ImportDates::moment($cell, $context);
     }
 }

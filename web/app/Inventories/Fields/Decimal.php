@@ -86,6 +86,47 @@ final readonly class Decimal
     }
 
     /**
+     * The number rounded to a number of decimals, halves away from zero (2.5 gives 3, -2.5 gives -3, 1.005 gives 1.01 to two decimals),
+     * as a canonical decimal string with at most that many decimals (the zeros at the end are left out, and so is the sign of a zero).
+     * Done on the digits, not on a float, so that nothing is lost to the binary representation.
+     */
+    public function rounded(int $decimals): string
+    {
+        if (strlen($this->fraction) <= $decimals) {
+            return $this->format();
+        }
+
+        $digits = $this->integer.substr($this->fraction, 0, $decimals);
+
+        if ((int) $this->fraction[$decimals] >= 5) {
+            $digits = self::increment($digits);
+        }
+
+        $split = strlen($digits) - $decimals;
+        $text = ($this->negative ? '-' : '').substr($digits, 0, $split).($decimals > 0 ? '.'.substr($digits, $split) : '');
+
+        return self::tryFrom($text)?->format() ?? $text;
+    }
+
+    /**
+     * One added to a number written with digits only.
+     */
+    private static function increment(string $digits): string
+    {
+        for ($position = strlen($digits) - 1; $position >= 0; $position--) {
+            if ($digits[$position] !== '9') {
+                $digits[$position] = (string) ((int) $digits[$position] + 1);
+
+                return $digits;
+            }
+
+            $digits[$position] = '0';
+        }
+
+        return '1'.$digits;
+    }
+
+    /**
      * Compares with another number: -1, 0 or 1.
      */
     public function compareTo(self $other): int

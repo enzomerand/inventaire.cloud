@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use Closure;
 
@@ -109,5 +112,33 @@ final class MultiselectType extends ChoiceType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return ExportValue::text(implode(', ', is_array($stored) ? $this->choiceLabels($stored, $field) : []));
+    }
+
+    /**
+     * The ids of the choices the cell names: the whole cell when it is the label of one choice (a label may hold a comma), else each
+     * part of it, cut at the commas, semicolons and line breaks.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        if ($cell->isEmpty()) {
+            return null;
+        }
+
+        $whole = $this->choiceIdOf($cell->line(), $field);
+
+        if ($whole !== null) {
+            return [$whole];
+        }
+
+        $ids = [];
+
+        foreach ($cell->parts() as $part) {
+            $id = $this->choiceIdOf($part, $field)
+                ?? throw new InvalidImportValue(__('Unknown choice: ":value".', ['value' => $part]));
+
+            $ids[$id] = $id;
+        }
+
+        return array_values($ids);
     }
 }
