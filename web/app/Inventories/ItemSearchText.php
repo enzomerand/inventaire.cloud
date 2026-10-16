@@ -12,6 +12,7 @@ use App\Models\Item;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use JsonException;
 
@@ -25,9 +26,10 @@ use JsonException;
  * word of a search can hold, so that a word never matches across two values. An item that adds nothing has no text (null).
  *
  * The text is written with the values ({@see Items}) and rebuilt, in the transaction of the change, when a change to a
- * field alters what its values say ({@see InventoryFields}). {@see self::refresh()} rebuilds it for a whole inventory,
- * which the migration that added the column used for the items that already existed. It is always written with the query
- * builder, so that the items keep their `updated_at`: the item did not change, the way it is found did.
+ * field alters what its values say ({@see InventoryFields}). {@see self::refresh()} rebuilds it for a whole inventory:
+ * `inventaire:upgrade` does so for the items that existed before the column did and whenever the form of the text changes
+ * ({@see SearchText::VERSION}, {@see DerivedData}). It is always written with the query builder, so that the items keep
+ * their `updated_at`: the item did not change, the way it is found did.
  */
 final class ItemSearchText
 {
@@ -73,16 +75,18 @@ final class ItemSearchText
     }
 
     /**
-     * Rebuilds the text of every item of the inventory, a chunk at a time, writing only the ones whose text changes.
+     * Rebuilds the text of the items of the inventory, a chunk at a time, writing only the ones whose text changes.
      *
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory, in order.
+     * @param  bool  $onlyMissing  Whether to rebuild only the items that have no text (the others are taken as right).
      *
      * @throws JsonException
      */
-    public function refresh(Inventory $inventory, Collection $fields): void
+    public function refresh(Inventory $inventory, Collection $fields, bool $onlyMissing = false): void
     {
         $this->db->table('items')
             ->where('inventory_id', $inventory->getKey())
+            ->when($onlyMissing, fn (QueryBuilder $query): QueryBuilder => $query->whereNull('search_text'))
             ->chunkById(self::CHUNK, function (Collection $rows) use ($fields): void {
                 foreach ($rows as $row) {
                     $values = json_decode((string) $row->values, true, 512, JSON_THROW_ON_ERROR);

@@ -7,6 +7,7 @@ use App\Models\Inventory;
 use App\Models\Item;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../../Support/inventories.php';
 
@@ -119,15 +120,26 @@ describe('the counter of items', function (): void {
             ->and(Item::query()->count())->toBe(1);
     });
 
-    it('never goes below zero', function (): void {
+    it('never goes below zero, and says so in the log when it would have', function (): void {
         $inventory = inventoryIn(inventoryTeam()['workspace']);
         $item = itemIn($inventory);
+        $other = itemIn($inventory);
+        Log::spy();
+
+        // A deletion that leaves the counter right says nothing.
+        app(Items::class)->delete($inventory, $other);
+
+        Log::shouldNotHaveReceived('warning');
+
         // A counter that drifted (it never does through the application).
         DB::table('inventories')->where('id', $inventory->id)->update(['items_count' => 0]);
 
         app(Items::class)->delete($inventory, $item);
 
         expect(storedCounter($inventory)['count'])->toBe(0);
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context): bool => str_contains($message, 'below zero')
+            && $context['inventory_id'] === $inventory->id && $context['stored'] === 0 && $context['by'] === -1);
     });
 
     it('is brought up to date in the inventory the caller holds, without leaving it modified', function (): void {

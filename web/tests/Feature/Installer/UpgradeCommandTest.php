@@ -5,11 +5,15 @@ declare(strict_types=1);
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Installer\PostMigrationHook;
+use App\Inventories\SearchText;
+use App\Settings\InstanceSettings;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\Process\Process;
+
+require_once __DIR__.'/../../Support/inventories.php';
 
 /**
  * Replaces one of the framework's (or a package's) commands with a stand-in that
@@ -164,6 +168,63 @@ it('clears the configuration, route, view and event caches and the packages\' on
     expect($this->calls->getArrayCopy())->toBe(['icons:clear'])
         ->and(cache()->get('upgrade-test'))->toBe('kept')
         ->and(is_file($kept) ? filemtime($kept) : null)->toBe($keptBefore);
+});
+
+describe('the derived data', function (): void {
+    it('builds the search text again when its version changed and counts the items again, and says so', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace'], 'Tools');
+        $name = fieldIn($inventory, 'text', 'Name');
+        $item = itemIn($inventory, [$name->ulid => 'Électricité']);
+        DB::table('items')->where('id', $item->id)->update(['search_text' => 'stale']);
+        DB::table('inventories')->where('id', $inventory->id)->update(['items_count' => 9]);
+
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain('The text the items are searched by was built again.')
+            ->expectsOutputToContain('The item counter of 1 inventory was wrong and was corrected (see the log).')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
+
+        expect(DB::table('items')->where('id', $item->id)->value('search_text'))->toBe('electricite')
+            ->and((int) DB::table('inventories')->where('id', $inventory->id)->value('items_count'))->toBe(1)
+            ->and(DB::table('settings')->where('key', InstanceSettings::SEARCH_TEXT_VERSION)->value('value'))->toBe((string) SearchText::VERSION);
+    });
+
+    it('leaves a text alone when the version is unchanged, and says nothing when nothing was wrong', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace'], 'Tools');
+        $name = fieldIn($inventory, 'text', 'Name');
+        $item = itemIn($inventory, [$name->ulid => 'Électricité']);
+
+        $this->artisan('inventaire:upgrade')->assertExitCode(0);
+        DB::table('items')->where('id', $item->id)->update(['search_text' => 'stale']);
+
+        $this->artisan('inventaire:upgrade')
+            ->doesntExpectOutputToContain('was built again')
+            ->doesntExpectOutputToContain('was wrong')
+            ->expectsOutputToContain('The instance is up to date.')
+            ->assertExitCode(0);
+
+        expect(DB::table('items')->where('id', $item->id)->value('search_text'))->toBe('stale');
+
+        // A new version of the form of the text: every text is built again.
+        app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION - 1);
+
+        $this->artisan('inventaire:upgrade')->expectsOutputToContain('The text the items are searched by was built again.')->assertExitCode(0);
+
+        expect(DB::table('items')->where('id', $item->id)->value('search_text'))->toBe('electricite');
+    });
+
+    it('speaks French', function (): void {
+        $this->useLanguage('fr');
+        $inventory = inventoryIn(inventoryTeam()['workspace']);
+        DB::table('inventories')->where('id', $inventory->id)->update(['items_count' => 4]);
+
+        $this->artisan('inventaire:upgrade')
+            ->expectsOutputToContain('Le texte qui sert à rechercher les articles a été reconstruit.')
+            ->expectsOutputToContain("Le compteur d'articles de 1 inventaire était faux et a été corrigé (voir le journal).")
+            ->assertExitCode(0);
+    });
 });
 
 describe('--optimize', function (): void {

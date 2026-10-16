@@ -64,17 +64,17 @@ function jsonValuesConnection(string $driver, array $config = [], bool $icu = tr
 
 describe('the SQL of a value', function (): void {
     it('reads a key as text with the grammar of the engine', function (string $driver, string $sql): void {
-        expect((new JsonValues(jsonValuesConnection($driver)))->text('01abc'))->toBe($sql);
+        expect((new JsonValues(jsonValuesConnection($driver)))->text('01abcdefghjkmnpqrstvwxyz00'))->toBe($sql);
     })->with([
-        'PostgreSQL' => ['pgsql', '"items"."values"->>\'01abc\''],
-        'MySQL' => ['mysql', 'json_unquote(json_extract(`items`.`values`, \'$."01abc"\'))'],
-        'MariaDB' => ['mariadb', 'json_value(`items`.`values`, \'$."01abc"\')'],
+        'PostgreSQL' => ['pgsql', '"items"."values"->>\'01abcdefghjkmnpqrstvwxyz00\''],
+        'MySQL' => ['mysql', 'json_unquote(json_extract(`items`.`values`, \'$."01abcdefghjkmnpqrstvwxyz00"\'))'],
+        'MariaDB' => ['mariadb', 'json_value(`items`.`values`, \'$."01abcdefghjkmnpqrstvwxyz00"\')'],
     ]);
 
     it('casts a number and the bound it is compared with to the same exact decimal type', function (string $driver, string $number, string $bound): void {
         $values = new JsonValues(jsonValuesConnection($driver));
 
-        expect($values->number('01abc'))->toBe(sprintf($number, $values->text('01abc')))->and($values->numberBound())->toBe($bound);
+        expect($values->number('01abcdefghjkmnpqrstvwxyz00'))->toBe(sprintf($number, $values->text('01abcdefghjkmnpqrstvwxyz00')))->and($values->numberBound())->toBe($bound);
     })->with([
         'PostgreSQL' => ['pgsql', '(%s)::numeric', 'cast(? as numeric)'],
         'MySQL' => ['mysql', 'cast(%s as decimal(40,6))', 'cast(? as decimal(40,6))'],
@@ -84,20 +84,20 @@ describe('the SQL of a value', function (): void {
     it('sorts text with the collation of the connection on MySQL and MariaDB', function (string $driver): void {
         $values = new JsonValues(jsonValuesConnection($driver, ['collation' => 'utf8mb4_0900_ai_ci']));
 
-        expect($values->sortableText('01abc'))->toBe($values->text('01abc').' collate utf8mb4_0900_ai_ci');
+        expect($values->sortableText('01abcdefghjkmnpqrstvwxyz00'))->toBe($values->text('01abcdefghjkmnpqrstvwxyz00').' collate utf8mb4_0900_ai_ci');
     })->with(['MySQL' => 'mysql', 'MariaDB' => 'mariadb']);
 
     it('sorts text with the ICU root collation on PostgreSQL, whatever the collation of the database', function (): void {
         $values = new JsonValues(jsonValuesConnection('pgsql', ['collation' => 'utf8mb4_0900_ai_ci']));
 
         // The text is in parentheses: COLLATE binds tighter than ->>, so it would otherwise apply to the key alone.
-        expect($values->sortableText('01abc'))->toBe('("items"."values"->>\'01abc\') collate "und-x-icu"');
+        expect($values->sortableText('01abcdefghjkmnpqrstvwxyz00'))->toBe('("items"."values"->>\'01abcdefghjkmnpqrstvwxyz00\') collate "und-x-icu"');
     });
 
     it('keeps the default collation of a PostgreSQL that was built without ICU', function (): void {
         $values = new JsonValues(jsonValuesConnection('pgsql', icu: false));
 
-        expect($values->sortableText('01abc'))->toBe($values->text('01abc'));
+        expect($values->sortableText('01abcdefghjkmnpqrstvwxyz00'))->toBe($values->text('01abcdefghjkmnpqrstvwxyz00'));
     });
 
     it('asks a PostgreSQL connection about ICU once, and each connection for itself', function (): void {
@@ -105,20 +105,20 @@ describe('the SQL of a value', function (): void {
         $plain = jsonValuesConnection('pgsql', icu: false);
 
         foreach (range(1, 3) as $_) {
-            (new JsonValues($icu))->sortableText('01abc');
-            (new JsonValues($plain))->sortableText('01abc');
+            (new JsonValues($icu))->sortableText('01abcdefghjkmnpqrstvwxyz00');
+            (new JsonValues($plain))->sortableText('01abcdefghjkmnpqrstvwxyz00');
         }
 
         expect($icu->asked)->toBe(1)->and($plain->asked)->toBe(1)
-            ->and((new JsonValues($icu))->sortableText('01abc'))->toContain('collate "und-x-icu"')
-            ->and((new JsonValues($plain))->sortableText('01abc'))->not->toContain('collate');
+            ->and((new JsonValues($icu))->sortableText('01abcdefghjkmnpqrstvwxyz00'))->toContain('collate "und-x-icu"')
+            ->and((new JsonValues($plain))->sortableText('01abcdefghjkmnpqrstvwxyz00'))->not->toContain('collate');
     });
 
     it('does not ask about ICU for anything but a sort', function (): void {
         $connection = jsonValuesConnection('pgsql');
         $values = new JsonValues($connection);
-        $values->text('01abc');
-        $values->number('01abc');
+        $values->text('01abcdefghjkmnpqrstvwxyz00');
+        $values->number('01abcdefghjkmnpqrstvwxyz00');
 
         expect($connection->asked)->toBe(0);
     });
@@ -126,11 +126,11 @@ describe('the SQL of a value', function (): void {
     it('leaves out a collation that is not one of utf8mb4, which the engine would refuse', function (string $driver, mixed $collation): void {
         $values = new JsonValues(jsonValuesConnection($driver, ['collation' => $collation]));
 
-        expect($values->sortableText('01abc'))->toBe($values->text('01abc'));
+        expect($values->sortableText('01abcdefghjkmnpqrstvwxyz00'))->toBe($values->text('01abcdefghjkmnpqrstvwxyz00'));
     })->with(['mysql', 'mariadb'])->with(['another character set' => 'latin1_swedish_ci', 'an injection' => 'utf8mb4_x; drop table items', 'none' => null]);
 
     it('reads the values on those three engines only', function (): void {
-        expect(fn () => (new JsonValues(jsonValuesConnection('sqlite')))->text('01abc'))->toThrow(LogicException::class);
+        expect(fn () => (new JsonValues(jsonValuesConnection('sqlite')))->text('01abcdefghjkmnpqrstvwxyz00'))->toThrow(LogicException::class);
     });
 });
 
@@ -144,25 +144,25 @@ describe('what ends up in the SQL', function (): void {
             ->and(fn () => $values->wherePresent($query, $key, true))->toThrow(InvalidArgumentException::class)
             ->and(fn () => $values->whereContainsAny($query, $key, ['a']))->toThrow(InvalidArgumentException::class)
             ->and(fn () => $values->orderByNumber($query, $key, 'asc'))->toThrow(InvalidArgumentException::class);
-    })->with(['capitals' => '01ABC', 'a quote' => "a'b", 'a path' => 'a->b', 'a dot' => 'a.b', 'a space' => 'a b', 'nothing' => '', 'a comment' => 'a--']);
+    })->with(['capitals' => '01ABCDEFGHJKMNPQRSTVWXYZ00', 'a short one' => '01abc', 'a long one' => '01abcdefghjkmnpqrstvwxyz000', 'a quote' => "a'b", 'a path' => 'a->b', 'a dot' => 'a.b', 'a space' => 'a b', 'nothing' => '', 'a comment' => 'a--']);
 
     it('refuses a comparison and a direction it does not know', function (): void {
         $values = new JsonValues(jsonValuesConnection('pgsql'));
         $query = Item::query();
 
-        expect(fn () => $values->whereNumber($query, '01abc', '= 1 or 1 =', '1'))->toThrow(InvalidArgumentException::class)
-            ->and(fn () => $values->whereText($query, '01abc', '<>', '1'))->toThrow(InvalidArgumentException::class)
-            ->and(fn () => $values->orderByText($query, '01abc', 'asc; drop table items'))->toThrow(InvalidArgumentException::class);
+        expect(fn () => $values->whereNumber($query, '01abcdefghjkmnpqrstvwxyz00', '= 1 or 1 =', '1'))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->whereText($query, '01abcdefghjkmnpqrstvwxyz00', '<>', '1'))->toThrow(InvalidArgumentException::class)
+            ->and(fn () => $values->orderByText($query, '01abcdefghjkmnpqrstvwxyz00', 'asc; drop table items'))->toThrow(InvalidArgumentException::class);
     });
 
     it('binds every value it is given', function (): void {
         $values = new JsonValues(jsonValuesConnection('mysql'));
         $query = Item::query();
 
-        $values->whereNumber($query, '01abc', '>=', "5'; drop table items; --");
-        $values->whereTextIn($query, '01abc', ["x'", 'y']);
-        $values->whereBoolean($query, '01abc', true);
-        $values->orderByPosition($query, '01abc', ["a'", 'b'], 'desc');
+        $values->whereNumber($query, '01abcdefghjkmnpqrstvwxyz00', '>=', "5'; drop table items; --");
+        $values->whereTextIn($query, '01abcdefghjkmnpqrstvwxyz00', ["x'", 'y']);
+        $values->whereBoolean($query, '01abcdefghjkmnpqrstvwxyz00', true);
+        $values->orderByPosition($query, '01abcdefghjkmnpqrstvwxyz00', ["a'", 'b'], 'desc');
 
         expect($query->toBase()->toSql())->not->toContain('drop table')->not->toContain("x'")->not->toContain("a'")
             ->and($query->toBase()->getBindings())->toBe(["5'; drop table items; --", "x'", 'y', 'true', "a'", 'b', "a'", 'b']);
@@ -173,8 +173,8 @@ describe('what ends up in the SQL', function (): void {
         $on = Item::query();
         $off = Item::query();
 
-        $values->whereBoolean($on, '01abc', true);
-        $values->whereBoolean($off, '01abc', false);
+        $values->whereBoolean($on, '01abcdefghjkmnpqrstvwxyz00', true);
+        $values->whereBoolean($off, '01abcdefghjkmnpqrstvwxyz00', false);
 
         expect([$on->toBase()->getBindings(), $off->toBase()->getBindings()])->toBe([[$yes], [$no]]);
     })->with([

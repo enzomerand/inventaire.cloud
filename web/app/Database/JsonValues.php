@@ -22,7 +22,11 @@ use WeakMap;
  * Reading a key goes through the query grammar of the connection, which already knows how its engine writes a path into a
  * JSON column and quotes the reserved word (`values` is one in MySQL):
  *
- * - PostgreSQL: `"items"."values"->>'key'` (the column is `json`, the result is text);
+ * - PostgreSQL: `"items"."values"->>'key'` (the column is `jsonb`, the result is text). `jsonb` is the binary form, which
+ *   is looked into without being parsed again for every key, about twice as fast as `json` for the totals; the price is
+ *   that it does not keep the order of the keys, as MySQL and MariaDB do not either. The checks of presence and of
+ *   containment are the grammar's (`("items"."values")::jsonb ?? 'key'` and `@>`: the `?` operator is written `??` so that
+ *   PDO does not take it for a placeholder), which on a `jsonb` column cast nothing;
  * - MySQL: ``json_unquote(json_extract(`items`.`values`, '$."key"'))``;
  * - MariaDB: ``json_value(`items`.`values`, '$."key"')``. It gives the text of a string or a number and, unlike the two
  *   others, `1` or `0` for a boolean (they give `true` or `false`: {@see self::whereBoolean()}) and null for an array or an
@@ -41,13 +45,23 @@ use WeakMap;
  *   every accent after the lowercase letters. A PostgreSQL built without ICU keeps its default ({@see self::sortableText()});
  * - a list holds a value when its JSON array contains it ({@see self::whereContainsAny()}).
  *
+ * What the values hold decides what the SQL can rely on, and the application keeps it so when it writes them:
+ *
+ * - an empty value is never stored: the key is absent. A JSON `null` therefore cannot occur, which matters because MySQL
+ *   extracts it as the text `null` (not as an SQL null) and every "no value" test here (`is null`, presence of the key)
+ *   would count it as a value;
+ * - the ids of choices are lowercase ULIDs: MariaDB compares text case-insensitively under the collation of the
+ *   connection, so ids that differed only by their case would be taken for one, and they never do;
+ * - there is one sort key at a time ({@see self::orderByCollatedText()} and the others add one expression each, and the
+ *   tie is always broken by the id of the item): sorting by several fields would multiply the extractions of the JSON.
+ *
  * The SQL is handed to the builder as {@see RawSql}. {@see ItemQuery} builds the sorts, filters and totals of the list of
  * items from these methods and writes none itself.
  */
 final class JsonValues
 {
-    /** What a key looks like: the lowercase ULID of a field. */
-    private const KEY_PATTERN = '/^[0-9a-z]{1,64}$/D';
+    /** What a key looks like: the lowercase ULID of a field (26 characters of the alphabet of ULIDs, lowercase). */
+    private const KEY_PATTERN = '/^[0-9a-z]{26}$/D';
 
     /** The comparisons {@see self::whereNumber()} and {@see self::whereText()} accept. */
     private const OPERATORS = ['=', '>=', '<='];

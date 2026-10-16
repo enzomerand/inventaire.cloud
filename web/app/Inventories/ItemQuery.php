@@ -30,8 +30,9 @@ use LogicException;
  *
  * What the list asks for ({@see ListItemsRequest}) is read here and checked against the fields: nothing the person typed
  * reaches the SQL but as a bound value, and the only identifiers that do are the ULIDs of fields the inventory has. Every
- * mistake is reported at once, as a `422` whose error keys name what is wrong (`sort`, `direction`, `filter.<ulid>` and
- * `filter.<ulid>.<operator>`). The SQL itself, which differs from one engine to another, is {@see JsonValues}'s.
+ * mistake is reported at once, as a `422` whose error keys name what is wrong (`sort`, `direction`, `filter.<ulid>`,
+ * `filter.<ulid>.<operator>` and `totals.<position>`). The SQL itself, which differs from one engine to another, is
+ * {@see JsonValues}'s.
  *
  * **Sort**: `sort` is `created_at`, `updated_at` or the ULID of a field, `direction` is `asc` (the default) or `desc`
  * (both read in any case).
@@ -40,7 +41,8 @@ use LogicException;
  * choices of the field. An item with no value for the field always comes last, whichever the direction, and so does one
  * whose choice the field no longer has. Items that sort alike come in the order of their id (in the same direction), so
  * that a page never repeats or skips an item. Without `sort`, the newest item comes first (and `direction` alone changes
- * nothing). A field that holds several values (several choices, tags) cannot be sorted.
+ * nothing). A field that holds several values (several choices, tags) cannot be sorted. There is one sort key, on purpose:
+ * a second one would double the number of expressions the database orders by, and the id already breaks every tie.
  *
  * **Filter**: `filter[<ulid>][<operator>]`, the conditions of all the fields and the search words all having to hold.
  * `empty` (true or false) is understood by every kind and tells whether the field holds no value. A number takes `min`
@@ -48,7 +50,10 @@ use LogicException;
  * a yes/no takes `is`, a choice or several choices take `in` (a list of the ids of choices: an item holding any of them
  * matches). The words a text or a tag says are looked for with the search of the list, not with a filter.
  *
- * **Totals**: {@see self::totals()} adds up the numbers and amounts of the items the list matches, exactly, in one query.
+ * **Totals**: `totals[]` names the fields to add up, and only those are: {@see self::totals()} adds up the numbers and
+ * amounts of the items the list matches, exactly, in one query, and costs one extraction of the JSON per item and per field
+ * (seconds, at the quota of items and fields), so a list that does not ask for totals does not run it. A name that is no
+ * field of the inventory, or a field that does not add up, is a mistake.
  *
  * The names of the fields are read in any case and used in lowercase, as the values are keyed.
  */
@@ -69,15 +74,16 @@ final class ItemQuery
     ) {}
 
     /**
-     * Restricts and orders the query as the list asks.
+     * Restricts and orders the query as the list asks, and tells which totals it asks for.
      *
      * @param  EloquentBuilder<Item>|Relation<Item, Inventory, *>  $items  A query on the items of one inventory.
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory.
-     * @param  array<array-key, mixed>  $input  What the list asks for: `sort`, `direction` and `filter`; the rest is ignored.
+     * @param  array<array-key, mixed>  $input  What the list asks for: `sort`, `direction`, `filter` and `totals`; the rest is ignored.
+     * @return list<string> The fields to add up ({@see self::totals()}): their ULIDs in lowercase, each once, in the order they were asked for. Empty when the list asks for no total.
      *
      * @throws ValidationException With every mistake found; nothing is run before.
      */
-    public function apply(EloquentBuilder|Relation $items, Collection $fields, array $input): void
+    public function apply(EloquentBuilder|Relation $items, Collection $fields, array $input): array
     {
         $errors = new MessageBag;
         $queryable = $this->queryable($fields);
@@ -102,6 +108,8 @@ final class ItemQuery
             $this->sort($items, $json, $queryable, strtolower($sort), $direction, $errors);
         }
 
+        $totals = $this->requestedTotals($queryable, $input['totals'] ?? null, $errors);
+
         if ($errors->isNotEmpty()) {
             throw ValidationException::withMessages($errors->messages());
         }
@@ -109,30 +117,33 @@ final class ItemQuery
         if (! is_string($sort) || $sort === '') {
             $items->orderByDesc('items.id');
         }
+
+        return $totals;
     }
 
     /**
-     * The total of every field that adds up (see {@see FieldType::summable()}) over the items the query matches: the
-     * numbers and amounts, added exactly in one aggregate query, as a decimal string keyed by the ULID of the field.
+     * The total of each of these fields (see {@see FieldType::summable()}: the numbers and amounts) over the items the query
+     * matches: added exactly in one aggregate query, as a decimal string keyed by the ULID of the field.
      *
      * A total has at least the decimals of its field, and more when values stored under older options have more. It is
-     * zero (`"0.00"`) when no item holds a value. Empty when the inventory has no field that adds up.
+     * zero (`"0.00"`) when no item holds a value. A key that is no field of the inventory, or that does not add up, is
+     * left out (the keys {@see self::apply()} returns never are).
      *
      * @param  EloquentBuilder<Item>|Relation<Item, Inventory, *>  $items  The query the list runs, whatever its order: only the matching items count, not the page.
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory.
+     * @param  list<string>  $keys  The fields to add up, by ULID in lowercase.
      * @return array<string, string>
      *
      * @throws LogicException When the database answers with a total that is not a decimal number.
      */
-    public function totals(EloquentBuilder|Relation $items, Collection $fields): array
+    public function totals(EloquentBuilder|Relation $items, Collection $fields, array $keys): array
     {
+        $summable = $this->summable($this->queryable($fields));
         $summed = [];
 
-        foreach ($fields as $field) {
-            $type = $this->types->of($field);
-
-            if ($type !== null && $type->summable()) {
-                $summed[$field->ulid] = [$field, $type];
+        foreach ($keys as $key) {
+            if (isset($summable[$key])) {
+                $summed[$key] = $summable[$key];
             }
         }
 
@@ -143,7 +154,7 @@ final class ItemQuery
         $sums = $this->json()->sums($this->base($items), array_keys($summed));
         $totals = [];
 
-        foreach ($summed as $key => [$field, $type]) {
+        foreach ($summed as $key => ['field' => $field, 'type' => $type]) {
             // No sum (null) is no row holding a value: zero. A sum that is not a number is not that, and not to be hidden.
             $sum = $sums[$key] ?? null;
             $sum = $sum === null ? Decimal::tryFrom('0') : Decimal::tryFrom(is_string($sum) || is_int($sum) ? (string) $sum : null);
@@ -153,7 +164,7 @@ final class ItemQuery
                 throw new LogicException("The database gave a total for the field {$key} that is not a decimal number.");
             }
 
-            $totals[$key] = $sum->format(max($places, $sum->scale()));
+            $totals[$field->ulid] = $sum->format(max($places, $sum->scale()));
         }
 
         return $totals;
@@ -292,6 +303,48 @@ final class ItemQuery
                 // Text and tags only answer `empty`, which was handled above.
                 return;
         }
+    }
+
+    /**
+     * The fields the list asks to add up, once each: the keys of `totals`, in lowercase, or the reason why one is refused.
+     *
+     * @param  array<string, array{field: InventoryField, type: FieldType}>  $queryable
+     * @param  MessageBag  $errors  Where the mistakes are put, by error key (`totals.<position>`).
+     * @return list<string>
+     */
+    private function requestedTotals(array $queryable, mixed $asked, MessageBag $errors): array
+    {
+        if (! is_array($asked)) {
+            return [];
+        }
+
+        $summable = $this->summable($queryable);
+        $keys = [];
+
+        foreach ($asked as $position => $name) {
+            $key = is_string($name) ? strtolower($name) : '';
+
+            if (! isset($queryable[$key])) {
+                $errors->add("totals.{$position}", __('This field does not exist in this inventory.'));
+            } elseif (! isset($summable[$key])) {
+                $errors->add("totals.{$position}", __('This field cannot be added up.'));
+            } else {
+                $keys[$key] = $key;
+            }
+        }
+
+        return array_values($keys);
+    }
+
+    /**
+     * The fields among these that add up (see {@see FieldType::summable()}).
+     *
+     * @param  array<string, array{field: InventoryField, type: FieldType}>  $queryable
+     * @return array<string, array{field: InventoryField, type: FieldType}>
+     */
+    private function summable(array $queryable): array
+    {
+        return array_filter($queryable, fn (array $entry): bool => $entry['type']->summable());
     }
 
     /**

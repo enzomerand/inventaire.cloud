@@ -24,6 +24,14 @@ use Normalizer;
 final class SearchText
 {
     /**
+     * The version of the form a text is stored in. Bump it whenever {@see self::normalize()} would give another text for
+     * the same input (a step added or changed) or {@see self::WRITTEN_OUT} changes: `inventaire:upgrade` compares it with
+     * the version the stored texts were built with ({@see DerivedData}) and, when they differ, builds every text again.
+     * Searching for a word whose form changed would otherwise miss the items written before the change.
+     */
+    public const VERSION = 1;
+
+    /**
      * The letters that decomposing does not split (the ligatures, and the letters with a stroke), written the way a person
      * types them on a plain keyboard, and the final sigma, which is the same letter as `σ`. The text is lowered before, so
      * the capitals need no entry. `ς` is here because MySQL and MariaDB, whose `LIKE` follows the collation of the column

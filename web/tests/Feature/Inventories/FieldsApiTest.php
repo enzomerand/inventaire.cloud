@@ -29,6 +29,50 @@ describe('adding a field', function (): void {
             ->and($inventory->fields()->pluck('ulid')->all())->toBe([$first->json('data.id'), $second->json('data.id')]);
     })->with(['an owner' => 'owner', 'an editor' => 'editor']);
 
+    it('says how the list of items treats each type of field: its query kind and whether it adds up', function (string $type, string $kind, bool $summable): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        $options = in_array($type, ['select', 'multiselect'], true) ? ['choices' => [['label' => 'One']]] : [];
+
+        $created = inventoryCall($this, $team['owner'], 'POST', "/api/v1/inventories/{$inventory->ulid}/fields", ['type' => $type, 'name' => 'Field', 'options' => $options])->assertCreated();
+        $listed = inventoryCall($this, $team['viewer'], 'GET', "/api/v1/inventories/{$inventory->ulid}")->assertOk();
+
+        // The same in the answer to the creation and in the fields of the inventory.
+        expect($created->json('data.query_kind'))->toBe($kind)
+            ->and($created->json('data.summable'))->toBe($summable)
+            ->and($listed->json('data.fields.0.query_kind'))->toBe($kind)
+            ->and($listed->json('data.fields.0.summable'))->toBe($summable);
+    })->with([
+        'text' => ['text', 'text', false],
+        'textarea' => ['textarea', 'text', false],
+        'number' => ['number', 'number', true],
+        'money' => ['money', 'number', true],
+        'percentage' => ['percentage', 'number', false],
+        'rating' => ['rating', 'number', false],
+        'boolean' => ['boolean', 'boolean', false],
+        'date' => ['date', 'temporal', false],
+        'datetime' => ['datetime', 'temporal', false],
+        'time' => ['time', 'temporal', false],
+        'select' => ['select', 'choice', false],
+        'multiselect' => ['multiselect', 'choices', false],
+        'tags' => ['tags', 'tags', false],
+        'url' => ['url', 'text', false],
+        'email' => ['email', 'text', false],
+        'phone' => ['phone', 'text', false],
+        'color' => ['color', 'text', false],
+        'barcode' => ['barcode', 'text', false],
+    ]);
+
+    it('gives no query kind to a field whose type this version does not know, and does not add it up', function (): void {
+        $team = inventoryTeam();
+        $inventory = inventoryIn($team['workspace']);
+        InventoryField::factory()->for($inventory)->create(['name' => 'Odd', 'type' => 'hologram', 'position' => 0]);
+
+        $field = inventoryCall($this, $team['viewer'], 'GET', "/api/v1/inventories/{$inventory->ulid}")->assertOk()->json('data.fields.0');
+
+        expect($field['type'])->toBe('hologram')->and($field['query_kind'])->toBeNull()->and($field['summable'])->toBeFalse();
+    });
+
     it('is refused to a viewer (403) and a stranger (404), who learn nothing from the validation', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);

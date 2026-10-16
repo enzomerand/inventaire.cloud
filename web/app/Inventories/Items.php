@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories;
 
 use App\Database\DeadlockRetries;
+use App\Http\Resources\ItemResource;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Models\Inventory;
 use App\Models\Item;
@@ -12,6 +13,7 @@ use App\Models\User;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -37,6 +39,14 @@ final class Items
 {
     /** Items per page of the list. */
     public const PER_PAGE = 50;
+
+    /**
+     * The columns the list reads: what an item is described with ({@see ItemResource}). Not the text the item is searched
+     * by (`search_text`, which can be as long as its values and is never given out), nor its authors.
+     *
+     * @var list<string>
+     */
+    public const LIST_COLUMNS = ['items.id', 'items.ulid', 'items.inventory_id', 'items.values', 'items.created_at', 'items.updated_at'];
 
     /**
      * Gets what the rules of items need: the database, the locks, the checks of values and the search text.
@@ -141,7 +151,8 @@ final class Items
      * afterwards), get the new value; it is set from the locked row, not added to the caller's copy, which may be older.
      * The counter never goes below zero: the column is unsigned on MySQL and MariaDB, which refuse a negative value with an
      * error (an unsigned underflow) instead of clamping it, so a counter that was already off (it should not be) must not
-     * turn a deletion into a failure.
+     * turn a deletion into a failure. It is a fault all the same, so it is written in the log (`inventaire:upgrade` counts
+     * the items again and corrects the counters, see {@see DerivedData}).
      *
      * @param  Inventory  $locked  The inventory as just read under the lock.
      * @param  Inventory  $given  The copy the caller holds.
@@ -149,7 +160,13 @@ final class Items
      */
     private function moveCount(Inventory $locked, Inventory $given, int $by): void
     {
-        $count = max(0, $locked->items_count + $by);
+        $count = $locked->items_count + $by;
+
+        if ($count < 0) {
+            Log::warning('The item counter of an inventory would have gone below zero: it was kept at zero.', ['inventory_id' => $locked->getKey(), 'stored' => $locked->items_count, 'by' => $by]);
+
+            $count = 0;
+        }
 
         $this->db->table('inventories')->where('id', $locked->getKey())->update(['items_count' => $count]);
 

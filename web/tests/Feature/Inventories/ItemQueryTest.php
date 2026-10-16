@@ -161,6 +161,21 @@ function listingRefused(TestResponse $response): array
     return $keys;
 }
 
+/**
+ * The totals the list gives for these fields (by alias, or an id as it is) with the rest of a query.
+ *
+ * @param  array{team: array<string, mixed>, inventory: Inventory, fields: array<string, InventoryField>}  $made
+ * @param  list<string>  $aliases
+ * @param  array<string, mixed>  $query
+ * @return array<string, string>
+ */
+function listingTotals(object $test, array $made, array $aliases, array $query = [], string $as = 'owner'): array
+{
+    $keys = array_map(fn (string $alias): string => isset($made['fields'][$alias]) ? listingKey($made, $alias) : $alias, $aliases);
+
+    return listingAsk($test, $made, ['totals' => $keys] + $query, $as)->assertOk()->json('meta.totals');
+}
+
 describe('sorting', function (): void {
     it('sorts text with the collation of the connection, empty values last', function (): void {
         $made = listingOf(['label' => ['text']]);
@@ -788,9 +803,8 @@ describe('totals', function (): void {
         listingAdd($made, 'b', ['qty' => '0.20', 'price' => '0.20', 'pct' => '20', 'stars' => 4]);
         listingAdd($made, 'blank');
 
-        $totals = listingAsk($this, $made)->assertOk()->json('meta.totals');
+        $totals = listingTotals($this, $made, ['qty', 'price']);
 
-        // Percentages and ratings are not added up: the sum of two rates or of two grades means nothing.
         expect($totals)->toBe([listingKey($made, 'qty') => '0.30', listingKey($made, 'price') => '0.30']);
     });
 
@@ -801,7 +815,7 @@ describe('totals', function (): void {
             listingAdd($made, $name, ['price' => '999999999999999.99']);
         }
 
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([listingKey($made, 'price') => '2999999999999999.97']);
+        expect(listingTotals($this, $made, ['price']))->toBe([listingKey($made, 'price') => '2999999999999999.97']);
     });
 
     it('adds negative numbers, and a large number of items', function (): void {
@@ -813,19 +827,19 @@ describe('totals', function (): void {
         }
 
         // 60 times 0.001 less 60 times 0.002: all the matching items count, not the 50 of the page.
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([$key => '-0.060']);
+        expect(listingTotals($this, $made, ['qty']))->toBe([$key => '-0.060']);
     });
 
     it('writes an amount with the decimals of its currency', function (string $currency, string $sent, string $total, string $zero): void {
         $made = listingOf(['price' => ['money', ['currency' => $currency]]]);
         $key = listingKey($made, 'price');
 
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([$key => $zero]);
+        expect(listingTotals($this, $made, ['price']))->toBe([$key => $zero]);
 
         listingAdd($made, 'one', ['price' => $sent]);
         listingAdd($made, 'two', ['price' => $sent]);
 
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([$key => $total]);
+        expect(listingTotals($this, $made, ['price']))->toBe([$key => $total]);
     })->with([
         'euros' => ['EUR', '1234.5', '2469.00', '0.00'],
         'yen' => ['JPY', '1234', '2468', '0'],
@@ -836,7 +850,7 @@ describe('totals', function (): void {
         $made = listingOf(['none' => ['number'], 'three' => ['number', ['decimals' => 3]], 'six' => ['number', ['decimals' => 6]]]);
         listingAdd($made, 'blank');
 
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([
+        expect(listingTotals($this, $made, ['none', 'three', 'six']))->toBe([
             listingKey($made, 'none') => '0',
             listingKey($made, 'three') => '0.000',
             listingKey($made, 'six') => '0.000000',
@@ -851,7 +865,7 @@ describe('totals', function (): void {
         // The decimals of a field can be lowered: the values already stored keep theirs.
         DB::table('inventory_fields')->where('id', $field->id)->update(['options' => json_encode(['decimals' => 1])]);
 
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([$field->ulid => '3.234']);
+        expect(listingTotals($this, $made, ['qty']))->toBe([$field->ulid => '3.234']);
     });
 
     it('adds up the items that match the search and the filters, not the whole inventory', function (): void {
@@ -862,7 +876,7 @@ describe('totals', function (): void {
         $qty = listingKey($made, 'qty');
         $price = listingKey($made, 'price');
 
-        $totals = fn (array $query): array => listingAsk($this, $made, $query)->assertOk()->json('meta.totals');
+        $totals = fn (array $query): array => listingTotals($this, $made, ['qty', 'price'], $query);
 
         expect($totals([]))->toBe([$qty => '9', $price => '60.00'])
             ->and($totals(['q' => 'hammer']))->toBe([$qty => '8', $price => '30.00'])
@@ -880,8 +894,8 @@ describe('totals', function (): void {
             Item::factory()->for($made['inventory'])->create(['values' => [$key => '2']]);
         }
 
-        $first = listingAsk($this, $made)->assertOk();
-        $second = listingAsk($this, $made, ['page' => 2])->assertOk();
+        $first = listingAsk($this, $made, ['totals' => [$key]])->assertOk();
+        $second = listingAsk($this, $made, ['totals' => [$key], 'page' => 2])->assertOk();
 
         expect($first->json('meta.totals'))->toBe([$key => '110'])
             ->and($second->json('meta.totals'))->toBe([$key => '110'])
@@ -890,30 +904,132 @@ describe('totals', function (): void {
             ->and($second->json('data'))->toHaveCount(5);
     });
 
-    it('is an empty object, never an empty list, when no field adds up', function (): void {
-        $made = listingOf(['pct' => ['percentage'], 'stars' => ['rating'], 'note' => ['text']]);
-        listingAdd($made, 'one', ['pct' => '10', 'stars' => 3]);
-        $response = listingAsk($this, $made)->assertOk();
-        $body = json_decode($response->getContent(), false);
+    it('is not run, and not in meta, unless the list asks for totals', function (): void {
+        $made = listingOf(['qty' => ['number'], 'price' => ['money']]);
+        listingAdd($made, 'one', ['qty' => '4', 'price' => '10']);
+        $queries = [];
+        DB::listen(function ($query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
 
-        expect($body->meta->totals)->toBeObject()->and((array) $body->meta->totals)->toBe([])
-            ->and($response->getContent())->toContain('"totals":{}');
+        $plain = listingAsk($this, $made)->assertOk();
+        $sums = function () use (&$queries): array {
+            return array_values(array_filter($queries, fn (string $sql): bool => str_contains($sql, 'sum(')));
+        };
+
+        expect($plain->json('meta'))->not->toHaveKey('totals')
+            ->and($plain->json('meta.total'))->toBe(1)
+            ->and($sums())->toBe([]);
+
+        // Nothing is asked for in a query string that names nothing (`totals=` is no list at all).
+        expect(listingAsk($this, $made, ['totals' => ''])->assertOk()->json('meta'))->not->toHaveKey('totals')
+            ->and($sums())->toBe([]);
+
+        listingTotals($this, $made, ['qty']);
+
+        expect($sums())->toHaveCount(1);
     });
 
-    it('is an empty object for an inventory with no field and no item', function (): void {
+    it('gives only the totals that are asked for, each once, whatever the case of the name', function (): void {
+        $made = listingOf(['qty' => ['number'], 'price' => ['money'], 'weight' => ['number']]);
+        listingAdd($made, 'one', ['qty' => '4', 'price' => '10', 'weight' => '7']);
+        listingAdd($made, 'two', ['qty' => '1', 'price' => '5', 'weight' => '3']);
+        $qty = listingKey($made, 'qty');
+        $price = listingKey($made, 'price');
+
+        expect(listingTotals($this, $made, ['qty']))->toBe([$qty => '5'])
+            ->and(listingTotals($this, $made, ['price', 'qty']))->toBe([$price => '15.00', $qty => '5'])
+            ->and(listingTotals($this, $made, [strtoupper($qty), $qty, strtoupper($price), $qty]))->toBe([$qty => '5', $price => '15.00']);
+    });
+
+    it('keeps the totals asked for in the links of the pages', function (): void {
+        $made = listingOf(['qty' => ['number']]);
+        $key = listingKey($made, 'qty');
+
+        foreach (range(1, 55) as $number) {
+            Item::factory()->for($made['inventory'])->create(['values' => [$key => '2']]);
+        }
+
+        $next = urldecode((string) listingAsk($this, $made, ['totals' => [$key]])->assertOk()->json('links.next'));
+
+        expect($next)->toContain("totals[0]={$key}")->and($next)->toContain('page=2');
+    });
+
+    it('refuses a name that is no field of the inventory, and a field that does not add up, naming where', function (): void {
+        $made = listingOf(['qty' => ['number'], 'pct' => ['percentage'], 'stars' => ['rating'], 'note' => ['text'], 'when' => ['date']]);
+        $other = listingOf(['qty' => ['number']]);
+        $qty = listingKey($made, 'qty');
+
+        $response = listingAsk($this, $made, ['totals' => [
+            $qty, listingKey($made, 'pct'), 'nope', listingKey($made, 'stars'), listingKey($other, 'qty'), listingKey($made, 'note'), listingKey($made, 'when'),
+        ]]);
+
+        expect(listingRefused($response))->toBe(['totals.1', 'totals.2', 'totals.3', 'totals.4', 'totals.5', 'totals.6'])
+            ->and($response->json('errors'))->toBe([
+                'totals.1' => ['This field cannot be added up.'],
+                'totals.2' => ['This field does not exist in this inventory.'],
+                'totals.3' => ['This field cannot be added up.'],
+                'totals.4' => ['This field does not exist in this inventory.'],
+                'totals.5' => ['This field cannot be added up.'],
+                'totals.6' => ['This field cannot be added up.'],
+            ]);
+
+        $french = listingAsk($this, $made, ['totals' => [listingKey($made, 'pct')]], headers: ['Accept-Language' => 'fr']);
+
+        expect($french->assertUnprocessable()->json('errors'))->toBe(['totals.0' => ['Ce champ ne peut pas être additionné.']]);
+    });
+
+    it('reports a mistake in the totals together with the others, and refuses what is not a list of names', function (): void {
+        $made = listingOf(['qty' => ['number']]);
+        $key = listingKey($made, 'qty');
+
+        expect(listingRefused(listingAsk($this, $made, ['totals' => ['nope'], 'sort' => 'nope', 'direction' => 'up'])))->toBe(['direction', 'sort', 'totals.0'])
+            ->and(listingRefused(listingAsk($this, $made, ['totals' => 'qty'])))->toBe(['totals'])
+            ->and(listingRefused(listingAsk($this, $made, ['totals' => [[$key]]])))->toBe(['totals.0'])
+            ->and(listingRefused(listingAsk($this, $made, ['totals' => ['']])))->toBe(['totals.0'])
+            ->and(listingRefused(listingAsk($this, $made, ['totals' => [str_repeat('a', 65)]])))->toBe(['totals.0'])
+            // At most as many names as an inventory has fields.
+            ->and(listingRefused(listingAsk($this, $made, ['totals' => array_fill(0, config('inventories.max_fields') + 1, $key)])))->toBe(['totals']);
+    });
+
+    it('refuses every name for an inventory with no field, and has no totals without being asked', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
+        $uri = "/api/v1/inventories/{$inventory->ulid}/items";
 
-        $response = inventoryCall($this, $team['viewer'], 'GET', "/api/v1/inventories/{$inventory->ulid}/items")->assertOk();
+        $response = inventoryCall($this, $team['viewer'], 'GET', $uri)->assertOk();
 
-        expect($response->getContent())->toContain('"totals":{}')->and($response->json('meta.total'))->toBe(0);
+        expect($response->json('meta'))->not->toHaveKey('totals')->and($response->json('meta.total'))->toBe(0)
+            ->and(listingRefused(inventoryCall($this, $team['viewer'], 'GET', $uri.'?totals[]=01m513q7z9j8zet4r7c5smwbtz')))->toBe(['totals.0']);
+    });
+
+    it('reads the columns of the items it gives, not the text they are searched by', function (): void {
+        $made = listingOf(['qty' => ['number']]);
+        listingAdd($made, 'one', ['qty' => '4']);
+        $selects = [];
+        DB::listen(function ($query) use (&$selects): void {
+            $sql = strtolower($query->sql);
+
+            // The page itself: a select of the items, not the count (`count(*)`) nor the search of the fields.
+            if (str_starts_with($sql, 'select') && preg_match('/from [`"]items[`"]/', $sql) === 1 && ! str_contains($sql, 'count(')) {
+                $selects[] = (string) preg_replace('/\s+from\s.*$/s', '', $sql);
+            }
+        });
+
+        $response = listingAsk($this, $made, ['q' => 'one'])->assertOk();
+
+        expect($response->json('data'))->toHaveCount(1)
+            ->and($response->json('data.0'))->toHaveKeys(['id', 'values', 'created_at', 'updated_at'])
+            // Named columns, not `*` (which would read the search text of every item of the page).
+            ->and($selects)->toHaveCount(1)
+            ->and($selects[0])->toContain('ulid')->toContain('values')->not->toContain('*')->not->toContain('search_text');
     });
 
     it('is given to a viewer too', function (): void {
         $made = listingOf(['qty' => ['number']]);
         listingAdd($made, 'one', ['qty' => '4']);
 
-        expect(listingAsk($this, $made, [], 'viewer')->assertOk()->json('meta.totals'))->toBe([listingKey($made, 'qty') => '4']);
+        expect(listingTotals($this, $made, ['qty'], [], 'viewer'))->toBe([listingKey($made, 'qty') => '4']);
     });
 
     it('is left out of the items of another inventory', function (): void {
@@ -922,7 +1038,7 @@ describe('totals', function (): void {
         listingAdd($made, 'mine', ['qty' => '4']);
         listingAdd($other, 'theirs', ['qty' => '1000']);
 
-        expect(listingAsk($this, $made)->assertOk()->json('meta.totals'))->toBe([listingKey($made, 'qty') => '4']);
+        expect(listingTotals($this, $made, ['qty']))->toBe([listingKey($made, 'qty') => '4']);
     });
 
     it('adds up the items the query matches, whatever its order, its limit and its offset', function (): void {
@@ -943,7 +1059,7 @@ describe('totals', function (): void {
             ->and($sum($inventory()->orderByDesc('id')->limit(2)->offset(3)))->toBe('15')
             ->and($sum($inventory()->offset(10)))->toBe('15')
             ->and($sum($inventory()->where('id', '>', $ids[2])->limit(1)->offset(1)))->toBe('9')
-            ->and(app(ItemQuery::class)->totals($inventory()->orderBy('id')->limit(2)->offset(1), $made['inventory']->fields()->get()))->toBe([$key => '15']);
+            ->and(app(ItemQuery::class)->totals($inventory()->orderBy('id')->limit(2)->offset(1), $made['inventory']->fields()->get(), [$key]))->toBe([$key => '15']);
     });
 
     it('shows zero when no item holds a value, and refuses a total that is not a number rather than showing zero', function (): void {
@@ -952,7 +1068,7 @@ describe('totals', function (): void {
         $fields = $made['inventory']->fields()->get();
 
         // A connection that answers the aggregate with the sum it is told to, whatever the query.
-        $answering = function (mixed $sum) use ($fields): array {
+        $answering = function (mixed $sum) use ($fields, $key): array {
             $connection = new class(fn () => throw new LogicException('Never connected.'), 'db', '', ['driver' => 'pgsql']) extends PostgresConnection
             {
                 public mixed $sum = null;
@@ -973,7 +1089,7 @@ describe('totals', function (): void {
             $manager = Mockery::mock(DatabaseManager::class);
             $manager->shouldReceive('connection')->andReturn($connection);
 
-            return (new ItemQuery($manager, app(FieldTypes::class)))->totals((new EloquentBuilder($connection->query()->from('items')))->setModel(new Item), $fields);
+            return (new ItemQuery($manager, app(FieldTypes::class)))->totals((new EloquentBuilder($connection->query()->from('items')))->setModel(new Item), $fields, [$key]);
         };
 
         expect($answering(null))->toBe([$key => '0'])

@@ -20,10 +20,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
-use stdClass;
 
 /**
- * The items of an inventory: list them (50 a page, newest first unless sorted, searched by words, filtered and totalled),
+ * The items of an inventory: list them (50 a page, newest first unless sorted, searched by words, filtered and, when asked, totalled),
  * read, add, change and delete one.
  *
  * Who may is decided by {@see InventoryPolicy}: every member reads, editors and owners write. An item belongs to the
@@ -47,21 +46,26 @@ final class ItemController extends Controller
      * `q`, only the items that hold every word of it, whatever the case and the accents; with `filter[<field>][<operator>]`,
      * only the ones that meet every condition ({@see ItemQuery}). The links of the pages keep all of it.
      *
-     * `meta.total` is the number of items that match, and `meta.totals` the sum of every number and amount field over all
-     * of them (not only the page), keyed by the ULID of the field; an empty object when the inventory has no such field.
+     * `meta.total` is the number of items that match. `totals[]` names the number and amount fields to add up, and
+     * `meta.totals` then holds the sum of each over all the items that match (not only the page), keyed by the ULID of
+     * the field. Totals are opt-in because they cost a pass over the values of every item for each field: without
+     * `totals`, `meta` has no `totals` and the query is not run. `422` (`totals.<position>`) for a name that is no field
+     * of the inventory or a field that does not add up.
      */
     public function index(ListItemsRequest $request, Inventory $inventory): AnonymousResourceCollection
     {
         $fields = $inventory->fields()->get();
         $items = $inventory->items();
         $this->search->restrict($items, (string) $request->validated('q', ''));
-        $this->query->apply($items, $fields, $request->validated());
-        $totals = $this->query->totals($items, $fields);
-        $page = $items->paginate(Items::PER_PAGE)->withQueryString();
+        $totalled = $this->query->apply($items, $fields, $request->validated());
+        $page = $items->paginate(Items::PER_PAGE, Items::LIST_COLUMNS)->withQueryString();
+        $list = ItemResource::collection($page->through(fn (Item $item): ItemResource => new ItemResource($item, $fields)));
 
-        return ItemResource::collection($page->through(fn (Item $item): ItemResource => new ItemResource($item, $fields)))
-            // An object even when it is empty: the same shape whatever the fields are.
-            ->additional(['meta' => ['totals' => $totals === [] ? new stdClass : $totals]]);
+        if ($totalled !== []) {
+            $list->additional(['meta' => ['totals' => $this->query->totals($items, $fields, $totalled)]]);
+        }
+
+        return $list;
     }
 
     /**
