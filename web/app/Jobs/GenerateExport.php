@@ -22,7 +22,7 @@ use Throwable;
  * 960 seconds).
  *
  * The job goes on its own queue, `exports` ({@see self::QUEUE}), so that a long export does not hold up the short jobs (mails,
- * file purges) behind it. The Docker example runs a worker for each: `worker` on `default` and `export-worker` on `exports`
+ * file purges) behind it. The imports ({@see ImportItems}) are heavy jobs too and go on the same queue. The Docker example runs a worker for each: `worker` on `default` and `export-worker` on `exports`
  * (`QUEUE_WORKER_QUEUES` of the image's entrypoint). A single worker, with that variable unset, listens to both, `default` first
  * (`queue:work --queue=default,exports`), as `composer dev` does: the exports are written, but a long one holds up the short jobs
  * that arrive behind it.
