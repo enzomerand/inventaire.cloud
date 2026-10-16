@@ -29,6 +29,10 @@
  * history. The tabs are `../item/tabs.js`, the files (the photo and file fields of the form, the attachments tab, the
  * uploads) `../item/files.js`, the history `../item/history.js`. Files never travel with the values of an item: each goes
  * up on its own request, and the files chosen while an item is added go up right after the form was saved.
+ *
+ * The dialog cannot be closed by hand (Escape, a click outside, a button) while a request that holds it is on its way: it
+ * closes itself when the request is done. A request belongs to the dialog that was open when it began (`dialogToken`): an
+ * answer that finds another dialog in its place leaves it alone.
  */
 import {
     choicesOf,
@@ -115,6 +119,9 @@ export default function inventoryItems() {
 
         /** The page the last reading was for, which a retry asks for again. */
         wantedPage: 1,
+
+        /** True while the code itself closes the dialog, which the guard against closing it by hand lets through. */
+        closingDialog: false,
 
         /** Number of the page that is shown, from 1. */
         page: 1,
@@ -362,7 +369,11 @@ export default function inventoryItems() {
          */
         async init() {
             this.rootNode = this.$root;
-            this.$nextTick(() => onModalHidden(this.$refs.modal, () => this.resetDialog()));
+            this.$nextTick(() => {
+                onModalHidden(this.$refs.modal, () => this.onDialogHidden());
+                // `hide.bs.modal` is Bootstrap's event, fired before it closes the dialog; preventing it keeps the dialog open.
+                this.$refs.modal.addEventListener('hide.bs.modal', (event) => this.guardClosing(event));
+            });
 
             const page = this.restoreQuery();
 
@@ -440,6 +451,7 @@ export default function inventoryItems() {
             const ticket = ++this.ticket;
             this.loadingItems = true;
             this.itemsFailed = false;
+            this.filesChanged = false;
             this.wantedPage = page;
             this.syncAddress(page);
 
@@ -629,7 +641,8 @@ export default function inventoryItems() {
 
         /**
          * Opens the dialog on the item of a row that was clicked, unless the click was on a link, a button or a control of the
-         * row (a click on the address of an item is for the address, one on a cell is for the cell).
+         * row (a click on the address of an item is for the address, one on a cell is for the cell). An `<a>` with no `href` is
+         * no link (the thumbnails of the files in the table are such), so a click on it is a click on the row.
          *
          * What was clicked is read from the path the event took when it was dispatched, not from where its target is now:
          * a cell that turns into its control at that very click is gone from the page by the time the click reaches the row.
@@ -645,10 +658,10 @@ export default function inventoryItems() {
 
             const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
             const onControl = [...path, event.target].some(
-                (node) => node instanceof Element && node.matches('a, button, input, select, textarea'),
+                (node) => node instanceof Element && node.matches('a[href], button, input, select, textarea'),
             );
 
-            if (!onControl && event.target.closest('a, button') === null) {
+            if (!onControl && event.target.closest('a[href], button') === null) {
                 this.open(row);
             }
         },
@@ -722,6 +735,52 @@ export default function inventoryItems() {
             this.resetHistory();
         },
 
+        /**
+         * Closes the dialog from the code: when a request is done with it, or what it shows is gone.
+         *
+         * @returns {void}
+         */
+        closeDialog() {
+            this.closingDialog = true;
+
+            try {
+                hideModal(this.$refs.modal);
+            } finally {
+                this.closingDialog = false;
+            }
+        },
+
+        /**
+         * Keeps the dialog open while a request that holds it is on its way (the person pressed Escape, clicked outside or
+         * on a button that closes it): the answer would find the form gone, and what was chosen for the item lost. The code
+         * closes the dialog itself when it is done ({@link closeDialog}).
+         *
+         * @param {Event} event The `hide.bs.modal` event, fired before the dialog closes.
+         * @returns {void}
+         */
+        guardClosing(event) {
+            if (this.busy && !this.closingDialog) {
+                event.preventDefault();
+            }
+        },
+
+        /**
+         * The dialog has been closed, however it was: it forgets the item. The list is read again when files were added or
+         * removed meanwhile and nothing has read it since, so that it shows the item as it is, whatever the filters ask.
+         *
+         * @returns {void}
+         */
+        onDialogHidden() {
+            const changed = this.filesChanged;
+
+            this.resetDialog();
+
+            if (changed) {
+                this.totalsFor = null;
+                this.loadItems(this.page);
+            }
+        },
+
         // The field types know how a field is entered and which choices it has (see `../fields`): the template asks
         // them through the component, with the field as the only argument.
         control: controlOf,
@@ -729,6 +788,27 @@ export default function inventoryItems() {
         inputMode: inputModeOf,
         maxLength: maxLengthOf,
         choices: choicesOf,
+
+        /**
+         * The `id` of the label of a field, which a group of controls without a control of their own is named by.
+         *
+         * @param {Field} field
+         * @returns {string}
+         */
+        labelId(field) {
+            return 'item-label-' + field.id;
+        },
+
+        /**
+         * The control a label points to (`for`): the control of the field, except for the files, whose only button (the one that
+         * adds a file) is not there when the field is full, and does not stand for the field: its group is named by the label.
+         *
+         * @param {Field} field
+         * @returns {string | null}
+         */
+        labelTarget(field) {
+            return controlOf(field) === 'files' ? null : this.controlId(field);
+        },
 
         /**
          * The `id` of the control of a field, which its label points to.
@@ -1080,10 +1160,15 @@ export default function inventoryItems() {
 
             // Nothing was changed: there is nothing to send.
             if (!creating && Object.keys(values).length === 0) {
-                hideModal(this.$refs.modal);
+                this.closeDialog();
 
                 return;
             }
+
+            // The dialog this save belongs to, and the files chosen in it: the dialog can be closed and opened again on something
+            // else while the requests are on their way, and what it holds (the files, the form) is not the next dialog's.
+            const token = this.dialogToken;
+            const staged = this.staged;
 
             this.busy = true;
             this.errors = {};
@@ -1103,17 +1188,27 @@ export default function inventoryItems() {
                 this.totalsFor = null;
 
                 // The item exists: the files chosen for it go up now, and the dialog stays on it while they do, so that the ones
-                // that fail can be seen.
+                // that fail can be seen. When the dialog is not the one that was saved, its files are not sent anywhere.
                 let failed = 0;
 
-                if (created !== null && this.staged.length > 0) {
-                    this.fillDialog('edit', created);
-                    failed = await this.sendStaged(created.id);
+                if (created !== null && staged.length > 0) {
+                    if (token === this.dialogToken) {
+                        this.fillDialog('edit', created);
+                        failed = (await this.sendStaged(created.id, token)).failed;
+                    } else {
+                        failed = staged.length;
+                    }
                 }
 
                 if (failed === 0) {
-                    hideModal(this.$refs.modal);
-                    notify('success', t(creating ? 'inventories.notice.item_added' : 'inventories.notice.item_saved'));
+                    // Only the dialog that was saved is closed and congratulated: it may have given way to another meanwhile.
+                    if (token === this.dialogToken) {
+                        this.closeDialog();
+                        notify(
+                            'success',
+                            t(creating ? 'inventories.notice.item_added' : 'inventories.notice.item_saved'),
+                        );
+                    }
                 } else {
                     notify('warning', this.partialNotice(failed));
                 }
@@ -1173,7 +1268,7 @@ export default function inventoryItems() {
 
             try {
                 await http.delete(fillUrl(this.itemUrl, this.itemId));
-                hideModal(this.$refs.modal);
+                this.closeDialog();
                 notify('success', t('inventories.notice.item_deleted'));
                 this.countItems(-1);
                 this.totalsFor = null;
@@ -1221,7 +1316,7 @@ export default function inventoryItems() {
                     // Adding an item: the address that is gone is the inventory's own.
                     this.leaveIfGone(error);
                 } else {
-                    hideModal(this.$refs.modal);
+                    this.closeDialog();
                     // If it is the inventory that is gone, this reading finds out and takes the person away. The item is gone:
                     // so is what it added to the totals.
                     this.totalsFor = null;

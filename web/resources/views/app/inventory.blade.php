@@ -241,11 +241,11 @@
                 <form class="modal-content" @submit.prevent="save" novalidate>
                     <div class="modal-header">
                         <h2 class="modal-title" id="item-modal-title" x-text="modalTitle"></h2>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ __('Close') }}"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ __('Close') }}" :disabled="busy"></button>
                     </div>
                     {{-- The tabs of an item that exists: its details, its attachments, its history. The dialog that adds an item has none. --}}
                     <div class="px-3 px-sm-4 pt-2" x-show="showTabs">
-                        <ul class="nav nav-tabs" role="tablist" aria-label="{{ __('Item') }}" @keydown="moveTab($event)">
+                        <ul class="nav nav-tabs flex-nowrap overflow-x-auto" role="tablist" aria-label="{{ __('Item') }}" @keydown="moveTab($event)">
                             <li class="nav-item" role="presentation">
                                 <button type="button" role="tab" id="item-tab-details" aria-controls="item-panel-details" :class="tabClass('details')" :aria-selected="tabSelected('details')" :tabindex="tabIndex('details')" @click="selectTab('details')">{{ __('Item details') }}</button>
                             </li>
@@ -258,6 +258,10 @@
                         </ul>
                     </div>
                     <div class="modal-body">
+                        {{-- Where the progress of the uploads is told to assistive technology. It is on the page from the start: a live
+                             region that is added together with its message is not reliably announced. --}}
+                        <div class="visually-hidden" role="status" aria-live="polite" x-text="uploadAnnouncement"></div>
+
                         <div class="alert alert-danger" role="alert" x-show="formError" x-text="formError"></div>
 
                         <template x-if="confirming">
@@ -270,12 +274,12 @@
 
                         <template x-if="!asking">
                             <div>
-                                <div role="tabpanel" id="item-panel-details" aria-labelledby="item-tab-details" x-show="onDetails">
+                                <div id="item-panel-details" :role="panelRole" :aria-labelledby="panelLabel('details')" :tabindex="panelTabIndex" x-show="onDetails">
                                     <template x-if="isForm">
                                         <div>
                                             <template x-for="field in fields" :key="field.id">
                                                 <div class="mb-3" :data-field="field.id">
-                                                    <label class="form-label" :class="{ required: field.required }" :for="controlId(field)" x-text="field.name"></label>
+                                                    <label class="form-label" :class="{ required: field.required }" :id="labelId(field)" :for="labelTarget(field)" x-text="field.name"></label>
 
                                                     <template x-if="control(field) === 'input'">
                                                         <input
@@ -403,11 +407,11 @@
                                     </template>
                                 </div>
 
-                                <div role="tabpanel" id="item-panel-files" aria-labelledby="item-tab-files" x-show="onFiles">
+                                <div id="item-panel-files" :role="panelRole" :aria-labelledby="panelLabel('files')" :tabindex="panelTabIndex" x-show="onFiles">
                                     @include('partials.item-attachments')
                                 </div>
 
-                                <div role="tabpanel" id="item-panel-history" aria-labelledby="item-tab-history" x-show="onHistory">
+                                <div id="item-panel-history" :role="panelRole" :aria-labelledby="panelLabel('history')" :tabindex="panelTabIndex" x-show="onHistory">
                                     @include('partials.item-history')
                                 </div>
                             </div>
@@ -415,7 +419,7 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-outline-danger me-auto" x-show="canDeleteItem" @click="askDelete" :disabled="busy">{{ __('Delete') }}</button>
-                        <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal">{{ __('Cancel') }}</button>
+                        <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal" :disabled="busy">{{ __('Cancel') }}</button>
                         <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
                         <button type="submit" class="btn btn-primary" x-show="isForm && !asking" :disabled="busy || uploading">{{ __('Save') }}</button>
                         {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor

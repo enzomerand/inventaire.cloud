@@ -51,6 +51,26 @@ describe('the tabs of the dialog of an item', () => {
         expect(tabs({ asking: true }).showTabs).toBe(false);
     });
 
+    it('are panels of tabs only where the dialog shows its tabs, labelled by their tab and reachable by keyboard', () => {
+        const editing = tabs({ mode: 'edit' });
+
+        expect(editing.panelRole).toBe('tabpanel');
+        expect(editing.panelTabIndex).toBe('0');
+        expect(TABS.map((name) => editing.panelLabel(name))).toEqual([
+            'item-tab-details',
+            'item-tab-files',
+            'item-tab-history',
+        ]);
+    });
+
+    it('are no panels of tabs while an item is added: the form is alone, there is no tab to belong to', () => {
+        const adding = tabs({ mode: 'create' });
+
+        expect(adding.panelRole).toBeNull();
+        expect(adding.panelTabIndex).toBeNull();
+        expect(adding.panelLabel('details')).toBeNull();
+    });
+
     it('show one panel at a time', () => {
         const component = tabs();
 

@@ -157,11 +157,13 @@ export function page(
  * runs at once.
  *
  * @param {() => Record<string, any>} factory The component function.
- * @param {{ canEdit?: boolean, maxAttachmentSize?: number }} [options] `maxAttachmentSize`: the largest file the page says the
- *   server takes, in bytes (the page says nothing when not given).
+ * @param {{ canEdit?: boolean, maxAttachmentSize?: number, laterTick?: boolean }} [options] `maxAttachmentSize`: the largest
+ *   file the page says the server takes, in bytes (the page says nothing when not given). `laterTick`: `$nextTick` runs the
+ *   function after the code that asked is done, as Alpine's does, instead of at once (which hides the bugs of what is
+ *   assumed to have happened by the time the function runs).
  * @returns {Record<string, any>}
  */
-export function mountComponent(factory, { canEdit = true, maxAttachmentSize = undefined } = {}) {
+export function mountComponent(factory, { canEdit = true, maxAttachmentSize = undefined, laterTick = false } = {}) {
     const component = factory();
 
     const root = document.createElement('div');
@@ -186,7 +188,7 @@ export function mountComponent(factory, { canEdit = true, maxAttachmentSize = un
         search: document.createElement('input'),
         picker: document.createElement('input'),
     };
-    component.$nextTick = (callback) => callback();
+    component.$nextTick = laterTick ? (callback) => void queueMicrotask(callback) : (callback) => callback();
     document.documentElement.lang = 'en';
     // The component keeps its search, sort and filters in the address: every test starts from a clean one.
     window.history.replaceState(null, '', '/');

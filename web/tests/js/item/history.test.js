@@ -2,15 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { momentText } from '../../../resources/js/grid/rows.js';
 import { revisionLines, revisionRow } from '../../../resources/js/item/history.js';
-import { FIELDS } from '../support/inventory.js';
+import { FIELDS, ulid } from '../support/inventory.js';
 
 vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/messages.js'));
 
 const WHEN = '2026-10-15T10:00:00Z';
 
+/** The id of a revision: a ULID. */
+const REVISION_ID = ulid('revision7');
+
 /** A revision as the API describes it. */
 function revision(action, changes, extra = {}) {
-    return { id: 7, action, user: { id: 1, name: 'Ada' }, created_at: WHEN, changes, ...extra };
+    return { id: REVISION_ID, action, user: { name: 'Ada' }, created_at: WHEN, changes, ...extra };
 }
 
 /** The field of a change, as the revision names it: the id, the name and the type of a field of the inventory. */
@@ -37,13 +40,13 @@ describe('the title of a revision', () => {
     });
 
     it('keeps what a name holds as text', () => {
-        const row = revisionRow(revision('updated', [], { user: { id: 2, name: '<b>Eve</b>' } }), FIELDS);
+        const row = revisionRow(revision('updated', [], { user: { name: '<b>Eve</b>' } }), FIELDS);
 
         expect(row.title).toBe('<b>Eve</b> · ' + momentText(WHEN));
     });
 
-    it('is identified by the id of the revision, as text', () => {
-        expect(revisionRow(revision('updated', []), FIELDS).id).toBe('7');
+    it('is identified by the id of the revision, a ULID', () => {
+        expect(revisionRow(revision('updated', []), FIELDS).id).toBe(REVISION_ID);
     });
 });
 

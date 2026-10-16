@@ -15,6 +15,7 @@ import {
     item,
     mountComponent,
     page,
+    ulid,
 } from '../support/inventory.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
@@ -37,9 +38,9 @@ const REVISIONS = `${ITEMS}/i1/revisions`;
 /** A revision as the API describes it. */
 function revision(id, extra = {}) {
     return {
-        id,
+        id: ulid('r' + id),
         action: 'updated',
-        user: { id: 1, name: 'Ada' },
+        user: { name: 'Ada' },
         created_at: '2026-10-15T10:00:00Z',
         changes: [{ field: { id: 'name', name: 'Name', type: 'text' }, before: 'Hammer', after: 'Claw hammer' }],
         ...extra,
@@ -148,7 +149,7 @@ describe('the history of an item', () => {
             await vi.waitFor(() => expect(component.revisionsLoaded).toBe(true));
 
             expect(reads()).toEqual([[REVISIONS, { params: { page: 1 } }]]);
-            expect(component.revisions.map((row) => row.id)).toEqual(['2', '1']);
+            expect(component.revisions.map((row) => row.id)).toEqual([ulid('r2'), ulid('r1')]);
             expect(component.revisions[0].lines.map((line) => line.text)).toEqual(['Name: Hammer → Claw hammer']);
             expect(component.noRevisions).toBe(false);
         });
@@ -251,7 +252,7 @@ describe('the history of an item', () => {
             await component.loadMoreRevisions();
 
             expect(reads()[1]).toEqual([REVISIONS, { params: { page: 2 } }]);
-            expect(component.revisions.map((row) => row.id)).toEqual(['3', '2', '1']);
+            expect(component.revisions.map((row) => row.id)).toEqual([ulid('r3'), ulid('r2'), ulid('r1')]);
             expect(component.hasMoreRevisions).toBe(false);
         });
 
@@ -284,7 +285,7 @@ describe('the history of an item', () => {
 
             await component.loadMoreRevisions();
 
-            expect(component.revisions.map((row) => row.id)).toEqual(['4', '3', '2']);
+            expect(component.revisions.map((row) => row.id)).toEqual([ulid('r4'), ulid('r3'), ulid('r2')]);
         });
 
         it('does not read a page that does not exist', async () => {
@@ -324,7 +325,7 @@ describe('the history of an item', () => {
             await component.retryRevisions();
 
             expect(component.revisionsFailed).toBe(false);
-            expect(component.revisions.map((row) => row.id)).toEqual(['3', '2']);
+            expect(component.revisions.map((row) => row.id)).toEqual([ulid('r3'), ulid('r2')]);
         });
 
         it('does not claim the item has no history when the first page failed', async () => {
@@ -338,8 +339,80 @@ describe('the history of an item', () => {
 
             await component.retryRevisions();
 
-            expect(component.revisions.map((row) => row.id)).toEqual(['1']);
+            expect(component.revisions.map((row) => row.id)).toEqual([ulid('r1')]);
             expect(component.revisionsFailed).toBe(false);
+        });
+
+        it('starts again from the first page when it was the reading again of a changed history that failed, not the page after the last', async () => {
+            await open([
+                revisionPage([revision(3)], 1, 2),
+                revisionPage([revision(2)], 2, 2),
+                new HttpError(500, 'Oops.'),
+                revisionPage([revision(5), revision(4)], 1, 1),
+            ]);
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisionsLoaded).toBe(true));
+            await component.loadMoreRevisions();
+            // The item changed since (a file was added): the next time the history is shown, it is read again... and that fails.
+            component.markHistoryStale();
+            component.selectTab('details');
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisionsFailed).toBe(true));
+
+            await component.retryRevisions();
+
+            expect(reads().map((call) => call[1].params.page)).toEqual([1, 2, 1, 1]);
+            expect(component.revisions.map((row) => row.id)).toEqual([ulid('r5'), ulid('r4')]);
+            expect(component.revisionsFailed).toBe(false);
+        });
+
+        it('reads it again the next time it is shown when the reading again of a changed history failed', async () => {
+            await open([
+                revisionPage([revision(3)]),
+                new HttpError(500, 'Oops.'),
+                revisionPage([revision(4), revision(3)]),
+            ]);
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisionsLoaded).toBe(true));
+            component.markHistoryStale();
+            component.selectTab('details');
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisionsFailed).toBe(true));
+
+            component.selectTab('details');
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisions).toHaveLength(2));
+
+            expect(component.revisionsFailed).toBe(false);
+        });
+    });
+
+    describe('an item that changes while its history is being read', () => {
+        it('is read again afterwards: the change that came while the reading was on its way is not in the answer', async () => {
+            const reading = deferred();
+
+            await open([reading.promise, revisionPage([revision(4), revision(3)])]);
+            component.selectTab('history');
+            // A file is added while the first reading is on its way.
+            component.markHistoryStale();
+            reading.resolve(revisionPage([revision(3)]));
+            await vi.waitFor(() => expect(component.revisionsLoaded).toBe(true));
+
+            expect(component.revisionsStale).toBe(true);
+
+            component.selectTab('details');
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisions).toHaveLength(2));
+
+            expect(component.revisionsStale).toBe(false);
+        });
+
+        it('keeps the flag cleared when nothing changed meanwhile', async () => {
+            await open([revisionPage([revision(3)])]);
+            component.selectTab('history');
+            await vi.waitFor(() => expect(component.revisionsLoaded).toBe(true));
+
+            expect(component.revisionsStale).toBe(false);
         });
     });
 });

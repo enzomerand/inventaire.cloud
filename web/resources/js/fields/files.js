@@ -42,7 +42,7 @@ const SIZE_UNITS = ['byte', 'kilobyte', 'megabyte', 'gigabyte'];
  * @property {number | null} [height]
  * @property {boolean} has_thumbnail
  * @property {string} uploaded_at
- * @property {{ id: number, name: string } | null} uploaded_by Who added it; null once their account is gone.
+ * @property {{ name: string } | null} uploaded_by Who added it (only their name is given); null once their account is gone.
  * @property {string} url Where it is downloaded; with `?inline=1` it is displayed, when it is an image or a PDF.
  * @property {string | null} thumbnail_url Its JPEG thumbnail, when it has one.
  */
@@ -81,16 +81,6 @@ export function maxFilesOf(field) {
     const wanted = Math.trunc(Number(field.options?.max_files ?? 1));
 
     return Number.isFinite(wanted) ? Math.min(Math.max(wanted, 1), MAX_FILES_PER_FIELD) : 1;
-}
-
-/**
- * Whether a field holds files (a `file` or a `photo` field).
- *
- * @param {Field} field
- * @returns {boolean}
- */
-export function isFileField(field) {
-    return field.type === 'file' || field.type === 'photo';
 }
 
 /**

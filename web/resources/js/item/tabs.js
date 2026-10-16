@@ -50,6 +50,26 @@ export default function itemTabs() {
             return this.mode !== 'create' && !this.asking;
         },
 
+        /** The role of the panels of the dialog: they are the panels of tabs only when the dialog shows its tabs (adding an item shows the form alone). */
+        get panelRole() {
+            return this.showTabs ? 'tabpanel' : null;
+        },
+
+        /** The `tabindex` of the panels: a panel of tabs is reached from its tab with the Tab key, so that a keyboard user can scroll it. */
+        get panelTabIndex() {
+            return this.showTabs ? '0' : null;
+        },
+
+        /**
+         * The `aria-labelledby` of a panel: its tab, when the dialog shows its tabs.
+         *
+         * @param {string} name One of {@link TABS}.
+         * @returns {string | null}
+         */
+        panelLabel(name) {
+            return this.showTabs ? TAB_ID_PREFIX + name : null;
+        },
+
         /** Whether the panel of the details is shown. */
         get onDetails() {
             return this.tab === 'details';

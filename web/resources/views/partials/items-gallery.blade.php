@@ -27,7 +27,7 @@
                     {{-- The first photo of the item, when it has one: its thumbnail, with the file name as alternative text. --}}
                     <template x-if="card.cover">
                         <div class="position-relative">
-                            <img class="card-img-top app-cover" :src="card.cover.src" :alt="card.cover.alt" loading="lazy">
+                            <img class="card-img-top app-cover" :src="card.cover.src" :alt="card.cover.alt" loading="lazy" decoding="async">
                             <template x-if="card.cover.more">
                                 <span class="badge bg-dark text-white position-absolute bottom-0 end-0 m-2" x-text="card.cover.more"></span>
                             </template>

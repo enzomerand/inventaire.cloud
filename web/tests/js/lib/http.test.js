@@ -647,4 +647,32 @@ describe('http helper', () => {
             expect(vi.getTimerCount()).toBe(0);
         });
     });
+
+    describe('the time an upload is given', () => {
+        let uploadTimeoutFor;
+        let UPLOAD_TIMEOUT_MS;
+
+        beforeEach(async () => {
+            ({ uploadTimeoutFor, UPLOAD_TIMEOUT_MS } = await import('../../../resources/js/lib/http.js'));
+        });
+
+        it('is at least two minutes, whatever the file', () => {
+            expect(UPLOAD_TIMEOUT_MS).toBe(120_000);
+            expect(uploadTimeoutFor(0)).toBe(120_000);
+            expect(uploadTimeoutFor(100)).toBe(120_000);
+            expect(uploadTimeoutFor(2 * 1024 * 1024)).toBe(120_000);
+        });
+
+        it('is a minute plus a second for each 50 KB once that is more', () => {
+            // 6 MiB is 123 steps of 50 KB (rounded up).
+            expect(uploadTimeoutFor(6 * 1024 * 1024)).toBe(60_000 + 123 * 1000);
+            // The largest file the server takes, 20 MiB: 410 steps.
+            expect(uploadTimeoutFor(20 * 1024 * 1024)).toBe(60_000 + 410 * 1000);
+        });
+
+        it('is the minimum for a size that is not one', () => {
+            expect(uploadTimeoutFor(Number.NaN)).toBe(120_000);
+            expect(uploadTimeoutFor(-5)).toBe(120_000);
+        });
+    });
 });

@@ -37,9 +37,9 @@ const TITLE_SEPARATOR = ' · ';
  * @property {RevisionField | null} field The file or photo field it belonged to; null for a plain attachment, or when the field was deleted since.
  *
  * @typedef {object} Revision A revision, as the API describes it.
- * @property {number} id
+ * @property {string} id A ULID: it orders the revisions of an item, and tells one from another.
  * @property {'created' | 'updated' | 'attachment_added' | 'attachment_removed' | string} action
- * @property {{ id: number, name: string } | null} user Who made the change; null once their account is gone.
+ * @property {{ name: string } | null} user Who made the change (only their name is given); null once their account is gone.
  * @property {string} created_at
  * @property {(ValueChange | AttachmentChange)[]} changes A list in both cases: the values that changed, or the one file.
  *
@@ -130,7 +130,7 @@ export function revisionLines(revision, fields) {
  */
 export function revisionRow(revision, fields) {
     return {
-        id: String(revision.id),
+        id: revision.id,
         title: (revision.user?.name ?? t('history.deleted_user')) + TITLE_SEPARATOR + momentText(revision.created_at),
         lines: revisionLines(revision, fields),
     };
@@ -155,6 +155,9 @@ export default function itemHistory() {
 
         /** True when the last reading failed: the tab offers to try again. */
         revisionsFailed: false,
+
+        /** Whether the reading that failed was for the page after the last one (rather than for the list from the start): a retry asks for the same. */
+        revisionsFailedMore: false,
 
         /** True once the first page was read for the item of the dialog. */
         revisionsLoaded: false,
@@ -230,6 +233,12 @@ export default function itemHistory() {
             this.revisionsLoading = true;
             this.revisionsFailed = false;
 
+            // A reading from the start answers for the item as it is now: a change that comes while it is on its way is not in
+            // it, and must still be told by the flag afterwards (clearing the flag on the answer would lose it).
+            if (!more) {
+                this.revisionsStale = false;
+            }
+
             try {
                 const answer = await http.get(this.revisionsUrl, { params: { page } });
 
@@ -245,10 +254,15 @@ export default function itemHistory() {
                 this.revisionsPage = answer.meta?.current_page ?? page;
                 this.revisionsLast = answer.meta?.last_page ?? this.revisionsPage;
                 this.revisionsLoaded = true;
-                this.revisionsStale = false;
             } catch {
                 if (ticket === this.revisionsTicket) {
                     this.revisionsFailed = true;
+                    this.revisionsFailedMore = more;
+
+                    // What is shown is still the old history: the next time the tab is shown reads it again.
+                    if (!more) {
+                        this.revisionsStale = true;
+                    }
                 }
             } finally {
                 if (ticket === this.revisionsTicket) {
@@ -258,12 +272,13 @@ export default function itemHistory() {
         },
 
         /**
-         * Reads the history again from the start (the button that follows a failure).
+         * Reads again what could not be read (the button that follows a failure): the page after the last one if that is what
+         * failed, the list from the start otherwise (the first page, or a reading again of a history that had changed).
          *
          * @returns {Promise<void>}
          */
         async retryRevisions() {
-            await this.loadRevisions(this.revisionsLoaded);
+            await this.loadRevisions(this.revisionsFailedMore);
         },
 
         /**
@@ -287,6 +302,7 @@ export default function itemHistory() {
             this.revisionsLast = 0;
             this.revisionsLoading = false;
             this.revisionsFailed = false;
+            this.revisionsFailedMore = false;
             this.revisionsLoaded = false;
             this.revisionsStale = false;
         },

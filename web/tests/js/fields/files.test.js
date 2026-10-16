@@ -10,7 +10,6 @@ import {
     fileEntry,
     formatSize,
     isDisplayable,
-    isFileField,
     maxFilesOf,
 } from '../../../resources/js/fields/files.js';
 import { controlOf, describeValue, isFilterable, isSortable, isSummable } from '../../../resources/js/fields/index.js';
@@ -49,12 +48,6 @@ describe('the size of a file', () => {
 });
 
 describe('the fields that hold files', () => {
-    it('are the photo and the file fields', () => {
-        expect(isFileField(field('f', 'photo'))).toBe(true);
-        expect(isFileField(field('f', 'file'))).toBe(true);
-        expect(isFileField(field('f', 'text'))).toBe(false);
-    });
-
     it('hold the number of files their option says, from 1 to 10', () => {
         expect(maxFilesOf(field('f', 'photo', { max_files: 4 }))).toBe(4);
         expect(maxFilesOf(field('f', 'photo', { max_files: '7' }))).toBe(7);

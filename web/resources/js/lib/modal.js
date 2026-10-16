@@ -10,11 +10,50 @@
 import { Modal } from '@tabler/core';
 
 /**
+ * Whether an element is shown: nothing between it and the dialog hides it (the `hidden` attribute, `display: none` from a
+ * style or a class, which is how `x-show` hides). A hidden element cannot take the focus.
+ *
+ * @param {Element} element
+ * @param {Element} root The dialog: what is above it is not looked at.
+ * @returns {boolean}
+ */
+function isShown(element, root) {
+    for (let node = element; node !== null && node !== root; node = node.parentElement) {
+        if ((node instanceof HTMLElement && node.hidden) || getComputedStyle(node).display === 'none') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * The first element, in order of the selectors, that matches one and is shown.
+ *
+ * @param {HTMLElement} root The dialog.
+ * @param {string[]} selectors
+ * @returns {HTMLElement | null}
+ */
+function firstShown(root, selectors) {
+    for (const selector of selectors) {
+        const found = [...root.querySelectorAll(selector)].find((candidate) => isShown(candidate, root));
+
+        if (found instanceof HTMLElement) {
+            return found;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Opens a dialog, and puts the cursor in its first input (or in the one marked `data-autofocus`) once it is shown. When
  * the dialog is closed, however it was, the focus goes back to the element that had it before, if that is still on the page.
  *
  * A caller that opens the dialog for one control (the cell of a table that has no editor of its own) can name where the
- * cursor goes: the first of its selectors that finds something wins, and the usual place is the fallback.
+ * cursor goes: the first of its selectors that finds a control that can be reached wins, and the usual place is the
+ * fallback. A control that is hidden (the button that adds a file to a field that is full, or anything inside a tab that is
+ * not shown) cannot take the cursor, so it is skipped, like the controls the usual place would pick.
  *
  * Nothing is waited for when Bootstrap ignores the call (a dialog that is in the middle of opening or closing): its
  * `show.bs.modal` event is not fired then, and the listeners that would be left behind are not added.
@@ -41,11 +80,11 @@ export function showModal(element, { focus = [] } = {}) {
     element.addEventListener(
         'shown.bs.modal',
         () => {
-            const asked = focus.map((selector) => element.querySelector(selector)).find((found) => found !== null);
-            const target =
-                asked ??
-                element.querySelector('[data-autofocus]') ??
-                element.querySelector('.modal-body :is(input:not([type="hidden"]), select, textarea)');
+            const target = firstShown(element, [
+                ...focus,
+                '[data-autofocus]',
+                '.modal-body :is(input:not([type="hidden"]), select, textarea)',
+            ]);
 
             target?.focus();
         },

@@ -6,19 +6,23 @@
 
     Included in the field loop of the dialog (app/inventory.blade.php), so it reads the inventoryItems component
     (resources/js/components/inventory-items.js, with resources/js/item/files.js) and has a "field" in scope.
-    The remove buttons are .btn-close, which the cursor skips when the dialog opens on this field: it lands on "Add".
+    The remove buttons are .btn-close, which the cursor skips when the dialog opens on this field: it lands on "Add" (and in the
+    usual place when the field is full, since "Add" is then hidden).
+
+    The field is a group named by its label (role="group" aria-labelledby): the label points at no control, since the one
+    button that adds a file is not there once the field is full.
 
     Do not put a display utility (d-flex...) on an element that carries x-show or :hidden: the utility wins and it never hides.
 --}}
 <template x-if="control(field) === 'files'">
-    <div>
+    <div role="group" :aria-labelledby="labelId(field)">
         <template x-if="isPhotoField(field)">
             <ul class="list-unstyled d-flex flex-wrap gap-2 m-0 mb-2">
                 <template x-for="file in filesOf(field)" :key="file.id">
                     <li class="app-photo-tile">
                         <a :href="file.href" :target="file.target" rel="noopener noreferrer">
                             <template x-if="file.thumb">
-                                <img class="app-thumb-lg" :src="file.thumb" :alt="file.name" loading="lazy">
+                                <img class="app-thumb-lg" :src="file.thumb" :alt="file.name" width="72" height="72" loading="lazy" decoding="async">
                             </template>
                             <template x-if="!file.thumb">
                                 <span class="app-thumb-lg app-file-icon" role="img" :aria-label="file.name">
@@ -26,7 +30,7 @@
                                 </span>
                             </template>
                         </a>
-                        <button type="button" class="btn-close app-tile-remove" :aria-label="removeFileLabel(file)" :title="removeFileLabel(file)" :disabled="busy" @click="askRemove(file)"></button>
+                        <button type="button" class="btn-close app-tile-remove" :aria-label="removeFileLabel(file)" :title="removeFileLabel(file)" :disabled="busy || uploading" @click="askRemove(file)"></button>
                     </li>
                 </template>
             </ul>
@@ -41,7 +45,7 @@
                         </span>
                         <a class="app-grow text-break" :href="file.href" :target="file.target" rel="noopener noreferrer" x-text="file.name"></a>
                         <span class="text-secondary small text-nowrap" x-text="file.sizeText"></span>
-                        <button type="button" class="btn-close" :aria-label="removeFileLabel(file)" :title="removeFileLabel(file)" :disabled="busy" @click="askRemove(file)"></button>
+                        <button type="button" class="btn-close" :aria-label="removeFileLabel(file)" :title="removeFileLabel(file)" :disabled="busy || uploading" @click="askRemove(file)"></button>
                     </li>
                 </template>
             </ul>
@@ -56,7 +60,7 @@
                     </span>
                     <span class="app-grow text-break" x-text="file.name"></span>
                     <span class="text-secondary small text-nowrap" x-text="file.sizeText"></span>
-                    <button type="button" class="btn-close" :aria-label="removeFileLabel(file)" :title="removeFileLabel(file)" @click="unstage(file)"></button>
+                    <button type="button" class="btn-close" :aria-label="removeFileLabel(file)" :title="removeFileLabel(file)" :disabled="busy" @click="unstage(file)"></button>
                 </li>
             </template>
         </ul>

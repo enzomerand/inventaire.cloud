@@ -52,7 +52,7 @@ const INVOICE = attachment('d1', 'docs', {
     has_thumbnail: false,
     thumbnail_url: null,
     size: 1048576,
-    uploaded_by: { id: 1, name: 'Ada' },
+    uploaded_by: { name: 'Ada' },
 });
 const NOTES = attachment('n1', null, {
     name: 'notes.txt',
@@ -168,6 +168,35 @@ describe('the files of an item', () => {
 
             expect(component.roomIn(PHOTOS)).toBe(0);
             expect(component.canAddTo(PHOTOS)).toBe(false);
+        });
+
+        it('counts the files a field holds even when its limit was lowered below them', async () => {
+            const lowered = field('photos', 'photo', { max_files: 2 }, { name: 'Photos' });
+            await open([withFiles('i2', { photos: ['a1', 'a2', 'a3'] }, [FRONT, BACK, attachment('a3', 'photos')])], {
+                fields: [NAME, lowered, DOCS],
+            });
+            await openItem('i2');
+
+            expect(component.countText(lowered)).toBe('3 of 2');
+            expect(component.roomIn(lowered)).toBe(0);
+            expect(component.canAddTo(lowered)).toBe(false);
+        });
+
+        it('counts the files waiting for their turn, like the ones on their way', async () => {
+            await open();
+            await openItem();
+            component.uploads.push({
+                key: 'k',
+                name: 'x.jpg',
+                field: 'photos',
+                state: 'queued',
+                message: '',
+                retryable: false,
+            });
+
+            expect(component.roomIn(PHOTOS)).toBe(0);
+            expect(component.countText(PHOTOS)).toBe('3 of 3');
+            expect(component.uploading).toBe(true);
         });
 
         it('offers no addition to a field that is full, nor while a change is on its way', async () => {
@@ -482,6 +511,22 @@ describe('the files of an item', () => {
                 'An item cannot hold more than 20 files.',
                 'This field cannot hold more than 3 files.',
                 'The storage space of this workspace is full.',
+            ]);
+        });
+
+        it('says the limit in the singular when it is one file', async () => {
+            await open([SAW]);
+            await openItem('i2');
+            http.post
+                .mockRejectedValueOnce(conflict('attachment_limit_reached', 1))
+                .mockRejectedValueOnce(conflict('field_file_limit_reached', 1));
+
+            await component.receive([picked('a.jpg')], 'photos');
+            await component.receive([picked('b.jpg')], 'photos');
+
+            expect(component.uploads.map((upload) => upload.message)).toEqual([
+                'An item cannot hold more than 1 file.',
+                'This field cannot hold more than 1 file.',
             ]);
         });
 

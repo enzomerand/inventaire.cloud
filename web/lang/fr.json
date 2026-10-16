@@ -834,5 +834,13 @@
     "File added: :name": "Fichier ajouté : :name",
     "File removed: :name": "Fichier retiré : :name",
     "Deleted field": "Champ supprimé",
-    "Deleted user": "Utilisateur supprimé"
+    "Deleted user": "Utilisateur supprimé",
+    "An item cannot hold more than :count file.": "Un article ne peut pas contenir plus de :count fichier.",
+    "This field cannot hold more than :count file.": "Ce champ ne peut pas contenir plus de :count fichier.",
+    "Try sending :name again": "Réessayer d'envoyer :name",
+    "Sending :name…": "Envoi de :name…",
+    "File sent: :name": "Fichier envoyé : :name",
+    ":count file was not sent, as the dialog was closed.": ":count fichier n'a pas été envoyé : la fenêtre a été fermée.",
+    ":count files were not sent, as the dialog was closed.": ":count fichiers n'ont pas été envoyés : la fenêtre a été fermée.",
+    "Waiting…": "En attente…"
 }

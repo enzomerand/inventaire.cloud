@@ -47,7 +47,7 @@
         <template x-for="file in cell.files" :key="file.id">
             <a :href="file.href" :target="file.target" rel="noopener noreferrer">
                 <template x-if="file.thumb">
-                    <img class="app-thumb" :src="file.thumb" :alt="file.name" loading="lazy">
+                    <img class="app-thumb" :src="file.thumb" :alt="file.name" width="32" height="32" loading="lazy" decoding="async">
                 </template>
                 <template x-if="!file.thumb">
                     <span class="app-thumb app-file-icon text-secondary" role="img" :aria-label="file.name">

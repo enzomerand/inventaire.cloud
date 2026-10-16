@@ -10,6 +10,14 @@
  * files failed stays open to see what happened. The browser checks what it can before sending (the size, the kind of
  * image a photo field takes, the room left in the field); the server decides.
  *
+ * Files go up in batches (the files chosen together, or the ones kept for an item that was added): every file of a batch
+ * shows as waiting from the start, and a batch belongs to the dialog that was open when it began. A dialog that is closed
+ * (or opened on something else) while a batch is on its way does not get what the batch has left: the files not yet sent
+ * are given up, and the person is told. A refusal that will be the same for the files that follow (the item is gone, the
+ * space is full) ends the batch too. An upload that was cut (the connection broke, or the time ran out) may have been
+ * stored all the same: the item is read again to see, before the file is declared failed. A file that failed can be sent
+ * again; the browser keeps it for that.
+ *
  * The endpoints come from the address of the item (`data-item-url` of the component root): `/attachments` to add a file,
  * `/attachments/{attachment}` to remove one. The largest file the server takes is `data-max-attachment-size`, in bytes.
  *
@@ -26,7 +34,7 @@ import {
     maxFilesOf,
 } from '../fields/files.js';
 import { firstMessages, fillUrl } from '../lib/forms.js';
-import { HttpError, UPLOAD_TIMEOUT_MS, http } from '../lib/http.js';
+import { HttpError, http, uploadTimeoutFor } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
 import { momentText } from '../grid/rows.js';
@@ -36,21 +44,58 @@ import { momentText } from '../grid/rows.js';
  * @typedef {import('../fields/cell.js').FileEntry} FileEntry
  * @typedef {import('../fields/files.js').Attachment} Attachment
  *
- * @typedef {object} Upload A file on its way up, or one that was refused.
+ * @typedef {object} Upload A file on its way up, waiting for its turn, or one that was refused.
  * @property {string} key
  * @property {string} name
  * @property {string | null} field The id of the field it is for, null for the item itself.
- * @property {'sending' | 'error'} state
+ * @property {File} [file] The file, which the browser keeps so that a failed upload can be sent again (not for a file the browser refused).
+ * @property {'queued' | 'sending' | 'error'} state
  * @property {string} message Why it failed ("" while it is on its way).
+ * @property {boolean} retryable Whether the person may send it again (a failure that can be different the next time).
  *
  * @typedef {object} Staged A file chosen while an item is added, kept until the item exists.
  * @property {string} key
  * @property {string | null} field
  * @property {File} file
+ *
+ * @typedef {object} UploadResult What came of one file.
+ * @property {boolean} added
+ * @property {{ reason: string, retryable: boolean } | null} endsBatch Set when the refusal will be the same for the files that follow.
+ *
+ * @typedef {object} Outcome What came of the files of a batch.
+ * @property {number} failed How many could not be sent (the ones given up included).
+ * @property {number} abandoned How many were given up without a try, because the dialog moved on.
  */
 
 /** The names the API gives the errors of an upload: the file itself, and the field it is for. */
 const UPLOAD_FIELDS = ['file', 'field'];
+
+/**
+ * Whether a failure says nothing of what became of the request: the connection broke or the time ran out, so the server may
+ * have stored the file all the same.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isCutShort(error) {
+    return error instanceof HttpError && (error.kind === 'timeout' || error.kind === 'network');
+}
+
+/**
+ * Whether a refusal will be the same for the files that follow it in a batch: the item is gone, or the space it takes
+ * files from is full.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function endsBatch(error) {
+    return (
+        error instanceof HttpError &&
+        (error.status === 404 ||
+            (error.status === 409 &&
+                (error.code === 'storage_limit_reached' || error.code === 'attachment_limit_reached')))
+    );
+}
 
 /**
  * Which icon stands for a file that is not on the server yet.
@@ -109,6 +154,12 @@ export default function itemFiles() {
         /** Counts the files chosen, to tell them apart. */
         fileCounter: 0,
 
+        /** Whether a file was added or removed since the list of items was last read: the list is read again when the dialog closes. */
+        filesChanged: false,
+
+        /** What the live region of the dialog says of the uploads ("Sending front.jpg…"). */
+        announcement: '',
+
         /** The size of the largest file the server takes, in bytes, from `data-max-attachment-size` on the component root. */
         get maxFileSize() {
             const size = Number(this.rootElement.dataset.maxAttachmentSize);
@@ -136,9 +187,14 @@ export default function itemFiles() {
             return this.removing === null ? '' : t('files.confirm_remove', { name: this.removing.name });
         },
 
-        /** Whether a file is on its way up. */
+        /** Whether a file is on its way up, or waiting for its turn. */
         get uploading() {
-            return this.uploads.some((upload) => upload.state === 'sending');
+            return this.uploads.some((upload) => upload.state === 'sending' || upload.state === 'queued');
+        },
+
+        /** What the live region of the dialog says about the uploads (it is there from the start, which is what makes it announce). */
+        get uploadAnnouncement() {
+            return this.announcement;
         },
 
         /** The attachments of the item of the dialog. */
@@ -156,9 +212,9 @@ export default function itemFiles() {
             return t(this.mode === 'create' ? 'files.hint_create' : 'files.hint_edit');
         },
 
-        /** Whether the item has no attachment and none is on its way. */
+        /** Whether the item has no attachment and none is on its way (the files of the fields are shown in their fields). */
         get noAttachments() {
-            return this.attachments.length === 0 && this.uploads.length === 0;
+            return this.attachments.length === 0 && this.itemUploads.length === 0;
         },
 
         /** Whether the people who may edit are offered to add attachments to the item (it exists, and nothing is sent). */
@@ -218,18 +274,28 @@ export default function itemFiles() {
         },
 
         /**
-         * How many more files a field takes: what it can hold, less what it holds, has chosen and is receiving.
+         * How many files a field has: the ones it holds, the ones chosen for it and the ones on their way up or waiting to be.
+         * (More than it can hold when its limit was lowered after files were added.)
+         *
+         * @param {Field} field
+         * @returns {number}
+         */
+        takenIn(field) {
+            return (
+                this.filesOf(field).length +
+                this.stagedOf(field).length +
+                this.uploadsOf(field).filter((upload) => upload.state === 'sending' || upload.state === 'queued').length
+            );
+        },
+
+        /**
+         * How many more files a field takes: what it can hold, less what it has.
          *
          * @param {Field} field
          * @returns {number}
          */
         roomIn(field) {
-            const taken =
-                this.filesOf(field).length +
-                this.stagedOf(field).length +
-                this.uploadsOf(field).filter((upload) => upload.state === 'sending').length;
-
-            return Math.max(0, maxFilesOf(field) - taken);
+            return Math.max(0, maxFilesOf(field) - this.takenIn(field));
         },
 
         /**
@@ -263,15 +329,14 @@ export default function itemFiles() {
         },
 
         /**
-         * How full a field is, as a sentence ("2 of 5"): what it holds, has chosen and is receiving, out of what it can hold.
+         * How full a field is, as a sentence ("2 of 5"): what it has, out of what it can hold. A field whose limit was lowered
+         * below what it holds says so ("3 of 2").
          *
          * @param {Field} field
          * @returns {string}
          */
         countText(field) {
-            const max = maxFilesOf(field);
-
-            return t('files.count', { count: max - this.roomIn(field), max });
+            return t('files.count', { count: this.takenIn(field), max: maxFilesOf(field) });
         },
 
         /**
@@ -282,6 +347,16 @@ export default function itemFiles() {
          */
         dismissLabel(upload) {
             return t('files.dismiss_named', { name: upload.name });
+        },
+
+        /**
+         * The accessible name of the button that sends a file again.
+         *
+         * @param {{ name: string }} upload
+         * @returns {string}
+         */
+        retryLabel(upload) {
+            return t('files.retry_named', { name: upload.name });
         },
 
         /**
@@ -363,6 +438,7 @@ export default function itemFiles() {
          */
         async receive(files, fieldId) {
             const field = this.fields.find((one) => one.id === fieldId);
+            const token = this.dialogToken;
             let room = field === undefined ? Infinity : this.roomIn(field);
             /** @type {Staged[]} */
             const accepted = [];
@@ -372,7 +448,14 @@ export default function itemFiles() {
                 const refusal = this.refusalFor(file, field, room);
 
                 if (refusal !== null) {
-                    this.uploads.push({ key, name: file.name, field: fieldId, state: 'error', message: refusal });
+                    this.uploads.push({
+                        key,
+                        name: file.name,
+                        field: fieldId,
+                        state: 'error',
+                        message: refusal,
+                        retryable: false,
+                    });
                 } else {
                     room -= 1;
                     accepted.push({ key, field: fieldId, file });
@@ -382,7 +465,8 @@ export default function itemFiles() {
             if (this.mode === 'create') {
                 this.staged.push(...accepted);
             } else if (this.itemId !== null) {
-                await this.sendFiles(this.itemId, accepted);
+                this.tellAbandoned(await this.sendFiles(this.itemId, accepted, token));
+                await this.refreshList();
             }
         },
 
@@ -427,36 +511,148 @@ export default function itemFiles() {
          * Sends the files chosen while the item was added, now that it exists, one after the other.
          *
          * @param {string} itemId
-         * @returns {Promise<number>} How many files could not be sent.
+         * @param {number} [token] The dialog they were chosen in.
+         * @returns {Promise<Outcome>}
          */
-        async sendStaged(itemId) {
+        async sendStaged(itemId, token = this.dialogToken) {
             const files = this.staged;
 
             this.staged = [];
 
-            return this.sendFiles(itemId, files);
+            return this.sendFiles(itemId, files, token);
         },
 
         /**
          * Sends files to an item, one after the other (the server counts the space of the workspace under a lock), each with
-         * its own spinner and its own error.
+         * its own spinner and its own error. They all show as waiting from the start.
+         *
+         * The batch belongs to the dialog it began in (`token`): when that dialog is closed, or opened on something else, the
+         * files not sent yet are given up. A refusal that will be the same for the files that follow ends the batch too: they are
+         * given the reason, rather than sent to be refused one by one.
          *
          * @param {string} itemId
          * @param {Staged[]} files
-         * @returns {Promise<number>} How many files could not be sent.
+         * @param {number} [token] The dialog the batch belongs to, taken once for the whole batch.
+         * @returns {Promise<Outcome>}
          */
-        async sendFiles(itemId, files) {
+        async sendFiles(itemId, files, token = this.dialogToken) {
             let failed = 0;
+            let next = 0;
+            /** @type {{ reason: string, retryable: boolean } | null} */
+            let ended = null;
 
-            for (const one of files) {
-                if (!(await this.sendFile(itemId, one))) {
+            this.queueUploads(files, token);
+
+            while (next < files.length && token === this.dialogToken) {
+                const outcome = await this.sendFile(itemId, files[next], token);
+
+                next += 1;
+
+                if (!outcome.added) {
                     failed += 1;
+                }
+
+                if (outcome.endsBatch !== null) {
+                    ended = outcome.endsBatch;
+                    break;
                 }
             }
 
-            this.restoreFocus(files[files.length - 1]?.field ?? null);
+            const unsent = files.slice(next);
+            const moved = token !== this.dialogToken;
 
-            return failed;
+            if (unsent.length > 0 && !moved) {
+                this.failUploads(unsent, ended?.reason ?? t('error.generic'), ended?.retryable ?? false);
+            }
+
+            if (!moved) {
+                this.restoreFocus(files[files.length - 1]?.field ?? null);
+            }
+
+            return { failed: failed + unsent.length, abandoned: moved ? unsent.length : 0 };
+        },
+
+        /**
+         * Tells the person that files were given up because the dialog they were being sent in was closed.
+         *
+         * @param {Outcome} outcome
+         * @returns {void}
+         */
+        tellAbandoned(outcome) {
+            if (outcome.abandoned > 0) {
+                notify('warning', tn('files.notice.abandoned', outcome.abandoned));
+            }
+        },
+
+        /**
+         * Shows files as waiting for their turn: a row for each, or the row it already has (a file sent again).
+         *
+         * @param {Staged[]} files
+         * @param {number} token The dialog they are for: another one has nothing to show.
+         * @returns {void}
+         */
+        queueUploads(files, token) {
+            if (token !== this.dialogToken) {
+                return;
+            }
+
+            for (const one of files) {
+                if (this.uploads.some((upload) => upload.key === one.key)) {
+                    this.setUpload(one.key, { state: 'queued', message: '', retryable: false });
+                } else {
+                    this.uploads.push({
+                        key: one.key,
+                        name: one.file.name,
+                        field: one.field,
+                        file: one.file,
+                        state: 'queued',
+                        message: '',
+                        retryable: false,
+                    });
+                }
+            }
+        },
+
+        /**
+         * Marks files that will not be sent as failed, with the reason (they keep their place in the list).
+         *
+         * @param {Staged[]} files
+         * @param {string} reason
+         * @param {boolean} retryable Whether they can be sent again (not when the item is gone).
+         * @returns {void}
+         */
+        failUploads(files, reason, retryable) {
+            for (const one of files) {
+                this.setUpload(one.key, { state: 'error', message: reason, retryable });
+            }
+        },
+
+        /**
+         * Sends a file again, from the row that says it failed.
+         *
+         * @param {Upload} upload
+         * @returns {Promise<void>}
+         */
+        async retryUpload(upload) {
+            if (upload.file === undefined || this.itemId === null || this.busy || this.uploading) {
+                return;
+            }
+
+            const field = this.fields.find((one) => one.id === upload.field);
+            const refusal = this.refusalFor(upload.file, field, field === undefined ? Infinity : this.roomIn(field));
+
+            if (refusal !== null) {
+                this.setUpload(upload.key, { message: refusal });
+
+                return;
+            }
+
+            const token = this.dialogToken;
+
+            this.tellAbandoned(
+                await this.sendFiles(this.itemId, [{ key: upload.key, field: upload.field, file: upload.file }], token),
+            );
+            await this.refreshList();
         },
 
         /**
@@ -487,17 +683,22 @@ export default function itemFiles() {
 
         /**
          * Sends one file. It shows as on its way until the server answers: with the item as it is now (which replaces the one
-         * the dialog and the table hold), or with a refusal that stays on the row of the file.
+         * the dialog and the table hold), or with a refusal that stays on the row of the file. The row is only touched while the
+         * dialog the file was chosen in is the one that is open; a failure after that is told by a toast.
          *
          * @param {string} itemId
          * @param {Staged} one
-         * @returns {Promise<boolean>} Whether the file was added.
+         * @param {number} [token] The dialog the file belongs to.
+         * @returns {Promise<UploadResult>} Whether the file was added, and why the batch ends when the refusal ends it.
          */
-        async sendFile(itemId, one) {
-            const token = this.dialogToken;
-            const name = one.file.name;
+        async sendFile(itemId, one, token = this.dialogToken) {
+            const known = this.knownAttachmentIds(itemId);
 
-            this.uploads.push({ key: one.key, name, field: one.field, state: 'sending', message: '' });
+            if (token === this.dialogToken) {
+                this.queueUploads([one], token);
+                this.setUpload(one.key, { state: 'sending', message: '' });
+                this.announcement = t('files.status.sending', { name: one.file.name });
+            }
 
             try {
                 const body = new FormData();
@@ -509,28 +710,116 @@ export default function itemFiles() {
                 }
 
                 const answer = await http.post(fillUrl(this.itemUrl, itemId) + '/attachments', body, {
-                    timeout: UPLOAD_TIMEOUT_MS,
+                    timeout: uploadTimeoutFor(one.file.size),
                 });
 
-                this.dropUpload(one.key);
-                this.applyItem(answer?.data, token);
+                this.uploadDone(one, token);
+                await this.applyItem(answer?.data);
 
-                return true;
+                return { added: true, endsBatch: null };
             } catch (error) {
-                const reason = this.uploadFailure(error);
+                return this.uploadFailed(itemId, one, error, token, known);
+            }
+        },
+
+        /**
+         * The ids of the attachments an item is known to have, to tell the one an upload added from the ones it had.
+         *
+         * @param {string} itemId
+         * @returns {Set<string>}
+         */
+        knownAttachmentIds(itemId) {
+            const holders = [
+                this.items.find((one) => one.id === itemId),
+                this.dialogItem?.id === itemId ? this.dialogItem : null,
+            ];
+
+            return new Set(holders.flatMap((holder) => (holder?.attachments ?? []).map((one) => one.id)));
+        },
+
+        /**
+         * A file arrived: its row goes, and the live region says so.
+         *
+         * @param {Staged} one
+         * @param {number} token
+         * @returns {void}
+         */
+        uploadDone(one, token) {
+            if (token === this.dialogToken) {
+                this.dropUpload(one.key);
+                this.announcement = t('files.status.sent', { name: one.file.name });
+            }
+        },
+
+        /**
+         * Deals with an upload that failed: looks whether the server stored the file after all when the request was cut
+         * short, and else tells the person on the row of the file (or by a toast when the dialog moved on). An item that is gone
+         * is read from the list again, and the dialog closes when it is not there any more.
+         *
+         * @param {string} itemId
+         * @param {Staged} one
+         * @param {unknown} error
+         * @param {number} token The dialog the file belongs to.
+         * @param {Set<string>} known The attachments the item had before the file was sent.
+         * @returns {Promise<UploadResult>}
+         */
+        async uploadFailed(itemId, one, error, token, known) {
+            if (isCutShort(error) && (await this.wasStored(itemId, one, known))) {
+                this.uploadDone(one, token);
+
+                return { added: true, endsBatch: null };
+            }
+
+            const reason = this.uploadFailure(error);
+            const gone = error instanceof HttpError && error.status === 404;
+
+            if (token === this.dialogToken) {
+                this.setUpload(one.key, { state: 'error', message: reason, retryable: !gone });
+                this.announcement = '';
+            } else {
+                // The dialog moved on: the row that would have said it is gone.
+                notify('warning', t('files.notice.upload_failed', { name: one.file.name, reason }));
+            }
+
+            if (gone) {
+                this.totalsFor = null;
+                await this.loadItems(this.page);
 
                 if (token === this.dialogToken) {
-                    this.setUpload(one.key, { state: 'error', message: reason });
-                } else {
-                    // The dialog moved on: the row that would have said it is gone.
-                    notify('warning', t('files.notice.upload_failed', { name, reason }));
+                    this.syncDialogItem();
+                }
+            }
+
+            return { added: false, endsBatch: endsBatch(error) ? { reason, retryable: !gone } : null };
+        },
+
+        /**
+         * Reads the item again after an upload that was cut short and shows it: the server may have stored the file all the
+         * same, and the answer was lost. The file is in the item when it holds an attachment it did not have, of the same size,
+         * for the same field.
+         *
+         * @param {string} itemId
+         * @param {Staged} one
+         * @param {Set<string>} known
+         * @returns {Promise<boolean>} Whether the file is on the item.
+         */
+        async wasStored(itemId, one, known) {
+            try {
+                const fresh = (await http.get(fillUrl(this.itemUrl, itemId), { silent: true }))?.data;
+
+                if (fresh === null || fresh === undefined || typeof fresh.id !== 'string') {
+                    return false;
                 }
 
-                if (error instanceof HttpError && error.status === 404) {
-                    this.totalsFor = null;
-                    this.loadItems(this.page);
-                }
+                await this.applyItem(fresh);
 
+                return (fresh.attachments ?? []).some(
+                    (attachment) =>
+                        !known.has(attachment.id) &&
+                        attachment.field === one.field &&
+                        attachment.size === one.file.size,
+                );
+            } catch {
                 return false;
             }
         },
@@ -555,13 +844,13 @@ export default function itemFiles() {
             }
 
             if (error.status === 409) {
-                const limit = error.body?.limit ?? '';
+                const limit = Number(error.body?.limit);
 
                 switch (error.code) {
                     case 'attachment_limit_reached':
-                        return t('files.error.item_limit', { count: limit });
+                        return tn('files.error.item_limit', limit);
                     case 'field_file_limit_reached':
-                        return t('files.error.field_limit', { count: limit });
+                        return tn('files.error.field_limit', limit);
                     case 'storage_limit_reached':
                         return t('files.error.storage_limit');
                     default:
@@ -595,30 +884,53 @@ export default function itemFiles() {
         },
 
         /**
-         * Shows an item as the server holds it now: in the table and the gallery, and in the dialog when it is about that item
-         * (an answer that comes after the dialog moved on to another item leaves the dialog alone). The history of the item
-         * is read again the next time it is shown.
+         * Shows an item as the server holds it now: in the table and the gallery, and in the dialog when it is open on that
+         * item (whichever opening of the dialog the answer is for: it is the same item). The history of the item is read again
+         * the next time it is shown.
+         *
+         * A reading of the list that began before the change can answer after it, with the item as it was: it is read again,
+         * as `saveInline` does.
          *
          * @param {{ id: string, attachments?: Attachment[] } | null | undefined} item
-         * @param {number} [token] The dialog the answer is for.
-         * @returns {void}
+         * @returns {Promise<void>}
          */
-        applyItem(item, token = this.dialogToken) {
+        async applyItem(item) {
             if (item === null || item === undefined || typeof item.id !== 'string') {
                 return;
             }
 
             const index = this.items.findIndex((one) => one.id === item.id);
 
+            this.filesChanged = true;
+
             if (index !== -1) {
                 this.items.splice(index, 1, item);
                 this.rebuild();
             }
 
-            if (token === this.dialogToken && this.itemId === item.id) {
+            if (this.dialogItem !== null && this.itemId === item.id) {
                 this.dialogItem = item;
                 this.details = this.cellsOf(item, true);
                 this.markHistoryStale();
+            }
+
+            if (this.loadingItems) {
+                this.totalsFor = null;
+                await this.loadItems(this.wantedPage);
+            }
+        },
+
+        /**
+         * Reads the list again when files were added or removed and the search or the filters are in force: they can match
+         * the item differently now (a filter on the files of a field says "empty"), which moves items in or out of the list and
+         * changes how many there are.
+         *
+         * @returns {Promise<void>}
+         */
+        async refreshList() {
+            if (this.filesChanged && this.hasCriteria) {
+                this.totalsFor = null;
+                await this.loadItems(this.page);
             }
         },
 
@@ -662,12 +974,19 @@ export default function itemFiles() {
             try {
                 const answer = await http.delete(this.attachmentsUrl + '/' + encodeURIComponent(id));
 
-                this.applyItem(answer?.data, token);
-                this.removing = null;
+                await this.applyItem(answer?.data);
+
+                if (token === this.dialogToken) {
+                    this.removing = null;
+                    this.focusTab();
+                }
+
                 notify('success', t('files.notice.removed'));
-                this.focusTab();
+                await this.refreshList();
             } catch (error) {
-                this.removing = null;
+                if (token === this.dialogToken) {
+                    this.removing = null;
+                }
 
                 if (error instanceof HttpError && error.status === 404) {
                     // The file (or the item) is already gone: what is shown is not what the server holds any more.
@@ -677,7 +996,10 @@ export default function itemFiles() {
 
                     this.totalsFor = null;
                     await this.loadItems(this.page);
-                    this.syncDialogItem();
+
+                    if (token === this.dialogToken) {
+                        this.syncDialogItem();
+                    }
                 } else {
                     this.fail(error);
                 }
@@ -687,23 +1009,29 @@ export default function itemFiles() {
         },
 
         /**
-         * Shows the item of the dialog as the list holds it now; the dialog closes when the item is not on the page any more.
+         * Shows the item of the dialog as the list holds it now; the dialog closes when the item is not on the page any more
+         * (it was deleted, or it is not on this page now).
          *
          * @returns {void}
          */
         syncDialogItem() {
             const fresh = this.items.find((one) => one.id === this.itemId);
 
-            if (fresh !== undefined) {
-                this.dialogItem = fresh;
-                this.details = this.cellsOf(fresh, true);
-                this.markHistoryStale();
+            if (fresh === undefined) {
+                this.closeDialog();
+
+                return;
             }
+
+            this.dialogItem = fresh;
+            this.details = this.cellsOf(fresh, true);
+            this.markHistoryStale();
         },
 
         /**
          * Forgets the files, as the dialog opens or closes: those chosen and not sent, the rows of the ones that failed, the
-         * question. A file still on its way finishes, but the dialog does not show it.
+         * question. A file still on its way finishes, but the dialog does not show it, and the batch it belongs to gives up the
+         * files it had not sent yet.
          *
          * @returns {void}
          */
@@ -714,6 +1042,7 @@ export default function itemFiles() {
             this.staged = [];
             this.removing = null;
             this.pickedField = null;
+            this.announcement = '';
         },
 
         /**

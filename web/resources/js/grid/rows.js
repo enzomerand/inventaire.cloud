@@ -58,7 +58,8 @@ export function cellValueText(cell) {
 /**
  * Where the cursor goes when the dialog of an item is opened for one field: the first box, select or check box of the field
  * (not the buttons that remove a tag or a file), else its first button (the stars of a rating, the button of a color, the
- * button that adds a file).
+ * button that adds a file). Only a control that is shown can take the cursor (see `showModal`): the field of a full photo
+ * field has no button that adds a file on show, so the dialog then opens in its usual place.
  *
  * @param {string} fieldId
  * @returns {string[]} CSS selectors, in order of preference.

@@ -25,7 +25,7 @@
                 <div class="d-flex align-items-center gap-3">
                     <a :href="file.href" :target="file.target" rel="noopener noreferrer" tabindex="-1" aria-hidden="true">
                         <template x-if="file.thumb">
-                            <img class="app-thumb-lg" :src="file.thumb" alt="" loading="lazy">
+                            <img class="app-thumb-lg" :src="file.thumb" alt="" width="72" height="72" loading="lazy" decoding="async">
                         </template>
                         <template x-if="!file.thumb">
                             <span class="app-thumb-lg app-file-icon text-secondary">
@@ -55,7 +55,7 @@
                 </div>
             </li>
         </template>
-        <template x-for="upload in uploads" :key="upload.key">
+        <template x-for="upload in itemUploads" :key="upload.key">
             <li class="list-group-item px-0">
                 @include('partials.item-upload-row')
             </li>
