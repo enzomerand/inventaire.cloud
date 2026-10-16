@@ -11,6 +11,24 @@ import { describeValue, isSummable } from '../fields/index.js';
  */
 
 /**
+ * The parameters that ask the API for the total of each field that adds up (`totals[0]`, `totals[1]`...). Nothing when no
+ * field does, so that a list of such an inventory asks for none.
+ *
+ * @param {import('../fields/types.js').Field[]} fields
+ * @returns {Record<string, string>}
+ */
+export function totalsParams(fields) {
+    /** @type {Record<string, string>} */
+    const params = {};
+
+    fields.filter(isSummable).forEach((field, index) => {
+        params[`totals[${index}]`] = field.id;
+    });
+
+    return params;
+}
+
+/**
  * The foot of each column, in the order of the fields.
  *
  * @param {import('../fields/types.js').Field[]} fields

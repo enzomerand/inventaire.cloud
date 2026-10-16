@@ -9,7 +9,8 @@
  * (the page, the search or the view changed meanwhile) is told by a toast that names the field, so that no edit is lost
  * unseen. The row is updated from the answer where it stands: the list is not sorted again under the person's hands. When
  * the field adds up, or when a search or filters narrow the list down (an edit can change what matches), the totals and
- * the count are read again, without replacing the rows.
+ * the count are read again, without replacing the rows. A reading of the list that was under way when the value was saved
+ * may carry the value it had before: its answer is dropped and the list is read again.
  *
  * The controls that do not fit a cell (a long text, several choices, tags, a rating, a color) open the dialog of the item
  * with the cursor on that field instead.
@@ -22,6 +23,7 @@ import { firstMessages, fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
+import { totalsKeyOf } from './query.js';
 import { totalCells } from './totals.js';
 import { cellKey, cellValueText } from './rows.js';
 
@@ -199,6 +201,14 @@ export default function gridInline() {
 
             await this.inlinePending;
 
+            // The list may have been read again while waiting (the saving does, when it raced a reading): the cell opens on the
+            // item as it is now, and not at all when it is not on the page any more.
+            const current = this.items.find((candidate) => candidate.id === row.id);
+
+            if (current === undefined) {
+                return;
+            }
+
             if (this.inlineRow !== null) {
                 if (this.inlineSaving) {
                     return;
@@ -215,7 +225,7 @@ export default function gridInline() {
 
             this.inlineRow = row.id;
             this.inlineFieldId = field.id;
-            this.inlineOriginal = toInput(field, item.values?.[field.id]);
+            this.inlineOriginal = toInput(field, current.values?.[field.id]);
             this.inlineInput = this.inlineOriginal;
             this.inlineError = '';
 
@@ -289,6 +299,8 @@ export default function gridInline() {
         async saveInline(field, itemId, value, source) {
             try {
                 const answer = await http.patch(fillUrl(this.itemUrl, itemId), { values: { [field.id]: value } });
+                // A reading of the list that began before the value was committed can answer after it, with the old one.
+                const raced = this.loadingItems;
                 const index = this.items.findIndex((candidate) => candidate.id === itemId);
 
                 if (index !== -1) {
@@ -298,8 +310,15 @@ export default function gridInline() {
                 this.rebuild();
                 this.closeInline(source === 'enter');
 
-                // The edit can change what a column adds up to, and what the search or the filters match.
-                if (isSummable(field) || this.hasCriteria) {
+                if (raced) {
+                    // Reading the list again takes over from the one in flight, whose answer is dropped. What it asks for is
+                    // what that reading was for (the page the person is moving to), and the totals with it.
+                    this.totalsFor = null;
+                    await this.loadItems(this.wantedPage);
+                } else if (isSummable(field) || this.hasCriteria) {
+                    // The edit can change what a column adds up to, and what the search or the filters match: until they are
+                    // read again, any reading of the list that is asked for meanwhile carries the totals too.
+                    this.totalsFor = null;
                     await this.refreshTotals();
                 }
             } catch (error) {
@@ -342,8 +361,8 @@ export default function gridInline() {
             const reason = this.refusalOf(error, field);
 
             if (!editing) {
-                // A request that was cancelled has nothing to tell.
-                if (reason !== null) {
+                // A request that was cancelled has nothing to tell, and one the HTTP helper reported has been told already.
+                if (reason !== null && !(error instanceof HttpError && error.reported)) {
                     this.tellNotSaved(field.name, reason);
                 }
 
@@ -394,23 +413,28 @@ export default function gridInline() {
 
         /**
          * Reads the page again for its totals and its count alone: the rows stay as they are, so that an edit never moves a
-         * row under the person's hands. A newer reading of the list, whenever it was asked for, takes over.
+         * row under the person's hands. A newer reading of the list, or of the totals, whenever it was asked for, takes over.
          *
          * @returns {Promise<void>}
          */
         async refreshTotals() {
             const ticket = this.ticket;
+            const mine = ++this.totalsTicket;
+            const totalsKey = totalsKeyOf(this.query);
 
             try {
-                const answer = await http.get(this.itemsUrl, { params: this.queryParams(this.page) });
+                const answer = await http.get(this.itemsUrl, { params: this.queryParams(this.page, { totals: true }) });
 
-                if (ticket !== this.ticket) {
+                if (ticket !== this.ticket || mine !== this.totalsTicket) {
                     return;
                 }
 
                 this.totals = answer.meta.totals ?? {};
+                this.totalsFor = totalsKey;
                 this.total = answer.meta.total;
                 this.lastPage = answer.meta.last_page;
+                this.from = answer.meta.from ?? 0;
+                this.to = answer.meta.to ?? 0;
                 this.totalRow = totalCells(this.fields, this.totals);
 
                 if (!this.hasCriteria) {

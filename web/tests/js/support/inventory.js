@@ -6,9 +6,47 @@ import { useMemoryStorage } from './storage.js';
 export const INVENTORY = '/api/v1/inventories/tools';
 export const ITEMS = INVENTORY + '/items';
 
-/** A field of the inventory. */
+/**
+ * How the API says the list treats each type of field (`query_kind` and `summable` of a field): the answer of the server,
+ * which the interface does not work out itself. Tested on the server side (FieldsApiTest).
+ */
+const QUERY_KINDS = {
+    text: ['text', false],
+    textarea: ['text', false],
+    number: ['number', true],
+    money: ['number', true],
+    percentage: ['number', false],
+    rating: ['number', false],
+    boolean: ['boolean', false],
+    date: ['temporal', false],
+    datetime: ['temporal', false],
+    time: ['temporal', false],
+    select: ['choice', false],
+    multiselect: ['choices', false],
+    tags: ['tags', false],
+    url: ['text', false],
+    email: ['text', false],
+    phone: ['text', false],
+    color: ['text', false],
+    barcode: ['text', false],
+};
+
+/**
+ * What the API says of a field of a type about the list: `query_kind` (null for a type the server does not know) and
+ * `summable`.
+ *
+ * @param {string} type
+ * @returns {{ query_kind: string | null, summable: boolean }}
+ */
+export function queryFacts(type) {
+    const [queryKind, summable] = QUERY_KINDS[type] ?? [null, false];
+
+    return { query_kind: queryKind, summable };
+}
+
+/** A field of the inventory, as the API describes it (with the way the list sorts, filters and adds it up). */
 export function field(id, type, options = {}, extra = {}) {
-    return { id, name: 'Field ' + id, type, options, required: false, position: 0, ...extra };
+    return { id, name: 'Field ' + id, type, options, required: false, position: 0, ...queryFacts(type), ...extra };
 }
 
 export const FIELDS = [

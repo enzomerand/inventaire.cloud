@@ -14,11 +14,13 @@ import {
     rangeInputType,
 } from '../../../resources/js/grid/filters.js';
 
+import { queryFacts } from '../support/inventory.js';
+
 vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/messages.js'));
 
-/** A field of an inventory. */
+/** A field of an inventory, as the API describes it. */
 function field(id, type, options = {}, name = 'Field ' + id) {
-    return { id, name, type, options, required: false, position: 0 };
+    return { id, name, type, options, required: false, position: 0, ...queryFacts(type) };
 }
 
 const STATE = field(

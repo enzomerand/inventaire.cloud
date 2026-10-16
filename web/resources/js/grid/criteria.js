@@ -8,7 +8,8 @@
  * hold text of their own until it is applied (`searchText`, `filterDraft`, see `filters.js`).
  *
  * The search waits for a pause in the typing (a few hundred milliseconds) before it asks, and each new criteria starts again
- * from the first page. An older answer never replaces a newer one: that is for the component's `loadItems` to see.
+ * from the first page. An older answer never replaces a newer one: that is for the component's `loadItems` to see. When the
+ * server refuses some of the criteria, only those are taken out ({@link dropRefused}), never the whole view.
  */
 import { isSortable } from '../fields/index.js';
 import { currentSearch, replaceSearch } from '../lib/location.js';
@@ -26,7 +27,8 @@ import {
     rangeInputMode,
     rangeInputType,
 } from './filters.js';
-import { emptyQuery, fromSearch, hasCriteria, toParams, toSearch } from './query.js';
+import { emptyQuery, fromSearch, hasCriteria, toParams, toSearch, withoutRefused } from './query.js';
+import { totalsParams } from './totals.js';
 import { CREATED, UPDATED, cycleSort, directionBy } from './sort.js';
 
 /** How long the search waits for the next key before it asks the server, in milliseconds. */
@@ -147,13 +149,18 @@ export default function gridCriteria() {
         },
 
         /**
-         * The parameters that ask the API for a page of the list.
+         * The parameters that ask the API for a page of the list, and for the totals of the fields that add up when asked.
+         * The totals are not part of the query: they are not written in the address, and which fields are totalled comes
+         * from the fields, not from the person.
          *
          * @param {number} page
+         * @param {{ totals?: boolean }} [options] Whether to ask for the totals (a pass over the values of every item).
          * @returns {Record<string, string | number>}
          */
-        queryParams(page) {
-            return toParams(this.query, { page });
+        queryParams(page, { totals = false } = {}) {
+            const params = toParams(this.query, { page });
+
+            return totals ? { ...params, ...totalsParams(this.fields) } : params;
         },
 
         /**
@@ -167,17 +174,25 @@ export default function gridCriteria() {
         },
 
         /**
-         * Goes back to everything, newest first: what the component does when the server refuses the criteria it was given
-         * (a field that was deleted since the address was shared, say).
+         * Takes out the criteria the server refused (a field that was deleted since the address was shared, say), and only
+         * those: the rest of the view stays. What the boxes hold goes back to what is applied.
          *
-         * @returns {void}
+         * @param {Record<string, unknown>} errors The `errors` of the refusal, by key (see `withoutRefused`).
+         * @returns {{ dropped: boolean, staleFields: boolean }} Whether a criterion was taken out, and whether the refusal says
+         *   the fields the page holds are out of date.
          */
-        resetQuery() {
-            this.stopSearchTimer();
-            this.query = emptyQuery();
-            this.searchText = '';
-            this.filterDraft = {};
-            this.filterErrors = {};
+        dropRefused(errors) {
+            const refusal = withoutRefused(this.query, errors);
+
+            if (refusal.dropped) {
+                this.stopSearchTimer();
+                this.query = refusal.query;
+                this.searchText = refusal.query.q;
+                this.filterDraft = {};
+                this.filterErrors = {};
+            }
+
+            return { dropped: refusal.dropped, staleFields: refusal.staleFields };
         },
 
         /**
@@ -316,10 +331,13 @@ export default function gridCriteria() {
             this.loadItems(1);
 
             // The button that was pressed is gone: the cursor goes to the close button of the chip that took its place, else
-            // of the one before it, else to the button of the filters.
+            // of the one before it, else to the button of the filters, else (the toolbar is hidden once nothing is left to
+            // narrow down: an inventory with no item) to the title of the list.
             this.$nextTick(() => {
                 const closers = [...(this.rootElement.querySelectorAll?.('[data-chip-remove]') ?? [])];
-                const target = closers[Math.min(position, closers.length - 1)] ?? refs.filtersButton;
+                const target =
+                    closers[Math.min(position, closers.length - 1)] ??
+                    (this.showToolbar ? refs.filtersButton : refs.itemsTitle);
 
                 target?.focus();
             });

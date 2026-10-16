@@ -39,6 +39,9 @@ vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/mess
 const NOTES = field('notes', 'textarea', {}, { name: 'Notes' });
 const ALL = [...FIELDS, NOTES];
 
+/** What a reading that asks for the totals adds to its parameters: the fields of the fixture that add up. */
+const ASK_TOTALS = { 'totals[0]': 'qty', 'totals[1]': 'price' };
+
 const HAMMER = item('i1', { name: 'Hammer', qty: '1.50', price: '19.90', state: 'aaaaaaaa', fragile: false });
 const SAW = item('i2', { name: 'Saw', price: '10.00' });
 
@@ -476,7 +479,17 @@ describe('editing a cell in place', () => {
             expect(notify).toHaveBeenCalledWith('warning', 'The new value of Price was not saved: Unknown field.');
         });
 
-        it('says which field failed for any other answer of the server, even one the helper has reported', async () => {
+        it('says which field failed for any other answer of the server', async () => {
+            const { sent, saving } = await sendPrice();
+            component.showAsGallery();
+
+            sent.reject(new HttpError(500, 'Server down'));
+            await saving;
+
+            expect(notify).toHaveBeenCalledWith('warning', 'The new value of Price was not saved: Server down');
+        });
+
+        it('does not repeat a toast the HTTP helper has already shown for the answer', async () => {
             const { sent, saving } = await sendPrice();
             component.showAsGallery();
             const down = new HttpError(500, 'Server down');
@@ -485,7 +498,7 @@ describe('editing a cell in place', () => {
             sent.reject(down);
             await saving;
 
-            expect(notify).toHaveBeenCalledWith('warning', 'The new value of Price was not saved: Server down');
+            expect(notify).not.toHaveBeenCalled();
         });
 
         it('has nothing to say about a request that was cancelled', async () => {
@@ -582,7 +595,7 @@ describe('editing a cell in place', () => {
             await component.commitInline('enter');
 
             expect(http.get).toHaveBeenCalledTimes(1);
-            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1 } });
+            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1, ...ASK_TOTALS } });
             expect(component.totalRow.find((cell) => cell.key === 'price').text).toBe('€40.00');
             expect(component.rows.map((row) => row.id)).toEqual(['i1', 'i2']);
             expect(component.items.map((one) => one.id)).toEqual(['i1', 'i2']);
@@ -598,7 +611,7 @@ describe('editing a cell in place', () => {
 
             await component.commitInline('enter');
 
-            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1, q: 'ham' } });
+            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1, q: 'ham', ...ASK_TOTALS } });
             expect(component.total).toBe(1);
             expect(component.totalsLabel).toBe('Selection total');
         });
@@ -615,11 +628,11 @@ describe('editing a cell in place', () => {
         });
 
         it.each([
-            ['a search', { q: 'ham' }, { page: 1, q: 'ham' }],
+            ['a search', { q: 'ham' }, { page: 1, q: 'ham', ...ASK_TOTALS }],
             [
                 'a filter',
                 { filters: { [ulid('state')]: { in: ['aaaaaaaa'] } } },
-                { page: 1, [`filter[${ulid('state')}][in][0]`]: 'aaaaaaaa' },
+                { page: 1, [`filter[${ulid('state')}][in][0]`]: 'aaaaaaaa', ...ASK_TOTALS },
             ],
         ])(
             'are read again, for the count too, when %s narrows the list down, whatever the field: an edit can change what matches',
@@ -725,6 +738,178 @@ describe('editing a cell in place', () => {
             await component.loadItems(1);
 
             expect(component.inlineRow).toBe('i1');
+        });
+    });
+    describe('when a reading of the list is under way as the value is saved', () => {
+        /** Saves a price of the first row with the request left pending, then starts reading the list. */
+        async function saveWhileReading() {
+            const patch = deferred();
+            const staleReading = deferred();
+            http.patch.mockReturnValue(patch.promise);
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: '30' } });
+            const saving = component.commitInline('enter');
+
+            // The reading starts before the value is committed: whatever it answers, it answers the list as it was.
+            http.get.mockReturnValueOnce(staleReading.promise);
+            const reading = component.loadItems(1);
+
+            return { patch, staleReading, saving, reading };
+        }
+
+        it('drops its answer, which would put the old value back, and reads the list again', async () => {
+            const { patch, staleReading, saving, reading } = await saveWhileReading();
+            const fresh = changed(HAMMER, { price: '30.00' }).data;
+            http.get.mockResolvedValueOnce(page([fresh, SAW], { totals: { qty: '1.50', price: '40.00' } }));
+
+            patch.resolve(changed(HAMMER, { price: '30.00' }));
+            await vi.advanceTimersByTimeAsync(0);
+            staleReading.resolve(page([HAMMER, SAW], { totals: { qty: '1.50', price: '29.90' } }));
+            await saving;
+            await reading;
+
+            expect(cellOf(0, 'price').text).toBe('€30.00');
+            expect(component.items[0].values.price).toBe('30.00');
+            expect(component.totalRow.find((cell) => cell.key === 'price').text).toBe('€40.00');
+            expect(component.loadingItems).toBe(false);
+            expect(component.inlineSaving).toBe(false);
+        });
+
+        it('reads the list again with the criteria in force and the page it was moving to, with the totals', async () => {
+            component.query = { ...component.query, q: 'saw' };
+            const { patch, staleReading, saving, reading } = await saveWhileReading();
+            http.get.mockResolvedValueOnce(page([SAW], { totals: { qty: '', price: '10.00' } }));
+
+            patch.resolve(changed(HAMMER, { price: '30.00' }));
+            await vi.advanceTimersByTimeAsync(0);
+            staleReading.resolve(page([HAMMER], {}));
+            await saving;
+            await reading;
+
+            const readings = http.get.mock.calls.filter(([url]) => url === ITEMS);
+
+            expect(readings).toHaveLength(2);
+            expect(readings[1][1].params).toEqual({ page: 1, q: 'saw', ...ASK_TOTALS });
+            expect(component.items.map((one) => one.id)).toEqual(['i2']);
+        });
+
+        it('does not read the list twice for the totals as well', async () => {
+            const { patch, staleReading, saving, reading } = await saveWhileReading();
+            http.get.mockResolvedValue(page([HAMMER, SAW], { totals: { qty: '1.50', price: '40.00' } }));
+
+            patch.resolve(changed(HAMMER, { price: '30.00' }));
+            await vi.advanceTimersByTimeAsync(0);
+            staleReading.resolve(page([HAMMER, SAW], {}));
+            await saving;
+            await reading;
+
+            expect(http.get.mock.calls.filter(([url]) => url === ITEMS)).toHaveLength(2);
+        });
+
+        it('leaves a cell the person started editing meanwhile open, on the item as the list says it is now', async () => {
+            const { patch, staleReading, saving, reading } = await saveWhileReading();
+            http.get.mockResolvedValueOnce(page([changed(HAMMER, { price: '30.00' }).data, SAW], {}));
+
+            patch.resolve(changed(HAMMER, { price: '30.00' }));
+            await vi.advanceTimersByTimeAsync(0);
+            const next = edit(1, 'price');
+            staleReading.resolve(page([HAMMER, SAW], {}));
+            await saving;
+            await reading;
+            await next;
+
+            expect(component.inlineRow).toBe('i2');
+            expect(component.inlineFieldId).toBe('price');
+            expect(component.items[0].values.price).toBe('30.00');
+        });
+    });
+
+    describe('starting a cell while a value is still on its way', () => {
+        it('opens it on the item as the list holds it once the value was answered, not as it was when the click came', async () => {
+            const patch = deferred();
+            http.patch.mockReturnValue(patch.promise);
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: '30' } });
+            const saving = component.commitInline('enter');
+            await vi.advanceTimersByTimeAsync(0);
+
+            const click = edit(0, 'qty');
+            // The answer of the server brings the item as it is now, with another weight than the one the click saw.
+            patch.resolve(changed(HAMMER, { price: '30.00', qty: '9.00' }));
+            await saving;
+            await click;
+
+            expect(component.inlineRow).toBe('i1');
+            expect(component.inlineFieldId).toBe('qty');
+            expect(component.inlineOriginal).toBe('9.00');
+            expect(component.inlineInput).toBe('9.00');
+        });
+
+        it('does not open at all when the item is no longer on the page', async () => {
+            const patch = deferred();
+            http.patch.mockReturnValue(patch.promise);
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: '30' } });
+            const saving = component.commitInline('enter');
+            await vi.advanceTimersByTimeAsync(0);
+
+            const click = edit(0, 'qty');
+            // The list is read again meanwhile, and the item is gone from it.
+            component.items = [SAW];
+            patch.resolve(changed(HAMMER, { price: '30.00' }));
+            await saving;
+            await click;
+
+            expect(component.inlineRow).toBeNull();
+            expect(showModal).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('reading the totals again', () => {
+        it('takes the position of the page too, with the count', async () => {
+            http.patch.mockResolvedValue(changed(HAMMER, { price: '30.00' }));
+            http.get.mockResolvedValue(
+                page([HAMMER, SAW], { total: 120, last: 3, from: 51, to: 52, totals: { qty: '1.50', price: '40.00' } }),
+            );
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: '30' } });
+
+            await component.commitInline('enter');
+
+            expect(component.from).toBe(51);
+            expect(component.to).toBe(52);
+            expect(component.total).toBe(120);
+            expect(component.lastPage).toBe(3);
+            expect(component.rangeLabel).toBe('51–52 of 120');
+        });
+
+        it('keeps the answer of the latest reading, whatever the order the answers come in', async () => {
+            const older = deferred();
+            const newer = deferred();
+            http.get.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+
+            const first = component.refreshTotals();
+            const second = component.refreshTotals();
+            newer.resolve(page([HAMMER, SAW], { totals: { qty: '1.50', price: '40.00' } }));
+            await second;
+            older.resolve(page([HAMMER, SAW], { totals: { qty: '1.50', price: '1.00' } }));
+            await first;
+
+            expect(component.totalRow.find((cell) => cell.key === 'price').text).toBe('€40.00');
+        });
+
+        it('is the totals of the search and filters in force from then on, so that a page keeps them', async () => {
+            component.query = { ...component.query, q: 'ham' };
+            http.patch.mockResolvedValue(changed(HAMMER, { price: '30.00' }));
+            http.get.mockResolvedValue(page([HAMMER], { total: 1, totals: { qty: '1.50', price: '30.00' } }));
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value: '30' } });
+            await component.commitInline('enter');
+            http.get.mockClear();
+
+            await component.loadItems(2);
+
+            expect(http.get.mock.calls[0][1].params).toEqual({ page: 2, q: 'ham' });
         });
     });
 });

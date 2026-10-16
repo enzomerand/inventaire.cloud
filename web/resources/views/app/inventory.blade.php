@@ -131,7 +131,7 @@
     >
         <div class="card">
             <div class="card-header">
-                <h2 class="card-title">{{ __('Items') }}</h2>
+                <h2 class="card-title" x-ref="itemsTitle" tabindex="-1">{{ __('Items') }}</h2>
                 <div class="card-actions">
                     <button type="button" class="btn btn-primary" x-show="canAdd" @click="startCreate">
                         <x-tabler-plus aria-hidden="true" />

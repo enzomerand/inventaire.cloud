@@ -18,7 +18,7 @@ import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
 import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
-import { ulid, withUlids } from '../support/inventory.js';
+import { queryFacts, ulid, withUlids } from '../support/inventory.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
 import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
 
@@ -1225,7 +1225,7 @@ describe('the pages under the real Alpine CSP build', () => {
             { id: 'labels', name: 'Labels', type: 'tags', options: {}, required: false, position: 8 },
             { id: 'grade', name: 'Grade', type: 'rating', options: { max: 5 }, required: false, position: 9 },
             { id: 'tint', name: 'Tint', type: 'color', options: {}, required: false, position: 10 },
-        ];
+        ].map((one) => ({ ...one, ...queryFacts(one.type) }));
         const HAMMER = {
             id: 'i1',
             values: {
@@ -1527,6 +1527,8 @@ describe('the pages under the real Alpine CSP build', () => {
             const headerOf = (name) => headers().find((cell) => cell.textContent.trim() === name);
             const panel = () => document.querySelector('#item-filters-title').closest('.offcanvas');
             const lastParams = () => http.get.mock.lastCall[1].params;
+            /** What a reading that asks for the totals adds to its parameters: the fields of the fixture that add up. */
+            const ASK_TOTALS = { 'totals[0]': 'qty', 'totals[1]': 'price' };
             const filtersButton = () => document.querySelector('button[aria-haspopup="dialog"]');
 
             it('shows a search box, the filters button and the number of items, and none of it while nothing was read', async () => {
@@ -1550,6 +1552,19 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(visible(searchBox())).toBe(false);
             });
 
+            it('has a title the cursor can be put on when the controls it was on are gone (the last chip of an empty inventory)', async () => {
+                await open({ items: [] });
+
+                const title = document.querySelector('.card-title');
+
+                expect(title.textContent).toBe('Items');
+                expect(title.getAttribute('tabindex')).toBe('-1');
+
+                title.focus();
+
+                expect(document.activeElement).toBe(title);
+            });
+
             it('searches once typing pauses, from the first page, and keeps the words in the address', async () => {
                 await open({ items: [HAMMER], meta: { current: 1, last: 3, total: 120, from: 1, to: 50 } });
                 http.get.mockClear();
@@ -1561,7 +1576,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 await flush();
 
                 expect(http.get).toHaveBeenCalledTimes(1);
-                expect(lastParams()).toEqual({ page: 1, q: 'hamm' });
+                expect(lastParams()).toEqual({ page: 1, q: 'hamm', ...ASK_TOTALS });
                 expect(window.location.search).toBe('?q=hamm');
             });
 
@@ -1586,12 +1601,12 @@ describe('the pages under the real Alpine CSP build', () => {
                 );
                 await flush();
 
-                expect(lastParams()).toEqual({ page: 1, q: 'ham' });
+                expect(lastParams()).toEqual({ page: 1, q: 'ham', ...ASK_TOTALS });
 
                 await press('Clear the search');
 
                 expect(searchBox().value).toBe('');
-                expect(lastParams()).toEqual({ page: 1 });
+                expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
                 expect(buttons('Clear the search')).toHaveLength(0);
             });
 
@@ -1805,6 +1820,7 @@ describe('the pages under the real Alpine CSP build', () => {
                         'filter[price][min]': '89.90',
                         'filter[price][max]': '120',
                         'filter[state][in][0]': 'aaaaaaaa',
+                        ...ASK_TOTALS,
                     });
                     expect(hideOffcanvas).toHaveBeenCalledWith(panel());
 
@@ -1865,7 +1881,7 @@ describe('the pages under the real Alpine CSP build', () => {
 
                     await submit(panel().querySelector('form'));
 
-                    expect(lastParams()).toEqual({ page: 1, 'filter[price][empty]': 'true' });
+                    expect(lastParams()).toEqual({ page: 1, 'filter[price][empty]': 'true', ...ASK_TOTALS });
                 });
 
                 it('removes a filter with the close button of its chip, or all of them with Reset', async () => {
@@ -1877,16 +1893,17 @@ describe('the pages under the real Alpine CSP build', () => {
                         page: 1,
                         'filter[name][empty]': 'false',
                         'filter[fragile][is]': 'true',
+                        ...ASK_TOTALS,
                     });
 
                     await press('Remove the filter Name: not empty');
 
-                    expect(lastParams()).toEqual({ page: 1, 'filter[fragile][is]': 'true' });
+                    expect(lastParams()).toEqual({ page: 1, 'filter[fragile][is]': 'true', ...ASK_TOTALS });
 
                     await openPanel();
                     await press('Reset');
 
-                    expect(lastParams()).toEqual({ page: 1 });
+                    expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
                     expect(document.querySelectorAll('.badge .btn-close')).toHaveLength(0);
                 });
 
@@ -1966,7 +1983,7 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(document.querySelector('.badge .btn-close')).not.toBeNull();
                     await press('Clear the search and the filters');
 
-                    expect(lastParams()).toEqual({ page: 1 });
+                    expect(lastParams()).toEqual({ page: 1, 'totals[0]': 'qty', 'totals[1]': ulid('price') });
                     expect(searchBox().value).toBe('');
                     // The button that was pressed went away with the message: the cursor is in the search box.
                     expect(document.activeElement).toBe(searchBox());
@@ -1978,8 +1995,8 @@ describe('the pages under the real Alpine CSP build', () => {
                 });
             });
 
-            it('starts again from everything when the address asks for a field that is gone', async () => {
-                window.history.replaceState(null, '', '/?sort=gone');
+            it('takes out of the view what the address asks for and the server refuses, and keeps the rest', async () => {
+                window.history.replaceState(null, '', '/?sort=gone&q=saw');
                 http.get.mockImplementation(async (url, options) => {
                     if (url === '/api/v1/inventories/tools') {
                         return { data: { id: 'tools', name: 'Tools', items_count: 1, fields: FIELDS } };
@@ -1995,10 +2012,11 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(notify).toHaveBeenCalledWith(
                     'warning',
-                    'Some of the search options no longer apply: the list was reset.',
+                    'Some of the search options no longer apply: they were removed.',
                 );
                 expect(bodyRows()).toHaveLength(1);
-                expect(window.location.search).toBe('');
+                expect(searchBox().value).toBe('saw');
+                expect(window.location.search).toBe('?q=saw');
             });
         });
 

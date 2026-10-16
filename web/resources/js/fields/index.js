@@ -28,13 +28,15 @@ export function typeOf(field) {
 }
 
 /**
- * How the server sorts and filters a field (see `QueryKind` in `types.js`).
+ * How the server sorts and filters a field (see `QueryKind` in `types.js`): what the API says of it (`query_kind`), so that
+ * the interface never has to know the types the server has. A field the server cannot query (a type it does not know, after
+ * a rollback) is a text, like the interface shows it.
  *
  * @param {Field} field
  * @returns {import('./types.js').QueryKind}
  */
 export function queryKindOf(field) {
-    return typeOf(field).queryKind;
+    return field.query_kind ?? 'text';
 }
 
 /**
@@ -50,13 +52,13 @@ export function isSortable(field) {
 }
 
 /**
- * Whether the totals of a list add the values of a field up (numbers and amounts).
+ * Whether the totals of a list add the values of a field up (numbers and amounts): what the API says of it (`summable`).
  *
  * @param {Field} field
  * @returns {boolean}
  */
 export function isSummable(field) {
-    return typeOf(field).summable === true;
+    return field.summable === true;
 }
 
 /**

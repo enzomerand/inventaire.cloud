@@ -44,6 +44,9 @@ function answer(items, { fields = FIELDS, itemsCount = items.length, ...meta } =
     );
 }
 
+/** What a reading that asks for the totals adds to its parameters: the fields of the fixture that add up. */
+const ASK_TOTALS = { 'totals[0]': 'qty', 'totals[1]': 'price' };
+
 /** The parameters of the last reading of the items. */
 function lastParams() {
     return http.get.mock.lastCall[1].params;
@@ -51,6 +54,35 @@ function lastParams() {
 
 /** Lets the pending promises run. */
 const settle = () => vi.advanceTimersByTimeAsync(0);
+
+/**
+ * Answers like the server: the totals only come when the reading asks for them (`totals[]`).
+ *
+ * @param {Record<string, any>[]} items The items of the page.
+ * @param {Record<string, string>} totals What the server adds up.
+ * @param {Record<string, any>} [options] The fields of the inventory and the rest of `meta`.
+ */
+function answerLikeTheServer(items, totals, { fields = FIELDS, ...meta } = {}) {
+    http.get.mockImplementation(async (url, options) => {
+        if (url === INVENTORY) {
+            return inventoryAnswer(fields, items.length);
+        }
+
+        const answered = page(items, meta);
+        const asked = Object.keys(options.params).some((name) => name.startsWith('totals['));
+
+        if (asked) {
+            answered.meta.totals = totals;
+        } else {
+            delete answered.meta.totals;
+        }
+
+        return answered;
+    });
+}
+
+/** Whether a reading of the items asks for the totals. */
+const asksForTotals = ([, options]) => Object.keys(options?.params ?? {}).some((name) => name.startsWith('totals['));
 
 /** A 422 as the API answers a list it refuses. */
 function refused() {
@@ -77,7 +109,7 @@ describe('the criteria of the items of an inventory', () => {
 
             await component.init();
 
-            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1 } });
+            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1, ...ASK_TOTALS } });
             expect(window.location.search).toBe('');
         });
 
@@ -106,6 +138,8 @@ describe('the criteria of the items of an inventory', () => {
                     [`filter[${STATE}][in][0]`]: 'aaaaaaaa',
                     [`filter[${PRICE}][min]`]: '10',
                     [`filter[${FRAGILE}][is]`]: 'false',
+                    'totals[0]': 'qty',
+                    'totals[1]': PRICE,
                 },
             });
             expect(component.searchText).toBe('ham mer');
@@ -136,6 +170,8 @@ describe('the criteria of the items of an inventory', () => {
                     sort: 'price',
                     [`filter[${PRICE}][max]`]: '50',
                     [`filter[${FRAGILE}][is]`]: 'true',
+                    'totals[0]': 'qty',
+                    'totals[1]': PRICE,
                 },
             });
             expect(notify).not.toHaveBeenCalled();
@@ -173,7 +209,7 @@ describe('the criteria of the items of an inventory', () => {
             expect(window.location.search).toBe('');
         });
 
-        it('starts again from everything, with a toast, when the server refuses what the address asked (a field deleted since)', async () => {
+        it('takes out only the criteria the server refuses, with a toast, and reads the list again (a sort that is gone)', async () => {
             window.history.replaceState(null, '', '/?sort=gone&q=old&filter[gone][empty]=true&page=3');
             http.get.mockImplementation(async (url, options) => {
                 if (url === INVENTORY) {
@@ -189,16 +225,19 @@ describe('the criteria of the items of an inventory', () => {
 
             await component.init();
 
-            expect(http.get).toHaveBeenLastCalledWith(ITEMS, { params: { page: 1 } });
+            // The search stays, the page starts again (the list is not the same list), the totals are asked for again.
+            expect(http.get).toHaveBeenLastCalledWith(ITEMS, { params: { page: 1, q: 'old', ...ASK_TOTALS } });
+            expect(http.get.mock.calls.filter(([url]) => url === ITEMS)).toHaveLength(2);
+            expect(notify).toHaveBeenCalledTimes(1);
             expect(notify).toHaveBeenCalledWith(
                 'warning',
-                'Some of the search options no longer apply: the list was reset.',
+                'Some of the search options no longer apply: they were removed.',
             );
-            expect(component.query).toEqual({ q: '', sort: '', direction: 'asc', filters: {} });
-            expect(component.searchText).toBe('');
+            expect(component.query).toEqual({ q: 'old', sort: '', direction: 'asc', filters: {} });
+            expect(component.searchText).toBe('old');
             expect(component.itemsFailed).toBe(false);
             expect(component.items).toHaveLength(1);
-            expect(window.location.search).toBe('');
+            expect(window.location.search).toBe('?q=old');
         });
 
         it('does not start again in a loop when even everything is refused', async () => {
@@ -214,6 +253,209 @@ describe('the criteria of the items of an inventory', () => {
 
             expect(http.get.mock.calls.filter(([url]) => url === ITEMS)).toHaveLength(1);
             expect(component.itemsFailed).toBe(true);
+        });
+    });
+
+    describe('when the server refuses part of the criteria', () => {
+        const [PRICE, STATE, FRAGILE] = ['price', 'state', 'fragile'].map(ulid);
+        const FIELDS_WITH_ULIDS = withUlids(['price', 'state', 'fragile']);
+
+        /** An address that holds a search, a sort and filters on three fields, and the page 2. */
+        const ADDRESS = `/?page=2&q=saw&sort=${PRICE}&direction=desc&filter[${PRICE}][min]=10&filter[${PRICE}][max]=50&filter[${STATE}][in][]=aaaaaaaa&filter[${FRAGILE}][is]=true`;
+
+        /**
+         * Refuses the first reading of the items with these errors, and answers the next ones.
+         *
+         * @param {Record<string, string[]>} errors
+         * @param {number} [refusals] How many readings of the items are refused.
+         */
+        function refuseWith(errors, refusals = 1) {
+            let refused = 0;
+
+            http.get.mockImplementation(async (url) => {
+                if (url === INVENTORY) {
+                    return inventoryAnswer(FIELDS_WITH_ULIDS, 1);
+                }
+
+                if (refused < refusals) {
+                    refused += 1;
+
+                    throw new HttpError(422, 'The given data was invalid.', { errors });
+                }
+
+                return page([item('i1')]);
+            });
+        }
+
+        /** The readings of the items so far. */
+        const readings = () =>
+            http.get.mock.calls.filter(([url]) => url === ITEMS).map(([, options]) => options.params);
+
+        beforeEach(() => {
+            window.history.replaceState(null, '', ADDRESS);
+        });
+
+        it('takes out the condition it names and keeps the others of the same field, the other fields, the search and the sort', async () => {
+            refuseWith({ [`filter.${PRICE}.max`]: ['This value is not valid.'] });
+
+            await component.init();
+
+            expect(readings()[1]).toEqual({
+                page: 1,
+                q: 'saw',
+                sort: PRICE,
+                direction: 'desc',
+                [`filter[${PRICE}][min]`]: '10',
+                [`filter[${STATE}][in][0]`]: 'aaaaaaaa',
+                [`filter[${FRAGILE}][is]`]: 'true',
+                'totals[0]': 'qty',
+                'totals[1]': PRICE,
+            });
+            expect(component.query.filters[PRICE]).toEqual({ min: '10' });
+            expect(notify).toHaveBeenCalledWith(
+                'warning',
+                'Some of the search options no longer apply: they were removed.',
+            );
+        });
+
+        it('takes out the whole filter of a field the server says is gone, and no other', async () => {
+            refuseWith({ [`filter.${STATE}`]: ['This field does not exist in this inventory.'] });
+
+            await component.init();
+
+            expect(Object.keys(component.query.filters).sort()).toEqual([FRAGILE, PRICE].sort());
+            expect(component.query.q).toBe('saw');
+            expect(component.query.sort).toBe(PRICE);
+            expect(readings()).toHaveLength(2);
+        });
+
+        it('takes out a filter whatever the case the server wrote the field in', async () => {
+            refuseWith({ [`filter.${PRICE.toUpperCase()}.min`]: ['This value is not valid.'] });
+
+            await component.init();
+
+            expect(component.query.filters[PRICE]).toEqual({ max: '50' });
+        });
+
+        it('takes out the search alone, emptying the box', async () => {
+            refuseWith({ q: ['The q field must not be greater than 200 characters.'] });
+
+            await component.init();
+
+            expect(component.query.q).toBe('');
+            expect(component.searchText).toBe('');
+            expect(component.query.sort).toBe(PRICE);
+            expect(component.filterCount).toBe(3);
+        });
+
+        it('takes out the sort with its direction, or the direction alone', async () => {
+            refuseWith({ sort: ['This field cannot be sorted.'] });
+            await component.init();
+
+            expect(component.query.sort).toBe('');
+            expect(component.query.direction).toBe('asc');
+            expect(component.query.q).toBe('saw');
+
+            http.get.mockReset();
+            window.history.replaceState(null, '', ADDRESS);
+            refuseWith({ direction: ['The direction must be asc or desc.'] });
+            component.restoreQuery();
+            await component.loadItems(2);
+
+            expect(component.query.sort).toBe(PRICE);
+            expect(component.query.direction).toBe('asc');
+        });
+
+        it('takes out everything it names at once, and tells the person once', async () => {
+            refuseWith({
+                q: ['Bad.'],
+                sort: ['Bad.'],
+                [`filter.${PRICE}.min`]: ['Bad.'],
+                [`filter.${FRAGILE}`]: ['Bad.'],
+            });
+
+            await component.init();
+
+            expect(component.query).toEqual({
+                q: '',
+                sort: '',
+                direction: 'asc',
+                filters: { [PRICE]: { max: '50' }, [STATE]: { in: ['aaaaaaaa'] } },
+            });
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(readings()).toHaveLength(2);
+        });
+
+        it('forgets what the boxes of the filters held, which no longer agree with the filters', async () => {
+            refuseWith({ [`filter.${PRICE}`]: ['Bad.'] });
+            component.filterDraft = { [PRICE]: { min: '1' } };
+            component.filterErrors = { [PRICE]: { min: 'Bad.' } };
+
+            await component.init();
+
+            expect(component.filterDraft).toEqual({});
+            expect(component.filterErrors).toEqual({});
+        });
+
+        it('reads the fields again, and the list on the same page, when it refuses to total a field', async () => {
+            refuseWith({ 'totals.1': ['This field does not exist in this inventory.'] });
+
+            await component.init();
+
+            // The criteria are right and stay; the page stays; the inventory is read again, then the list with its totals.
+            expect(http.get.mock.calls.filter(([url]) => url === INVENTORY)).toHaveLength(2);
+            expect(readings()[1].page).toBe(2);
+            expect(readings()[1].q).toBe('saw');
+            expect(readings()[1]['totals[1]']).toBe(PRICE);
+            expect(component.query.sort).toBe(PRICE);
+            expect(notify).toHaveBeenCalledWith(
+                'warning',
+                'The fields of this inventory have changed: the list was loaded again.',
+            );
+        });
+
+        it('recovers once: a list that is refused again is not read a third time', async () => {
+            refuseWith({ q: ['Bad.'] }, 2);
+
+            await component.init();
+
+            expect(readings()).toHaveLength(2);
+            expect(component.itemsFailed).toBe(true);
+            // Told once, when the criteria were taken out; the second refusal is the failure of the reading.
+            expect(notify).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not recover from a refusal that names nothing it holds', async () => {
+            refuseWith({ page: ['The page must be at least 1.'] });
+
+            await component.init();
+
+            expect(readings()).toHaveLength(1);
+            expect(component.itemsFailed).toBe(true);
+            expect(component.query.q).toBe('saw');
+        });
+
+        it('drops the criteria of a refusal that comes while the person searches, not the ones they typed since', async () => {
+            window.history.replaceState(null, '', '/');
+            answer([item('i1')]);
+            await component.init();
+            http.get.mockClear();
+            let refuse = true;
+            http.get.mockImplementation(async (url, options) => {
+                if (refuse && options.params.q === 'bad') {
+                    refuse = false;
+
+                    throw new HttpError(422, 'The given data was invalid.', { errors: { q: ['Bad.'] } });
+                }
+
+                return page([item('i1')]);
+            });
+
+            component.query = { ...component.query, q: 'bad' };
+            await component.loadItems(1);
+
+            expect(component.query.q).toBe('');
+            expect(component.items).toHaveLength(1);
         });
     });
 
@@ -242,7 +484,7 @@ describe('the criteria of the items of an inventory', () => {
             await vi.advanceTimersByTimeAsync(300);
 
             expect(http.get).toHaveBeenCalledTimes(1);
-            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1, q: 'ham' } });
+            expect(http.get).toHaveBeenCalledWith(ITEMS, { params: { page: 1, q: 'ham', ...ASK_TOTALS } });
         });
 
         it('keeps what is typed in the box while the reading is under way', async () => {
@@ -259,7 +501,7 @@ describe('the criteria of the items of an inventory', () => {
             await vi.advanceTimersByTimeAsync(1000);
 
             expect(http.get).toHaveBeenCalledTimes(1);
-            expect(lastParams()).toEqual({ page: 1, q: 'ham' });
+            expect(lastParams()).toEqual({ page: 1, q: 'ham', ...ASK_TOTALS });
         });
 
         it('trims the words, and asks for nothing when they are the ones already asked', async () => {
@@ -273,7 +515,7 @@ describe('the criteria of the items of an inventory', () => {
             await vi.advanceTimersByTimeAsync(300);
 
             expect(http.get).toHaveBeenCalledTimes(1);
-            expect(lastParams()).toEqual({ page: 1 });
+            expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
         });
 
         it('empties the box, shows everything again and puts the cursor back in the box', async () => {
@@ -288,7 +530,7 @@ describe('the criteria of the items of an inventory', () => {
 
             expect(component.searchText).toBe('');
             expect(component.hasSearchText).toBe(false);
-            expect(lastParams()).toEqual({ page: 1 });
+            expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
             expect(focus).toHaveBeenCalled();
         });
 
@@ -502,6 +744,7 @@ describe('the criteria of the items of an inventory', () => {
                 'filter[price][max]': '120',
                 'filter[state][in][0]': 'aaaaaaaa',
                 'filter[fragile][is]': 'true',
+                ...ASK_TOTALS,
             });
             expect(hideOffcanvas).toHaveBeenCalledWith(component.$refs.filters);
             expect(component.filterCount).toBe(4);
@@ -556,12 +799,12 @@ describe('the criteria of the items of an inventory', () => {
             component.removeChip(component.chips[0]);
             await settle();
 
-            expect(lastParams()).toEqual({ page: 1, q: 'saw', 'filter[fragile][is]': 'true' });
+            expect(lastParams()).toEqual({ page: 1, q: 'saw', 'filter[fragile][is]': 'true', ...ASK_TOTALS });
 
             component.resetFilters();
             await settle();
 
-            expect(lastParams()).toEqual({ page: 1, q: 'saw' });
+            expect(lastParams()).toEqual({ page: 1, q: 'saw', ...ASK_TOTALS });
             expect(hideOffcanvas).toHaveBeenCalled();
             expect(component.filterCount).toBe(0);
         });
@@ -643,6 +886,25 @@ describe('the criteria of the items of an inventory', () => {
             await settle();
 
             expect(document.activeElement).toBe(filtersButton);
+        });
+
+        it('puts the cursor on the title of the list when the only chip was removed and the toolbar is gone with it', async () => {
+            const { filtersButton } = drawChips(['price']);
+            const title = document.createElement('h2');
+
+            title.tabIndex = -1;
+            document.body.append(title);
+            component.$refs.itemsTitle = title;
+            // An inventory with no item: nothing is left to narrow down once the filter is gone, so the toolbar is hidden.
+            component.itemsCount = 0;
+            http.get.mockResolvedValue(page([], { total: 0 }));
+
+            component.removeChip(component.chips[0]);
+            await settle();
+
+            expect(component.showToolbar).toBe(false);
+            expect(document.activeElement).toBe(title);
+            expect(document.activeElement).not.toBe(filtersButton);
         });
 
         it('puts the cursor in the search box when the search and the filters are cleared', async () => {
@@ -843,7 +1105,7 @@ describe('the criteria of the items of an inventory', () => {
             expect(component.showTotals).toBe(false);
         });
 
-        it('is read again with every page, so that it stays right after an item is added, changed or deleted', async () => {
+        it('is read again after an item is added, changed or deleted, so that it stays right', async () => {
             answer([item('i1')], { totals: { qty: '1.00', price: '10.00' } });
             await component.init();
             http.post.mockResolvedValue({ data: item('new') });
@@ -854,16 +1116,156 @@ describe('the criteria of the items of an inventory', () => {
             component.startCreate();
             await component.save();
             expect(component.totalRow[2].text).toBe('€30.00');
+            expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
 
             answer([item('new'), item('i1')], { totals: { qty: '3.00', price: '45.50' } });
             component.begin('edit', component.items[0]);
             component.set(FIELDS[2], '45,50');
             await component.save();
             expect(component.totalRow[2].text).toBe('€45.50');
+            expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
 
             answer([item('i1')], { totals: { qty: '1.00', price: '10.00' } });
             await component.confirmDelete();
             expect(component.totalRow[2].text).toBe('€10.00');
+            expect(lastParams()).toEqual({ page: 1, ...ASK_TOTALS });
+        });
+
+        it('is asked for with the first reading, for the fields that add up and no other', async () => {
+            answerLikeTheServer([item('i1')], TOTALS);
+
+            await component.init();
+
+            expect(http.get).toHaveBeenCalledWith(ITEMS, {
+                params: { page: 1, 'totals[0]': 'qty', 'totals[1]': 'price' },
+            });
+            expect(component.totals).toEqual(TOTALS);
+            expect(component.totalRow[1].text).toBe('12.50 kg');
+        });
+
+        it('is kept, not asked for again, when the page or the sort changes', async () => {
+            answerLikeTheServer([item('i1')], TOTALS, { last: 3, total: 120 });
+            await component.init();
+            http.get.mockClear();
+
+            await component.loadItems(2);
+            component.toggleSort('qty');
+            await settle();
+            component.flipDirection();
+            await settle();
+            component.chooseSort({ target: { value: 'price' } });
+            await settle();
+
+            expect(http.get.mock.calls.filter(([url]) => url === ITEMS)).toHaveLength(4);
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(0);
+            expect(component.totals).toEqual(TOTALS);
+            expect(component.totalRow[1].text).toBe('12.50 kg');
+            expect(component.showTotals).toBe(true);
+        });
+
+        it('is asked for again when the search or the filters change, and only then', async () => {
+            answerLikeTheServer([item('i1')], TOTALS);
+            await component.init();
+            http.get.mockClear();
+
+            component.onSearchInput({ target: { value: 'saw' } });
+            await vi.advanceTimersByTimeAsync(300);
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(1);
+
+            // Another page, another sort: the same search and filters, the same totals.
+            await component.loadItems(2);
+            component.toggleSort('qty');
+            await settle();
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(1);
+
+            component.openFilters();
+            component.setDraft(FIELDS[2], 'min', { target: { value: '5' } });
+            component.applyFilters();
+            await settle();
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(2);
+
+            component.removeChip(component.chips[0]);
+            await settle();
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(3);
+            expect(http.get.mock.calls.filter(([url]) => url === ITEMS)).toHaveLength(5);
+        });
+
+        it('does not depend on the order the filters were written in', async () => {
+            answerLikeTheServer([item('i1')], TOTALS);
+            await component.init();
+            component.query = { ...component.query, filters: { price: { min: '5' }, fragile: { is: true } } };
+            await component.loadItems(1);
+            http.get.mockClear();
+
+            component.query = { ...component.query, filters: { fragile: { is: true }, price: { min: '5' } } };
+            await component.loadItems(1);
+
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(0);
+        });
+
+        it('is never asked for by an inventory with no field that adds up', async () => {
+            answerLikeTheServer([item('i1')], {}, { fields: [FIELDS[0], FIELDS[3]] });
+
+            await component.init();
+            component.onSearchInput({ target: { value: 'saw' } });
+            await vi.advanceTimersByTimeAsync(300);
+
+            expect(http.get.mock.calls.filter(([url]) => url === ITEMS)).toHaveLength(2);
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(0);
+            expect(component.showTotals).toBe(false);
+        });
+
+        it('is asked for by the next reading when the one that carried it was dropped for a newer one', async () => {
+            answerLikeTheServer([item('i1')], TOTALS, { last: 3, total: 120 });
+            await component.init();
+            const first = deferred();
+            http.get.mockImplementationOnce(async () => first.promise);
+
+            // A search whose answer is slow, then a page of the same search: the second must carry the totals.
+            component.onSearchInput({ target: { value: 'saw' } });
+            await vi.advanceTimersByTimeAsync(300);
+            await component.loadItems(2);
+            first.resolve(page([item('old')], { totals: { qty: '999', price: '999' } }));
+            await settle();
+
+            expect(asksForTotals(http.get.mock.lastCall)).toBe(true);
+            expect(component.totals).toEqual(TOTALS);
+            expect(component.items[0].id).toBe('i1');
+        });
+
+        it('is asked for again when the inventory is read again and other fields add up', async () => {
+            answerLikeTheServer([item('i1')], TOTALS);
+            await component.init();
+            http.get.mockClear();
+
+            answerLikeTheServer([item('i1')], { qty: '1' }, { fields: [FIELDS[0], FIELDS[1]] });
+            await component.loadInventory();
+            await component.loadItems(1);
+
+            expect(lastParams()).toEqual({ page: 1, 'totals[0]': 'qty' });
+            expect(component.totals).toEqual({ qty: '1' });
+        });
+
+        it('is read once for a page past the end, not twice', async () => {
+            let reads = 0;
+            http.get.mockImplementation(async (url, options) => {
+                if (url === INVENTORY) {
+                    return inventoryAnswer(FIELDS, 1);
+                }
+
+                reads += 1;
+
+                return options.params.page > 1
+                    ? page([], { current: 3, last: 1, total: 0, totals: TOTALS })
+                    : page([item('i1')], { totals: TOTALS });
+            });
+            window.history.replaceState(null, '', '/?page=4');
+
+            await component.init();
+
+            expect(reads).toBe(2);
+            expect(http.get.mock.calls.filter(asksForTotals)).toHaveLength(1);
+            expect(component.totals).toEqual(TOTALS);
         });
     });
 });

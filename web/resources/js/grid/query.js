@@ -3,9 +3,10 @@
  *
  * The same description serves three purposes. It is held by the component (a {@link Query}); it is sent to the API as
  * the parameters of `GET /api/v1/inventories/{inventory}/items` ({@link toParams}); and it is written in the address of the
- * page ({@link toSearch}) and read back from it ({@link fromSearch}), so that a reload, or the Back button, brings the
- * same view back. The address uses the very names of the API (`q`, `sort`, `direction`, `filter[<field>][<condition>]`)
- * plus `page` and `view`, so there is one format to know.
+ * page ({@link toSearch}) and read back from it ({@link fromSearch}), so that a reload, or a page restored by the browser
+ * (history navigation, a discarded tab), shows the same view again. The address is replaced, not added to (see
+ * `lib/location.js`): Back leaves the page, it does not step through the searches. The address uses the very names of the
+ * API (`q`, `sort`, `direction`, `filter[<field>][<condition>]`) plus `page` and `view`, so there is one format to know.
  *
  * Values are the canonical ones of the API (`"89.90"`, `"2026-10-15"`, `"2026-10-15T12:30:00Z"`); what a person types in a
  * box is converted to them by `filters.js`. Nothing here talks to the server: whether a field still exists, or can be sorted,
@@ -84,6 +85,77 @@ export function hasCriteria(query) {
  */
 export function isEmptyQuery(query) {
     return !hasCriteria(query) && query.sort === '';
+}
+
+/**
+ * What the totals of the list depend on: the search and the filters, not the sort nor the page. Two queries with the same
+ * key have the same totals.
+ *
+ * @param {Query} query
+ * @returns {string}
+ */
+export function totalsKeyOf(query) {
+    const filters = Object.entries(query.filters).sort(([first], [second]) =>
+        first < second ? -1 : first > second ? 1 : 0,
+    );
+
+    return JSON.stringify([query.q, filters.map(([id, filter]) => [id, Object.entries(filter).sort()])]);
+}
+
+/**
+ * Takes out of a query the criteria the API refused, and only those. The refusal names them by the keys of its errors:
+ * `q`, `sort`, `direction`, `filter.<field>` (the whole filter of the field) and `filter.<field>.<condition>` (that
+ * condition), and `totals.<n>` for a field it does not add up (which says the fields the page holds are out of date, not
+ * that a criterion is wrong).
+ *
+ * @param {Query} query
+ * @param {Record<string, unknown>} errors The `errors` of the answer, by key.
+ * @returns {{ query: Query, dropped: boolean, staleFields: boolean }} The query without the refused criteria (the very
+ *   query when nothing was refused that it holds), whether something was dropped, and whether the fields are out of date.
+ */
+export function withoutRefused(query, errors) {
+    const next = { ...query, filters: { ...query.filters } };
+    let staleFields = false;
+
+    for (const key of Object.keys(errors ?? {})) {
+        if (key === 'q') {
+            next.q = '';
+        } else if (key === 'sort') {
+            next.sort = '';
+            next.direction = 'asc';
+        } else if (key === 'direction') {
+            next.direction = 'asc';
+        } else if (key.startsWith('totals.') || key === 'totals') {
+            staleFields = true;
+        } else if (key.startsWith('filter.')) {
+            const [id, condition] = key.slice('filter.'.length).split('.');
+            const own = Object.keys(next.filters).find((candidate) => candidate.toLowerCase() === id.toLowerCase());
+
+            if (own === undefined) {
+                continue;
+            }
+
+            if (condition === undefined) {
+                delete next.filters[own];
+
+                continue;
+            }
+
+            const rest = { ...next.filters[own] };
+
+            delete rest[/** @type {keyof Filter} */ (condition)];
+
+            if (Object.keys(rest).length === 0) {
+                delete next.filters[own];
+            } else {
+                next.filters[own] = rest;
+            }
+        }
+    }
+
+    const dropped = JSON.stringify(next) !== JSON.stringify(query);
+
+    return { query: dropped ? next : query, dropped, staleFields };
 }
 
 /**
@@ -177,7 +249,7 @@ export function fromSearch(search) {
 
     query.q = clip((params.get('q') ?? '').trim(), SEARCH_MAX_LENGTH);
     query.sort = clip((params.get('sort') ?? '').trim(), SORT_MAX_LENGTH);
-    query.direction = query.sort !== '' && params.get('direction') === 'desc' ? 'desc' : 'asc';
+    query.direction = query.sort !== '' && params.get('direction')?.toLowerCase() === 'desc' ? 'desc' : 'asc';
 
     // The names in the address are the person's to choose: they land in a map without a prototype, and only as the id of a
     // field, never as a name that means something to an object (`__proto__`, `constructor`).

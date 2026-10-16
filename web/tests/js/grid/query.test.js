@@ -8,6 +8,8 @@ import {
     isEmptyQuery,
     toParams,
     toSearch,
+    totalsKeyOf,
+    withoutRefused,
 } from '../../../resources/js/grid/query.js';
 import { ulid } from '../support/inventory.js';
 
@@ -235,6 +237,13 @@ describe('the query of the list of items', () => {
             expect(fromSearch('direction=desc').query.direction).toBe('asc');
         });
 
+        it('reads the direction in any case, as the API does', () => {
+            expect(fromSearch('sort=price&direction=DESC').query.direction).toBe('desc');
+            expect(fromSearch('sort=price&direction=Desc').query.direction).toBe('desc');
+            expect(fromSearch('sort=price&direction=ASC').query.direction).toBe('asc');
+            expect(fromSearch('sort=price&direction=sideways').query.direction).toBe('asc');
+        });
+
         it('carries the way the items are laid out when the person chose one, and nothing when not', () => {
             expect(toSearch(emptyQuery(), { view: 'gallery' })).toBe('view=gallery');
             expect(toSearch({ ...emptyQuery(), q: 'saw' }, { page: 2, view: 'table' })).toBe('page=2&q=saw&view=table');
@@ -283,6 +292,119 @@ describe('the query of the list of items', () => {
             const sort = fromSearch('sort=' + encodeURIComponent('x'.repeat(63) + '\u{1F600}' + 'z')).query.sort;
 
             expect(sort).toBe('x'.repeat(63) + '\u{1F600}');
+        });
+    });
+
+    describe('what the totals depend on', () => {
+        it('is the search and the filters, not the sort nor the direction', () => {
+            const query = fullQuery();
+
+            expect(totalsKeyOf({ ...query, sort: '', direction: 'asc' })).toBe(totalsKeyOf(query));
+            expect(totalsKeyOf({ ...query, sort: 'created_at', direction: 'desc' })).toBe(totalsKeyOf(query));
+        });
+
+        it('changes with the search, and with any condition of any filter', () => {
+            const query = fullQuery();
+            const keys = new Set([
+                totalsKeyOf(query),
+                totalsKeyOf({ ...query, q: 'saw' }),
+                totalsKeyOf({ ...query, filters: { ...query.filters, [PRICE]: { min: '10' } } }),
+                totalsKeyOf({ ...query, filters: { ...query.filters, [FRAGILE]: { is: true } } }),
+                totalsKeyOf({ ...query, filters: {} }),
+                totalsKeyOf(emptyQuery()),
+            ]);
+
+            expect(keys.size).toBe(6);
+        });
+
+        it('does not depend on the order the filters and their conditions were written in', () => {
+            const first = {
+                ...emptyQuery(),
+                filters: { [PRICE]: { min: '1', max: '2' }, [STATE]: { in: ['aaaaaaaa'] } },
+            };
+            const second = {
+                ...emptyQuery(),
+                filters: { [STATE]: { in: ['aaaaaaaa'] }, [PRICE]: { max: '2', min: '1' } },
+            };
+
+            expect(totalsKeyOf(first)).toBe(totalsKeyOf(second));
+        });
+    });
+
+    describe('taking out what the server refused', () => {
+        it('takes out the search, the sort with its direction, or the direction alone, by the key of the error', () => {
+            const query = fullQuery();
+
+            expect(withoutRefused(query, { q: ['x'] }).query).toEqual({ ...query, q: '' });
+            expect(withoutRefused(query, { sort: ['x'] }).query).toEqual({ ...query, sort: '', direction: 'asc' });
+            expect(withoutRefused(query, { direction: ['x'] }).query).toEqual({ ...query, direction: 'asc' });
+        });
+
+        it('takes out one condition of a filter, and the filter itself when it was the last one', () => {
+            const query = fullQuery();
+
+            expect(withoutRefused(query, { [`filter.${PRICE}.max`]: ['x'] }).query.filters[PRICE]).toEqual({
+                min: '10',
+            });
+            expect(withoutRefused(query, { [`filter.${FRAGILE}.is`]: ['x'] }).query.filters).not.toHaveProperty(
+                FRAGILE,
+            );
+            expect(withoutRefused(query, { [`filter.${FRAGILE}.is`]: ['x'] }).query.filters).toHaveProperty(PRICE);
+        });
+
+        it('takes out the whole filter of a field, in whatever case the error names it', () => {
+            const query = fullQuery();
+
+            expect(withoutRefused(query, { [`filter.${PRICE}`]: ['x'] }).query.filters).not.toHaveProperty(PRICE);
+            expect(
+                withoutRefused(query, { [`filter.${PRICE.toUpperCase()}`]: ['x'] }).query.filters,
+            ).not.toHaveProperty(PRICE);
+            expect(Object.keys(withoutRefused(query, { [`filter.${PRICE}`]: ['x'] }).query.filters)).toHaveLength(5);
+        });
+
+        it('says whether something was taken out, and returns the very query when nothing was', () => {
+            const query = fullQuery();
+            const nothing = withoutRefused(query, {
+                [`filter.${ulid('gone')}.min`]: ['x'],
+                page: ['x'],
+                unknown: ['x'],
+            });
+
+            expect(nothing.dropped).toBe(false);
+            expect(nothing.query).toBe(query);
+            expect(withoutRefused(emptyQuery(), { sort: ['x'] }).dropped).toBe(false);
+            expect(withoutRefused(query, { q: ['x'] }).dropped).toBe(true);
+        });
+
+        it('says the fields are out of date when the server refuses to total one, and takes nothing out for it', () => {
+            const query = fullQuery();
+            const refusal = withoutRefused(query, { 'totals.0': ['x'], 'totals.3': ['x'] });
+
+            expect(refusal.staleFields).toBe(true);
+            expect(refusal.dropped).toBe(false);
+            expect(refusal.query).toBe(query);
+            expect(withoutRefused(query, { q: ['x'] }).staleFields).toBe(false);
+        });
+
+        it('does not change the query it is given', () => {
+            const query = fullQuery();
+            const before = JSON.parse(JSON.stringify(query));
+
+            withoutRefused(query, {
+                q: ['x'],
+                [`filter.${PRICE}.min`]: ['x'],
+                [`filter.${STATE}`]: ['x'],
+                sort: ['x'],
+            });
+
+            expect(query).toEqual(before);
+        });
+
+        it('copes with an error that carries no keys', () => {
+            const query = fullQuery();
+
+            expect(withoutRefused(query, {}).dropped).toBe(false);
+            expect(withoutRefused(query, undefined).dropped).toBe(false);
         });
     });
 });

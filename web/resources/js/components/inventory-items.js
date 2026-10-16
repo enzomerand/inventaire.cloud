@@ -20,9 +20,10 @@
  *
  * What narrows and orders the list (the search, the filters, the sort, and the address of the page that remembers them)
  * is `../grid/criteria.js`, merged into this component: the page asked for is always read with the criteria in force, an
- * older answer never replaces a newer one, and the totals of the numbers and amounts come with each page. Editing a value
- * in its cell, without the dialog, is `../grid/inline.js`; laying the items out as a table or as cards is
- * `../grid/gallery.js`.
+ * older answer never replaces a newer one. The totals of the numbers and amounts cost the server a pass over every item, so
+ * they are asked for only when they can have changed: the first time, with a new search or new filters, and after an item
+ * is added, changed or deleted; a page or a sort keeps the totals it has. Editing a value in its cell, without the
+ * dialog, is `../grid/inline.js`; laying the items out as a table or as cards is `../grid/gallery.js`.
  */
 import {
     choicesOf,
@@ -32,6 +33,7 @@ import {
     fromInput,
     inputModeOf,
     inputTypeOf,
+    isSummable,
     maxLengthOf,
     selectOptionsOf,
     toInput,
@@ -46,7 +48,7 @@ import { compose } from '../lib/compose.js';
 import gridCriteria from '../grid/criteria.js';
 import gridInline from '../grid/inline.js';
 import gridView from '../grid/gallery.js';
-import { isEmptyQuery } from '../grid/query.js';
+import { totalsKeyOf } from '../grid/query.js';
 import { fieldFocusSelectors, momentText } from '../grid/rows.js';
 import { hasTotals, totalCells } from '../grid/totals.js';
 
@@ -55,6 +57,19 @@ const FIRST_COLOR = '#000000';
 
 /** The prefix of the names the API gives the errors of the values of an item (`values.<field ULID>`). */
 const VALUES_PREFIX = 'values.';
+
+/**
+ * The fields the totals add up, as one text to tell whether they are the same ones.
+ *
+ * @param {import('../fields/types.js').Field[]} fields
+ * @returns {string}
+ */
+function summedIds(fields) {
+    return fields
+        .filter(isSummable)
+        .map((field) => field.id)
+        .join();
+}
 
 /**
  * @typedef {import('../fields/types.js').Field} Field
@@ -107,6 +122,15 @@ export default function inventoryItems() {
 
         /** The sums of the numbers and amounts of the items that match, by field id (`meta.totals`). */
         totals: {},
+
+        /**
+         * The search and the filters (see `totalsKeyOf`) that `totals` were read for, null when they are not known to be right:
+         * before the first reading, and after an item came, changed or went.
+         */
+        totalsFor: null,
+
+        /** Ticket of the last reading of the totals alone (see `refreshTotals` in `../grid/inline.js`): an older answer is dropped. */
+        totalsTicket: 0,
 
         /** The foot of each column of the table (see `../grid/totals.js`). */
         totalRow: [],
@@ -323,6 +347,9 @@ export default function inventoryItems() {
          * Reads the inventory and the first page of items when the page opens (the one the address asks for, with the search,
          * the sort and the filters it holds), and forgets the form whenever the dialog is closed.
          *
+         * The inventory comes first: its fields say which of them the totals add up, and the page asks for the totals along
+         * with the items (a second reading just for them would run the page twice).
+         *
          * @returns {Promise<void>}
          */
         async init() {
@@ -333,7 +360,8 @@ export default function inventoryItems() {
 
             this.pickView();
 
-            await Promise.all([this.loadInventory(), this.loadItems(page)]);
+            await this.loadInventory();
+            await this.loadItems(page);
         },
 
         /**
@@ -358,8 +386,16 @@ export default function inventoryItems() {
             try {
                 const inventory = (await http.get(this.url)).data;
 
+                const summed = summedIds(this.fields);
+
                 this.fields = inventory.fields ?? [];
                 this.itemsCount = inventory.items_count ?? this.itemsCount;
+
+                // Other fields add up now: the totals shown are not the ones of the page the next reading asks for.
+                if (summedIds(this.fields) !== summed) {
+                    this.totalsFor = null;
+                }
+
                 this.rebuild();
             } catch (error) {
                 this.inventoryFailed = true;
@@ -375,33 +411,52 @@ export default function inventoryItems() {
         /**
          * Reads a page of items from the API, narrowed and ordered as the search, the filters and the sort ask, and writes
          * them in the address of the page. A failure is remembered (`itemsFailed`) until the next reading, so that the page
-         * does not claim the inventory holds no item. The server refusing the criteria (a field that was deleted since the
-         * address was shared) starts again from everything, with a toast.
+         * does not claim the inventory holds no item.
+         *
+         * The totals ride along only when they are not known to be right: they depend on the search and the filters alone,
+         * so a page or a sort keeps the ones the list has. A reading whose answer is dropped (a newer one took over) leaves
+         * them unknown, and the newer one asks for them.
+         *
+         * When the server refuses criteria (a field that was deleted since the address was shared), only the criteria it
+         * names are taken out, with a toast, and the list is read again, once. The fields the server refuses to total are
+         * a sign that the fields of the page are out of date: they are read again too.
          *
          * Only the latest reading counts: the answer to an older one (a search typed over, a page clicked past) is dropped,
          * whenever it comes.
          *
          * @param {number} page Number of the page to read.
+         * @param {boolean} [recovered] Whether this reading is the one that follows a refusal, which is not recovered from again.
          * @returns {Promise<void>}
          */
-        async loadItems(page) {
+        async loadItems(page, recovered = false) {
             const ticket = ++this.ticket;
             this.loadingItems = true;
             this.itemsFailed = false;
             this.wantedPage = page;
             this.syncAddress(page);
 
+            const totalsKey = totalsKeyOf(this.query);
+            const withTotals = this.totalsFor !== totalsKey && this.fields.some(isSummable);
+
             try {
-                const answer = await http.get(this.itemsUrl, { params: this.queryParams(page) });
+                const answer = await http.get(this.itemsUrl, {
+                    params: this.queryParams(page, { totals: withTotals }),
+                });
 
                 if (ticket !== this.ticket) {
                     return;
                 }
 
+                // Kept even when the page is read again just below: they do not depend on the page.
+                if (withTotals) {
+                    this.totals = answer.meta.totals ?? {};
+                    this.totalsFor = totalsKey;
+                }
+
                 // Items were deleted since the page was shown and it is past the end now: the last one it is.
                 if (answer.data.length === 0 && page > answer.meta.last_page) {
                     this.loadingItems = false;
-                    await this.loadItems(answer.meta.last_page);
+                    await this.loadItems(answer.meta.last_page, recovered);
 
                     return;
                 }
@@ -412,7 +467,6 @@ export default function inventoryItems() {
                 this.total = answer.meta.total;
                 this.from = answer.meta.from ?? 0;
                 this.to = answer.meta.to ?? 0;
-                this.totals = answer.meta.totals ?? {};
                 this.loadedOnce = true;
 
                 // The row being edited is not on this page.
@@ -427,16 +481,7 @@ export default function inventoryItems() {
 
                 this.rebuild();
             } catch (error) {
-                if (
-                    ticket === this.ticket &&
-                    error instanceof HttpError &&
-                    error.status === 422 &&
-                    !isEmptyQuery(this.query)
-                ) {
-                    this.resetQuery();
-                    notify('warning', t('grid.notice.reset'));
-                    await this.loadItems(1);
-
+                if (ticket === this.ticket && !recovered && (await this.recoverFromRefusal(error, page))) {
                     return;
                 }
 
@@ -455,15 +500,50 @@ export default function inventoryItems() {
         },
 
         /**
+         * Gets over the server refusing the criteria of a reading (a `422`): takes out the criteria it names and no others,
+         * reads the fields again when it refused to total one, tells the person, and reads the list again.
+         *
+         * @param {unknown} error
+         * @param {number} page The page that was asked for.
+         * @returns {Promise<boolean>} Whether the list was read again; false when the refusal names nothing that can be taken out.
+         */
+        async recoverFromRefusal(error, page) {
+            if (!(error instanceof HttpError) || error.status !== 422) {
+                return false;
+            }
+
+            const { dropped, staleFields } = this.dropRefused(error.errors ?? {});
+
+            if (!dropped && !staleFields) {
+                return false;
+            }
+
+            if (staleFields) {
+                await this.loadInventory();
+            }
+
+            this.totalsFor = null;
+            notify('warning', t(dropped ? 'grid.notice.dropped' : 'grid.notice.fields_changed'));
+            await this.loadItems(dropped ? 1 : page, true);
+
+            return true;
+        },
+
+        /**
          * Reads again what could not be read: the inventory, and the page of items that was asked for.
          *
          * @returns {Promise<void>}
          */
         async retry() {
-            await Promise.all([
-                this.inventoryFailed ? this.loadInventory() : Promise.resolve(),
-                this.loadItems(this.wantedPage),
-            ]);
+            // The alert goes while the page is read again, as the readings below would take it away one after the other.
+            this.itemsFailed = false;
+
+            // In this order, for the reason `init` gives.
+            if (this.inventoryFailed) {
+                await this.loadInventory();
+            }
+
+            await this.loadItems(this.wantedPage);
         },
 
         /**
@@ -995,7 +1075,8 @@ export default function inventoryItems() {
                     this.countItems(1);
                 }
 
-                // Newest first: a new item is at the top of the first page.
+                // Newest first: a new item is at the top of the first page. What the columns add up to has changed.
+                this.totalsFor = null;
                 await this.loadItems(creating ? 1 : this.page);
             } catch (error) {
                 this.failChange(error);
@@ -1054,6 +1135,7 @@ export default function inventoryItems() {
                 hideModal(this.$refs.modal);
                 notify('success', t('inventories.notice.item_deleted'));
                 this.countItems(-1);
+                this.totalsFor = null;
                 await this.loadItems(this.page);
             } catch (error) {
                 this.failChange(error);
@@ -1099,7 +1181,9 @@ export default function inventoryItems() {
                     this.leaveIfGone(error);
                 } else {
                     hideModal(this.$refs.modal);
-                    // If it is the inventory that is gone, this reading finds out and takes the person away.
+                    // If it is the inventory that is gone, this reading finds out and takes the person away. The item is gone:
+                    // so is what it added to the totals.
+                    this.totalsFor = null;
                     this.loadItems(this.page);
                 }
 

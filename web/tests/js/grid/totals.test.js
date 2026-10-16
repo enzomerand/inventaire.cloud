@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { hasTotals, totalCells } from '../../../resources/js/grid/totals.js';
+import { hasTotals, totalCells, totalsParams } from '../../../resources/js/grid/totals.js';
+
+import { queryFacts } from '../support/inventory.js';
 
 vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/messages.js'));
 
-/** A field of an inventory. */
+/** A field of an inventory, as the API describes it. */
 function field(id, type, options = {}) {
-    return { id, name: 'Field ' + id, type, options, required: false, position: 0 };
+    return { id, name: 'Field ' + id, type, options, required: false, position: 0, ...queryFacts(type) };
 }
 
 const FIELDS = [
@@ -54,5 +56,21 @@ describe('the totals of the columns', () => {
     it('reads the totals of an inventory with no summable field as there being none', () => {
         expect(hasTotals(totalCells([field('name', 'text')], {}))).toBe(false);
         expect(totalCells([], {})).toEqual([]);
+    });
+
+    it('asks the API for the total of each field that adds up, numbered, and for no other', () => {
+        expect(totalsParams(FIELDS)).toEqual({ 'totals[0]': 'weight', 'totals[1]': 'price' });
+    });
+
+    it('asks for no total when no field adds up, or when there is no field', () => {
+        expect(totalsParams([field('name', 'text'), field('grade', 'rating', { max: 5 })])).toEqual({});
+        expect(totalsParams([])).toEqual({});
+    });
+
+    it('leaves out a field the API does not say adds up, whatever its type', () => {
+        const plain = { id: 'weight', name: 'Weight', type: 'number', options: {}, required: false, position: 0 };
+
+        expect(totalsParams([plain])).toEqual({});
+        expect(totalCells([plain], { weight: '1' })[0].text).toBe('');
     });
 });
