@@ -37,6 +37,7 @@ final class ApplicationTables
         'inventory_fields',
         'items',
         'item_revisions',
+        'attachments',
     ];
 
     /**

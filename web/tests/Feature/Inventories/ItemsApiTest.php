@@ -75,7 +75,7 @@ describe('adding an item', function (): void {
 
         expect($response->json('data.id'))->toBe($item->ulid)
             ->and($response->json('data.values'))->toBe($everything['read'])
-            ->and(array_keys($response->json('data')))->toBe(['id', 'values', 'created_at', 'updated_at'])
+            ->and(array_keys($response->json('data')))->toBe(['id', 'values', 'attachments', 'created_at', 'updated_at'])
             ->and($item->values)->toEqual($everything['read'])
             // What is stored: decimal strings, not numbers; a real false; the moment in UTC.
             ->and($item->values[$everything['fields']['number']->ulid])->toBe('12.50')
@@ -318,6 +318,7 @@ describe('reading items', function (): void {
             inventoryCall($this, $team[$role], 'GET', $uri)->assertOk()->assertExactJson(['data' => [
                 'id' => $item->ulid,
                 'values' => [$name->ulid => 'Hammer'],
+                'attachments' => [],
                 'created_at' => $item->created_at->toIso8601String(),
                 'updated_at' => $item->updated_at->toIso8601String(),
             ]]);

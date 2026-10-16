@@ -14,11 +14,16 @@
 //        php concurrent-action.php <go file> create-item <user id> <inventory id> [<field ULID> <value>]
 //        php concurrent-action.php <go file> update-item <user id> <inventory id> <item id> <field ULID> <value>
 //        php concurrent-action.php <go file> delete-item <inventory id> <item id>
+//        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload>
+//        php concurrent-action.php <go file> remove-attachment <user id> <inventory id> <item id> <attachment id>
+//
+// The files of the attachments are written to the local disk, whose folder the test gives with TEST_STORAGE_ROOT (the
+// folder its own process writes to), so that a child never writes to the real storage of the application.
 //
 // It follows the protocol of Tests\Support\ConcurrentChild: boots, says "ready", waits for the go file and only then
 // acts. It prints what happened as one JSON line: {"result": "deleted"}, {"result": "refused", "reason":
 // "last_administrator"} (or any other reason or exception name); {"result": "demoted"} for admin-demote. The actions on
-// inventories answer {"result": "created"}, "deleted" or "updated", or {"result": "refused", "reason": "item_limit_reached"}
+// inventories answer {"result": "created"}, "deleted" or "updated" ("uploaded" and "removed" for a file), or {"result": "refused", "reason": "item_limit_reached"}
 // (the code of a quota) / {"result": "refused", "reason": "invalid:<key>"} (a 422: the first key of its errors) /
 // {"result": "refused", "reason": "gone"} (what it works on was deleted by the other process first).
 //
@@ -32,12 +37,17 @@ declare(strict_types=1);
 use App\Admin\Exceptions\UserAdministrationRefused;
 use App\Admin\UserAdministration;
 use App\Auth\Exceptions\AccountDeletionRefused;
+use App\Inventories\Attachments\Attachments;
+use App\Inventories\Exceptions\AttachmentLimitReachedException;
+use App\Inventories\Exceptions\FieldFileLimitReachedException;
 use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
 use App\Inventories\Exceptions\ItemLimitReachedException;
+use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Inventories\Inventories;
 use App\Inventories\InventoryFields;
 use App\Inventories\Items;
+use App\Models\Attachment;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
@@ -48,6 +58,7 @@ use App\Workspaces\Locks;
 use App\Workspaces\Workspaces;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Tests\Support\ConcurrentChild;
@@ -60,6 +71,11 @@ require $base.'/vendor/autoload.php';
 $arguments = array_slice($argv, 3);
 
 $app = ConcurrentChild::boot($base);
+
+// The local disk of the child is the folder of the test, not the real storage of the application.
+if (is_string(getenv('TEST_STORAGE_ROOT')) && getenv('TEST_STORAGE_ROOT') !== '') {
+    $app->make('config')->set('filesystems.disks.local.root', getenv('TEST_STORAGE_ROOT'));
+}
 
 ConcurrentChild::awaitGo($go);
 
@@ -168,6 +184,24 @@ function changeInventories(Application $app, string $action, array $arguments): 
             $app->make(Items::class)->delete(Inventory::query()->findOrFail((int) $arguments[0]), Item::query()->findOrFail((int) $arguments[1]));
 
             return ['result' => 'deleted'];
+        case 'upload-attachment':
+            $app->make(Attachments::class)->upload(
+                Inventory::query()->findOrFail((int) $arguments[1]),
+                Item::query()->findOrFail((int) $arguments[2]),
+                new UploadedFile($arguments[3], basename($arguments[3]), null, null, true),
+                User::query()->findOrFail((int) $arguments[0]),
+            );
+
+            return ['result' => 'uploaded'];
+        case 'remove-attachment':
+            $app->make(Attachments::class)->delete(
+                Inventory::query()->findOrFail((int) $arguments[1]),
+                Item::query()->findOrFail((int) $arguments[2]),
+                Attachment::query()->findOrFail((int) $arguments[3]),
+                User::query()->findOrFail((int) $arguments[0]),
+            );
+
+            return ['result' => 'removed'];
         case 'update-item':
             $app->make(Items::class)->update(Inventory::query()->findOrFail((int) $arguments[1]), Item::query()->findOrFail((int) $arguments[2]), [$arguments[3] => $arguments[4]], User::query()->findOrFail((int) $arguments[0]));
 
@@ -181,7 +215,7 @@ try {
     $outcome = match ($action) {
         'hold-admin-lock' => holdAdministratorLock($app->make(Locks::class), $go, (int) $arguments[0]),
         'insert-user' => insertUserWhileLocked($go),
-        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item' => changeInventories($app, $action, $arguments),
+        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
 } catch (AccountDeletionRefused $refusal) {
@@ -190,7 +224,7 @@ try {
     $outcome = ['result' => 'refused', 'reason' => $refusal->reason];
 } catch (LastWorkspaceException) {
     $outcome = ['result' => 'refused', 'reason' => LastWorkspaceException::CODE];
-} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException $limit) {
+} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException $limit) {
     $outcome = ['result' => 'refused', 'reason' => $limit::CODE];
 } catch (ModelNotFoundException) {
     // Something the action needed was deleted by the other process first (the account that writes, the inventory...).

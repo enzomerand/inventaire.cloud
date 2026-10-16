@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Inventories\Attachments\WorkspaceStorage;
 use App\Models\Concerns\HasUlidRouteKey;
 use Database\Factories\WorkspaceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -20,9 +21,13 @@ use Illuminate\Support\Carbon;
  * in each ({@see WorkspaceMember}). The numeric `id` is internal; `ulid` is the identifier the outside world uses
  * (URLs, API), so that nothing reveals how many workspaces exist or lets one be guessed ({@see HasUlidRouteKey}).
  *
+ * `storage_used` is the number of bytes its files use, kept on the row so that nothing has to add them up: it is moved
+ * only by {@see WorkspaceStorage}, with the workspace locked, in the transaction that adds or removes the file.
+ *
  * @property int $id
  * @property string $ulid
  * @property string $name
+ * @property int $storage_used
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -31,6 +36,25 @@ final class Workspace extends Model
 {
     /** @use HasFactory<WorkspaceFactory> */
     use HasFactory, HasUlidRouteKey;
+
+    /**
+     * The attributes a new workspace starts with: no file, as the column does.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = ['storage_used' => 0];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, mixed>
+     */
+    protected function casts(): array
+    {
+        return [
+            'storage_used' => 'integer',
+        ];
+    }
 
     /**
      * The users who belong to the workspace, each with a `pivot` carrying their role.

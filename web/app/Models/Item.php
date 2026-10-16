@@ -74,6 +74,20 @@ final class Item extends Model
     }
 
     /**
+     * The files attached to the item, in the order they were uploaded. They go with it (the foreign key cascades; the
+     * files themselves are purged by the code that deletes the item).
+     *
+     * The route key of an attachment is its ULID, and one is bound through this relation (`/items/{item}/attachments/{attachment}`),
+     * so a file of another item is a 404.
+     *
+     * @return HasMany<Attachment, $this>
+     */
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(Attachment::class)->orderBy('id');
+    }
+
+    /**
      * The history of the item. Unordered: the caller reads the latest changes first. It goes with the item (the foreign
      * key cascades).
      *
