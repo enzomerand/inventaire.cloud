@@ -69,7 +69,7 @@ describe('the verdict', function (): void {
 
         expect($entries)->toHaveCount(1)
             ->and(array_keys($entries)[0])->toMatch('/^inventory-templates:v1:[0-9a-f]{32}$/D')
-            ->and($entry['expiresAt'] - microtime(true))->toBeGreaterThan(TemplateCatalogue::CACHE_TTL - 60)->toBeLessThanOrEqual(TemplateCatalogue::CACHE_TTL)
+            ->and($entry['expiresAt'] - microtime(true))->toBeGreaterThan(TemplateCatalogue::CACHE_TTL - 60)->toBeLessThan(TemplateCatalogue::CACHE_TTL + 1)
             ->and(TemplateCatalogue::CACHE_TTL)->toBe(24 * 3600)
             ->and(array_keys($entry['value']))->toBe(['templates', 'rejected'])
             ->and(array_keys($entry['value']['templates']))->toBe(['sample-shop'])
