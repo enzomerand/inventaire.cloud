@@ -8,9 +8,9 @@
     },
     "description": {
         "fr": [
-            "Ce modèle s'adresse aux amateurs qui veulent savoir ce qu'il y a dans leur cave, suivre le vieillissement de leurs vins et ne pas oublier une belle bouteille. Chaque ligne décrit une cuvée : domaine, appellation, couleur, millésime, cépages, nombre de bouteilles et prix.",
+            "Ce modèle s'adresse aux amateurs qui veulent savoir ce qu'il y a dans leur cave, suivre le vieillissement de leurs vins et ne pas oublier une belle bouteille. Chaque ligne décrit une cuvée : domaine, appellation, type de vin, millésime, cépages, nombre de bouteilles et prix.",
             "Les champs « À boire à partir de » et « À boire avant » donnent la période de garde : triez la colonne « À boire avant » pour ouvrir en priorité les bouteilles qui arrivent à maturité. Notez l'emplacement (casier, rangée) pour retrouver une bouteille sans fouiller, et gardez vos impressions dans les notes de dégustation.",
-            "Astuces : photographiez l'étiquette de chaque cuvée, filtrez par couleur ou par appellation pour préparer un repas, et affichez le total de la colonne « Bouteilles en cave » pour connaître la taille de votre cave. Quand vous ouvrez une bouteille, diminuez simplement la quantité : l'historique garde la trace de chaque changement."
+            "Astuces : photographiez l'étiquette de chaque cuvée, filtrez par type de vin ou par appellation pour préparer un repas, et affichez le total de la colonne « Bouteilles en cave » pour connaître la taille de votre cave. Quand vous ouvrez une bouteille, diminuez simplement la quantité : l'historique garde la trace de chaque changement."
         ],
         "en": [
             "This template is for enthusiasts who want to know what is in their cellar, follow how their wines age and never forget a great bottle. Each row describes a wine: producer, appellation, type, vintage, grape varieties, number of bottles and price.",
@@ -29,7 +29,7 @@
         {
             "key": "type",
             "type": "select",
-            "name": { "fr": "Couleur", "en": "Type" },
+            "name": { "fr": "Type", "en": "Type" },
             "options": {
                 "choices": [
                     { "key": "red", "label": { "fr": "Rouge", "en": "Red" }, "color": "red" },

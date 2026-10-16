@@ -25,6 +25,10 @@
     /* Header menus: widest they grow, and the gap kept to the edge of the screen on a phone. */
     --app-dropdown-max-width: 24rem;
     --app-dropdown-gutter: 0.75rem;
+
+    /* The stars of a rating on the public pages: an amber with at least 3:1 contrast against a card (WCAG 1.4.11), which
+       Tabler's yellow (about 2:1) does not have. */
+    --app-stars-color: #b45309;
 }
 
 /*
@@ -271,5 +275,23 @@
 
 /* A heading that takes the cursor when its step opens (so that a screen reader reads it): the cursor is not drawn on it. */
 .modal-body [tabindex='-1']:focus {
+    outline: none;
+}
+
+/*
+ * The public pages of the templates. The stars of an example rating, and a gallery card whose link is its title: the link
+ * is stretched over the card (Bootstrap's `stretched-link`), so the focus ring that would surround only the title surrounds
+ * the whole card instead.
+ */
+.app-stars {
+    color: var(--app-stars-color);
+}
+
+.app-template-card:has(.stretched-link:focus-visible) {
+    outline: 2px solid var(--tblr-primary);
+    outline-offset: 2px;
+}
+
+.app-template-card .stretched-link:focus-visible {
     outline: none;
 }

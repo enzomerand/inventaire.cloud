@@ -21,9 +21,10 @@
         class="nav-link dropdown-toggle d-flex align-items-center gap-1 bg-transparent border-0"
         data-bs-toggle="dropdown"
         aria-expanded="false"
-        aria-label="{{ __('Change language') }}"
     >
         <x-tabler-language aria-hidden="true" />
+        {{-- The name of the button holds the label that is seen (WCAG 2.5.3): a person who says "Français" to a voice control finds it. --}}
+        <span class="visually-hidden">{{ __('Change language') }}</span>
         <span>{{ $names[$current] ?? $current }}</span>
     </button>
 

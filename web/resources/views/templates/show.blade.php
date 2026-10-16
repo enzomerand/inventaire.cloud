@@ -9,6 +9,9 @@
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php); the icon of a template is
     one of a closed list (TemplateIcons) drawn by a dynamic component.
+
+    Accessibility: each table has a caption that only a screen reader shows (it names the table in the list of tables of the
+    page), a rating is an image with its grade as a sentence (the stars are in a color with 3:1 contrast, see `.app-stars`).
 --}}
 @extends('layouts.app')
 
@@ -69,6 +72,7 @@
                 </div>
                 <div class="table-responsive">
                     <table class="table table-vcenter card-table">
+                        <caption class="visually-hidden">{{ __('Fields of the template :name', ['name' => $template->name($locale)]) }}</caption>
                         <thead>
                             <tr>
                                 <th scope="col">{{ __('Name') }}</th>
@@ -112,6 +116,7 @@
                     </div>
                     <div class="table-responsive">
                         <table class="table table-vcenter card-table">
+                            <caption class="visually-hidden">{{ __('Example rows of the template :name', ['name' => $template->name($locale)]) }}</caption>
                             <thead>
                                 <tr>
                                     @foreach ($examples['columns'] as $column)
@@ -133,7 +138,7 @@
                                                         </span>
                                                         @break
                                                     @case('stars')
-                                                        <span class="text-yellow text-nowrap" role="img" aria-label="{{ $cell['label'] }}" title="{{ $cell['label'] }}">{{ $cell['text'] }}</span>
+                                                        <span class="app-stars text-nowrap" role="img" aria-label="{{ $cell['label'] }}" title="{{ $cell['label'] }}">{{ $cell['text'] }}</span>
                                                         @break
                                                     @case('swatch')
                                                         <span class="d-inline-flex align-items-center gap-2">

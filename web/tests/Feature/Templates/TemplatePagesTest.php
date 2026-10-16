@@ -82,6 +82,22 @@ describe('the language of a public page', function (): void {
         $this->get('/templates', ['Accept-Language' => 'fr'])->assertOk()->assertSee('Inventory templates');
     });
 
+    it('names the button of the language switcher after the language it shows, as a person who sees it says it', function (): void {
+        $page = templateDom($this->get('/en/templates/sample-tools')->assertOk());
+        $button = '//button[@data-bs-toggle="dropdown"]';
+
+        // No aria-label that replaces the visible words: the name is made of them, the sentence that says what the button does first.
+        expect($page->query($button)->length)->toBe(1)
+            ->and($page->query($button.'[@aria-label]')->length)->toBe(0)
+            ->and(templateTexts($page, $button.'/span[contains(@class, "visually-hidden")]'))->toBe(['Change language'])
+            ->and(templateTexts($page, $button.'/span[not(@class)]'))->toBe(['English'])
+            ->and(templateTexts($page, $button))->toBe(['Change language English']);
+
+        $french = templateDom($this->get('/templates/sample-tools')->assertOk());
+
+        expect(templateTexts($french, $button))->toBe(['Changer de langue Français']);
+    });
+
     it('links to the same page in every language from the switcher, which stores nothing', function (): void {
         $page = templateDom($this->get('/en/templates/sample-tools')->assertOk());
 
@@ -108,22 +124,33 @@ describe('the gallery', function (): void {
 
         expect(templateTexts($page, '//h2'))->toBe(['Maison et famille', 'Commerce et entreprise', 'Loisirs et atelier'])
             ->and(templateTexts($page, '//h3'))->toBe(['Inventaire du logement', 'Stock de boutique', 'Outils', 'Vinyles'])
-            ->and(templateAttributes($page, '//a[contains(@class, "card")]', 'href'))->toBe(['/templates/sample-home', '/templates/sample-shop', '/templates/sample-tools', '/templates/sample-records']);
+            ->and(templateAttributes($page, '//h3/a[contains(@class, "stretched-link")]', 'href'))->toBe(['/templates/sample-home', '/templates/sample-shop', '/templates/sample-tools', '/templates/sample-records']);
     });
 
     it('shows the summary and the number of fields of each template', function (): void {
         $page = templateDom($this->get('/en/templates')->assertOk());
 
         expect(templateTexts($page, '//h2'))->toBe(['Home and family', 'Business and retail', 'Hobbies and workshop'])
-            ->and(templateTexts($page, '//a[contains(@class, "card")]//p'))->toContain('Track your products, quantities and prices, with the barcode of each product.')
-            ->and(templateTexts($page, '//a[contains(@class, "card")]//div[contains(@class, "small")]'))->toBe(['13 fields', '8 fields', '5 fields', '6 fields'])
-            ->and(templateAttributes($page, '//a[contains(@class, "card")]', 'href'))->toBe(['/en/templates/sample-home', '/en/templates/sample-shop', '/en/templates/sample-records', '/en/templates/sample-tools']);
+            ->and(templateTexts($page, '//div[contains(@class, "app-template-card")]//p'))->toContain('Track your products, quantities and prices, with the barcode of each product.')
+            ->and(templateTexts($page, '//div[contains(@class, "app-template-card")]//div[contains(@class, "small")]'))->toBe(['13 fields', '8 fields', '5 fields', '6 fields'])
+            ->and(templateAttributes($page, '//h3/a[contains(@class, "stretched-link")]', 'href'))->toBe(['/en/templates/sample-home', '/en/templates/sample-shop', '/en/templates/sample-records', '/en/templates/sample-tools']);
     });
 
     it('draws the icon of each template and nothing the file says', function (): void {
         $page = templateDom($this->get('/templates')->assertOk());
 
-        expect($page->query('//a[contains(@class, "card")]//svg')->length)->toBe(4);
+        expect($page->query('//div[contains(@class, "app-template-card")]//svg')->length)->toBe(4);
+    });
+
+    it('makes the title of each card its link, and nothing else: a card is not one link around a heading and a paragraph', function (): void {
+        $page = templateDom($this->get('/templates')->assertOk());
+
+        expect($page->query('//div[contains(@class, "app-template-card")]')->length)->toBe(4)
+            ->and(templateTexts($page, '//div[contains(@class, "app-template-card")]//h3/a'))->toBe(['Inventaire du logement', 'Stock de boutique', 'Outils', 'Vinyles'])
+            ->and($page->query('//div[contains(@class, "app-template-card")]//a')->length)->toBe(4)
+            ->and(templateAttributes($page, '//div[contains(@class, "app-template-card")]//a', 'class'))->each->toContain('stretched-link')
+            // Nothing a link wraps but its own words.
+            ->and($page->query('//a[.//h2 or .//h3 or .//p or .//div]')->length)->toBe(0);
     });
 
     it('says so when there is no template, and is still a page', function (): void {
@@ -187,6 +214,48 @@ describe('the page of a template', function (): void {
 
         expect(templateTexts($page, '(//table)[2]/tbody/tr[1]/td'))->toBe(['Lave-linge', 'Cuisine', 'Électroménager', '649,00 €', '14 sept. 2023', '14 sept. 2026', '★★★★☆', 'Oui', '68,5 kg', 'garantie cuisine', '—'])
             ->and(templateTexts($page, '(//table)[1]/tbody/tr/td[1]'))->toContain('Choix', 'Choix multiple', 'Montant');
+    });
+
+    it('gives each table a caption that only a screen reader shows, naming the table after the template', function (): void {
+        $english = templateDom($this->get('/en/templates/sample-records')->assertOk());
+        $french = templateDom($this->get('/templates/sample-records')->assertOk());
+
+        expect($english->query('//table')->length)->toBe(2)
+            ->and(templateTexts($english, '//table/caption'))->toBe(['Fields of the template Records', 'Example rows of the template Records'])
+            ->and(templateAttributes($english, '//table/caption', 'class'))->toBe(['visually-hidden', 'visually-hidden'])
+            // The first child of the table, as the caption must be.
+            ->and($english->query('//table/*[1][self::caption]')->length)->toBe(2)
+            ->and(templateTexts($french, '//table/caption'))->toBe(['Champs du modèle Vinyles', 'Exemples de lignes du modèle Vinyles']);
+    });
+
+    it('draws a rating as an image with its grade as a sentence, in the color of the stars', function (): void {
+        $page = templateDom($this->get('/en/templates/sample-tools')->assertOk());
+        $stars = '(//table)[2]//span[@role="img"]';
+
+        expect(templateAttributes($page, $stars, 'aria-label'))->toBe(['4 out of 5', '2 out of 5'])
+            ->and(templateTexts($page, $stars))->toBe(['★★★★☆', '★★☆☆☆'])
+            ->and(templateAttributes($page, $stars, 'class'))->each->toContain('app-stars')->not->toContain('text-yellow');
+    });
+
+    it('draws the stars in a color that has at least 3:1 contrast with the card they are on', function (): void {
+        $css = (string) file_get_contents(resource_path('css/app.css'));
+
+        expect(preg_match('/--app-stars-color:\s*(#[0-9a-f]{6});/i', $css, $match))->toBe(1)
+            ->and(preg_match('/\.app-stars\s*\{\s*color:\s*var\(--app-stars-color\);/', $css))->toBe(1);
+
+        // The relative luminance and the contrast ratio of WCAG 2.
+        $luminance = function (string $hex): float {
+            $channels = array_map(function (string $part): float {
+                $value = hexdec($part) / 255;
+
+                return $value <= 0.03928 ? $value / 12.92 : (($value + 0.055) / 1.055) ** 2.4;
+            }, str_split(ltrim($hex, '#'), 2));
+
+            return 0.2126 * $channels[0] + 0.7152 * $channels[1] + 0.0722 * $channels[2];
+        };
+        $contrast = ($luminance('#ffffff') + 0.05) / ($luminance($match[1]) + 0.05);
+
+        expect($contrast)->toBeGreaterThanOrEqual(3.0);
     });
 
     it('formats numbers, percentages, codes, colors and moments', function (): void {

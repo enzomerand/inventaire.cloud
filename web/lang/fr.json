@@ -62,6 +62,8 @@
     "Field deleted.": "Champ supprimé.",
     "Field limit reached (:count per inventory).": "Limite de champs atteinte (:count par inventaire).",
     "Fields": "Champs",
+    "Fields of the template :name": "Champs du modèle :name",
+    "Example rows of the template :name": "Exemples de lignes du modèle :name",
     "Field saved.": "Champ enregistré.",
     "Fields describe what each item holds: a name, a quantity, a price, a photo... Add them first, then the items.": "Les champs décrivent ce que contient chaque article : un nom, une quantité, un prix, une photo... Ajoutez-les d'abord, puis les articles.",
     "Filters": "Filtres",
