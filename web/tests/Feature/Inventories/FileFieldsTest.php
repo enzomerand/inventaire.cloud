@@ -435,22 +435,50 @@ describe('a photo field', function (): void {
         'a text' => ['photo.jpg', 'just words'],
     ]);
 
-    it('refuses an image that cannot be read, in the file part', function (): void {
+    it('keeps an image of an allowed type that cannot be decoded, without a thumbnail: it is no more refused than in a plain attachment', function (string $name, string $content, string $mime): void {
         $case = fileFieldsCase();
-        $broken = substr(attachmentImageBytes('png', 40, 20), 0, 33).random_bytes(200);
 
-        $response = attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentUploadedAs('photo.png', $broken), ['field' => $case['photos']->ulid])->assertUnprocessable();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentUploadedAs($name, $content), ['field' => $case['photos']->ulid])->assertCreated();
+        $attachment = Attachment::query()->sole();
 
-        expect(array_keys($response->json('errors')))->toBe(['file'])
-            ->and($response->json('errors.file.0'))->toBe('This image could not be read.')
-            ->and(Attachment::query()->count())->toBe(0)
-            ->and(storedFiles())->toBe([]);
+        expect($attachment->mime)->toBe($mime)
+            ->and($attachment->thumbnail_path)->toBeNull()
+            ->and(storedFiles())->toBe([$attachment->path])
+            ->and(fileFieldValue($case['item'], $case['photos']))->toBe([$attachment->ulid]);
+    })->with([
+        'an animated WebP' => ['loop.webp', attachmentAnimatedWebpBytes(), 'image/webp'],
+        'a PNG that is broken after its header' => ['photo.png', substr(attachmentImageBytes('png', 40, 20), 0, 33).'garbage after the header', 'image/png'],
+    ]);
+
+    it('gives the dimensions of an animated WebP that GD cannot decode, from its header', function (): void {
+        $case = fileFieldsCase();
+
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentUploadedAs('loop.webp', attachmentAnimatedWebpBytes(64, 32)), ['field' => $case['photos']->ulid])->assertCreated();
+        $attachment = Attachment::query()->sole();
+
+        expect([$attachment->width, $attachment->height])->toBe([64, 32]);
     });
 
-    it('refuses an image whose header cannot be read', function (): void {
+    it('keeps an image whose header gives no size, without a thumbnail, as long as its content is of an allowed type', function (): void {
+        $case = fileFieldsCase();
+        $png = attachmentImageBytes('png', 4, 4);
+        $empty = substr($png, 0, 16).pack('NN', 0, 0).substr($png, 24);
+
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentUploadedAs('photo.png', $empty), ['field' => $case['photos']->ulid])->assertCreated();
+        $attachment = Attachment::query()->sole();
+
+        expect($attachment->mime)->toBe('image/png')
+            ->and($attachment->thumbnail_path)->toBeNull()
+            ->and([$attachment->width, $attachment->height])->toBe([null, null]);
+    });
+
+    it('still refuses a file whose content is not of an allowed image type, even when its first bytes look like an image header', function (): void {
         $case = fileFieldsCase();
 
-        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentUploadedAs('photo.png', substr(attachmentImageBytes('png', 40, 20), 0, 12)), ['field' => $case['photos']->ulid])->assertUnprocessable()->assertJsonValidationErrors('file');
+        $response = attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentUploadedAs('photo.png', substr(attachmentImageBytes('png', 40, 20), 0, 12)), ['field' => $case['photos']->ulid])->assertUnprocessable();
+
+        expect($response->json('errors.file.0'))->toBe('This field only takes images: JPEG, PNG, WebP or GIF.')
+            ->and(storedFiles())->toBe([]);
     });
 
     it('keeps an image that has too many pixels to get a thumbnail: it is readable', function (): void {

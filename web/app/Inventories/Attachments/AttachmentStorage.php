@@ -148,7 +148,8 @@ final class AttachmentStorage
 
     /**
      * Deletes files at once, for the ones that were written for a transaction that failed. A file that cannot be deleted
-     * is written in the log (nothing refers to it: it is just left on the disk) and does not hide the failure that led here.
+     * (the disk throws, or answers that it did not: a disk that does not throw says so by returning false) is written in the
+     * log (nothing refers to it: it is just left on the disk) and does not hide the failure that led here.
      *
      * @param  list<string>  $paths
      */
@@ -156,10 +157,16 @@ final class AttachmentStorage
     {
         foreach ($paths as $path) {
             try {
-                $this->disk($disk)->delete($path);
+                if ($this->disk($disk)->delete($path) !== false) {
+                    continue;
+                }
+
+                $exception = null;
             } catch (Throwable $exception) {
-                Log::warning('A file written for a change that failed could not be deleted: it stays on the disk.', ['disk' => $disk, 'path' => $path, 'exception' => $exception]);
+                // Logged below, with what it said.
             }
+
+            Log::warning('A file written for a change that failed could not be deleted: it stays on the disk.', ['disk' => $disk, 'path' => $path, 'exception' => $exception]);
         }
     }
 

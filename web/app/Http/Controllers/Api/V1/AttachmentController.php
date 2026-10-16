@@ -22,6 +22,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Number;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -46,7 +47,7 @@ final class AttachmentController extends Controller
     /**
      * Attaches the `file` part of the request to the item (`201`, the item as it is now), as the content of the file or photo
      * `field` of the inventory when one is named (its ULID). `422` when the file is missing or too large, the field is not a
-     * file or photo field of the inventory, or a photo field is given something that is not a readable image.
+     * file or photo field of the inventory, or a photo field is given something that is not a JPEG, PNG, WebP or GIF image.
      */
     public function store(UploadAttachmentRequest $request, Inventory $inventory, Item $item): JsonResponse
     {
@@ -88,13 +89,13 @@ final class AttachmentController extends Controller
     }
 
     /**
-     * The file, as a download; shown in the page instead with `?inline=1` for an image or a PDF.
+     * The file, as a download; shown in the page instead with `?inline=1` for an image or a PDF. `304` for a reader who has it already.
      */
-    public function show(Request $request, Inventory $inventory, Item $item, Attachment $attachment): StreamedResponse|JsonResponse
+    public function show(Request $request, Inventory $inventory, Item $item, Attachment $attachment): Response|StreamedResponse|JsonResponse
     {
         Gate::authorize('view', $inventory);
 
-        return StoredFileResponse::file($attachment, $this->storage, $request->boolean('inline'));
+        return StoredFileResponse::file($attachment, $this->storage, $request);
     }
 
     /**

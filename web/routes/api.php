@@ -78,7 +78,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::delete('/inventories/{inventory}/items/{item}', [ItemController::class, 'destroy'])->name('inventories.items.destroy');
             Route::get('/inventories/{inventory}/items/{item}/revisions', [ItemRevisionController::class, 'index'])->name('inventories.items.revisions.index');
 
-            Route::post('/inventories/{inventory}/items/{item}/attachments', [AttachmentController::class, 'store'])->name('inventories.items.attachments.store');
+            Route::post('/inventories/{inventory}/items/{item}/attachments', [AttachmentController::class, 'store'])->middleware('throttle:attachment-upload')->name('inventories.items.attachments.store');
             Route::get('/inventories/{inventory}/items/{item}/attachments/{attachment}', [AttachmentController::class, 'show'])->name('inventories.items.attachments.show');
             Route::get('/inventories/{inventory}/items/{item}/attachments/{attachment}/thumbnail', [AttachmentController::class, 'thumbnail'])->name('inventories.items.attachments.thumbnail');
             Route::delete('/inventories/{inventory}/items/{item}/attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('inventories.items.attachments.destroy');

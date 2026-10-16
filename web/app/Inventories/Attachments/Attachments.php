@@ -32,7 +32,7 @@ use Throwable;
  * A file is a plain attachment of the item, or the content of one of its file or photo fields ({@see UploadedFilesType}): then
  * the ULID of the attachment is also appended to the value of the field (and taken out when the file is removed), in the
  * same transaction, under the lock of the item, so that the list and the files cannot disagree. A photo field takes images
- * only, and refuses one that cannot be read.
+ * only (JPEG, PNG, WebP or GIF, by their content).
  *
  * A file is written to the disk **before** the transaction that records it, so that the transaction stays short and holds its
  * locks for no longer than the database needs: if that transaction fails (the quota is reached, the item was deleted
@@ -75,8 +75,9 @@ final class Attachments
      * Attaches an uploaded file to an item.
      *
      * The type is detected from the content and the name is cleaned up ({@see IncomingFile}). A JPEG, PNG, WebP or GIF image
-     * gets a thumbnail, when one can be made ({@see Thumbnails}); the file is kept without one when it cannot, unless it is for
-     * a photo field, which refuses an image that cannot be read.
+     * gets a thumbnail, when one can be made ({@see Thumbnails}); the file is kept without one when it cannot (an animated WebP
+     * that GD cannot decode, an image too large to be decoded), in a photo field too: a photo field refuses what is not an
+     * image of those types, not an image it cannot draw.
      *
      * @param  User  $uploader  The person who uploads it.
      * @param  string|null  $field  The ULID (in any case) of the file or photo field of the inventory the file fills, or null for a plain attachment.
@@ -103,8 +104,10 @@ final class Attachments
         $written = [];
 
         try {
-            $this->storage->writeFrom($disk, $attachment->path, $incoming->path);
+            // Noted before it is written: a disk that fails half way through leaves a part of the file behind, which the
+            // cleanup below must delete too.
             $written[] = $attachment->path;
+            $this->storage->writeFrom($disk, $attachment->path, $incoming->path);
 
             if ($thumbnail !== null) {
                 $attachment->thumbnail_path = AttachmentStorage::thumbnailPath($attachment->path);
@@ -280,30 +283,27 @@ final class Attachments
     /**
      * The thumbnail of an image, or null when none is made.
      *
-     * For a photo field (`$strict`) the file must be an image that can be read: anything else is refused. Anywhere else an
-     * image that cannot be decoded, or is too large to be, is kept without a thumbnail.
+     * A photo field (`$imagesOnly`) refuses a file whose content is not an image of a type that gets a thumbnail. An image of
+     * one of those types is kept when it has no thumbnail, in a photo field as anywhere else: its header may give no size, GD
+     * may not decode it (an animated WebP) or it may be too large to be decoded.
      *
      * @param  ImageInfo|null  $image  What the header says, null when the file is not an image of a supported type or its header is unreadable.
      *
-     * @throws ValidationException When `$strict` and the file is not a readable image.
+     * @throws ValidationException When `$imagesOnly` and the file is not an image of one of the supported types.
      */
-    private function thumbnailOf(IncomingFile $file, ?ImageInfo $image, bool $strict): ?Thumbnail
+    private function thumbnailOf(IncomingFile $file, ?ImageInfo $image, bool $imagesOnly): ?Thumbnail
     {
-        if ($image === null) {
-            if ($strict) {
-                throw ValidationException::withMessages(['file' => [$file->isImage() ? __('This image could not be read.') : __('This field only takes images: JPEG, PNG, WebP or GIF.')]]);
-            }
+        if ($imagesOnly && ! $file->isImage()) {
+            throw ValidationException::withMessages(['file' => [__('This field only takes images: JPEG, PNG, WebP or GIF.')]]);
+        }
 
+        if ($image === null) {
             return null;
         }
 
         try {
             return $this->thumbnails->make($file->path, $file->mime, $image);
         } catch (UnreadableImageException) {
-            if ($strict) {
-                throw ValidationException::withMessages(['file' => [__('This image could not be read.')]]);
-            }
-
             return null;
         }
     }

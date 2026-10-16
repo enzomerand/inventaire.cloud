@@ -55,7 +55,18 @@ class AppServiceProvider extends ServiceProvider
         $this->registerSignInLimiters();
         $this->registerAccountLimiters();
         $this->registerWorkspaceLimiters();
+        $this->registerInventoryLimiters();
         $this->registerAdminLimiters();
+    }
+
+    /**
+     * The rate limiter of the endpoint that uploads a file to an item (limit in config/inventories.php,
+     * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks.
+     */
+    private function registerInventoryLimiters(): void
+    {
+        RateLimiter::for('attachment-upload', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.uploads_per_minute'))
+            ->by('attachment-upload:'.$this->signedInKey($request)));
     }
 
     /**

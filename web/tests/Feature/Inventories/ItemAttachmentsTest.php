@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\UnableToReadFile;
 
 require_once __DIR__.'/../../Support/attachments.php';
 
@@ -320,6 +321,34 @@ describe('the limits', function (): void {
     });
 });
 
+describe('the pace of uploads', function (): void {
+    it('is throttled per person, with the usual answer', function (): void {
+        config(['inventories.uploads_per_minute' => 3]);
+        $case = attachmentCase();
+
+        foreach (range(1, 3) as $_) {
+            attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        }
+
+        $refused = attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertTooManyRequests();
+
+        // The allowance is the person's own, reading is not throttled, and a minute renews it.
+        attachmentUpload($this, $case['team']['editor'], $case['files'], attachmentPdf())->assertCreated();
+        attachmentGet($this, $case['team']['owner'], $case['uri'])->assertOk();
+        $this->travel(61)->seconds();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+
+        expect($refused->headers->get('Retry-After'))->not->toBeNull()
+            ->and($refused->json('message'))->toBeString()
+            ->and(Attachment::query()->count())->toBe(5)
+            ->and(storedFiles())->toHaveCount(5);
+    });
+
+    it('is thirty a minute unless configured otherwise', function (): void {
+        expect(config('inventories.uploads_per_minute'))->toBe(30);
+    });
+});
+
 describe('a failed upload', function (): void {
     it('leaves no file on the disk when the quota refuses it', function (): void {
         config(['inventories.storage_per_workspace' => 5]);
@@ -352,6 +381,54 @@ describe('a failed upload', function (): void {
         expect(storedFiles())->toBe([]);
     });
 
+    it('deletes the file that the disk wrote only in part before it failed', function (): void {
+        $case = attachmentCase();
+        $disk = Storage::disk(ATTACHMENT_TEST_DISK);
+        attachmentDiskProxy()->shouldReceive('put')->once()->andReturnUsing(function (string $path) use ($disk): bool {
+            $disk->put($path, 'the first bytes of it');
+
+            return false;
+        });
+
+        expect(fn () => app(Attachments::class)->upload($case['inventory'], $case['item'], attachmentPdf(), $case['team']['owner']))
+            ->toThrow(RuntimeException::class);
+
+        expect(storedFiles())->toBe([])
+            ->and(Attachment::query()->count())->toBe(0);
+    });
+
+    it('deletes the thumbnail that the disk wrote only in part, and the file with it', function (): void {
+        $case = attachmentCase();
+        $disk = Storage::disk(ATTACHMENT_TEST_DISK);
+        $calls = 0;
+        attachmentDiskProxy()->shouldReceive('put')->twice()->andReturnUsing(function (string $path, mixed $contents) use ($disk, &$calls): bool {
+            if (++$calls === 1) {
+                return (bool) $disk->put($path, $contents);
+            }
+
+            $disk->put($path, 'a part of the thumbnail');
+
+            return false;
+        });
+
+        expect(fn () => app(Attachments::class)->upload($case['inventory'], $case['item'], attachmentImage('a.png', 'png', 600, 300), $case['team']['owner']))
+            ->toThrow(RuntimeException::class);
+
+        expect(storedFiles())->toBe([]);
+    });
+
+    it('writes a warning in the log for a file that the disk says it did not delete', function (): void {
+        attachmentCase();
+        attachmentDiskProxy()->shouldReceive('delete')->once()->with('workspaces/a/leftover')->andReturn(false);
+        Log::spy();
+
+        app(AttachmentStorage::class)->forgetNow(ATTACHMENT_TEST_DISK, ['workspaces/a/leftover']);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'could not be deleted')
+            && $context['disk'] === ATTACHMENT_TEST_DISK
+            && $context['path'] === 'workspaces/a/leftover')->once();
+    });
+
     it('leaves no file on the disk when the database fails', function (): void {
         $case = attachmentCase();
         Attachment::creating(fn () => throw new RuntimeException('The database is down.'));
@@ -377,7 +454,8 @@ describe('downloading a file', function (): void {
             ->and($response->headers->get('Content-Disposition'))->toBe('attachment; filename=Facture.pdf')
             ->and($response->headers->get('X-Content-Type-Options'))->toBe('nosniff')
             ->and($response->headers->get('Content-Security-Policy'))->toBe("default-src 'none'; sandbox")
-            ->and($response->headers->get('Cache-Control'))->toContain('private')->toContain('max-age=3600')
+            ->and($response->headers->get('Cache-Control'))->toContain('private')->toContain('no-cache')->not->toContain('max-age')
+            ->and($response->headers->get('ETag'))->toBe('"'.$attachment->ulid.'"')
             ->and($response->headers->get('Content-Length'))->toBe((string) $attachment->size);
     });
 
@@ -404,8 +482,7 @@ describe('downloading a file', function (): void {
 
         expect($plain->headers->get('Content-Disposition'))->toStartWith('attachment')
             ->and($asked->headers->get('Content-Disposition'))->toStartWith($inline ? 'inline' : 'attachment')
-            ->and($asked->headers->get('X-Content-Type-Options'))->toBe('nosniff')
-            ->and($asked->headers->get('Content-Security-Policy'))->toBe("default-src 'none'; sandbox");
+            ->and($asked->headers->get('X-Content-Type-Options'))->toBe('nosniff');
     })->with([
         'png' => ['a.png', attachmentImageBytes('png'), true],
         'jpeg' => ['a.jpg', attachmentImageBytes('jpeg'), true],
@@ -416,6 +493,97 @@ describe('downloading a file', function (): void {
         'svg' => ['a.svg', '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>alert(1)</script></svg>', false],
         'text' => ['a.txt', 'hello', false],
     ]);
+
+    it('lets a PDF be shown in the page by Chromium: no sandbox on a PDF asked inline, a sandbox on everything else', function (): void {
+        $case = attachmentCase();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentImage('a.png'))->assertCreated();
+        [$pdf, $image] = Attachment::query()->orderBy('id')->get()->all();
+        $get = fn (Attachment $file, string $query = ''): string => (string) attachmentGet($this, $case['team']['owner'], $case['files'].'/'.$file->ulid.$query)->headers->get('Content-Security-Policy');
+        $nosniff = attachmentGet($this, $case['team']['owner'], $case['files'].'/'.$pdf->ulid.'?inline=1')->headers->get('X-Content-Type-Options');
+
+        expect($get($pdf, '?inline=1'))->toBe("default-src 'none'")
+            ->and($get($pdf))->toBe("default-src 'none'; sandbox")
+            ->and($get($image, '?inline=1'))->toBe("default-src 'none'; sandbox")
+            ->and($get($image))->toBe("default-src 'none'; sandbox")
+            ->and($nosniff)->toBe('nosniff');
+    });
+
+    it('is revalidated each time rather than kept for an hour, and answers 304 to a reader who has it', function (): void {
+        $case = attachmentCase();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        $attachment = Attachment::query()->sole();
+        $address = $case['files'].'/'.$attachment->ulid;
+        $etag = (string) attachmentGet($this, $case['team']['viewer'], $address)->assertOk()->headers->get('ETag');
+
+        $same = attachmentGet($this, $case['team']['viewer'], $address, ['If-None-Match' => $etag])->assertStatus(304);
+        $inline = attachmentGet($this, $case['team']['viewer'], $address.'?inline=1', ['If-None-Match' => $etag])->assertStatus(304);
+        attachmentGet($this, $case['team']['viewer'], $address, ['If-None-Match' => '"another"'])->assertOk();
+
+        expect($etag)->toBe('"'.$attachment->ulid.'"')
+            ->and($same->getContent())->toBe('')
+            ->and($same->headers->get('ETag'))->toBe($etag)
+            ->and($same->headers->get('Cache-Control'))->toContain('private')->toContain('no-cache')
+            ->and($inline->headers->get('ETag'))->toBe($etag);
+    });
+
+    it('answers 304 only to a reader who may read the file', function (): void {
+        $case = attachmentCase();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        $address = $case['files'].'/'.Attachment::query()->sole()->ulid;
+        $etag = '"'.Attachment::query()->sole()->ulid.'"';
+
+        attachmentGet($this, $case['team']['stranger'], $address, ['If-None-Match' => $etag])->assertNotFound();
+        $this->flushSession();
+        app('auth')->forgetGuards();
+        $this->get($address, frontend(['If-None-Match' => $etag]))->assertUnauthorized();
+    });
+
+    it('answers 404 in JSON, not 500, when the disk of the file is no longer configured', function (): void {
+        $case = attachmentCase();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        $attachment = Attachment::query()->sole();
+        DB::table('attachments')->where('id', $attachment->id)->update(['disk' => 'a-disk-nobody-configures']);
+
+        attachmentGet($this, $case['team']['owner'], $case['files'].'/'.$attachment->ulid)->assertNotFound()->assertJson(['code' => 'file_not_found']);
+        attachmentGet($this, $case['team']['owner'], $case['files'].'/'.$attachment->ulid.'?inline=1')->assertNotFound()->assertJson(['code' => 'file_not_found']);
+    });
+
+    it('answers 503 and writes the failure in the log when the disk cannot be read, whether it says so or just answers nothing', function (string $failure): void {
+        $case = attachmentCase();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        $attachment = Attachment::query()->sole();
+        $disk = attachmentDiskProxy();
+        Log::spy();
+
+        match ($failure) {
+            'readStream returns nothing, exists says yes' => $disk->shouldReceive('readStream')->andReturn(null) && $disk->shouldReceive('exists')->andReturn(true),
+            'readStream returns nothing, exists fails too' => $disk->shouldReceive('readStream')->andReturn(null) && $disk->shouldReceive('exists')->andThrow(new RuntimeException('The bucket does not answer.')),
+            'readStream fails' => $disk->shouldReceive('readStream')->andThrow(UnableToReadFile::fromLocation($attachment->path, 'Connection reset.')) && $disk->shouldReceive('exists')->andReturn(true),
+        };
+
+        $response = attachmentGet($this, $case['team']['owner'], $case['files'].'/'.$attachment->ulid)->assertStatus(503);
+
+        expect($response->json('code'))->toBe('file_unavailable')
+            ->and($response->json('message'))->toBeString();
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['disk'] === ATTACHMENT_TEST_DISK && $context['path'] === $attachment->path)->once();
+    })->with([
+        'readStream returns nothing, exists says yes',
+        'readStream returns nothing, exists fails too',
+        'readStream fails',
+    ]);
+
+    it('answers 404, not 503, when the read fails because the file is not there', function (): void {
+        $case = attachmentCase();
+        attachmentUpload($this, $case['team']['owner'], $case['files'], attachmentPdf())->assertCreated();
+        $attachment = Attachment::query()->sole();
+        attachmentDiskProxy()->shouldReceive('readStream')->andThrow(UnableToReadFile::fromLocation($attachment->path, 'No such file.'));
+        Storage::disk(ATTACHMENT_TEST_DISK)->delete($attachment->path);
+        Log::spy();
+
+        attachmentGet($this, $case['team']['owner'], $case['files'].'/'.$attachment->ulid)->assertNotFound()->assertJson(['code' => 'file_not_found']);
+        Log::shouldNotHaveReceived('error');
+    });
 
     it('serves the type it detected, whatever the extension of the name', function (): void {
         $case = attachmentCase();
