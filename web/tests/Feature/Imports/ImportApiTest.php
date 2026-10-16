@@ -105,13 +105,13 @@ describe('sending a file', function (): void {
             ->and($response->json('data.size'))->toBe((int) filesize($case['csv']))
             ->and($response->json('data.options'))->toBe(['has_header' => true, 'delimiter' => 'semicolon', 'encoding' => 'utf-8', 'decimal' => 'comma', 'date_order' => 'dmy', 'on_error' => 'abort'])
             ->and($response->json('data.columns'))->toBe([
-                ['index' => 0, 'header' => 'Name', 'samples' => ['Drill', 'Saw'], 'guess' => 'text'],
-                ['index' => 1, 'header' => 'Quantity (kg)', 'samples' => ['2,5', '1'], 'guess' => 'number'],
-                ['index' => 2, 'header' => 'Price', 'samples' => ['12,50 €', '9 €'], 'guess' => 'money'],
-                ['index' => 3, 'header' => 'In stock', 'samples' => ['oui', 'non'], 'guess' => 'boolean'],
-                ['index' => 4, 'header' => 'Bought', 'samples' => ['15/03/2026', '16/03/2026'], 'guess' => 'date'],
-                ['index' => 5, 'header' => 'Identifier', 'samples' => ['abc', 'def'], 'guess' => 'text'],
-                ['index' => 6, 'header' => 'Notes', 'samples' => ['first', 'two lines'], 'guess' => 'textarea'],
+                ['index' => 0, 'header' => 'Name', 'samples' => ['Drill', 'Saw'], 'guess' => 'text', 'fraction_like' => false],
+                ['index' => 1, 'header' => 'Quantity (kg)', 'samples' => ['2,5', '1'], 'guess' => 'number', 'fraction_like' => false],
+                ['index' => 2, 'header' => 'Price', 'samples' => ['12,50 €', '9 €'], 'guess' => 'money', 'fraction_like' => false],
+                ['index' => 3, 'header' => 'In stock', 'samples' => ['oui', 'non'], 'guess' => 'boolean', 'fraction_like' => false],
+                ['index' => 4, 'header' => 'Bought', 'samples' => ['15/03/2026', '16/03/2026'], 'guess' => 'date', 'fraction_like' => false],
+                ['index' => 5, 'header' => 'Identifier', 'samples' => ['abc', 'def'], 'guess' => 'text', 'fraction_like' => false],
+                ['index' => 6, 'header' => 'Notes', 'samples' => ['first', 'two lines'], 'guess' => 'textarea', 'fraction_like' => false],
             ])
             ->and($response->json('data.mapping'))->toBe([
                 ['column' => 0, 'target' => 'field', 'field' => $case['fields']['name']->ulid, 'type' => null, 'name' => null],
@@ -462,7 +462,7 @@ describe('starting an import', function (): void {
 
     it('answers 422 for a mapping of a shape it cannot read', function (mixed $mapping): void {
         $case = importFixture();
-        $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'columns' => [['index' => 0, 'header' => 'a', 'samples' => [], 'guess' => 'text']]]);
+        $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'columns' => [['index' => 0, 'header' => 'a', 'samples' => [], 'guess' => 'text', 'fraction_like' => false]]]);
 
         $errors = inventoryCall($this, $case['team']['owner'], 'POST', importUri($case['inventory'], $import, '/start'), ['mapping' => $mapping])->assertStatus(422)->json('errors');
 
@@ -504,7 +504,7 @@ describe('starting an import', function (): void {
         Queue::fake();
         $case = importFixture();
         $mapping = [importToField(0, $case['fields']['name']->ulid)];
-        $columns = [['index' => 0, 'header' => 'Name', 'samples' => [], 'guess' => 'text']];
+        $columns = [['index' => 0, 'header' => 'Name', 'samples' => [], 'guess' => 'text', 'fraction_like' => false]];
         $started = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'status' => ImportStatus::Pending, 'columns' => $columns]);
         $expired = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'expires_at' => now()->subMinute(), 'columns' => $columns]);
 

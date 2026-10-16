@@ -984,6 +984,7 @@
     "The name of a new field must be 1 to :max characters on one line.": "Le nom d'un nouveau champ doit faire de 1 à :max caractères, sur une seule ligne.",
     "Two new fields have the same name.": "Deux nouveaux champs portent le même nom.",
     "Column :letter": "Colonne :letter",
+    "These values look like fractions (0.125 for 12.5%): they will be imported as they are.": "Ces valeurs ressemblent à des fractions (0,125 pour 12,5 %) : elles seront importées telles quelles.",
     "You already have too many imports under way for this inventory. Cancel one or wait for it to end, then try again.": "Vous avez déjà trop d'imports en cours pour cet inventaire. Annulez-en un ou attendez qu'il se termine, puis réessayez.",
     "This import has already started and can no longer be changed.": "Cet import a déjà commencé et ne peut plus être modifié.",
     "This import is no longer available. Choose the file again.": "Cet import n'est plus disponible. Choisissez à nouveau le fichier.",

@@ -177,6 +177,51 @@ describe('the decimal sign and the order of the dates', function (): void {
     });
 });
 
+describe('a column that looks like the fractions a spreadsheet shows as percentages', function (): void {
+    it('is told by its numbers: all between -1 and 1, and not all whole', function (array $values, bool $expected): void {
+        foreach (['xlsx', 'ods'] as $format) {
+            $path = importSpreadsheet($format, [['Rate'], ...array_map(fn (mixed $value): array => [$value], $values)]);
+            $column = importAnalyze($path, ImportFormat::from($format))->columns[0];
+
+            expect($column['fraction_like'])->toBe($expected, "{$format} {$column['guess']}");
+        }
+    })->with([
+        'the cell of a percentage: 12.5 % is 0.125' => [[0.125, 0.5, 0.75], true],
+        'whole numbers can be in it' => [[0.5, 1, 0], true],
+        'negative fractions' => [[-0.25, 0.5, -1], true],
+        'a single fraction' => [[0.2], true],
+        'empty cells are not values' => [[0.25, null, 0.5], true],
+        'whole numbers only: flags, not fractions' => [[0, 1, 0, 1], false],
+        'a value beyond one' => [[0.5, 1.5], false],
+        'a value below minus one' => [[0.5, -1.25], false],
+        'percentages written as plain numbers' => [[12.5, 40, 3.25], false],
+        'no value at all' => [[null, null], false],
+        'a text among the numbers' => [[0.25, 'n/a'], false],
+        'a date' => [[new DateTimeImmutable('2026-03-01 00:00:00', new DateTimeZone('UTC'))], false],
+        'yes and no' => [[true, false], false],
+    ]);
+
+    it('is told for a text file too, but not for a value written with a percent sign or a currency', function (array $values, bool $expected): void {
+        // A second column, so that the semicolon is the separator and the commas are the decimals.
+        $csv = importFile(importCsv([['Rate', 'Other'], ...array_map(fn (string $value): array => [$value, 'x'], $values)], ';'));
+
+        expect(importAnalyze($csv, locale: 'fr')->columns[0]['fraction_like'])->toBe($expected);
+    })->with([
+        'a comma for decimals' => [['0,125', '0,5'], true],
+        'a point for decimals, read with commas' => [['0.5', '0,25'], true],
+        'with a percent sign: the person said percent' => [['0,5 %', '0,25 %'], false],
+        'with a currency' => [['0,5 €', '0,25 €'], false],
+        'not a number' => [['0,5', 'half'], false],
+        'plain percentages' => [['12,5', '40'], false],
+    ]);
+
+    it('does not change the guess of the type', function (): void {
+        $path = importSpreadsheet('xlsx', [['Rate'], [0.125], [0.5]]);
+
+        expect(importAnalyze($path, ImportFormat::Xlsx)->columns[0])->toMatchArray(['guess' => 'number', 'fraction_like' => true]);
+    });
+});
+
 describe('the proposal', function (): void {
     /**
      * An inventory with fields of several types, as the proposal sees them.

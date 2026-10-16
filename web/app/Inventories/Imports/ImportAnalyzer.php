@@ -25,6 +25,11 @@ use Illuminate\Support\Collection;
  * in it is a text. A number that a spreadsheet would show with its leading zeros (`007`, a phone number), or that is as long as a
  * barcode, is a text.
  *
+ * A column also says whether its values look like **fractions** (`fraction_like`), because a spreadsheet cell shown as a percentage holds
+ * a fraction: 12.5 % is stored as 0.125, and a file read as it is would bring 0.125 % into a percentage field. A column is fraction-like
+ * when it has values, all of them numbers without a percent sign or a currency, none of them beyond 1 or below -1, and at least one that
+ * is not a whole number. Nothing is multiplied: the values are imported as they are, and the person is told so before they start.
+ *
  * The proposal is, for each column in this order: the field that has the same name (without the case, the accents and a unit in
  * brackets: `Price (EUR)` is `price`), and not already taken by an earlier column; ignored, when it is one of the columns an export adds
  * (the identifier and the dates of creation and change); else a new field of the type guessed, named as the header, when the person may
@@ -100,6 +105,7 @@ final class ImportAnalyzer
                 'header' => $this->header($header[$index] ?? null, $index),
                 'samples' => array_map(fn (ImportCell $cell): string => $cell->sample(), array_slice($values, 0, self::SAMPLES)),
                 'guess' => $this->guess($values, $context),
+                'fraction_like' => $this->fractionLike($values, $context),
             ];
         }
 
@@ -253,6 +259,41 @@ final class ImportAnalyzer
     }
 
     /**
+     * Whether the values of a column look like fractions that a spreadsheet shows as percentages (see the class).
+     *
+     * @param  list<ImportCell>  $cells  The cells that hold something.
+     */
+    private function fractionLike(array $cells, ImportContext $context): bool
+    {
+        $fractional = false;
+
+        foreach ($cells as $cell) {
+            try {
+                $read = ImportNumbers::read($cell, $context);
+            } catch (InvalidImportValue) {
+                return false;
+            }
+
+            if ($read['percent'] || $read['currency'] !== null) {
+                return false;
+            }
+
+            $number = $read['number'];
+            $whole = ltrim($number->integer, '0');
+            $decimals = trim($number->fraction, '0') !== '';
+
+            // Beyond one, either way: 1 itself is a fraction (all of it), 1.5 is not.
+            if ($whole !== '' && ($whole !== '1' || $decimals)) {
+                return false;
+            }
+
+            $fractional = $fractional || $decimals;
+        }
+
+        return $fractional;
+    }
+
+    /**
      * `money` when every number has a currency, `percentage` when every one has a percent sign, else `number`.
      *
      * @param  list<ImportCell>  $cells
@@ -397,7 +438,7 @@ final class ImportAnalyzer
     /**
      * Where each column is proposed to go (see the class).
      *
-     * @param  list<array{index: int, header: string, samples: list<string>, guess: string}>  $columns
+     * @param  list<array{index: int, header: string, samples: list<string>, guess: string, fraction_like: bool}>  $columns
      * @param  Collection<int, InventoryField>  $fields
      */
     private function propose(array $columns, Collection $fields, bool $canManageFields): ImportMapping

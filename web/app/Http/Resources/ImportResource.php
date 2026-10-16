@@ -23,7 +23,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * `status` is `uploaded` (read, waiting for the person to start it), `pending`, `running`, `completed` or `failed`. `error` is the
  * message to show for a failed import, in the language of the request, and null otherwise. `options` is
  * `{has_header, delimiter, encoding, decimal, date_order, on_error}` (the first two of a text file are null for a spreadsheet),
- * `columns` is a list of `{index, header, samples, guess}` (`guess`: the key of the type of field the values look like) and `mapping` a list of
+ * `columns` is a list of `{index, header, samples, guess, fraction_like}` (`guess`: the key of the type of field the values look like;
+ * `fraction_like`: whether they are numbers between -1 and 1 that are not all whole, as the cells of a spreadsheet shown as percentages are:
+ * 12.5 % is stored as 0.125, and is imported as 0.125, so the front warns before such a column goes to a percentage field) and `mapping` a list of
  * `{column, target, field, type, name}`: the proposal while the import is `uploaded`, what was started after. The counts and `errors`
  * (a list of `{row, column, message}`, the first 100) are null until the import ends. The ids are the ULIDs; nothing numeric is given out.
  *
