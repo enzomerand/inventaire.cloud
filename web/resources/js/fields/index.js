@@ -41,8 +41,8 @@ export function queryKindOf(field) {
 }
 
 /**
- * Whether the list can be sorted by a field: all but the ones that hold several values (several choices, tags) and the ones
- * the server cannot query.
+ * Whether the list can be sorted by a field: all but the ones that hold several values (several choices, tags, files) and
+ * the ones the server cannot query.
  *
  * @param {Field} field
  * @returns {boolean}
@@ -50,7 +50,7 @@ export function queryKindOf(field) {
 export function isSortable(field) {
     const kind = queryKindOf(field);
 
-    return kind !== null && kind !== 'choices' && kind !== 'tags';
+    return kind !== null && kind !== 'choices' && kind !== 'tags' && kind !== 'files';
 }
 
 /**

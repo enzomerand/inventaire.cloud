@@ -25,6 +25,7 @@ import {
     BARCODE_FORMATS,
     barcodeFormatName,
     blankChoice,
+    canBeRequired,
     formToOptions,
     optionNames,
     optionsToForm,
@@ -152,6 +153,16 @@ export default function inventoryFields() {
         /** The grades a rating can go up to, for the picker (as text, like the value of the picker). */
         get ratingMaxima() {
             return ['3', '4', '5', '6', '7', '8', '9', '10'];
+        },
+
+        /** How many files a photo or file field can hold, for the picker (as text, like the value of the picker). */
+        get fileMaxima() {
+            return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+        },
+
+        /** Whether the type picked in the dialog can be required (the photo and file fields cannot: they are filled by uploading). */
+        get canRequire() {
+            return canBeRequired(this.form.type);
         },
 
         /**
@@ -520,7 +531,7 @@ export default function inventoryFields() {
 
             const body = {
                 name: this.form.name.trim(),
-                required: this.form.required,
+                required: this.canRequire && this.form.required,
                 options: formToOptions(this.form.type, this.form.options, this.editing ? this.opened : null),
             };
 

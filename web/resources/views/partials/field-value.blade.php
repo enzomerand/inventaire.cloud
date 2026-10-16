@@ -4,6 +4,11 @@
     is interpreted as markup. Links carry rel="noopener noreferrer nofollow".
 
     Included in a template that has a "cell" in scope: the table of the items, the cards of the gallery and the details of an item.
+
+    The files of a photo or file field are a thumbnail (or an icon) or a name for each file the cell shows, and "+n" for the
+    others. A file is a link only where the cell says so (the details of an item): an <a> without href is no link, which is how
+    one template serves the table, where the whole cell opens the item, and the details. The alternative text of a thumbnail
+    is the name of the file.
 --}}
 <template x-if="cell.kind === 'empty'">
     <span class="text-secondary" x-text="cell.text"></span>
@@ -35,5 +40,42 @@
     <span class="d-inline-flex align-items-center gap-2">
         <span class="app-swatch" :style="cell.style" aria-hidden="true"></span>
         <span class="font-monospace" x-text="cell.text"></span>
+    </span>
+</template>
+<template x-if="cell.kind === 'photos'">
+    <span class="d-inline-flex flex-wrap align-items-center gap-1">
+        <template x-for="file in cell.files" :key="file.id">
+            <a :href="file.href" :target="file.target" rel="noopener noreferrer">
+                <template x-if="file.thumb">
+                    <img class="app-thumb" :src="file.thumb" :alt="file.name" loading="lazy">
+                </template>
+                <template x-if="!file.thumb">
+                    <span class="app-thumb app-file-icon text-secondary" role="img" :aria-label="file.name">
+                        @include('partials.file-icon')
+                    </span>
+                </template>
+            </a>
+        </template>
+        <template x-if="cell.more > 0">
+            <span class="badge bg-secondary-lt" x-text="'+' + cell.more"></span>
+        </template>
+    </span>
+</template>
+<template x-if="cell.kind === 'files'">
+    <span class="d-inline-flex flex-wrap align-items-center gap-2">
+        <template x-for="file in cell.files" :key="file.id">
+            <a class="d-inline-flex align-items-center gap-1" :href="file.href" :target="file.target" rel="noopener noreferrer">
+                <span class="app-file-icon text-secondary" aria-hidden="true">
+                    @include('partials.file-icon')
+                </span>
+                <span class="text-break" x-text="file.name"></span>
+                <template x-if="file.href">
+                    <span class="text-secondary small text-nowrap" x-text="file.sizeText"></span>
+                </template>
+            </a>
+        </template>
+        <template x-if="cell.more > 0">
+            <span class="badge bg-secondary-lt" x-text="'+' + cell.more"></span>
+        </template>
     </span>
 </template>

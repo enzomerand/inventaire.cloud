@@ -24,6 +24,11 @@
  * they are asked for only when they can have changed: the first time, with a new search or new filters, and after an item
  * is added, changed or deleted; a page or a sort keeps the totals it has. Editing a value in its cell, without the
  * dialog, is `../grid/inline.js`; laying the items out as a table or as cards is `../grid/gallery.js`.
+ *
+ * The dialog of an existing item has three tabs: its details (the form, or the read-only list), its attachments and its
+ * history. The tabs are `../item/tabs.js`, the files (the photo and file fields of the form, the attachments tab, the
+ * uploads) `../item/files.js`, the history `../item/history.js`. Files never travel with the values of an item: each goes
+ * up on its own request, and the files chosen while an item is added go up right after the form was saved.
  */
 import {
     choicesOf,
@@ -51,6 +56,9 @@ import gridView from '../grid/gallery.js';
 import { totalsKeyOf } from '../grid/query.js';
 import { fieldFocusSelectors, momentText } from '../grid/rows.js';
 import { hasTotals, totalCells } from '../grid/totals.js';
+import itemFiles from '../item/files.js';
+import itemHistory from '../item/history.js';
+import itemTabs from '../item/tabs.js';
 
 /** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
 const FIRST_COLOR = '#000000';
@@ -83,7 +91,7 @@ function summedIds(fields) {
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return compose(gridCriteria(), gridInline(), gridView(), {
+    return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -328,9 +336,9 @@ export default function inventoryItems() {
             return t('inventories.item.title_' + this.mode);
         },
 
-        /** Whether the dialog offers to delete the item: while it changes one, before the deletion is asked for. */
+        /** Whether the dialog offers to delete the item: while it changes one, before a deletion is asked for. */
         get canDeleteItem() {
-            return this.mode === 'edit' && !this.confirming;
+            return this.mode === 'edit' && !this.asking;
         },
 
         /** The accessible name of the button of a row: it opens the form of the item, or its details. */
@@ -575,7 +583,7 @@ export default function inventoryItems() {
                 name: field.name,
                 // The cell of a person who edits is a button, which cannot hold a link: the table puts one beside it.
                 plain: this.canEdit && !full,
-                ...describeValue(field, item.values?.[field.id], { full }),
+                ...describeValue(field, item.values?.[field.id], { full, attachments: item.attachments ?? [] }),
             }));
         },
 
@@ -669,16 +677,7 @@ export default function inventoryItems() {
          */
         begin(mode, item, focusField = null) {
             this.resetDialog();
-            this.mode = mode;
-            this.itemId = item === null ? null : item.id;
-            this.values = Object.fromEntries(
-                this.fields.map((field) => [
-                    field.id,
-                    item === null ? emptyInput(field) : toInput(field, item.values?.[field.id]),
-                ]),
-            );
-            this.original = JSON.parse(JSON.stringify(this.values));
-            this.details = item === null ? [] : this.cellsOf(item, true);
+            this.fillDialog(mode, item);
 
             if (focusField === null) {
                 showModal(this.$refs.modal);
@@ -688,7 +687,28 @@ export default function inventoryItems() {
         },
 
         /**
-         * Forgets the refusals, the unfinished tags and the confirmation: the dialog starts clean.
+         * Puts an item (or nothing, to add one) in the dialog: what its controls hold, and the details it shows.
+         *
+         * @param {'create' | 'edit' | 'view'} mode
+         * @param {Item | null} item The item, null to add one.
+         * @returns {void}
+         */
+        fillDialog(mode, item) {
+            this.mode = mode;
+            this.itemId = item === null ? null : item.id;
+            this.dialogItem = item;
+            this.values = Object.fromEntries(
+                this.fields.map((field) => [
+                    field.id,
+                    item === null ? emptyInput(field) : toInput(field, item.values?.[field.id]),
+                ]),
+            );
+            this.original = JSON.parse(JSON.stringify(this.values));
+            this.details = item === null ? [] : this.cellsOf(item, true);
+        },
+
+        /**
+         * Forgets the refusals, the unfinished tags, the confirmation, the files and the history: the dialog starts clean.
          *
          * @returns {void}
          */
@@ -697,6 +717,9 @@ export default function inventoryItems() {
             this.formError = '';
             this.drafts = {};
             this.confirming = false;
+            this.resetTabs();
+            this.resetFiles();
+            this.resetHistory();
         },
 
         // The field types know how a field is entered and which choices it has (see `../fields`): the template asks
@@ -1023,6 +1046,11 @@ export default function inventoryItems() {
             const values = {};
 
             for (const field of this.fields) {
+                // The files of a field go up on their own request, never with the values.
+                if (controlOf(field) === 'files') {
+                    continue;
+                }
+
                 if (editing && JSON.stringify(this.values[field.id]) === JSON.stringify(this.original[field.id])) {
                     continue;
                 }
@@ -1062,21 +1090,34 @@ export default function inventoryItems() {
             this.formError = '';
 
             try {
+                let created = null;
+
                 if (creating) {
-                    await http.post(this.itemsUrl, { values });
+                    created = (await http.post(this.itemsUrl, { values }))?.data ?? null;
+                    this.countItems(1);
                 } else {
                     await http.patch(fillUrl(this.itemUrl, this.itemId), { values });
                 }
 
-                hideModal(this.$refs.modal);
-                notify('success', t(creating ? 'inventories.notice.item_added' : 'inventories.notice.item_saved'));
-
-                if (creating) {
-                    this.countItems(1);
-                }
-
                 // Newest first: a new item is at the top of the first page. What the columns add up to has changed.
                 this.totalsFor = null;
+
+                // The item exists: the files chosen for it go up now, and the dialog stays on it while they do, so that the ones
+                // that fail can be seen.
+                let failed = 0;
+
+                if (created !== null && this.staged.length > 0) {
+                    this.fillDialog('edit', created);
+                    failed = await this.sendStaged(created.id);
+                }
+
+                if (failed === 0) {
+                    hideModal(this.$refs.modal);
+                    notify('success', t(creating ? 'inventories.notice.item_added' : 'inventories.notice.item_saved'));
+                } else {
+                    notify('warning', this.partialNotice(failed));
+                }
+
                 await this.loadItems(creating ? 1 : this.page);
             } catch (error) {
                 this.failChange(error);

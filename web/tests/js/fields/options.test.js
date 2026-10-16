@@ -4,6 +4,7 @@ import {
     BARCODE_FORMATS,
     barcodeFormatName,
     blankChoice,
+    canBeRequired,
     formToOptions,
     optionNames,
     optionsToForm,
@@ -21,6 +22,7 @@ const MESSAGES = {
     'fields.summary.currency': 'Currency: :currency',
     'fields.summary.choices': 'Choices: :list',
     'fields.summary.format': 'Format: :format',
+    'fields.summary.max_files': 'Files allowed: :count',
 };
 
 beforeAll(() => {
@@ -273,5 +275,38 @@ describe('the palette', () => {
         expect(badgeClass(null)).toBe('badge bg-secondary-lt');
         expect(badgeClass('chartreuse')).toBe('badge bg-secondary-lt');
         expect(swatchClass('teal')).toBe('app-swatch bg-teal-lt');
+    });
+});
+
+describe('the options of the photo and file fields', () => {
+    it('are the number of files, for both types', () => {
+        expect(optionNames('photo')).toEqual(['max_files']);
+        expect(optionNames('file')).toEqual(['max_files']);
+    });
+
+    it('start from one file, and show the number a field has as a box holds it', () => {
+        expect(optionsToForm('photo').max_files).toBe('1');
+        expect(optionsToForm('file', { max_files: 4 }).max_files).toBe('4');
+    });
+
+    it('send the number of files as a number', () => {
+        expect(formToOptions('photo', { ...optionsToForm('photo'), max_files: '6' })).toEqual({ max_files: 6 });
+        expect(formToOptions('file', optionsToForm('file', { max_files: 2 }))).toEqual({ max_files: 2 });
+    });
+
+    it('send text that is not a number as it is, for the server to refuse', () => {
+        expect(formToOptions('photo', { ...optionsToForm('photo'), max_files: 'lots' })).toEqual({ max_files: 'lots' });
+    });
+
+    it('are summed up by how many files they take', () => {
+        expect(summarizeOptions({ type: 'photo', options: { max_files: 3 } }, String)).toBe('Files allowed: 3');
+        expect(summarizeOptions({ type: 'file', options: {} }, String)).toBe('Files allowed: 1');
+    });
+
+    it('cannot be required: they are filled by uploading, which an item can be saved without', () => {
+        expect(canBeRequired('photo')).toBe(false);
+        expect(canBeRequired('file')).toBe(false);
+        expect(canBeRequired('text')).toBe(true);
+        expect(canBeRequired('select')).toBe(true);
     });
 });
