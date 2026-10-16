@@ -179,7 +179,7 @@ describe('the page of a template', function (): void {
         $page = templateDom($this->get('/en/templates/sample-home')->assertOk());
 
         expect(templateTexts($page, '//h1'))->toBe(['Home inventory'])
-            ->and(templateTexts($page, '//title'))->toBe(['Home inventory: free inventory template · '.config('app.name')]);
+            ->and(templateTexts($page, '//title'))->toBe(['Home inventory: free template · '.config('app.name')]);
     });
 
     it('lists the fields with their type, whether they are required, and the badges of their choices', function (): void {

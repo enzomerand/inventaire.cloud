@@ -70,7 +70,8 @@
                 <div class="card-header">
                     <h2 class="card-title">{{ __('Fields') }}</h2>
                 </div>
-                <div class="table-responsive">
+                {{-- Focusable so keyboard users can scroll the table when it overflows. --}}
+                <div class="table-responsive" tabindex="0" role="region" aria-label="{{ __('Fields of the template :name', ['name' => $template->name($locale)]) }}">
                     <table class="table table-vcenter card-table">
                         <caption class="visually-hidden">{{ __('Fields of the template :name', ['name' => $template->name($locale)]) }}</caption>
                         <thead>
@@ -114,7 +115,7 @@
                     <div class="card-body pb-0">
                         <p class="text-secondary">{{ __('These rows only show what the inventory could hold. They are not added to your inventory.') }}</p>
                     </div>
-                    <div class="table-responsive">
+                    <div class="table-responsive" tabindex="0" role="region" aria-label="{{ __('Example rows of the template :name', ['name' => $template->name($locale)]) }}">
                         <table class="table table-vcenter card-table">
                             <caption class="visually-hidden">{{ __('Example rows of the template :name', ['name' => $template->name($locale)]) }}</caption>
                             <thead>

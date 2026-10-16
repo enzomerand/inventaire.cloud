@@ -248,7 +248,7 @@ describe('with indexing on', function (): void {
             ->and(templateAttributes($page, '//head/link[@rel="canonical"]', 'href'))->toBe(['http://localhost/en/templates/sample-shop'])
             ->and(templateAttributes($page, '//head/link[@rel="alternate"]', 'hreflang'))->toBe(['fr', 'en', 'x-default'])
             ->and(templateAttributes($page, '//head/link[@rel="alternate"]', 'href'))->toBe(['http://localhost/templates/sample-shop', 'http://localhost/en/templates/sample-shop', 'http://localhost/templates/sample-shop'])
-            ->and(seoMeta($page, 'property', 'og:title'))->toBe(['Shop stock: free inventory template'])
+            ->and(seoMeta($page, 'property', 'og:title'))->toBe(['Shop stock: free template'])
             ->and(seoMeta($page, 'property', 'og:url'))->toBe(['http://localhost/en/templates/sample-shop'])
             ->and(seoMeta($page, 'property', 'og:type'))->toBe(['website'])
             ->and(seoMeta($page, 'property', 'og:locale'))->toBe(['en_US'])

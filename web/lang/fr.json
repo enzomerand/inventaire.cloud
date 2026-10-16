@@ -860,7 +860,7 @@
     "Start from a ready-made inventory: pick a template, adjust its fields and start counting.": "Partez d'un inventaire prêt à l'emploi : choisissez un modèle, ajustez ses champs et commencez à compter.",
     ":count field|:count fields": ":count champ|:count champs",
     "No template is available yet.": "Aucun modèle n'est disponible pour le moment.",
-    ":name: free inventory template": ":name : modèle d'inventaire gratuit",
+    ":name: free template": ":name : modèle gratuit",
     "Use this template": "Utiliser ce modèle",
     "You will be asked to sign in, then the inventory is created with these fields.": "On vous demandera de vous connecter, puis l'inventaire est créé avec ces champs.",
     "Examples": "Exemples",

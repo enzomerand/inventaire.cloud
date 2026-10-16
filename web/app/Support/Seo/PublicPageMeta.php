@@ -90,7 +90,7 @@ final class PublicPageMeta
         $pageLocale = $template->localeFor($locale);
         $canonical = PublicUrls::template($template->slug, $pageLocale);
         $name = $template->name($locale);
-        $title = __(':name: free inventory template', ['name' => $name]);
+        $title = __(':name: free template', ['name' => $name]);
         $summary = $template->summary($locale);
 
         $written = array_values(array_intersect($this->locales->supported(), $template->locales()));
