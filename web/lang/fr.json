@@ -843,5 +843,22 @@
     "File sent: :name": "Fichier envoyé : :name",
     ":count file was not sent, as the dialog was closed.": ":count fichier n'a pas été envoyé : la fenêtre a été fermée.",
     ":count files were not sent, as the dialog was closed.": ":count fichiers n'ont pas été envoyés : la fenêtre a été fermée.",
-    "Waiting…": "En attente…"
+    "Waiting…": "En attente…",
+    "How do you want to start?": "Comment voulez-vous commencer ?",
+    "Start from scratch": "Partir de zéro",
+    "An empty inventory: you add its fields yourself.": "Un inventaire vide : vous ajoutez vous-même ses champs.",
+    "Start from a template": "Partir d'un modèle",
+    "Fields ready to use: home, shop, cellar, tools...": "Des champs prêts à l'emploi : logement, boutique, cave, outils...",
+    "Search a template": "Rechercher un modèle",
+    "Categories": "Catégories",
+    "The templates could not be loaded.": "Les modèles n'ont pas pu être chargés.",
+    "No template is available yet.": "Aucun modèle n'est disponible pour le moment.",
+    "No template matches your search.": "Aucun modèle ne correspond à votre recherche.",
+    "This template could not be loaded.": "Ce modèle n'a pas pu être chargé.",
+    "Use this template": "Utiliser ce modèle",
+    "All templates": "Tous les modèles",
+    "Template: :name": "Modèle : :name",
+    "This template does not exist. Pick one from the list.": "Ce modèle n'existe pas : choisissez-en un dans la liste.",
+    ":count template": ":count modèle",
+    ":count templates": ":count modèles"
 }

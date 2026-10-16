@@ -202,6 +202,11 @@ class ClientMessages extends Component
             'history.file_removed' => __('File removed: :name'),
             'history.deleted_field' => __('Deleted field'),
             'history.deleted_user' => __('Deleted user'),
+            'templates.all' => __('All templates'),
+            'templates.based_on' => __('Template: :name'),
+            'templates.results.one' => __(':count template'),
+            'templates.results.other' => __(':count templates'),
+            'templates.error.unknown' => __('This template does not exist. Pick one from the list.'),
         ];
     }
 
