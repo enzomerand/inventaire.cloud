@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\Auth\VerifyCodeController;
 use App\Http\Controllers\Api\V1\CurrentWorkspaceController;
 use App\Http\Controllers\Api\V1\ExportController;
 use App\Http\Controllers\Api\V1\FieldTypeController;
+use App\Http\Controllers\Api\V1\ImportController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryFieldController;
 use App\Http\Controllers\Api\V1\ItemController;
@@ -99,6 +100,16 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::get('/inventories/{inventory}/exports/{export}', [ExportController::class, 'show'])->name('inventories.exports.show');
             Route::get('/inventories/{inventory}/exports/{export}/download', [ExportController::class, 'download'])->name('inventories.exports.download');
             Route::delete('/inventories/{inventory}/exports/{export}', [ExportController::class, 'destroy'])->name('inventories.exports.destroy');
+
+            // Imports: a spreadsheet or a CSV brought into an inventory. The file is read when it is sent (the columns, a guess of their
+            // types and a proposal of where each goes), then a queued job adds the rows once the person started it. Changing the items is
+            // what it does, so editors and owners only; and an import is its author's alone: another person's is a 404.
+            Route::get('/inventories/{inventory}/imports', [ImportController::class, 'index'])->name('inventories.imports.index');
+            Route::post('/inventories/{inventory}/imports', [ImportController::class, 'store'])->middleware('throttle:imports')->name('inventories.imports.store');
+            Route::get('/inventories/{inventory}/imports/{import}', [ImportController::class, 'show'])->name('inventories.imports.show');
+            Route::patch('/inventories/{inventory}/imports/{import}', [ImportController::class, 'update'])->middleware('throttle:imports')->name('inventories.imports.update');
+            Route::post('/inventories/{inventory}/imports/{import}/start', [ImportController::class, 'start'])->name('inventories.imports.start');
+            Route::delete('/inventories/{inventory}/imports/{import}', [ImportController::class, 'destroy'])->name('inventories.imports.destroy');
         });
 
         // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a

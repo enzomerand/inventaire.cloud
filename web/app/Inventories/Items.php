@@ -9,13 +9,17 @@ use App\Http\Resources\ItemResource;
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Models\Inventory;
+use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\User;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use stdClass;
 
 /**
  * Creating, changing and deleting the items of an inventory.
@@ -44,6 +48,9 @@ final class Items
 {
     /** Items per page of the list. */
     public const PER_PAGE = 50;
+
+    /** Items written per statement when many are added at once. */
+    private const BULK_CHUNK = 500;
 
     /**
      * The columns the list reads: what an item is described with ({@see ItemResource}). Not the text the item is searched
@@ -101,6 +108,75 @@ final class Items
 
             return $item;
         }));
+    }
+
+    /**
+     * Adds many items to an inventory the caller holds, inside the caller's transaction: the quota (`inventories.max_items`) judged for
+     * all of them at once, then the items, their search text and their first revision written in bulk, a few hundred a statement, and
+     * the counter of the inventory moved once. That is what lets an import be one transaction with one lock, where a loop of
+     * {@see self::create()} would take the locks again and write four statements an item.
+     *
+     * The inventory is locked by the caller ({@see Locks::inventory()}, after {@see Locks::author()}) and the fields are those read under
+     * that lock, those just added included. The values are **not** checked here: they come out of {@see ItemValues::apply()} already, in
+     * canonical form, and the caller vouches that the fields have not changed since. The items are given the ULIDs in the order of the list, so
+     * that the order of the file is the order of the numeric keys.
+     *
+     * @param  Inventory  $locked  The inventory as just read under the lock.
+     * @param  Inventory  $given  The copy the caller holds, whose counter is moved too.
+     * @param  Collection<int, InventoryField>  $fields  The fields of the inventory, read under the lock.
+     * @param  list<array<string, mixed>>  $stored  The stored values of each item, keyed by the ULID of the field.
+     * @return int How many items were added.
+     *
+     * @throws ItemLimitReachedException When the inventory would hold more items than allowed.
+     */
+    public function createMany(Inventory $locked, Inventory $given, Collection $fields, array $stored, User $author): int
+    {
+        $count = count($stored);
+
+        if ($count === 0) {
+            return 0;
+        }
+
+        $limit = config()->integer('inventories.max_items');
+
+        if ($locked->items_count + $count > $limit) {
+            throw new ItemLimitReachedException($limit);
+        }
+
+        $now = now();
+
+        foreach (array_chunk($stored, self::BULK_CHUNK) as $chunk) {
+            $rows = [];
+
+            foreach ($chunk as $values) {
+                $rows[] = [
+                    'ulid' => strtolower((string) Str::ulid()),
+                    'inventory_id' => $locked->getKey(),
+                    'values' => json_encode($values === [] ? new stdClass : $values, JSON_THROW_ON_ERROR),
+                    'search_text' => $this->searchText->build($fields, $values),
+                    'created_by' => $author->getKey(),
+                    'updated_by' => $author->getKey(),
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+
+            $this->db->table('items')->insert($rows);
+
+            // The numeric keys are not given back by a bulk insert: they are read by the ULIDs that were just made.
+            $ids = $this->db->table('items')->whereIn('ulid', array_column($rows, 'ulid'))->pluck('id', 'ulid');
+            $items = [];
+
+            foreach ($rows as $position => $row) {
+                $items[] = ['id' => (int) $ids[$row['ulid']], 'values' => $chunk[$position]];
+            }
+
+            $this->revisions->createdMany((int) $locked->getKey(), $items, $author);
+        }
+
+        $this->moveCount($locked, $given, $count);
+
+        return $count;
     }
 
     /**
