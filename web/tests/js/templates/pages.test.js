@@ -18,7 +18,7 @@ import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
 import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
-import { queryFacts, ulid, withUlids } from '../support/inventory.js';
+import { attachment, deferred, queryFacts, ulid, withUlids } from '../support/inventory.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
 import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
 
@@ -83,6 +83,8 @@ const PAGE = {
         { type: 'select', label: 'Choice' },
         { type: 'rating', label: 'Rating' },
         { type: 'barcode', label: 'Barcode' },
+        { type: 'file', label: 'File' },
+        { type: 'photo', label: 'Photo' },
     ],
     currencies: [
         { code: 'EUR', name: 'Euro' },
@@ -90,6 +92,9 @@ const PAGE = {
     ],
     abilities: {},
 };
+
+/** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
+const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 
 /** What an editor of the workspace may do; a test narrows it down by setting `PAGE.abilities`. */
 const EDITOR = { view: true, create: true, update: true, delete: false, manage_fields: true, edit_items: true };
@@ -158,9 +163,9 @@ function render(path) {
         .replace(/@php[\s\S]*?@endphp/g, '')
         .replace(/@extends\([^)]*\)/g, '')
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
-        // table of the items are parts of the page of an inventory.
+        // table of the items are parts of the page of an inventory, and so are the parts of the dialog of an item.
         .replace(
-            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-gallery|items-cell-editor)'\)/g,
+            /@include\('partials\.(field-value|items-toolbar|items-filters|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
             (_match, name) => render(`partials/${name}.blade.php`),
         )
         // The tabs of the administration are not under test.
@@ -225,6 +230,7 @@ function render(path) {
             '$user?->email': 'ada@example.com',
             $accountLocale: 'fr',
             "config('auth.account_deletion.lifetime_minutes')": '10',
+            "config('inventories.max_attachment_size', 20 * 1024 * 1024)": String(MAX_ATTACHMENT_SIZE),
         };
 
         return values[expression] ?? fail(`unsupported echo {{ ${expression} }}`);
@@ -2807,6 +2813,704 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(buttons('Close', itemDialog().querySelector('.modal-footer'))).toHaveLength(1);
             });
         });
+
+        describe('the files and the history of an item', () => {
+            const PHOTOS = {
+                id: 'photos',
+                name: 'Photos',
+                type: 'photo',
+                options: { max_files: 3 },
+                required: false,
+                position: 1,
+                ...queryFacts('photo'),
+            };
+            const DOCS = {
+                id: 'docs',
+                name: 'Documents',
+                type: 'file',
+                options: { max_files: 2 },
+                required: false,
+                position: 2,
+                ...queryFacts('file'),
+            };
+            const FILE_FIELDS = [FIELDS[0], PHOTOS, DOCS];
+            const FRONT = attachment('a1', 'photos', { name: 'front.jpg' });
+            const BACK = attachment('a2', 'photos', { name: 'back.jpg' });
+            const INVOICE = attachment('d1', 'docs', {
+                name: 'invoice.pdf',
+                mime: 'application/pdf',
+                has_thumbnail: false,
+                thumbnail_url: null,
+                size: 1048576,
+            });
+            const SHELF = {
+                id: 'i5',
+                values: { name: 'Shelf', photos: ['a1', 'a2'], docs: ['d1'] },
+                created_at: '2026-10-15T10:00:00Z',
+                updated_at: '2026-10-15T10:00:00Z',
+                attachments: [FRONT, BACK, INVOICE],
+            };
+            const BARE = {
+                id: 'i6',
+                values: { name: 'Plank' },
+                created_at: '2026-10-15T10:00:00Z',
+                updated_at: '2026-10-15T10:00:00Z',
+                attachments: [],
+            };
+            const REVISIONS = '/api/v1/inventories/tools/items/i5/revisions';
+
+            /** Opens the page of an inventory whose items hold files; the revisions of `i5` are the given ones. */
+            async function openFiles({ items = [SHELF], revisions = [] } = {}) {
+                http.get.mockImplementation(async (url) => {
+                    if (url === '/api/v1/inventories/tools') {
+                        return { data: { id: 'tools', name: 'Tools', items_count: items.length, fields: FILE_FIELDS } };
+                    }
+
+                    if (url === REVISIONS) {
+                        return { data: revisions, meta: { current_page: 1, last_page: 1, total: revisions.length } };
+                    }
+
+                    return itemsPage(items);
+                });
+                await mount('app/inventory.blade.php');
+            }
+
+            /** Opens the dialog on the first item of the table. */
+            async function openDialog() {
+                bodyRows()[0].querySelector('td').click();
+                await flush();
+            }
+
+            const tab = (name) => itemDialog().querySelector('#item-tab-' + name);
+            const panel = (name) => itemDialog().querySelector('#item-panel-' + name);
+            const picker = () => itemDialog().querySelector('input[type="file"]');
+            const field = (id) => itemDialog().querySelector(`[data-field="${id}"]`);
+
+            /** Chooses files the way the file chooser of the browser hands them over. */
+            async function choosing(files) {
+                Object.defineProperty(picker(), 'files', { value: files, configurable: true });
+                picker().dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+            }
+
+            /** A file the person picked. */
+            function picked(name, type = 'image/jpeg') {
+                return new File(['x'], name, { type });
+            }
+
+            describe('in the table and the gallery', () => {
+                it('shows the first photo of a cell with the number of the others, and the first file name', async () => {
+                    await openFiles();
+
+                    const [, photos, docs] = cellsOf(bodyRows()[0]);
+                    const image = photos.querySelector('img');
+
+                    expect(image.getAttribute('src')).toBe('/api/v1/attachments/a1/thumbnail');
+                    expect(image.getAttribute('alt')).toBe('front.jpg');
+                    expect(photos.querySelectorAll('img')).toHaveLength(1);
+                    expect(photos.querySelector('.badge').textContent).toBe('+1');
+                    expect(docs.textContent).toContain('invoice.pdf');
+                    expect(docs.querySelector('.badge')).toBeNull();
+                });
+
+                it('is no link where the whole cell is a button, nor where the row opens the item', async () => {
+                    await openFiles();
+
+                    for (const link of cellsOf(bodyRows()[0]).flatMap((cell) => [...cell.querySelectorAll('a')])) {
+                        expect(link.hasAttribute('href'), link.outerHTML).toBe(false);
+                    }
+                });
+
+                it('says what the cell of an item without files holds, as for any other field', async () => {
+                    await openFiles({ items: [BARE] });
+
+                    const [, photos, docs] = cellsOf(bodyRows()[0]);
+
+                    expect(photos.querySelector('img')).toBeNull();
+                    expect(photos.textContent.trim()).toBe('—');
+                    expect(docs.textContent.trim()).toBe('—');
+                });
+
+                it('opens the dialog of the item, on the field, when a cell of files is pressed', async () => {
+                    await openFiles();
+
+                    cellsOf(bodyRows()[0])[1].querySelector('button').click();
+                    await flush();
+
+                    expect(showModal).toHaveBeenCalledWith(
+                        itemDialog(),
+                        expect.objectContaining({ focus: expect.any(Array) }),
+                    );
+                    expect(document.querySelector('#item-inline-editor')).toBeNull();
+                    expect(field('photos')).not.toBeNull();
+                });
+
+                it('puts the first photo of an item on its card, with the file name as alternative text', async () => {
+                    await openFiles();
+
+                    await press('Gallery');
+
+                    const card = document.querySelector('.card.app-row-link');
+                    const cover = card.querySelector('img.card-img-top');
+
+                    expect(cover.getAttribute('src')).toBe('/api/v1/attachments/a1/thumbnail');
+                    expect(cover.getAttribute('alt')).toBe('front.jpg');
+                    expect(card.querySelector('.badge.bg-dark').textContent).toBe('+1');
+                    expect(card.textContent).toContain('invoice.pdf');
+                });
+
+                it('puts no picture on the card of an item without a photo', async () => {
+                    await openFiles({ items: [BARE] });
+
+                    await press('Gallery');
+
+                    expect(document.querySelector('.card.app-row-link img')).toBeNull();
+                });
+            });
+
+            describe('the tabs of the dialog', () => {
+                it('shows the details, the attachments with their number, and the history, the details first', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    expect(
+                        [...itemDialog().querySelectorAll('[role="tab"]')].map((one) => one.textContent.trim()),
+                    ).toEqual(['Item details', 'Attachments (3)', 'History']);
+                    expect(tab('details').getAttribute('aria-selected')).toBe('true');
+                    expect(tab('files').getAttribute('aria-selected')).toBe('false');
+                    expect(tab('details').getAttribute('tabindex')).toBe('0');
+                    expect(tab('files').getAttribute('tabindex')).toBe('-1');
+                    expect(visible(panel('details'))).toBe(true);
+                    expect(visible(panel('files'))).toBe(false);
+                    expect(visible(panel('history'))).toBe(false);
+                    expect(panel('files').getAttribute('aria-labelledby')).toBe('item-tab-files');
+                });
+
+                it('shows one panel at a time', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('Attachments (3)');
+
+                    expect(tab('files').getAttribute('aria-selected')).toBe('true');
+                    expect(visible(panel('files'))).toBe(true);
+                    expect(visible(panel('details'))).toBe(false);
+                });
+
+                it('moves with the arrow keys', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    tab('details').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                    await flush();
+
+                    expect(tab('files').getAttribute('aria-selected')).toBe('true');
+                    expect(document.activeElement).toBe(tab('files'));
+
+                    tab('files').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+                    await flush();
+
+                    expect(tab('history').getAttribute('aria-selected')).toBe('true');
+                });
+
+                it('are not there while an item is added', async () => {
+                    await openFiles();
+
+                    await press('Add item');
+
+                    expect(visible(itemDialog().querySelector('[role="tablist"]'))).toBe(false);
+                    expect(visible(field('photos'))).toBe(true);
+                });
+
+                it('are gone while the deletion of the item is asked for', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('Delete', itemDialog().querySelector('.modal-footer'));
+
+                    expect(visible(itemDialog().querySelector('[role="tablist"]'))).toBe(false);
+                    expect(itemDialog().querySelector('.modal-body').textContent).toContain('Delete this item?');
+                });
+            });
+
+            describe('the photo and file fields of the form', () => {
+                it('shows the photos as thumbnails that link to the photo, with a button to remove each', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    const images = [...field('photos').querySelectorAll('img')];
+
+                    expect(images.map((one) => one.getAttribute('alt'))).toEqual(['front.jpg', 'back.jpg']);
+                    expect(images[0].getAttribute('src')).toBe('/api/v1/attachments/a1/thumbnail');
+                    expect(images[0].closest('a').getAttribute('href')).toBe('/api/v1/attachments/a1?inline=1');
+                    expect(images[0].closest('a').getAttribute('target')).toBe('_blank');
+                    expect(images[0].closest('a').getAttribute('rel')).toBe('noopener noreferrer');
+                    expect(buttons('Remove front.jpg', field('photos'))).toHaveLength(1);
+                    expect(buttons('Remove back.jpg', field('photos'))).toHaveLength(1);
+                });
+
+                it('shows the files as names with their size, with a button to remove each', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    const entry = field('docs').querySelector('li');
+
+                    expect(entry.querySelector('a').textContent).toBe('invoice.pdf');
+                    expect(entry.querySelector('a').getAttribute('href')).toBe('/api/v1/attachments/d1?inline=1');
+                    expect(entry.textContent).toContain('1 MB');
+                    expect(buttons('Remove invoice.pdf', field('docs'))).toHaveLength(1);
+                });
+
+                it('says how full each field is, and offers to add to a field that has room', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    expect(field('photos').textContent).toContain('2 of 3');
+                    expect(field('docs').textContent).toContain('1 of 2');
+                    expect(buttons('Add a photo', field('photos'))).toHaveLength(1);
+                    expect(buttons('Add a file', field('docs'))).toHaveLength(1);
+                    expect(field('photos').querySelector('button[id="item-field-photos"]')).not.toBeNull();
+                });
+
+                it('offers nothing more to a field that is full', async () => {
+                    const third = attachment('a3', 'photos', { name: 'side.jpg' });
+                    await openFiles({
+                        items: [
+                            {
+                                ...SHELF,
+                                values: { ...SHELF.values, photos: ['a1', 'a2', 'a3'] },
+                                attachments: [...SHELF.attachments, third],
+                            },
+                        ],
+                    });
+                    await openDialog();
+
+                    expect(buttons('Add a photo', field('photos'))).toHaveLength(0);
+                    expect(field('photos').textContent).toContain('3 of 3');
+                });
+
+                it('opens the file chooser, for the types the field takes', async () => {
+                    await openFiles();
+                    await openDialog();
+                    picker().click = vi.fn();
+
+                    await press('Add a photo');
+
+                    expect(picker().click).toHaveBeenCalledTimes(1);
+                    expect(picker().accept).toBe('image/jpeg,image/png,image/webp,image/gif');
+                });
+
+                it('sends a file as soon as it is chosen and shows the item as the server describes it', async () => {
+                    await openFiles();
+                    await openDialog();
+                    picker().click = vi.fn();
+                    const third = attachment('a3', 'photos', { name: 'side.jpg' });
+                    const sending = deferred();
+                    http.post.mockReturnValue(sending.promise);
+
+                    await press('Add a photo');
+                    await choosing([picked('side.jpg')]);
+
+                    expect(http.post.mock.calls[0][0]).toBe('/api/v1/inventories/tools/items/i5/attachments');
+                    expect(http.post.mock.calls[0][1].get('field')).toBe('photos');
+                    expect(field('photos').querySelector('.spinner-border')).not.toBeNull();
+                    expect(field('photos').textContent).toContain('side.jpg');
+                    expect(visible(buttons('Save', itemDialog())[0] ?? document.body)).toBe(true);
+
+                    sending.resolve({
+                        data: {
+                            ...SHELF,
+                            values: { ...SHELF.values, photos: ['a1', 'a2', 'a3'] },
+                            attachments: [...SHELF.attachments, third],
+                        },
+                    });
+                    await flush();
+
+                    expect([...field('photos').querySelectorAll('img')].map((one) => one.getAttribute('alt'))).toEqual([
+                        'front.jpg',
+                        'back.jpg',
+                        'side.jpg',
+                    ]);
+                    expect(field('photos').querySelector('.spinner-border')).toBeNull();
+                    expect(tab('files').textContent.trim()).toBe('Attachments (4)');
+                    // The table behind the dialog shows the new photo count.
+                    expect(cellsOf(bodyRows()[0])[1].querySelector('.badge').textContent).toBe('+2');
+                });
+
+                it('shows why a file was refused, beside the file, until it is dismissed', async () => {
+                    await openFiles();
+                    await openDialog();
+                    http.post.mockRejectedValue(
+                        new HttpError(422, 'Invalid', { errors: { file: ['The file must be an image.'] } }),
+                    );
+
+                    await press('Add a photo');
+                    await choosing([picked('plan.jpg')]);
+
+                    const refusal = field('photos').querySelector('[role="alert"]');
+
+                    expect(refusal.textContent).toBe('The file must be an image.');
+                    expect(visible(refusal)).toBe(true);
+                    expect(field('photos').textContent).toContain('plan.jpg');
+
+                    await press('Dismiss the error for plan.jpg', field('photos'));
+
+                    expect(field('photos').querySelector('[role="alert"]')).toBeNull();
+                });
+
+                it('refuses a file larger than the page says the server takes, without sending it', async () => {
+                    await openFiles();
+                    await openDialog();
+                    const huge = picked('huge.jpg');
+                    Object.defineProperty(huge, 'size', { value: MAX_ATTACHMENT_SIZE + 1 });
+
+                    await press('Add a photo');
+                    await choosing([huge]);
+
+                    expect(http.post).not.toHaveBeenCalled();
+                    expect(field('photos').querySelector('[role="alert"]').textContent).toBe(
+                        'This file is larger than 5 MB.',
+                    );
+                });
+
+                it('asks before erasing a file, then removes it', async () => {
+                    await openFiles();
+                    await openDialog();
+                    const without = {
+                        ...SHELF,
+                        values: { ...SHELF.values, photos: ['a2'] },
+                        attachments: [BACK, INVOICE],
+                    };
+                    http.delete.mockResolvedValue({ data: without });
+
+                    await press('Remove front.jpg');
+
+                    expect(itemDialog().querySelector('.modal-body').textContent).toContain(
+                        'Delete the file front.jpg? This cannot be undone.',
+                    );
+                    expect(visible(itemDialog().querySelector('[role="tablist"]'))).toBe(false);
+                    expect(http.delete).not.toHaveBeenCalled();
+
+                    await press('Delete the file');
+
+                    expect(http.delete).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i5/attachments/a1');
+                    expect(notify).toHaveBeenCalledWith('success', 'File deleted.');
+                    expect([...field('photos').querySelectorAll('img')].map((one) => one.getAttribute('alt'))).toEqual([
+                        'back.jpg',
+                    ]);
+                    expect(hideModal).not.toHaveBeenCalled();
+                });
+
+                it('keeps the file when the person gives up', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('Remove front.jpg');
+                    await press('Cancel', itemDialog().querySelector('.modal-footer'));
+
+                    expect(http.delete).not.toHaveBeenCalled();
+                    expect(field('photos').querySelectorAll('img')).toHaveLength(2);
+                    expect(visible(itemDialog().querySelector('[role="tablist"]'))).toBe(true);
+                });
+
+                it('keeps the files chosen for an item that is being added, and sends them after it was saved', async () => {
+                    await openFiles({ items: [BARE] });
+                    http.post.mockImplementation(async (url) =>
+                        url === '/api/v1/inventories/tools/items'
+                            ? { data: { ...BARE, id: 'new' } }
+                            : { data: { ...BARE, id: 'new', values: { photos: ['a1'] }, attachments: [FRONT] } },
+                    );
+
+                    await press('Add item');
+                    picker().click = vi.fn();
+                    await press('Add a photo');
+                    await choosing([picked('front.jpg')]);
+
+                    expect(http.post).not.toHaveBeenCalled();
+                    expect(field('photos').textContent).toContain('front.jpg');
+                    expect(buttons('Remove front.jpg', field('photos'))).toHaveLength(1);
+
+                    await type(control('name'), 'Shelf');
+                    await submit(itemDialog().querySelector('form'));
+
+                    expect(http.post.mock.calls.map((call) => call[0])).toEqual([
+                        '/api/v1/inventories/tools/items',
+                        '/api/v1/inventories/tools/items/new/attachments',
+                    ]);
+                    expect(http.post.mock.calls[0][1]).toEqual({ values: { name: 'Shelf' } });
+                    expect(hideModal).toHaveBeenCalledWith(itemDialog());
+                });
+
+                it('takes back a file chosen for an item that is being added', async () => {
+                    await openFiles({ items: [BARE] });
+
+                    await press('Add item');
+                    picker().click = vi.fn();
+                    await press('Add a photo');
+                    await choosing([picked('front.jpg'), picked('back.jpg')]);
+                    await press('Remove front.jpg');
+
+                    expect(field('photos').textContent).not.toContain('front.jpg');
+                    expect(field('photos').textContent).toContain('back.jpg');
+                });
+
+                it('stays open on the new item, showing the file that failed, when a file could not be sent', async () => {
+                    await openFiles({ items: [BARE] });
+                    http.post
+                        .mockResolvedValueOnce({ data: { ...BARE, id: 'new' } })
+                        .mockRejectedValueOnce(new HttpError(422, 'Invalid', { errors: { file: ['Not an image.'] } }));
+
+                    await press('Add item');
+                    picker().click = vi.fn();
+                    await press('Add a photo');
+                    await choosing([picked('front.jpg')]);
+                    await type(control('name'), 'Shelf');
+                    await submit(itemDialog().querySelector('form'));
+
+                    expect(hideModal).not.toHaveBeenCalled();
+                    expect(notify).toHaveBeenCalledWith('warning', 'Item added, but 1 file could not be sent.');
+                    expect(visible(itemDialog().querySelector('[role="tablist"]'))).toBe(true);
+                    expect(field('photos').querySelector('[role="alert"]').textContent).toBe('Not an image.');
+                });
+            });
+
+            describe('the attachments tab', () => {
+                it('lists every file with its thumbnail or icon, its name, its size and the day it was added', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('Attachments (3)');
+
+                    const entries = [...panel('files').querySelectorAll('li.list-group-item')];
+
+                    expect(entries.map((entry) => entry.querySelector('a.fw-bold').textContent)).toEqual([
+                        'front.jpg',
+                        'back.jpg',
+                        'invoice.pdf',
+                    ]);
+                    expect(entries[0].querySelector('img').getAttribute('src')).toBe(
+                        '/api/v1/attachments/a1/thumbnail',
+                    );
+                    expect(entries[2].querySelector('img')).toBeNull();
+                    expect(entries[2].textContent).toContain('1 MB');
+                    expect(entries[2].textContent).toContain('Documents');
+                });
+
+                it('downloads a file, and deletes it after asking', async () => {
+                    await openFiles();
+                    await openDialog();
+                    await press('Attachments (3)');
+                    http.delete.mockResolvedValue({
+                        data: { ...SHELF, values: { ...SHELF.values, docs: [] }, attachments: [FRONT, BACK] },
+                    });
+
+                    const download = panel('files').querySelector('a[aria-label="Download invoice.pdf"]');
+
+                    expect(download.getAttribute('href')).toBe('/api/v1/attachments/d1');
+
+                    await press('Remove invoice.pdf', panel('files'));
+
+                    expect(itemDialog().querySelector('.modal-body').textContent).toContain(
+                        'Delete the file invoice.pdf?',
+                    );
+
+                    await press('Delete the file');
+
+                    expect(http.delete).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i5/attachments/d1');
+                    expect(panel('files').querySelectorAll('li.list-group-item')).toHaveLength(2);
+                });
+
+                it('adds a file to the item itself', async () => {
+                    await openFiles();
+                    await openDialog();
+                    await press('Attachments (3)');
+                    picker().click = vi.fn();
+                    const notes = attachment('n1', null, {
+                        name: 'notes.txt',
+                        mime: 'text/plain',
+                        has_thumbnail: false,
+                    });
+                    http.post.mockResolvedValue({ data: { ...SHELF, attachments: [...SHELF.attachments, notes] } });
+
+                    await press('Add a file', panel('files'));
+                    await choosing([picked('notes.txt', 'text/plain')]);
+
+                    expect(picker().click).toHaveBeenCalledTimes(1);
+                    expect(http.post.mock.calls[0][1].has('field')).toBe(false);
+                    expect(panel('files').querySelectorAll('li.list-group-item')).toHaveLength(4);
+                    expect(tab('files').textContent.trim()).toBe('Attachments (4)');
+                });
+
+                it('says when the item has no attachment', async () => {
+                    await openFiles({ items: [BARE] });
+                    await openDialog();
+
+                    await press('Attachments (0)');
+
+                    expect(panel('files').textContent).toContain('No attachment yet.');
+                });
+            });
+
+            describe('the history tab', () => {
+                const REVISION = {
+                    id: 3,
+                    action: 'updated',
+                    user: { id: 'u1', name: 'Ada' },
+                    created_at: '2026-10-15T10:00:00Z',
+                    changes: [{ field: 'name', before: 'Racks', after: 'Shelf' }],
+                };
+
+                it('reads the revisions when it is shown and lists them with what changed', async () => {
+                    await openFiles({
+                        revisions: [
+                            REVISION,
+                            {
+                                id: 2,
+                                action: 'attachment_added',
+                                user: null,
+                                created_at: '2026-10-15T09:00:00Z',
+                                changes: { attachment: 'a1', name: 'front.jpg', field: 'photos' },
+                            },
+                        ],
+                    });
+                    await openDialog();
+
+                    expect(http.get).not.toHaveBeenCalledWith(REVISIONS, expect.anything());
+
+                    await press('History');
+
+                    expect(http.get).toHaveBeenCalledWith(REVISIONS, { params: { page: 1 } });
+
+                    const entries = [...panel('history').querySelectorAll('li.list-group-item')];
+
+                    expect(entries[0].querySelector('.fw-bold').textContent.startsWith('Ada · ')).toBe(true);
+                    expect(entries[0].querySelector('li').textContent).toBe('Name: Racks → Shelf');
+                    expect(entries[1].querySelector('.fw-bold').textContent.startsWith('Deleted user · ')).toBe(true);
+                    expect(entries[1].querySelector('li').textContent).toBe('File added: front.jpg');
+                });
+
+                it('says when nothing was recorded', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('History');
+
+                    expect(panel('history').textContent).toContain('No change recorded yet.');
+                });
+
+                it('adds the next page on request', async () => {
+                    http.get.mockImplementation(async (url, request) => {
+                        if (url === REVISIONS) {
+                            return request.params.page === 1
+                                ? { data: [REVISION], meta: { current_page: 1, last_page: 2, total: 2 } }
+                                : { data: [{ ...REVISION, id: 1 }], meta: { current_page: 2, last_page: 2, total: 2 } };
+                        }
+
+                        return url === '/api/v1/inventories/tools'
+                            ? { data: { id: 'tools', name: 'Tools', items_count: 1, fields: FILE_FIELDS } }
+                            : itemsPage([SHELF]);
+                    });
+                    await mount('app/inventory.blade.php');
+                    await openDialog();
+
+                    await press('History');
+
+                    expect(panel('history').querySelectorAll('li.list-group-item')).toHaveLength(1);
+
+                    await press('Load more', panel('history'));
+
+                    expect(panel('history').querySelectorAll('li.list-group-item')).toHaveLength(2);
+                    expect(buttons('Load more', panel('history'))).toHaveLength(0);
+                });
+
+                it('offers to try again when it could not be read', async () => {
+                    await openFiles();
+                    await openDialog();
+                    http.get.mockRejectedValueOnce(new HttpError(500, 'Server down'));
+
+                    await press('History');
+
+                    expect(visible(panel('history').querySelector('.alert-danger'))).toBe(true);
+                    expect(panel('history').textContent).toContain('The history could not be loaded.');
+
+                    await press('Try again', panel('history'));
+
+                    expect(visible(panel('history').querySelector('.alert-danger'))).toBe(false);
+                });
+
+                it('shows what a person typed as text, never as markup', async () => {
+                    await openFiles({
+                        revisions: [
+                            { ...REVISION, user: { id: 'u1', name: '<img src=x onerror="window.pwned = true">' } },
+                        ],
+                    });
+                    await openDialog();
+
+                    await press('History');
+
+                    expect(panel('history').querySelector('img')).toBeNull();
+                    expect(panel('history').textContent).toContain('<img src=x onerror="window.pwned = true">');
+                    expect(window.pwned).toBeUndefined();
+                });
+            });
+
+            describe('what a person who may not edit sees', () => {
+                beforeEach(() => {
+                    PAGE.abilities = { edit_items: false };
+                });
+
+                it('is the details with the files linked, and no control to add or remove', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    expect(itemDialog().querySelectorAll('input, select, textarea')).toHaveLength(0);
+                    expect(visible(itemDialog().querySelector('[role="tablist"]'))).toBe(true);
+
+                    const links = [...panel('details').querySelectorAll('dd a')];
+
+                    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+                        '/api/v1/attachments/a1?inline=1',
+                        '/api/v1/attachments/a2?inline=1',
+                        '/api/v1/attachments/d1?inline=1',
+                    ]);
+                    expect(links[0].querySelector('img').getAttribute('alt')).toBe('front.jpg');
+                    expect(links.every((link) => link.getAttribute('rel') === 'noopener noreferrer')).toBe(true);
+                });
+
+                it('can read the attachments and download them, but not add or delete any', async () => {
+                    await openFiles();
+                    await openDialog();
+
+                    await press('Attachments (3)');
+
+                    expect(buttons('Add a file', panel('files'))).toHaveLength(0);
+                    expect(buttons('Remove front.jpg', panel('files'))).toHaveLength(0);
+                    expect(panel('files').querySelector('a[aria-label="Download front.jpg"]')).not.toBeNull();
+                });
+
+                it('can read the history', async () => {
+                    await openFiles({
+                        revisions: [
+                            {
+                                id: 4,
+                                action: 'created',
+                                user: { id: 'u1', name: 'Ada' },
+                                created_at: '2026-10-15T08:00:00Z',
+                                changes: [{ field: 'name', before: null, after: 'Shelf' }],
+                            },
+                        ],
+                    });
+                    await openDialog();
+
+                    await press('History');
+
+                    expect([...panel('history').querySelectorAll('li li')].map((line) => line.textContent)).toEqual([
+                        'Item created',
+                        'Name: Shelf',
+                    ]);
+                });
+            });
+        });
     });
 
     describe('the field editor of an inventory', () => {
@@ -2936,6 +3640,8 @@ describe('the pages under the real Alpine CSP build', () => {
                 'Choice',
                 'Rating',
                 'Barcode',
+                'File',
+                'Photo',
             ]);
             expect(input('field-max-length')).not.toBeNull();
             expect(input('field-decimals')).toBeNull();
@@ -2984,6 +3690,81 @@ describe('the pages under the real Alpine CSP build', () => {
                 required: false,
                 options: { currency: 'USD' },
             });
+        });
+
+        it('offers the number of files a photo or file field takes, and never a requirement', async () => {
+            await open();
+            await press('Add a field');
+            const required = () => fieldDialog().querySelector('input[type="checkbox"]');
+
+            expect(visible(required())).toBe(true);
+            expect(input('field-max-files')).toBeNull();
+
+            await choose(input('field-type'), 'photo');
+
+            expect(visible(required())).toBe(false);
+            expect([...input('field-max-files').options].map((option) => option.textContent)).toEqual([
+                '1',
+                '2',
+                '3',
+                '4',
+                '5',
+                '6',
+                '7',
+                '8',
+                '9',
+                '10',
+            ]);
+            expect(input('field-max-files').value).toBe('1');
+
+            await choose(input('field-max-files'), '4');
+            await type(input('field-name'), 'Photos');
+            http.post.mockResolvedValue({ data: { id: 'new' } });
+            await submit(fieldDialog().querySelector('form'));
+
+            expect(http.post.mock.calls[0][1]).toEqual({
+                type: 'photo',
+                name: 'Photos',
+                required: false,
+                options: { max_files: 4 },
+            });
+        });
+
+        it('does not send a requirement ticked before the type became a file field', async () => {
+            await open();
+            await press('Add a field');
+
+            await tick(fieldDialog().querySelector('input[type="checkbox"]'), true);
+            await choose(input('field-type'), 'file');
+            await type(input('field-name'), 'Manuals');
+            http.post.mockResolvedValue({ data: { id: 'new' } });
+            await submit(fieldDialog().querySelector('form'));
+
+            expect(http.post.mock.calls[0][1]).toEqual({
+                type: 'file',
+                name: 'Manuals',
+                required: false,
+                options: { max_files: 1 },
+            });
+        });
+
+        it('sums up how many files a photo or file field takes', async () => {
+            await open([
+                FIELDS[0],
+                {
+                    id: 'photos',
+                    name: 'Photos',
+                    type: 'photo',
+                    options: { max_files: 3 },
+                    required: false,
+                    position: 1,
+                },
+            ]);
+
+            expect(entries().map((entry) => entry.querySelector('.text-secondary').textContent)).toEqual([
+                'Maximum length: 120',
+                'Files allowed: 3',
+            ]);
         });
 
         it('edits the choices of a select, keeping the ids of the ones that stay', async () => {

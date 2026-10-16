@@ -22,6 +22,9 @@ import { redirectTo, reloadPage } from './page.js';
 /** Time after which a request is abandoned (covers connecting and reading the body). */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** Time after which an upload is abandoned: a file of several megabytes on a slow connection takes longer than other requests. */
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
 /** Time a feedback toast stays readable before the page reloads or redirects. */
 const NAVIGATION_DELAY_MS = 1500;
 
