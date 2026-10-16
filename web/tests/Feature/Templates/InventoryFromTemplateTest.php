@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Requests\Inventories\SaveInventoryRequest;
 use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Inventories;
 use App\Inventories\Templates\Template;
@@ -9,6 +10,7 @@ use App\Inventories\Templates\TemplateCatalogue;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Testing\TestResponse;
 use Illuminate\Validation\ValidationException;
 
@@ -154,6 +156,31 @@ describe('creating an inventory from a template', function (): void {
         expect(Inventory::query()->count())->toBe(0);
     })->with(['an unknown slug' => ['nothing'], 'capitals' => ['SAMPLE-TOOLS'], 'a number' => [12], 'a list' => [['sample-tools']], 'too long' => [str_repeat('a', 300)]]);
 
+    it('is made from the template the validation found, even when the catalogue lost it before the inventory is made', function (): void {
+        $request = SaveInventoryRequest::create('/api/v1/workspaces/any/inventories', 'POST', ['name' => 'Shop', 'template' => 'sample-shop']);
+        $validator = Validator::make($request->all(), $request->rules());
+
+        expect($validator->passes())->toBeTrue();
+
+        // The file went away, or the cache was emptied, between the rule and the use.
+        templateCatalogueFrom(storage_path('framework/testing/no-such-folder'));
+
+        expect(app(TemplateCatalogue::class)->find('sample-shop'))->toBeNull()
+            ->and($request->template())->toBeInstanceOf(Template::class)
+            ->and($request->template()?->slug)->toBe('sample-shop')
+            ->and($request->template())->toBe($request->template());
+    });
+
+    it('is never an empty inventory for a template that is named and cannot be found: it is a 422 like the validation', function (): void {
+        $request = SaveInventoryRequest::create('/api/v1/workspaces/any/inventories', 'POST', ['name' => 'Shop', 'template' => 'nothing']);
+
+        expect(fn () => $request->template())->toThrow(ValidationException::class, "Ce modèle n'existe pas.");
+
+        $none = SaveInventoryRequest::create('/api/v1/workspaces/any/inventories', 'POST', ['name' => 'Shop']);
+
+        expect($none->template())->toBeNull();
+    });
+
     it('cannot be asked for when an inventory is changed', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
@@ -237,6 +264,25 @@ describe('the transaction', function (): void {
 
         expect(Inventory::query()->count())->toBe(0);
     });
+
+    it('refuses a required field that is filled by uploading files, whichever way the field is added, and makes nothing', function (string $type): void {
+        $this->useLanguage('en');
+        $team = inventoryTeam();
+        $data = templateData('sample-tools');
+        // The validator would never let this file in: the template is built by hand to reach the creation.
+        $data['fields'][5]['type'] = $type;
+        $data['fields'][5]['required'] = true;
+
+        expect(fn () => app(Inventories::class)->createFromTemplate($team['workspace'], Template::fromArray('uploads', $data), 'Uploads', null, 'en'))
+            ->toThrow(ValidationException::class, 'A field filled by uploading files cannot be required.');
+
+        expect(Inventory::query()->count())->toBe(0)->and(InventoryField::query()->count())->toBe(0);
+
+        $inventory = inventoryIn($team['workspace']);
+
+        expect(fn () => fieldIn($inventory, $type, 'Attachments', [], true))->toThrow(ValidationException::class, 'A field filled by uploading files cannot be required.')
+            ->and(fieldIn($inventory, $type, 'Attachments')->required)->toBeFalse();
+    })->with(['file', 'photo']);
 
     it('keeps the behaviour of a field added by hand: position, quota and name', function (): void {
         $team = inventoryTeam();

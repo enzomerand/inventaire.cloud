@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Inventories\Templates\Template;
 use App\Inventories\Templates\TemplateCatalogue;
+use App\Inventories\Templates\TemplatePresenter;
 use App\Support\PublicUrls;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../../Support/inventories.php';
 require_once __DIR__.'/../../Support/templates.php';
@@ -206,6 +209,31 @@ describe('the page of a template', function (): void {
         expect(templateTexts($page, '(//table)[2]/tbody/tr[2]/td[4]'))->toBe(['May 18, 2024, 10:30 AM']);
     });
 
+    it('shows a day or a moment it cannot format as the file writes it, and logs a warning', function (): void {
+        $data = templateData('sample-records');
+        $data['fields'][] = ['key' => 'released_on', 'type' => 'date', 'name' => ['fr' => 'Sorti le', 'en' => 'Released on']];
+        // The validator would never let these in: the template is built by hand to reach the presenter.
+        $data['examples']['en'][0]['bought_at'] = 'not a moment';
+        $data['examples']['en'][0]['released_on'] = 'not a day';
+        $template = Template::fromArray('records', $data);
+        Log::spy();
+
+        $examples = app(TemplatePresenter::class)->examples($template, 'en');
+        $texts = array_column(array_merge(...$examples['rows']), 'text');
+
+        expect($texts)->toContain('not a moment')->toContain('not a day');
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'A moment') && $context['value'] === 'not a moment' && $context['locale'] === 'en' && $context['exception'] instanceof Throwable)->once();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'A day') && $context['value'] === 'not a day')->once();
+    });
+
+    it('writes a moment and a day it can format without a warning', function (): void {
+        Log::spy();
+
+        $this->get('/en/templates/sample-records')->assertOk();
+
+        Log::shouldNotHaveReceived('warning');
+    });
+
     it('has a button that uses the template, at the top and at the end', function (): void {
         $page = templateDom($this->get('/templates/sample-tools')->assertOk());
 
@@ -310,6 +338,64 @@ describe('using a template', function (): void {
         $this->get('/app')->assertRedirect(route('app.workspace', ['workspace' => $person->workspaces()->sole()->ulid]));
     });
 
+    it('takes a person back to the page of the account they were sent from, once, whatever the query', function (string $intended, string $to): void {
+        $person = inventoryPerson();
+
+        $this->actingAs($person)->withSession(['url.intended' => $intended])->get('/app')->assertRedirect($to);
+
+        // Used once.
+        $this->get('/app')->assertRedirect(route('app.workspace', ['workspace' => $person->workspaces()->sole()->ulid]));
+    })->with([
+        ['http://localhost/app/templates/sample-tools', 'http://localhost/app/templates/sample-tools'],
+        ['http://localhost/app/account?tab=export', 'http://localhost/app/account?tab=export'],
+        ['http://LOCALHOST:80/app/workspaces#top', 'http://localhost/app/workspaces'],
+        ['http://localhost/app/w/01HZ/inventories/01J', 'http://localhost/app/w/01HZ/inventories/01J'],
+    ]);
+
+    it('forgets a stale place that is not a page of the account, and lands in the workspace', function (string $intended): void {
+        $person = inventoryPerson();
+        $workspace = route('app.workspace', ['workspace' => $person->workspaces()->sole()->ulid]);
+
+        $this->actingAs($person)->withSession(['url.intended' => $intended])->get('/app')->assertRedirect($workspace);
+
+        expect(session()->has('url.intended'))->toBeFalse();
+    })->with([
+        'a public page' => 'http://localhost/templates/sample-tools',
+        'the login page' => 'http://localhost/login',
+        'the home page' => 'http://localhost/',
+        'an API address' => 'http://localhost/api/v1/templates',
+        'this very address, which would loop' => 'http://localhost/app',
+        'this very address with a slash' => 'http://localhost/app/',
+        'a path that only starts like it' => 'http://localhost/apple/pie',
+        'a page of another site' => 'https://evil.example/app/templates/sample-tools',
+        'a page of another port' => 'http://localhost:8080/app/account',
+        'another scheme' => 'https://localhost/app/account',
+        'a host that only starts like the instance' => 'http://localhost.evil.example/app/account',
+        'a user name that looks like the instance' => 'http://localhost@evil.example/app/account',
+        'an address without a host' => '//evil.example/app/account',
+        'a path without a host' => '/app/account',
+        'a way out of /app' => 'http://localhost/app/../login',
+        'a way out of /app, encoded' => 'http://localhost/app/%2e%2e/login',
+        'a back slash' => 'http://localhost/app\\@evil.example/',
+        'something that is not an address' => 'javascript:alert(1)',
+        'nothing but spaces' => ' ',
+    ]);
+
+    it('lands in the workspace of an instance whose address is not the one of the request, when the place was written for the other', function (): void {
+        config(['app.url' => 'https://inventaire.example']);
+        $person = inventoryPerson();
+
+        $this->actingAs($person)->withSession(['url.intended' => 'http://localhost/app/account'])->get('/app')
+            ->assertRedirect(route('app.workspace', ['workspace' => $person->workspaces()->sole()->ulid]));
+    });
+
+    it('builds the address of the page from APP_URL', function (): void {
+        config(['app.url' => 'https://inventaire.example/']);
+
+        $this->actingAs(inventoryPerson())->withSession(['url.intended' => 'https://INVENTAIRE.example/app/account?x=1'])->get('/app')
+            ->assertRedirect('https://inventaire.example/app/account?x=1');
+    });
+
     it('opens the dialog of a new inventory in the workspace the person works in', function (): void {
         $person = inventoryPerson();
         $workspace = $person->workspaces()->sole();
@@ -351,6 +437,22 @@ describe('using a template', function (): void {
         $this->get('/app/workspaces', ['Accept-Language' => 'fr'])->assertOk()->assertSee('Il vous faut un espace de travail où vous pouvez ajouter des inventaires pour utiliser un modèle.', false);
         // Said once.
         $this->get('/app/workspaces', ['Accept-Language' => 'fr'])->assertOk()->assertDontSee('Il vous faut un espace de travail');
+    });
+
+    it('shows the notice, as a warning, on the page of the workspaces the person is sent to, and only once', function (): void {
+        $team = inventoryTeam();
+        $viewer = $team['viewer'];
+        $viewer->workspaces()->detach($viewer->workspaces()->where('workspaces.id', '!=', $team['workspace']->id)->sole()->id);
+
+        $page = templateDom($this->actingAs($viewer)->followingRedirects()->get('/app/templates/sample-tools', ['Accept-Language' => 'en'])->assertOk());
+
+        expect(templateTexts($page, '//h1'))->toBe(['Workspaces'])
+            ->and(templateAttributes($page, '//div[@x-data="flashNotice"]', 'data-type'))->toBe(['warning'])
+            ->and(templateAttributes($page, '//div[@x-data="flashNotice"]', 'data-message'))->toBe(['You need a workspace where you can add inventories to use a template.']);
+
+        $again = templateDom($this->get('/app/workspaces', ['Accept-Language' => 'en'])->assertOk());
+
+        expect($again->query('//div[@x-data="flashNotice"]')->length)->toBe(0);
     });
 
     it('is a 404 for a template that does not exist', function (): void {

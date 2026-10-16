@@ -10,6 +10,7 @@ use App\Support\DisplayTime;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeZone;
+use Illuminate\Support\Facades\Log;
 use IntlDateFormatter;
 use NumberFormatter;
 use Throwable;
@@ -224,7 +225,10 @@ final class TemplatePresenter
         try {
             $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE, 'UTC')
                 ?->format(new DateTimeImmutable($date.' 00:00:00', new DateTimeZone('UTC')));
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
+            // The page still shows the day as the file writes it; the validator should have refused it, so say so.
+            Log::warning('A day of an example of a template cannot be formatted: it is shown as it is written.', ['value' => $date, 'locale' => $locale, 'exception' => $exception]);
+
             return $date;
         }
 
@@ -240,7 +244,9 @@ final class TemplatePresenter
             $zone = DisplayTime::zone();
             $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT, $zone)
                 ?->format(CarbonImmutable::parse($moment)->setTimezone($zone));
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
+            Log::warning('A moment of an example of a template cannot be formatted: it is shown as it is written.', ['value' => $moment, 'locale' => $locale, 'exception' => $exception]);
+
             return $moment;
         }
 

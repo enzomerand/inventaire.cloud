@@ -68,12 +68,7 @@ final class InventoryFields
      */
     public function create(Inventory $inventory, string $type, string $name, array $options = [], bool $required = false): InventoryField
     {
-        $handler = $this->types->get($type);
         $name = SingleLineText::normalize($name);
-
-        if ($required) {
-            $this->assertCanBeRequired($handler);
-        }
 
         return DeadlockRetries::run(fn (): InventoryField => $this->db->transaction(function () use ($inventory, $type, $name, $options, $required): InventoryField {
             $locked = $this->locks->inventory($inventory->getKey());
@@ -99,10 +94,16 @@ final class InventoryFields
      * @param  array<string, mixed>  $options  As sent: the type fills in the defaults and puts them in canonical form.
      *
      * @throws FieldLimitReachedException When the inventory already has as many fields as allowed.
-     * @throws ValidationException When the name is taken or the options do not fit together.
+     * @throws ValidationException When the name is taken, the options do not fit together, or the type is filled by uploading
+     *                             files and the field is required.
      */
     public function insert(Inventory $inventory, Collection $fields, string $type, string $name, array $options, bool $required): InventoryField
     {
+        // Whoever adds a field, by hand or with the many of a template, a field that is filled by uploading files is not required.
+        if ($required) {
+            $this->assertCanBeRequired($this->types->get($type));
+        }
+
         $limit = config()->integer('inventories.max_fields');
 
         if ($fields->count() >= $limit) {
