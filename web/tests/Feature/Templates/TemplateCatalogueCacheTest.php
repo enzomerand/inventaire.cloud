@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Inventories\Templates\Template;
 use App\Inventories\Templates\TemplateCatalogue;
+use App\Inventories\Templates\TemplateValidator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -167,6 +168,20 @@ describe('the key of the cache entry', function (): void {
         templateNewProcess()->all();
 
         expect(templateCacheEntries())->toHaveCount(2);
+    });
+
+    it('holds the version of the rules and the newest format of the files they read, with the languages and the files', function (): void {
+        $folder = templateFolder();
+        copy(base_path('tests/Fixtures/templates/sample-shop.json'), $folder.'/sample-shop.json');
+        templateCatalogueFrom($folder);
+        app(TemplateCatalogue::class)->all();
+
+        $content = (string) file_get_contents($folder.'/sample-shop.json');
+        $hashed = 'validator:'.TemplateValidator::VERSION."\0format:".TemplateValidator::FORMAT."\0locales:".implode(',', array_keys(config('app.locale_names')))."\0"
+            .strlen('sample-shop.json').':sample-shop.json|'.strlen($content).'|read|'.strlen($content).':'.$content."\0";
+
+        // A build that reads another format must not take the verdict of this one (a file refused for being too new may now be read).
+        expect(array_keys(templateCacheEntries()))->toBe(['inventory-templates:v2:'.hash('xxh128', $hashed)]);
     });
 
     it('does not change with the settings that do not change what the validator says', function (): void {

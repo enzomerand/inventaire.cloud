@@ -21,7 +21,8 @@ use JsonException;
  * reading them, so the verdict is kept in the application cache for a day: the decoded templates that were accepted, as plain
  * arrays (the files that were left out are logged when the verdict is made, and are not kept). The key of the entry is a hash of what the
  * verdict depends on: the name and the content of every file, {@see TemplateValidator::VERSION} (the rules that judged
- * them) and the languages of the application. Editing a file, adding one, or a new version of the rules therefore needs no
+ * them), {@see TemplateValidator::FORMAT} (the newest format they read: a file refused for being too new may be read by the
+ * next version) and the languages of the application. Editing a file, adding one, or a new version of the rules therefore needs no
  * invalidation: the next request finds no entry under the new key and judges again (the old entries expire by themselves),
  * and only `inventaire:upgrade` forgets the entry ({@see self::forget()}), for what the key cannot see (the registry of
  * the types of field, say). The templates themselves are rebuilt from the arrays at the first question of each process and
@@ -217,7 +218,7 @@ final class TemplateCatalogue
     {
         $hash = hash_init('xxh128');
 
-        hash_update($hash, 'validator:'.TemplateValidator::VERSION."\0locales:".implode(',', $this->locales->supported())."\0");
+        hash_update($hash, 'validator:'.TemplateValidator::VERSION."\0format:".TemplateValidator::FORMAT."\0locales:".implode(',', $this->locales->supported())."\0");
 
         foreach ($files as $name => $file) {
             // Lengths first, so that no content can be taken for the start of the next file.
