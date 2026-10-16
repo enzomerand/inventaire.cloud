@@ -37,8 +37,8 @@ class SetLocale
 
         $response = $next($request);
 
-        // Tells clients which language the body is in...
-        $response->headers->set('Content-Language', $locale);
+        // Tells clients which language the body is in (the one the route may have chosen instead: see UseUrlLocale)...
+        $response->headers->set('Content-Language', App::getLocale());
 
         // ...and tells shared caches that it depends on the request headers the locale is resolved from.
         $response->setVary('Accept-Language, Cookie', false);

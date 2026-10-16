@@ -11,14 +11,35 @@ use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
 use App\Http\Controllers\Web\InventoryFieldsPageController;
 use App\Http\Controllers\Web\InventoryPageController;
+use App\Http\Controllers\Web\TemplateGalleryController;
+use App\Http\Controllers\Web\TemplatePageController;
+use App\Http\Controllers\Web\TemplateUseController;
 use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
+use App\Http\Middleware\UseUrlLocale;
 use App\Installer\InstallStep;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'home')->name('home');
+
+// The public pages of the templates (the gallery and one page for each template), rendered by the server so that search
+// engines read them. They exist once per language, each with an address of its own: the language of the instance has no
+// prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
+// permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale).
+$localeCodes = implode('|', array_map(fn (int|string $code): string => preg_quote((string) $code, '/'), array_keys(config()->array('app.locale_names'))));
+
+Route::middleware(UseUrlLocale::class)->group(function () use ($localeCodes): void {
+    Route::get('/templates', TemplateGalleryController::class)->name('templates.index');
+    Route::get('/templates/{slug}', TemplatePageController::class)->name('templates.show');
+
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])
+        ->name('templates.localized.')->group(function (): void {
+            Route::get('/templates', TemplateGalleryController::class)->name('index');
+            Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
+        });
+});
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the
 // workspace they work in), where the pages drive the /api/v1 endpoints of their workspaces, their inventories, their
@@ -29,6 +50,10 @@ Route::middleware(['auth', AuthenticateSession::class])->group(function (): void
     Route::get('/app', CurrentWorkspaceRedirectController::class)->name('app');
     Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
     Route::view('/app/account', 'app.account')->name('app.account');
+
+    // "Use this template" on a public page: opens the dialog of a new inventory, with the template chosen, in a workspace
+    // the person may change. A visitor who is not signed in goes through the login page and comes back here.
+    Route::get('/app/templates/{slug}', TemplateUseController::class)->name('app.templates.use');
 
     // The pages of a workspace: its inventories, the items of one of them and its fields. The ULID of the workspace is in
     // the path (not the "current" workspace of the account), so that a link always shows the same thing; the inventory

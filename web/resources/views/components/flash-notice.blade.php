@@ -11,3 +11,8 @@
 @if (session()->has('account_deleted'))
     <div hidden x-data="flashNotice" data-type="success" data-message="{{ __('Your account has been deleted.') }}"></div>
 @endif
+
+{{-- "Use this template" for somebody who may add inventories to none of their workspaces (a viewer everywhere). --}}
+@if (session()->has('template_needs_workspace'))
+    <div hidden x-data="flashNotice" data-type="warning" data-message="{{ __('You need a workspace where you can add inventories to use a template.') }}"></div>
+@endif

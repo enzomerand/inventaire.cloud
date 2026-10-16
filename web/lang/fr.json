@@ -851,5 +851,18 @@
     "Hobbies and workshop": "Loisirs et atelier",
     "Food and drink": "Alimentation et boissons",
     "Associations and clubs": "Associations et clubs",
-    "This template does not exist.": "Ce modèle n'existe pas."
+    "This template does not exist.": "Ce modèle n'existe pas.",
+    "Free inventory templates": "Modèles d'inventaire gratuits",
+    "Inventory templates": "Modèles d'inventaire",
+    "Start from a ready-made inventory: pick a template, adjust its fields and start counting.": "Partez d'un inventaire prêt à l'emploi : choisissez un modèle, ajustez ses champs et commencez à compter.",
+    ":count field|:count fields": ":count champ|:count champs",
+    "No template is available yet.": "Aucun modèle n'est disponible pour le moment.",
+    ":name: free inventory template": ":name : modèle d'inventaire gratuit",
+    "Use this template": "Utiliser ce modèle",
+    "You will be asked to sign in, then the inventory is created with these fields.": "On vous demandera de vous connecter, puis l'inventaire est créé avec ces champs.",
+    "Examples": "Exemples",
+    "These rows only show what the inventory could hold. They are not added to your inventory.": "Ces lignes montrent seulement ce que l'inventaire peut contenir. Elles ne sont pas ajoutées à votre inventaire.",
+    ":grade out of :max": ":grade sur :max",
+    "You need a workspace where you can add inventories to use a template.": "Il vous faut un espace de travail où vous pouvez ajouter des inventaires pour utiliser un modèle.",
+    "Browse the templates": "Parcourir les modèles"
 }

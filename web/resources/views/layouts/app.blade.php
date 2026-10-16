@@ -24,7 +24,12 @@
                 </a>
 
                 <div class="navbar-nav flex-row order-md-last align-items-center gap-2">
-                    <x-locale-switcher />
+                    {{-- A page that exists once per language, with an address each, links to its other languages. --}}
+                    @isset($localeAlternates)
+                        <x-locale-links :alternates="$localeAlternates" />
+                    @else
+                        <x-locale-switcher />
+                    @endisset
 
                     {{-- The install wizard runs before there are any accounts, or even a database to look them up in. --}}
                     @unless (request()->routeIs('install.*'))
@@ -66,6 +71,12 @@
                     <div class="row text-center align-items-center flex-row-reverse">
                         <div class="col-lg-auto ms-lg-auto">
                             <ul class="list-inline list-inline-dots mb-0">
+                                <li class="list-inline-item">
+                                    <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::templatesPath(app()->getLocale()) }}">
+                                        <x-tabler-layout-grid aria-hidden="true" />
+                                        {{ __('Inventory templates') }}
+                                    </a>
+                                </li>
                                 <li class="list-inline-item">
                                     <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ $repository }}" target="_blank" rel="noopener">
                                         <x-tabler-code aria-hidden="true" />

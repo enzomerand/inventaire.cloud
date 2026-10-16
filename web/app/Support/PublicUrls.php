@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Services\LocaleResolver;
+use Closure;
+
 /**
  * The addresses of the public pages (the home page and the gallery of templates), as search engines and other sites must
  * see them: absolute, and built from `APP_URL`, never from the request. A `Host` header is written by whoever calls, so an
@@ -44,7 +47,7 @@ final class PublicUrls
      */
     public static function templates(string $locale): string
     {
-        return self::to(self::prefix($locale).'/templates');
+        return self::to(self::templatesPath($locale));
     }
 
     /**
@@ -52,7 +55,41 @@ final class PublicUrls
      */
     public static function template(string $slug, string $locale): string
     {
-        return self::to(self::prefix($locale).'/templates/'.rawurlencode($slug));
+        return self::to(self::templatePath($slug, $locale));
+    }
+
+    /**
+     * The path of the gallery of templates in a language, for a link that stays on the host the visitor came by.
+     */
+    public static function templatesPath(string $locale): string
+    {
+        return self::prefix($locale).'/templates';
+    }
+
+    /**
+     * The path of the page of a template in a language, for a link that stays on the host the visitor came by.
+     */
+    public static function templatePath(string $slug, string $locale): string
+    {
+        return self::templatesPath($locale).'/'.rawurlencode($slug);
+    }
+
+    /**
+     * A page in every language the application supports: what `$path` gives for each language, by language. For the
+     * language switcher of a page that exists once per language, and for the `hreflang` links that say so.
+     *
+     * @param  Closure(string): string  $path  The path or address of the page in a language.
+     * @return array<string, string>
+     */
+    public static function alternates(Closure $path): array
+    {
+        $alternates = [];
+
+        foreach (app(LocaleResolver::class)->supported() as $locale) {
+            $alternates[$locale] = $path($locale);
+        }
+
+        return $alternates;
     }
 
     /**

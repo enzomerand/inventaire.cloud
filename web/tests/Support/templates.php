@@ -7,6 +7,7 @@ declare(strict_types=1);
 
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Inventories\Templates\TemplateValidator;
+use Illuminate\Testing\TestResponse;
 
 /**
  * Makes the catalogue read the fixtures of tests/Fixtures/templates (four small templates) instead of the shipped ones.
@@ -102,4 +103,51 @@ function templateRemoveFolder(string $path): void
     }
 
     rmdir($path);
+}
+
+/**
+ * The page of a response, ready to be queried with XPath.
+ */
+function templateDom(TestResponse $response): DOMXPath
+{
+    $dom = new DOMDocument;
+    libxml_use_internal_errors(true);
+    $dom->loadHTML('<?xml encoding="UTF-8">'.$response->getContent());
+    libxml_clear_errors();
+
+    return new DOMXPath($dom);
+}
+
+/**
+ * The texts of the nodes an XPath query finds, with the spaces (the non-breaking ones too) squeezed.
+ *
+ * @return list<string>
+ */
+function templateTexts(DOMXPath $page, string $query): array
+{
+    $texts = [];
+
+    foreach ($page->query($query) ?: [] as $node) {
+        $texts[] = trim((string) preg_replace('/[\s\x{00A0}\x{202F}]+/u', ' ', $node->textContent));
+    }
+
+    return $texts;
+}
+
+/**
+ * The values of an attribute of the nodes an XPath query finds.
+ *
+ * @return list<string>
+ */
+function templateAttributes(DOMXPath $page, string $query, string $attribute): array
+{
+    $values = [];
+
+    foreach ($page->query($query) ?: [] as $node) {
+        if ($node instanceof DOMElement) {
+            $values[] = $node->getAttribute($attribute);
+        }
+    }
+
+    return $values;
 }

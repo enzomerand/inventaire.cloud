@@ -15,7 +15,8 @@ use Illuminate\Http\Request;
  * The workspace is the one they chose, else the first one they joined; an account that somehow has none is given its
  * personal workspace on the way ({@see Workspaces::current()}). If it still has none (the account was deleted while
  * the request ran), the person is sent to the list of their workspaces, which renders without one: never to the login
- * page, which sends a signed-in visitor straight back here.
+ * page, which sends a signed-in visitor straight back here. Somebody who comes from the login page, where a page that needs
+ * an account had sent them, goes back to that page instead.
  */
 final class CurrentWorkspaceRedirectController extends Controller
 {
@@ -28,8 +29,12 @@ final class CurrentWorkspaceRedirectController extends Controller
     {
         $workspace = $this->workspaces->current($this->user($request));
 
-        return $workspace === null
-            ? redirect()->route('app.workspaces')
-            : redirect()->route('app.workspace', ['workspace' => $workspace->ulid]);
+        if ($workspace === null) {
+            return redirect()->route('app.workspaces');
+        }
+
+        // A visitor who was sent to the login page by a page of /app (the "use this template" button, say) is taken back to
+        // it: the framework remembered where they were going. Anybody else lands in their workspace.
+        return redirect()->intended(route('app.workspace', ['workspace' => $workspace->ulid]));
     }
 }

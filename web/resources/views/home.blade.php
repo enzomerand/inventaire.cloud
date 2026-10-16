@@ -10,9 +10,12 @@
             <p class="lead text-secondary mb-0">
                 {{ __('A free inventory tool for professionals and individuals.') }}
             </p>
-            @auth
-                <a class="btn btn-primary mt-4" href="{{ route('app') }}">{{ __('Open my space') }}</a>
-            @endauth
+            <div class="d-flex flex-wrap justify-content-center gap-2 mt-4">
+                @auth
+                    <a class="btn btn-primary" href="{{ route('app') }}">{{ __('Open my space') }}</a>
+                @endauth
+                <a class="btn @auth btn-outline-primary @else btn-primary @endauth" href="{{ \App\Support\PublicUrls::templatesPath(app()->getLocale()) }}">{{ __('Browse the templates') }}</a>
+            </div>
         </div>
     </div>
 @endsection
