@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Inventories\Exceptions\ImportFileException;
 use App\Inventories\Imports\ImportCsv;
 use App\Inventories\Imports\ImportFormat;
+use App\Inventories\Imports\ImportRows;
 use OpenSpout\Common\Entity\Cell\FormulaCell;
 
 require_once __DIR__.'/../../Support/imports.php';
@@ -116,6 +117,14 @@ describe('a CSV', function (): void {
 
         expect(fn () => importRead(importFile("a,b,c\r\n1,2,3,4\r\n"), ImportFormat::Csv))
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS)->and($failure->getMessage())->toBe('This file uses more than 3 columns.'));
+    });
+
+    it('stops at a very long run of empty rows, which is how a spreadsheet ends, and reads on after a shorter one', function (): void {
+        $short = importFile("Name\r\nDrill\r\n".str_repeat("\r\n", ImportRows::MAX_EMPTY_RUN)."Saw\r\n");
+        $long = importFile("Name\r\nDrill\r\n".str_repeat("\r\n", ImportRows::MAX_EMPTY_RUN + 1)."Saw\r\n");
+
+        expect(importRead($short, ImportFormat::Csv)['rows'])->toBe([1 => ['Name'], 2 => ['Drill'], ImportRows::MAX_EMPTY_RUN + 3 => ['Saw']])
+            ->and(importRead($long, ImportFormat::Csv)['rows'])->toBe([1 => ['Name'], 2 => ['Drill']]);
     });
 
     it('takes a file of empty lines for a file with no row', function (): void {

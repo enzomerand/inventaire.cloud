@@ -32,7 +32,8 @@ use Throwable;
  * The sheet read is the one that was active when the spreadsheet was saved, else the first visible one; a CSV has one. A row is a
  * list of {@see ImportCell}, the empty ones at its end cut off, and is given with its number in the file, counted from 1 with the
  * empty rows counted too: the number an error is reported with is the one the person sees in their spreadsheet. A row with nothing in
- * it is not given.
+ * it is not given, and a run of more than {@see self::MAX_EMPTY_RUN} of them ends the file (a spreadsheet often ends with a million
+ * rows that were formatted and hold nothing).
  *
  * A formula is read as its calculated value, or as the text of the formula when the file holds none. In a CSV, the apostrophe that the
  * export puts in front of a text a spreadsheet would run as a formula (it starts with `=`, `+`, `-`, `@`, a tab or a return) is taken
@@ -45,8 +46,8 @@ final class ImportRows
     /** The characters that, after an apostrophe, mean the apostrophe was put there by an export. */
     private const FORMULA_STARTS = ['=', '+', '-', '@', "\t", "\r"];
 
-    /** Rows of the file, empty ones included, that are read per row of the limit before the file is taken for a runaway. */
-    private const SCAN_FACTOR = 10;
+    /** Empty rows in a row after which the rest of the file is not looked at: no data is that far from the data before it. */
+    public const MAX_EMPTY_RUN = 100000;
 
     private bool $closed = false;
 
@@ -100,12 +101,12 @@ final class ImportRows
 
         $reader = $this->reader();
         $columns = config()->integer('inventories.import_max_columns');
-        $scanned = config()->integer('inventories.import_max_rows') * self::SCAN_FACTOR + 1000;
 
         try {
             $reader->open($this->path);
             $sheet = $this->sheet($reader);
             $number = 0;
+            $gap = 0;
 
             foreach ($sheet->getRowIterator() as $row) {
                 $number++;
@@ -116,12 +117,16 @@ final class ImportRows
                 }
 
                 if ($cells === []) {
-                    if ($number > $scanned) {
-                        throw new ImportFileException(ImportFileException::TOO_MANY_ROWS);
+                    // A spreadsheet often ends with a million empty rows that were formatted (OpenDocument writes them as one repeated row):
+                    // after a very long run of them, the data is taken to be over.
+                    if (++$gap > self::MAX_EMPTY_RUN) {
+                        return;
                     }
 
                     continue;
                 }
+
+                $gap = 0;
 
                 yield $number => $cells;
             }

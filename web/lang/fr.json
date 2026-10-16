@@ -968,7 +968,6 @@
     "This file holds no row.": "Ce fichier ne contient aucune ligne.",
     "This spreadsheet is too large once unpacked.": "Ce tableur est trop volumineux une fois décompressé.",
     "This file uses more than :count column.|This file uses more than :count columns.": "Ce fichier utilise plus de :count colonne.|Ce fichier utilise plus de :count colonnes.",
-    "This file holds more rows than an import may take.": "Ce fichier contient plus de lignes qu'un import n'en accepte.",
     "This file could not be read. It may be damaged or protected by a password.": "Ce fichier n'a pas pu être lu. Il est peut-être endommagé ou protégé par un mot de passe.",
     "\":value\" is not a yes or no.": "« :value » n'est pas un oui ou un non.",
     "\":value\" is not a rating.": "« :value » n'est pas une note.",
