@@ -33,12 +33,4 @@ enum ExportError: string
             self::Stale => __('The export did not finish and was cancelled. Try again.'),
         };
     }
-
-    /**
-     * The error for a code read from the database, or null for a code this version does not know.
-     */
-    public static function fromCode(?string $code): ?self
-    {
-        return $code === null ? null : self::tryFrom($code);
-    }
 }

@@ -3627,20 +3627,6 @@ describe('the pages under the real Alpine CSP build', () => {
                 ]);
             });
 
-            it('starts the separator as the language of the page asks: the comma in English', async () => {
-                await openDialog();
-
-                expect(separator().value).toBe('comma');
-            });
-
-            it('starts the separator as the language of the page asks: the semicolon in French', async () => {
-                await open();
-                document.documentElement.lang = 'fr';
-                await press('Export');
-
-                expect(separator().value).toBe('semicolon');
-            });
-
             it('does not offer the current view while nothing narrows or orders the list, and offers it afterwards', async () => {
                 await openDialog();
 

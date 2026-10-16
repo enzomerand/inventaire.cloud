@@ -16,12 +16,6 @@ export const POLL_INTERVAL_MS = 2000;
 /** The formats of an export, in the order the dialog offers them (the names the API takes). */
 export const FORMAT_IDS = ['xlsx', 'ods', 'csv', 'json', 'pdf', 'zip'];
 
-/** The separators of a CSV file, by the name the API takes. */
-export const DELIMITERS = ['semicolon', 'comma', 'tab'];
-
-/** The files a ZIP holds, by the name the API takes: the photos of the photo fields, or every attachment. */
-export const FILE_CHOICES = ['photos', 'all'];
-
 /** The statuses of an export that is not over: the list keeps asking while it holds one. */
 const ACTIVE_STATUSES = ['pending', 'running'];
 

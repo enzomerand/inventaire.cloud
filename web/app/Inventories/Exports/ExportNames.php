@@ -58,11 +58,11 @@ final class ExportNames
     /**
      * The name of a file in a folder that may already hold one of that name: `photo.jpg`, then `photo (2).jpg`, `photo (3).jpg`...
      * The names are compared whatever the case, as a system that does not keep it would. The number is part of the length: the
-     * name is cut before it so that the whole stays within `$max` bytes.
+     * name is cut before it so that the whole stays within {@see self::FILE_MAX_BYTES} bytes.
      *
      * @param  array<string, true>  $taken  The names already used in the folder (lowercase), which this adds the new one to.
      */
-    public static function unique(string $name, array &$taken, int $max = self::FILE_MAX_BYTES): string
+    public static function unique(string $name, array &$taken): string
     {
         $candidate = $name;
         $dot = mb_strrpos($name, '.');
@@ -71,7 +71,7 @@ final class ExportNames
 
         for ($number = 2; isset($taken[mb_strtolower($candidate)]); $number++) {
             $suffix = " ({$number})";
-            $room = max(1, $max - strlen($suffix) - strlen($extension));
+            $room = max(1, self::FILE_MAX_BYTES - strlen($suffix) - strlen($extension));
             $candidate = (strlen($stem) > $room ? rtrim(mb_strcut($stem, 0, $room, 'UTF-8'), ' .') : $stem).$suffix.$extension;
         }
 

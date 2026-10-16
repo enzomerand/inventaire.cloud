@@ -12,8 +12,8 @@ use Dompdf\FontMetrics;
  * The table of a PDF is cut in fragments of a few rows (the library's memory grows faster than a table does), and the header of the
  * columns is not part of any of them: it is written once, in a block that the library repeats at the top of every page. Fragments
  * and header must therefore agree on the width of the columns without the library measuring anything, which is what a fixed
- * layout with the same `<colgroup>` of percentages in each of them gives. The widths are worked out here, once, from what the
- * columns hold.
+ * layout whose columns take the same percentages, written on the cells of the header and of the first row of each fragment, gives
+ * (the library does not read `<col>`). The widths are worked out here, once, from what the columns hold.
  *
  * Each column first gets what it needs to show its header and its short values on one line (the width of the header, and of the
  * longest value up to {@see self::SHORT_VALUE} characters); what is left goes to the columns that hold long texts, in proportion to

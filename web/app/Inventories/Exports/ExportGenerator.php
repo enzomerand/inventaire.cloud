@@ -16,7 +16,6 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
-use RuntimeException;
 use Throwable;
 
 /**
@@ -172,7 +171,7 @@ final class ExportGenerator
 
         $name = $this->fileName($inventory, $export->format);
         $path = AttachmentStorage::exportDirectory($inventory->workspace()->firstOrFail()->ulid, $inventory->ulid, $export->ulid).'/'.$name;
-        $this->store($export->disk, $path, $scratch);
+        $this->storage->writeFrom($export->disk, $path, $scratch);
 
         $completed = Export::query()
             ->whereKey($export->getKey())
@@ -225,18 +224,8 @@ final class ExportGenerator
      */
     private function fileName(Inventory $inventory, ExportFormat $format): string
     {
-        $suffix = ' - '.DisplayTime::of(now())->format('Y-m-d').'.'.$format->extension();
+        $suffix = ' - '.DisplayTime::of(now())->format('Y-m-d').'.'.$format->value;
 
         return ExportNames::entry($inventory->name, __('Items'), ExportNames::FILE_MAX_BYTES - strlen($suffix)).$suffix;
-    }
-
-    /**
-     * Copies the scratch file to the disk of the export.
-     *
-     * @throws RuntimeException When the file cannot be read or written.
-     */
-    private function store(string $disk, string $path, string $scratch): void
-    {
-        $this->storage->writeFrom($disk, $path, $scratch);
     }
 }

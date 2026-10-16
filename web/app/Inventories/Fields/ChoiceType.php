@@ -172,14 +172,7 @@ abstract class ChoiceType extends AbstractFieldType
      */
     protected function labelsText(array $ids, InventoryField $field): ?string
     {
-        $labels = array_column(self::choicesOf($field->options), 'label', 'id');
-        $found = [];
-
-        foreach ($ids as $id) {
-            if (is_string($id) && isset($labels[$id])) {
-                $found[] = $labels[$id];
-            }
-        }
+        $found = $this->choiceLabels($ids, $field);
 
         return $found === [] ? null : implode(' ', $found);
     }

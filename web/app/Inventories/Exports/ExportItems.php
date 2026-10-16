@@ -49,7 +49,7 @@ final class ExportItems
      *
      * @throws ValidationException When the view does not hold for the fields the inventory has now (a field it uses was deleted).
      */
-    public function matching(Inventory $inventory, Collection $fields, ExportScope $scope, array $view = []): HasMany
+    public function matching(Inventory $inventory, Collection $fields, ExportScope $scope, array $view): HasMany
     {
         $items = $inventory->items();
 

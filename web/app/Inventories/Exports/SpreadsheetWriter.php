@@ -28,7 +28,6 @@ use OpenSpout\Writer\ODS\Writer as OdsWriter;
 use OpenSpout\Writer\XLSX\Entity\SheetView;
 use OpenSpout\Writer\XLSX\Options as XlsxOptions;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
-use RuntimeException;
 use Throwable;
 
 /**
@@ -73,15 +72,9 @@ final class SpreadsheetWriter implements ExportWriter
 
     /**
      * Writes the workbook.
-     *
-     * @throws RuntimeException When the format is not a spreadsheet.
      */
     public function write(ExportContext $context, string $path): int
     {
-        if (! $this->format->isSpreadsheet()) {
-            throw new RuntimeException("The format [{$this->format->value}] is not a spreadsheet.");
-        }
-
         // One font for the whole sheet: the library's default for the plain cells would otherwise differ from the styled ones.
         $options = ['FALLBACK_STYLE' => new Style, 'tempFolder' => ExportTemp::directory()];
         $writer = $this->format === ExportFormat::Xlsx ? new XlsxWriter(new XlsxOptions(...$options)) : new OdsWriter(new OdsOptions(...$options));

@@ -38,20 +38,13 @@ final class CsvWriter implements ExportWriter
     private const FORMULA_STARTS = ['=', '+', '-', '@', "\t", "\r"];
 
     /**
-     * The name of the separator an export without a choice gets: the semicolon in French, the comma otherwise.
-     */
-    public static function defaultDelimiter(string $locale): string
-    {
-        return $locale === 'fr' ? 'semicolon' : 'comma';
-    }
-
-    /**
      * Writes the CSV.
      */
     public function write(ExportContext $context, string $path): int
     {
         $name = $context->export->option('delimiter');
-        $name = is_string($name) && isset(self::DELIMITERS[$name]) ? $name : self::defaultDelimiter($context->export->locale);
+        // Without a (known) choice: the semicolon in French, the comma otherwise.
+        $name = is_string($name) && isset(self::DELIMITERS[$name]) ? $name : ($context->export->locale === 'fr' ? 'semicolon' : 'comma');
         $decimal = $name === 'semicolon' ? ',' : '.';
 
         $writer = new Writer(new Options(FIELD_DELIMITER: self::DELIMITERS[$name], EOL: "\r\n"));
@@ -102,7 +95,7 @@ final class CsvWriter implements ExportWriter
         return match ($value->kind) {
             ExportKind::Empty => '',
             ExportKind::Text => $this->safe($value->string()),
-            ExportKind::Number => $decimal === '.' ? $value->numberText() : str_replace('.', $decimal, $value->numberText()),
+            ExportKind::Number => str_replace('.', $decimal, $value->numberText()),
             ExportKind::Date, ExportKind::Time => $value->string(),
             ExportKind::DateTime => $value->moment()?->format('Y-m-d H:i') ?? '',
             ExportKind::Boolean => $value->answer() === true ? __('Yes') : __('No'),

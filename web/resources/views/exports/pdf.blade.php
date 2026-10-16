@@ -6,7 +6,7 @@
     block with `position: fixed`, which the library repeats on every page. It sits in the top margin of the page, whose height is
     made of it: the numbers come from PdfWriter, which knows how high the block is. The table is cut in fragments without a header
     of their own (the library lays a long table out with a cost that grows faster than its size), which all share the same
-    `<colgroup>` and a fixed layout, so that their columns are those of the header.
+    percentages on the first row and a fixed layout, so that their columns are those of the header.
 --}}
 <!DOCTYPE html>
 <html lang="{{ $locale }}">
@@ -46,11 +46,6 @@
         </p>
         @if ($columns !== [])
             <table>
-                <colgroup>
-                    @foreach ($columns as $column)
-                        <col style="width: {{ $column['share'] }}%">
-                    @endforeach
-                </colgroup>
                 <tr>
                     @foreach ($columns as $column)
                         <th class="{{ $column['numeric'] ? 'number' : '' }}" style="width: {{ $column['share'] }}%">{{ $column['label'] }}</th>
@@ -71,11 +66,6 @@
         @php($line = 0)
         @foreach (array_chunk($rows, $tableRows) as $part)
             <table>
-                <colgroup>
-                    @foreach ($columns as $column)
-                        <col style="width: {{ $column['share'] }}%">
-                    @endforeach
-                </colgroup>
                 <tbody>
                     @foreach ($part as $index => $row)
                         <tr class="{{ $line++ % 2 === 0 ? 'odd' : '' }}">

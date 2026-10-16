@@ -305,7 +305,8 @@ describe('the page', function (): void {
     it('splits a long table in fragments with no header of their own, sharing the columns of the one header', function (): void {
         $case = pdfTableCase(60);
         $html = pdfHtml($case['inventory'], $case['team']['owner']);
-        preg_match_all('#<colgroup>.*?</colgroup>#s', $html, $groups);
+        preg_match_all('#<th class="[^"]*" style="width: ([\d.]+)%">#', $html, $headers);
+        preg_match_all('#<td class="[^"]*" style="width: ([\d.]+)%">#', $html, $firstRows);
 
         // The header table, and three fragments of 25, 25 and 10 rows.
         expect(substr_count($html, '<table>'))->toBe(4)
@@ -314,13 +315,12 @@ describe('the page', function (): void {
             // The columns are named once: in the header that the library repeats on every page.
             ->and(substr_count($html, '>Name</th>'))->toBe(1)
             ->and(substr_count($html, '<th '))->toBe(4)
-            // All with the same `<colgroup>` of percentages, which add up to 100.
-            ->and($groups[0])->toHaveCount(4)
-            ->and(array_values(array_unique($groups[0])))->toHaveCount(1)
-            ->and(substr_count($groups[0][0], '<col '))->toBe(4);
-        preg_match_all('#<col style="width: ([\d.]+)%">#', $groups[0][0], $widths);
+            // The first row of each fragment carries the same percentages as the header, which add up to 100.
+            ->and($headers[1])->toHaveCount(4)
+            ->and($firstRows[1])->toHaveCount(12)
+            ->and(array_chunk($firstRows[1], 4))->each->toBe($headers[1]);
 
-        expect(round(array_sum(array_map('floatval', $widths[1])), 2))->toBe(100.0)
+        expect(round(array_sum(array_map('floatval', $headers[1])), 2))->toBe(100.0)
             // A fixed layout: the library does not measure the cells of every fragment.
             ->and($html)->toContain('table-layout: fixed');
     });
@@ -348,8 +348,7 @@ describe('the page', function (): void {
 
         expect(substr_count($html, '<div class="head">'))->toBe(1)
             ->and($html)->toMatch('#<div class="head">\s*<h1>Workshop</h1>\s*<p class="summary">.*?3 items.*?</p>\s*</div>#s')
-            ->and($html)->not->toContain('<th')
-            ->and($html)->not->toContain('<colgroup');
+            ->and($html)->not->toContain('<th');
     });
 
     it('gives each column the room for its header and its short values, then the rest to the one that holds long texts, and cuts a header that does not fit', function (): void {
@@ -361,8 +360,8 @@ describe('the page', function (): void {
         $stock = fieldIn($inventory, 'boolean', 'A very very long name of a field that holds just a yes or a no');
         itemIn($inventory, [$name->ulid => 'Drill', $notes->ulid => str_repeat('some words ', 12), $stock->ulid => true]);
         $html = pdfHtml($inventory, $team['owner']);
-        preg_match_all('#<col style="width: ([\d.]+)%">#', $html, $found);
-        [$nameShare, $notesShare, $stockShare] = array_map('floatval', array_slice($found[1], 0, 3));
+        preg_match_all('#<th class="[^"]*" style="width: ([\d.]+)%">#', $html, $found);
+        [$nameShare, $notesShare, $stockShare] = array_map('floatval', $found[1]);
 
         expect($notesShare)->toBeGreaterThan($nameShare * 2)
             ->and($nameShare)->toBeGreaterThanOrEqual(4.0)
@@ -381,11 +380,13 @@ describe('the page', function (): void {
     it('does not cut the headers of a table of short values, and the shares add up to 100', function (): void {
         $case = pdfTableCase(5);
         $html = pdfHtml($case['inventory'], $case['team']['owner']);
-        preg_match_all('#<col style="width: ([\d.]+)%">#', $html, $found);
+        preg_match_all('#<th class="[^"]*" style="width: ([\d.]+)%">#', $html, $found);
+        preg_match_all('#<td class="[^"]*" style="width: ([\d.]+)%">#', $html, $firstRow);
 
-        // The four columns, in the header and again in the fragment of the rows.
-        expect(array_sum(array_map('floatval', array_slice($found[1], 0, 4))))->toEqualWithDelta(100.0, 0.001)
-            ->and($found[1])->toHaveCount(8)
+        // The four columns, in the header and again on the first row of the fragment of the rows.
+        expect(array_sum(array_map('floatval', $found[1])))->toEqualWithDelta(100.0, 0.001)
+            ->and($found[1])->toHaveCount(4)
+            ->and($firstRow[1])->toBe($found[1])
             ->and($html)->toMatch('#>Price \(EUR\)</th>#')
             ->and($html)->toMatch('#>Bought</th>#')
             ->and($html)->toMatch('#>Photos</th>#')

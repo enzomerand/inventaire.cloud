@@ -15,8 +15,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 /**
  * Builds exports for tests and local seeding: a spreadsheet of a whole inventory that is still waiting for the queue.
  *
- * It writes no file; a test that needs one writes it where `path` says. Without an inventory or a person given
- * (`->for($inventory)`, `->for($user)`), it builds bare ones.
+ * It writes no file (`exportStored()` of the tests support does, and completes the export). Without an inventory given (`->for($inventory)`)
+ * or a `user_id`, it builds a bare one.
  *
  * @extends Factory<Export>
  */
@@ -39,23 +39,5 @@ class ExportFactory extends Factory
             'status' => ExportStatus::Pending,
             'disk' => 'local',
         ];
-    }
-
-    /**
-     * An export that is done: its file is where `path` says (the caller writes it), and it lasts one more day.
-     */
-    public function completed(string $path = 'export.xlsx', int $size = 1024): static
-    {
-        return $this->state(fn (array $attributes): array => [
-            'status' => ExportStatus::Completed,
-            'path' => $path,
-            'file_name' => basename($path),
-            'mime' => ExportFormat::Xlsx->mime(),
-            'size' => $size,
-            'items_count' => 0,
-            'started_at' => now()->subMinute(),
-            'completed_at' => now(),
-            'expires_at' => now()->addDay(),
-        ]);
     }
 }

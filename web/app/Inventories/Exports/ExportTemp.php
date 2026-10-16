@@ -17,6 +17,9 @@ use RuntimeException;
  */
 final class ExportTemp
 {
+    /** How long, in seconds, a scratch file or folder may stay before it is taken for a leftover: an hour, more than an export may run. */
+    private const LEFTOVER_AGE = 3600;
+
     /**
      * The folder of a kind of scratch files (`exports`, `dompdf`), created if it is missing.
      *
@@ -50,12 +53,12 @@ final class ExportTemp
     }
 
     /**
-     * Deletes the scratch files and folders left in the folder of the exports for longer than this many seconds (an hour by default,
-     * more than an export may run): the leftovers of a worker that was stopped while it wrote one.
+     * Deletes the scratch files and folders left in the folder of the exports for longer than an hour (more than an export may
+     * run): the leftovers of a worker that was stopped while it wrote one.
      *
      * @return int How many files and folders were deleted.
      */
-    public static function prune(int $olderThan = 3600): int
+    public static function prune(): int
     {
         $deleted = 0;
 
@@ -63,7 +66,7 @@ final class ExportTemp
             // A file that vanished since the listing (another worker is done with it) has no age: it is not ours to delete.
             $modified = @filemtime($path);
 
-            if ($modified === false || $modified >= time() - $olderThan) {
+            if ($modified === false || $modified >= time() - self::LEFTOVER_AGE) {
                 continue;
             }
 

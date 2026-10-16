@@ -10,7 +10,6 @@ use App\Inventories\Exceptions\ExportLimitReachedException;
 use App\Inventories\Exceptions\ExportRefusedException;
 use App\Inventories\Exceptions\ExportStorageFullException;
 use App\Inventories\Fields\FieldTypes;
-use App\Inventories\Fields\UploadedFilesType;
 use App\Jobs\GenerateExport;
 use App\Models\Export;
 use App\Models\Inventory;
@@ -18,11 +17,10 @@ use App\Models\InventoryField;
 use App\Models\User;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
-use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Asks for an export and deletes one: what the API does apart from the HTTP.
+ * Asks for an export: what the API does apart from the HTTP.
  *
  * An export is **asked for** after three checks, in this order. The view it is made on must hold for the fields the inventory has
  * now (the mistakes are those of the list of items, under `query.`: a `ValidationException`). A PDF must not hold more items than the
@@ -105,15 +103,6 @@ final class Exports
     }
 
     /**
-     * Deletes an export: its row now, its file once the deletion is committed. One that is being written is deleted all the same;
-     * the worker finds the row gone when it is done and deletes the file it wrote.
-     */
-    public function delete(Export $export): void
-    {
-        $export->delete();
-    }
-
-    /**
      * The checks that depend on what the inventory holds: the view, the size of a PDF, the files of a zip.
      *
      * @param  array<string, mixed>  $options
@@ -145,7 +134,7 @@ final class Exports
             $files = $this->db->table('attachments')->where('inventory_id', $inventory->getKey());
 
             if (($options['files'] ?? ZipWriter::PHOTOS) !== ZipWriter::ALL) {
-                $files->whereIn('field_id', $this->photoFieldIds($fields));
+                $files->whereIn('field_id', $this->types->photoFieldIds($fields));
             }
 
             if ($scope === ExportScope::View) {
@@ -162,26 +151,5 @@ final class Exports
         }
 
         return 0;
-    }
-
-    /**
-     * The ids of the photo fields of the inventory.
-     *
-     * @param  Collection<int, InventoryField>  $fields
-     * @return list<int>
-     */
-    private function photoFieldIds(Collection $fields): array
-    {
-        $ids = [];
-
-        foreach ($fields as $field) {
-            $type = $this->types->of($field);
-
-            if ($type instanceof UploadedFilesType && $type->imagesOnly()) {
-                $ids[] = (int) $field->getKey();
-            }
-        }
-
-        return $ids;
     }
 }

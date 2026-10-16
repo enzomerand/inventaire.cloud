@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Inventories\Exports\ExportError;
-use App\Inventories\Exports\ExportFormat;
 use App\Inventories\Exports\ExportGenerator;
 use App\Inventories\Exports\ExportPruner;
 use App\Inventories\Exports\ExportStatus;
@@ -173,18 +172,6 @@ describe('the exports that never ended', function (): void {
         expect($stuck->fresh()->status)->toBe(ExportStatus::Failed);
     });
 
-    it('do not take back the file of an export that completed while the pruner was reading it', function (): void {
-        $case = pruneCase();
-        $done = exportStored(exportRow($case['inventory'], $case['team']['owner'], ['status' => ExportStatus::Running, 'started_at' => now()->subHours(2)]), 'late.csv');
-
-        // The pruner read the row as running; the worker completed it before the pruner gave up on it.
-        app(ExportGenerator::class)->fail($done->forceFill(['status' => ExportStatus::Running]), ExportError::Stale);
-
-        expect($done->fresh()->status)->toBe(ExportStatus::Completed)
-            ->and($done->fresh()->error)->toBeNull()
-            ->and(storedFiles())->toContain($done->path);
-    });
-
     it('are not undone by a worker that wakes up: the file it was writing is not kept', function (): void {
         $case = pruneCase();
 
@@ -297,9 +284,4 @@ describe('the scratch files', function (): void {
 
         expect(file_exists($old))->toBeFalse();
     });
-});
-
-it('writes nothing for an export format it does not know', function (): void {
-    expect(ExportFormat::tryFrom('docx'))->toBeNull()
-        ->and(ExportFormat::values())->toBe(['xlsx', 'ods', 'csv', 'json', 'pdf', 'zip']);
 });

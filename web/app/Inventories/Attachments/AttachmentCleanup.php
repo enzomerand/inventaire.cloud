@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Attachments;
 
+use App\Inventories\Exports\ExportCleanup;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
@@ -27,7 +28,8 @@ use WeakMap;
  * The folder of an inventory or of a workspace is worked out in the `deleting` event of its model (the rows that say which
  * disks hold files are still there) but queued only in the `deleted` event, once the `DELETE` has gone through: a deletion
  * that fails must not purge anything, and outside a transaction (a bare `$workspace->delete()`) "after the commit" is
- * immediately, which in `deleting` would be before the row is deleted.
+ * immediately, which in `deleting` would be before the row is deleted. The folders of the exports of an account that is deleted
+ * go through the same two steps ({@see self::collect()}, worked out by {@see ExportCleanup}).
  */
 final class AttachmentCleanup
 {
@@ -35,8 +37,8 @@ final class AttachmentCleanup
     private const CHUNK = 500;
 
     /**
-     * The folders to purge for each inventory and workspace that is being deleted, between its `deleting` and its `deleted`
-     * event. Dropped with the model if the deletion fails.
+     * The folders to purge for each inventory, workspace and account that is being deleted, between its `deleting` and its
+     * `deleted` event. Dropped with the model if the deletion fails.
      *
      * @var WeakMap<Model, list<array{disk: string, directory: string}>>|null
      */
@@ -147,10 +149,11 @@ final class AttachmentCleanup
     }
 
     /**
-     * Queues the deletion of the folders collected for an inventory or a workspace that has just been deleted, to be run once
-     * the transaction that deletes it is committed (at once when there is none). Called by the `deleted` event of both models.
+     * Queues the deletion of the folders collected for a model that has just been deleted (an inventory, a workspace or an
+     * account), to be run once the transaction that deletes it is committed (at once when there is none). Called by the
+     * `deleted` event of those models.
      */
-    public function purgeCollected(Inventory|Workspace $model): void
+    public function purgeCollected(Model $model): void
     {
         $collected = self::collected();
         $folders = $collected[$model] ?? [];
@@ -198,14 +201,25 @@ final class AttachmentCleanup
     }
 
     /**
+     * Remembers the folders to purge for a model that is being deleted (replacing what an earlier try collected), to be queued
+     * by {@see self::purgeCollected()} once it is really gone. Dropped with the model if the deletion fails.
+     *
+     * @param  list<array{disk: string, directory: string}>  $folders  The disk and the directory of each folder.
+     */
+    public function collect(Model $model, array $folders): void
+    {
+        $collected = self::collected();
+        $collected[$model] = $folders;
+    }
+
+    /**
      * Remembers the folder to purge on each disk, for a model that is being deleted (replacing what an earlier try collected).
      *
      * @param  array<array-key, string>  $disks  The names of the disks, possibly repeated.
      */
     private function remember(Model $model, array $disks, string $directory): void
     {
-        $collected = self::collected();
-        $collected[$model] = array_map(fn (string $disk): array => ['disk' => $disk, 'directory' => $directory], array_values(array_unique($disks)));
+        $this->collect($model, array_map(fn (string $disk): array => ['disk' => $disk, 'directory' => $directory], array_values(array_unique($disks))));
     }
 
     /**

@@ -41,7 +41,7 @@ final class ExportController extends Controller
     private const LIST_LIMIT = 20;
 
     /**
-     * Gets the service that asks for and deletes exports, and the storage the files are read from.
+     * Gets the service that asks for exports, and the storage the files are read from.
      */
     public function __construct(
         private readonly Exports $exports,
@@ -132,11 +132,12 @@ final class ExportController extends Controller
     }
 
     /**
-     * Deletes an export and, once that is committed, its file (`204`).
+     * Deletes an export and, once that is committed, its file (`204`). One that is being written is deleted all the same; the
+     * worker finds the row gone when it is done and deletes the file it wrote.
      */
     public function destroy(Request $request, Inventory $inventory, Export $export): Response
     {
-        $this->exports->delete($this->owned($request, $inventory, $export));
+        $this->owned($request, $inventory, $export)->delete();
 
         return response()->noContent();
     }

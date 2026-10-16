@@ -106,16 +106,6 @@ final class Export extends Model
     }
 
     /**
-     * The person who asked for it, and the only one who can read it.
-     *
-     * @return BelongsTo<User, $this>
-     */
-    public function user(): BelongsTo
-    {
-        return $this->belongsTo(User::class);
-    }
-
-    /**
      * The exports that still count: those without an end date yet (being written) and those that have not expired.
      *
      * @param  Builder<self>  $query
@@ -141,7 +131,7 @@ final class Export extends Model
      */
     public function failure(): ?ExportError
     {
-        return ExportError::fromCode($this->error);
+        return $this->error === null ? null : ExportError::tryFrom($this->error);
     }
 
     /**

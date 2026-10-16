@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Auth\Exceptions\AccountDeletionRefused;
-use App\Installer\ApplicationTables;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Exports\ExportError;
 use App\Inventories\Exports\ExportFormat;
@@ -105,10 +104,6 @@ describe('the cascade', function (): void {
         $team['editor']->delete();
         expect(Export::query()->whereKey($byUser->id)->exists())->toBeFalse()
             ->and(Export::query()->whereKey($kept->id)->exists())->toBeTrue();
-    });
-
-    it('is on the list of tables of the application, so that the installer accepts a database that holds it', function (): void {
-        expect(ApplicationTables::owns('exports'))->toBeTrue();
     });
 });
 

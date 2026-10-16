@@ -9,7 +9,6 @@ use App\Inventories\Attachments\AttachmentStorage;
 use App\Models\Export;
 use App\Models\User;
 use Illuminate\Database\DatabaseManager;
-use WeakMap;
 
 /**
  * What becomes of the files of the exports when what holds them goes: the folder of an export is purged once the deletion that
@@ -20,24 +19,17 @@ use WeakMap;
  * inventory: see {@see AttachmentStorage::exportDirectory()}). The ones that go with the account of the person who asked for them
  * are anywhere in the workspaces they could read, so the folders are worked out when the account is about to be deleted (the rows
  * that say where they are are still there), and queued only once it really is (the database cascades the rows and fires no event
- * for them). The same pattern as {@see AttachmentCleanup}.
+ * for them). {@see AttachmentCleanup} remembers the folders and queues them, as it does for an inventory or a workspace.
  */
 final class ExportCleanup
 {
     /**
-     * The folders to purge for each account that is being deleted, between its `deleting` and its `deleted` event. Dropped with the
-     * model if the deletion fails.
-     *
-     * @var WeakMap<User, list<array{disk: string, directory: string}>>|null
-     */
-    private static ?WeakMap $collected = null;
-
-    /**
-     * Gets the database and the storage that purges files.
+     * Gets the database, the storage that purges files and the cleanup that remembers the folders of a deleted account.
      */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly AttachmentStorage $storage,
+        private readonly AttachmentCleanup $attachments,
     ) {}
 
     /**
@@ -61,8 +53,9 @@ final class ExportCleanup
     }
 
     /**
-     * Works out the folders of the exports of an account that is being deleted, to be queued by {@see self::purgeCollected()} once
-     * the account is really gone. Called by the `deleting` event of {@see User}, so that every way of deleting an account does it.
+     * Works out the folders of the exports of an account that is being deleted, to be queued by
+     * {@see AttachmentCleanup::purgeCollected()} once the account is really gone. Called by the `deleting` event of {@see User}, so
+     * that every way of deleting an account does it.
      */
     public function collectForUser(User $user): void
     {
@@ -79,32 +72,6 @@ final class ExportCleanup
             $folders[] = ['disk' => (string) $row->disk, 'directory' => AttachmentStorage::exportDirectory((string) $row->workspace, (string) $row->inventory, (string) $row->export)];
         }
 
-        $collected = self::collected();
-        $collected[$user] = $folders;
-    }
-
-    /**
-     * Queues the purge of the folders collected for an account that has just been deleted, to be run once the transaction that
-     * deletes it is committed (at once when there is none). Called by the `deleted` event of {@see User}.
-     */
-    public function purgeCollected(User $user): void
-    {
-        $collected = self::collected();
-        $folders = $collected[$user] ?? [];
-        unset($collected[$user]);
-
-        foreach ($folders as $folder) {
-            $this->storage->purgeAfterCommit($folder['disk'], [], [$folder['directory']]);
-        }
-    }
-
-    /**
-     * What was collected, by account.
-     *
-     * @return WeakMap<User, list<array{disk: string, directory: string}>>
-     */
-    private static function collected(): WeakMap
-    {
-        return self::$collected ??= new WeakMap;
+        $this->attachments->collect($user, $folders);
     }
 }

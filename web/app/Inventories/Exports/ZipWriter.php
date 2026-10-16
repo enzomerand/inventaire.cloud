@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories\Exports;
 
 use App\Inventories\Attachments\AttachmentStorage;
-use App\Inventories\Fields\UploadedFilesType;
+use App\Inventories\Fields\FieldTypes;
 use App\Models\Attachment;
 use App\Models\Item;
 use Illuminate\Support\Facades\Log;
@@ -40,9 +40,12 @@ final class ZipWriter implements ExportWriter
     public const ALL = 'all';
 
     /**
-     * Gets the storage the files are read from.
+     * Gets the storage the files are read from and the registry of field types, which tells the photo fields.
      */
-    public function __construct(private readonly AttachmentStorage $storage) {}
+    public function __construct(
+        private readonly AttachmentStorage $storage,
+        private readonly FieldTypes $types,
+    ) {}
 
     /**
      * Writes the zip.
@@ -57,7 +60,8 @@ final class ZipWriter implements ExportWriter
             throw new RuntimeException('The zip of the export could not be created.');
         }
 
-        $photoFields = $this->photoFields($context);
+        // Keyed by id: the files of an export of photos are the ones that fill these fields.
+        $photoFields = array_flip($this->types->photoFieldIds($context->fields));
         $everything = $context->export->option('files', self::PHOTOS) === self::ALL;
         $scratch = [];
         $items = 0;
@@ -184,26 +188,6 @@ final class ZipWriter implements ExportWriter
         }
 
         return ExportNames::entry($label, __('Item'), ExportNames::FOLDER_LABEL_MAX_BYTES).' - '.$item->ulid;
-    }
-
-    /**
-     * The photo fields of the inventory, keyed by id: the files of an export of photos are the ones that fill them.
-     *
-     * @return array<int, true>
-     */
-    private function photoFields(ExportContext $context): array
-    {
-        $ids = [];
-
-        foreach ($context->fields as $position => $field) {
-            $type = $context->table->typeAt($position);
-
-            if ($type instanceof UploadedFilesType && $type->imagesOnly()) {
-                $ids[(int) $field->getKey()] = true;
-            }
-        }
-
-        return $ids;
     }
 
     /**

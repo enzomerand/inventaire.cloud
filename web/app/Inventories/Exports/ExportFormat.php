@@ -21,14 +21,6 @@ enum ExportFormat: string
     case Zip = 'zip';
 
     /**
-     * The extension of the file (without the dot): the value itself.
-     */
-    public function extension(): string
-    {
-        return $this->value;
-    }
-
-    /**
      * The type the file is served as: always one the browser downloads and never runs.
      */
     public function mime(): string
@@ -41,14 +33,6 @@ enum ExportFormat: string
             self::Pdf => 'application/pdf',
             self::Zip => 'application/zip',
         };
-    }
-
-    /**
-     * Whether the file is a spreadsheet written cell by cell (the two formats of the same writer).
-     */
-    public function isSpreadsheet(): bool
-    {
-        return $this === self::Xlsx || $this === self::Ods;
     }
 
     /**
