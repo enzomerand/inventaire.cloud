@@ -168,12 +168,17 @@ return [
     |   fails (`too_many_rows`) beyond. The quota of items of the inventory
     |   (`max_items`) applies too.
     | - `import_max_columns`: columns the file may use
-    |   (`INVENTORIES_IMPORT_MAX_COLUMNS`, 200): `422` beyond.
+    |   (`INVENTORIES_IMPORT_MAX_COLUMNS`, 200): `422` beyond. It counts the
+    |   columns that hold something; a row that would be built with more than
+    |   this or 16384 cells (the width of a sheet), whichever is larger, is
+    |   refused before it is built, whatever it holds.
     | - `import_max_unpacked_size`: bytes all the parts of a spreadsheet may
     |   weigh once unpacked (`INVENTORIES_IMPORT_MAX_UNPACKED_SIZE_MB`,
     |   megabytes, 100): a spreadsheet is a zip archive, and a small one can
     |   unpack to gigabytes. The sizes announced by the archive are summed
-    |   before anything is read, and the file is refused (`422`) beyond.
+    |   first, then the parts are unpacked into nothing and the bytes that
+    |   really come out are counted (the announced sizes can be forged); the
+    |   file is refused (`422`) beyond, before anything is read.
     | - `import_ttl_hours`: hours a file that was sent but not started is kept,
     |   and a finished import with its report is kept
     |   (`INVENTORIES_IMPORT_TTL_HOURS`, 24), then purged by
