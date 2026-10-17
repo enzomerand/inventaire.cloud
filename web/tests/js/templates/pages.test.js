@@ -98,6 +98,9 @@ const PAGE = {
 /** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
 const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 
+/** The largest spreadsheet the server takes, in bytes, as the page of an inventory says (`data-import-max-size`). */
+const IMPORT_MAX_SIZE = 3 * 1024 * 1024;
+
 /** What an editor of the workspace may do; a test narrows it down by setting `PAGE.abilities`. */
 const EDITOR = { view: true, create: true, update: true, delete: false, manage_fields: true, edit_items: true };
 
@@ -167,7 +170,7 @@ function render(path) {
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
         // table of the items are parts of the page of an inventory, and so are the parts of the dialog of an item.
         .replace(
-            /@include\('partials\.(field-value|items-toolbar|items-filters|export-dialog|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
+            /@include\('partials\.(field-value|items-toolbar|items-filters|export-dialog|import-dialog|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
             (_match, name) => render(`partials/${name}.blade.php`),
         )
         // The tabs of the administration are not under test.
@@ -233,6 +236,7 @@ function render(path) {
             $accountLocale: 'fr',
             "config('auth.account_deletion.lifetime_minutes')": '10',
             "config('inventories.max_attachment_size', 20 * 1024 * 1024)": String(MAX_ATTACHMENT_SIZE),
+            "config('inventories.import_max_size', 10 * 1048576)": String(IMPORT_MAX_SIZE),
         };
 
         return values[expression] ?? fail(`unsupported echo {{ ${expression} }}`);
@@ -3819,6 +3823,700 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(buttons('Close', exportDialog().querySelector('.modal-footer'))).toHaveLength(1);
                 expect(buttons('Close', exportDialog().querySelector('.modal-header'))).toHaveLength(1);
                 expect(startButton().type).toBe('submit');
+            });
+        });
+
+        describe('importing items', () => {
+            const IMPORTS = '/api/v1/inventories/tools/imports';
+            const importDialog = () => document.querySelector('#import-modal-title').closest('.modal');
+            const stepOf = (name) => importDialog().querySelector(`[data-import-step="${name}"]`);
+            const columnsOf = () => [...importDialog().querySelectorAll('[data-import-column]')];
+            const destination = (index) => importDialog().querySelector(`#import-destination-${index}`);
+            const typeSelect = (index) => importDialog().querySelector(`#import-type-${index}`);
+            const nameInput = (index) => importDialog().querySelector(`#import-name-${index}`);
+            const startButton = () => buttons('Start the import', importDialog())[0];
+            const footerAlert = () => importDialog().querySelector('.modal-footer [role="alert"]');
+            const alertsOf = () => [...footerAlert().querySelectorAll('li')].map((one) => one.textContent);
+
+            /** A column of the file, as the API describes it. */
+            const column = (index, header, samples = [], guess = 'text') => ({ index, header, samples, guess });
+
+            /** An import as the API describes it: waiting for a worker, unless the test says otherwise. */
+            function record(id, status = 'pending', extra = {}) {
+                return {
+                    id,
+                    format: 'csv',
+                    status,
+                    error: null,
+                    file_name: 'tools.csv',
+                    size: 2048,
+                    options: {
+                        has_header: true,
+                        delimiter: 'semicolon',
+                        encoding: 'utf-8',
+                        decimal: 'comma',
+                        date_order: 'dmy',
+                        on_error: 'abort',
+                    },
+                    columns: [],
+                    mapping: null,
+                    rows_total: null,
+                    rows_imported: null,
+                    rows_failed: null,
+                    fields_created: null,
+                    errors: null,
+                    created_at: '2026-10-15T10:00:00Z',
+                    completed_at: null,
+                    expires_at: null,
+                    ...extra,
+                };
+            }
+
+            /** An import that waits for its mapping: a name to match, a weight to match, a price to create, a date to ignore. */
+            function uploaded(id = 'i1', extra = {}) {
+                return record(id, 'uploaded', {
+                    columns: [
+                        column(0, 'Name', ['Hammer', 'Saw']),
+                        column(1, 'Weight', ['1,5', '2'], 'number'),
+                        column(2, 'Unit price', ['9,90 €'], 'money'),
+                        column(3, 'Created on', [], 'datetime'),
+                    ],
+                    mapping: [
+                        { column: 0, target: 'field', field: 'name' },
+                        { column: 1, target: 'field', field: 'qty' },
+                        { column: 2, target: 'new', type: 'money', name: 'Unit price' },
+                        { column: 3, target: 'ignore' },
+                    ],
+                    ...extra,
+                });
+            }
+
+            /** Opens the page, then the import dialog, which finds the given imports. */
+            async function openDialog(list = [], pageOptions = {}) {
+                await open(pageOptions);
+
+                const readItems = http.get.getMockImplementation();
+
+                http.get.mockImplementation(async (url, options) =>
+                    url === IMPORTS ? { data: list } : readItems(url, options),
+                );
+                await press('Import');
+            }
+
+            /** Picks a file in the chooser of the dialog, the way a person does. */
+            async function sendFile(file) {
+                const input = importDialog().querySelector('#import-file');
+
+                Object.defineProperty(input, 'files', { value: [file], configurable: true });
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+            }
+
+            const csv = (size = 64) => new File(['x'.repeat(size)], 'tools.csv', { type: 'text/csv' });
+
+            /** Opens the dialog and sends a file that comes back as the given import. */
+            async function openOnMapping(answer = uploaded()) {
+                http.post.mockResolvedValue({ data: answer });
+                await openDialog();
+                await sendFile(csv());
+            }
+
+            it('is offered by a button of the toolbar to the people who may edit, and to nobody else', async () => {
+                await open();
+
+                const button = buttons('Import');
+
+                expect(button).toHaveLength(1);
+                expect(button[0].closest('.row')).not.toBeNull();
+                expect(button[0].getAttribute('aria-haspopup')).toBe('dialog');
+                expect(button[0].querySelector('svg')).not.toBeNull();
+
+                PAGE.abilities = { update: false, delete: false, manage_fields: false, edit_items: false };
+                await open();
+
+                expect(buttons('Import')).toHaveLength(0);
+            });
+
+            it('is offered by the empty states, where the toolbar is not there', async () => {
+                await open({ items: [], itemsCount: 0 });
+
+                expect(buttons('Import')).toHaveLength(0);
+                expect(buttons('Import a file')).toHaveLength(1);
+
+                await press('Import a file');
+
+                expect(showModal).toHaveBeenCalledWith(importDialog(), { focus: ['#import-file'] });
+
+                await open({ fields: [], items: [], itemsCount: 0 });
+
+                expect(buttons('Import a file')).toHaveLength(1);
+                expect(buttons('Import a file')[0].closest('.empty-action')).not.toBeNull();
+
+                PAGE.abilities = { manage_fields: false };
+                await open({ fields: [], items: [], itemsCount: 0 });
+
+                expect(buttons('Import a file')).toHaveLength(0);
+
+                PAGE.abilities = { update: false, delete: false, manage_fields: false, edit_items: false };
+                await open({ items: [], itemsCount: 0 });
+
+                expect(buttons('Import a file')).toHaveLength(0);
+            });
+
+            it('opens a dialog that reads the imports and asks for the file, with the cursor on the chooser', async () => {
+                await openDialog();
+
+                expect(showModal).toHaveBeenCalledWith(importDialog(), { focus: ['#import-file'] });
+                expect(http.get).toHaveBeenCalledWith(
+                    IMPORTS,
+                    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+                );
+                expect(importDialog().getAttribute('aria-labelledby')).toBe('import-modal-title');
+                expect(document.querySelector('#import-modal-title').textContent).toBe('Import items');
+                expect(visible(stepOf('file'))).toBe(true);
+                expect(visible(stepOf('mapping'))).toBe(false);
+                expect(visible(stepOf('result'))).toBe(false);
+
+                const input = importDialog().querySelector('#import-file');
+
+                expect(input.type).toBe('file');
+                expect(input.getAttribute('accept')).toBe('.csv,.tsv,.txt,.xlsx,.ods');
+                expect(importDialog().querySelector('label[for="import-file"]').textContent).toBe('Spreadsheet file');
+                expect(importDialog().querySelector('#import-file-hint').textContent).toBe(
+                    'CSV, TSV, TXT, Excel (.xlsx) or OpenDocument (.ods) file, up to 3 MB.',
+                );
+                expect(input.getAttribute('aria-describedby')).toBe('import-file-hint');
+                expect(buttons('Close', importDialog().querySelector('.modal-footer'))).toHaveLength(1);
+                expect(buttons('Start the import', importDialog())).toHaveLength(0);
+            });
+
+            it('keeps a polite live region and no form, so that Enter cannot start an import', async () => {
+                await openDialog();
+
+                expect(importDialog().querySelector('[role="status"][aria-live="polite"]')).not.toBeNull();
+                expect(importDialog().querySelector('form')).toBeNull();
+            });
+
+            it('sends the file as soon as it is chosen and shows one row for each column, with the proposed destination', async () => {
+                await openOnMapping();
+
+                expect(http.post).toHaveBeenCalledWith(IMPORTS, expect.any(FormData), expect.any(Object));
+                expect(http.post.mock.calls[0][1].get('file').name).toBe('tools.csv');
+                expect(visible(stepOf('mapping'))).toBe(true);
+                expect(visible(stepOf('file'))).toBe(false);
+                expect(columnsOf()).toHaveLength(4);
+                expect(columnsOf().map((one) => one.querySelector('.fw-medium').textContent)).toEqual([
+                    'Name',
+                    'Weight',
+                    'Unit price',
+                    'Created on',
+                ]);
+                expect(columnsOf()[1].textContent).toContain('1,5 · 2');
+                expect(columnsOf()[3].textContent).toContain('Empty column');
+                expect([0, 1, 2, 3].map((index) => destination(index).value)).toEqual([
+                    'field:name',
+                    'field:qty',
+                    'new',
+                    'ignore',
+                ]);
+                expect(importDialog().querySelector('#import-columns-title').textContent).toBe('Columns of the file');
+                expect(importDialog().textContent).toContain('3 columns will be imported, 1 new field will be created');
+                expect(importDialog().querySelector('[role="status"]').textContent).toBe('File read: 4 columns found.');
+                expect(visible(startButton())).toBe(true);
+                expect(buttons('Cancel the import', importDialog())).toHaveLength(1);
+            });
+
+            it('names the controls of each column, and lists the destinations: ignore, new field, then the existing fields', async () => {
+                await openOnMapping();
+
+                expect(destination(1).getAttribute('aria-label')).toBe('Destination of the column Weight');
+                expect(typeSelect(2).getAttribute('aria-label')).toBe(
+                    'Type of the new field for the column Unit price',
+                );
+                expect(nameInput(2).getAttribute('aria-label')).toBe('Name of the new field for the column Unit price');
+
+                const options = [...destination(0).querySelectorAll('option')].map((one) => [
+                    one.value,
+                    one.textContent,
+                ]);
+
+                expect(options.slice(0, 2)).toEqual([
+                    ['ignore', 'Ignore this column'],
+                    ['new', 'New field'],
+                ]);
+                expect(options.slice(2).map(([, name]) => name)).toEqual(FIELDS.map((one) => one.name));
+                expect(destination(0).querySelector('optgroup').label).toBe('Existing field');
+            });
+
+            it('shows the type and the name of a field to create for the columns that create one only', async () => {
+                await openOnMapping();
+
+                expect(typeSelect(2).value).toBe('money');
+                expect(nameInput(2).value).toBe('Unit price');
+                expect(typeSelect(0)).toBeNull();
+                expect(nameInput(1)).toBeNull();
+                expect([...typeSelect(2).options].map((one) => one.value)).not.toContain('file');
+                expect([...typeSelect(2).options].map((one) => one.value)).not.toContain('multiselect');
+                expect(typeSelect(2).options).toHaveLength(17);
+
+                await choose(destination(3), 'new');
+
+                expect(typeSelect(3).value).toBe('datetime');
+                expect(nameInput(3).value).toBe('Created on');
+
+                await choose(destination(3), 'field:bought');
+
+                expect(typeSelect(3)).toBeNull();
+                expect(destination(3).value).toBe('field:bought');
+            });
+
+            it('says the choices of a field to create are made from the values of its column', async () => {
+                await openOnMapping();
+                const hint = () =>
+                    [...columnsOf()[2].querySelectorAll('.form-hint')].find((one) =>
+                        one.textContent.includes('different values'),
+                    );
+
+                expect(visible(hint())).toBe(false);
+
+                await choose(typeSelect(2), 'select');
+
+                expect(visible(hint())).toBe(true);
+            });
+
+            it('does not offer a new field to a person who may not create fields, nor the one the mapping proposed', async () => {
+                PAGE.abilities = { manage_fields: false };
+                await openOnMapping();
+
+                expect([...destination(0).querySelectorAll('option')].map((one) => one.value)).not.toContain('new');
+                expect(destination(2).value).toBe('ignore');
+                expect(typeSelect(2)).toBeNull();
+            });
+
+            it('shows the separator and the encoding for a CSV file only', async () => {
+                await openOnMapping();
+
+                const separator = () => importDialog().querySelector('#import-delimiter');
+                const encoding = () => importDialog().querySelector('#import-encoding');
+
+                expect(visible(separator())).toBe(true);
+                expect(visible(encoding())).toBe(true);
+                expect([...separator().options].map((one) => one.value)).toEqual(['semicolon', 'comma', 'tab']);
+                expect([...encoding().options].map((one) => one.value)).toEqual(['utf-8', 'windows-1252', 'utf-16']);
+                expect(separator().value).toBe('semicolon');
+                expect(encoding().value).toBe('utf-8');
+
+                await openOnMapping(
+                    uploaded('i2', {
+                        format: 'xlsx',
+                        options: {
+                            has_header: true,
+                            delimiter: null,
+                            encoding: null,
+                            decimal: 'point',
+                            date_order: 'mdy',
+                            on_error: 'abort',
+                        },
+                    }),
+                );
+
+                expect(visible(separator())).toBe(false);
+                expect(visible(encoding())).toBe(false);
+                expect(visible(importDialog().querySelector('#import-header'))).toBe(true);
+            });
+
+            it('shows the options of the cells the way the API read them', async () => {
+                await openOnMapping();
+
+                expect(importDialog().querySelector('#import-decimal').value).toBe('comma');
+                expect(importDialog().querySelector('#import-date-order').value).toBe('dmy');
+                expect(importDialog().querySelector('#import-on-error-abort').checked).toBe(true);
+                expect(importDialog().querySelector('#import-on-error-skip').checked).toBe(false);
+                expect(importDialog().querySelector('#import-header').checked).toBe(true);
+            });
+
+            it('reads the file again, and starts the mapping over, when the separator is changed', async () => {
+                await openOnMapping();
+                http.patch.mockResolvedValue({
+                    data: uploaded('i1', {
+                        options: { ...uploaded().options, delimiter: 'tab' },
+                        columns: [column(0, 'Only')],
+                        mapping: [{ column: 0, target: 'ignore' }],
+                    }),
+                });
+
+                await choose(importDialog().querySelector('#import-delimiter'), 'tab');
+
+                expect(http.patch).toHaveBeenCalledWith(
+                    `${IMPORTS}/i1`,
+                    { has_header: true, delimiter: 'tab', encoding: 'utf-8' },
+                    { timeout: expect.any(Number) },
+                );
+                expect(http.patch.mock.calls[0][2].timeout).toBeGreaterThanOrEqual(120_000);
+                expect(columnsOf()).toHaveLength(1);
+                expect(importDialog().querySelector('#import-delimiter').value).toBe('tab');
+            });
+
+            it('reads the file again when the row of the headers is unticked, and when the encoding is changed', async () => {
+                await openOnMapping();
+                http.patch.mockResolvedValue({
+                    data: uploaded('i1', { options: { ...uploaded().options, has_header: false } }),
+                });
+
+                await tick(importDialog().querySelector('#import-header'), false);
+
+                expect(http.patch).toHaveBeenLastCalledWith(
+                    `${IMPORTS}/i1`,
+                    { has_header: false, delimiter: 'semicolon', encoding: 'utf-8' },
+                    { timeout: expect.any(Number) },
+                );
+
+                await choose(importDialog().querySelector('#import-encoding'), 'windows-1252');
+
+                expect(http.patch).toHaveBeenLastCalledWith(
+                    `${IMPORTS}/i1`,
+                    { has_header: false, delimiter: 'semicolon', encoding: 'windows-1252' },
+                    { timeout: expect.any(Number) },
+                );
+            });
+
+            it('does not read the file again for the options of the cells', async () => {
+                await openOnMapping();
+
+                await choose(importDialog().querySelector('#import-decimal'), 'point');
+                await choose(importDialog().querySelector('#import-date-order'), 'ymd');
+                await tick(importDialog().querySelector('#import-on-error-skip'), true);
+
+                expect(http.patch).not.toHaveBeenCalled();
+            });
+
+            it('does not start an import whose mapping has something wrong, and says what under the column', async () => {
+                await openOnMapping();
+                await type(nameInput(2), '   ');
+
+                await press('Start the import', importDialog());
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(columnsOf()[2].textContent).toContain('Give the new field a name.');
+                expect(nameInput(2).getAttribute('aria-invalid')).toBe('true');
+                expect(nameInput(1)).toBeNull();
+                expect(document.getElementById(nameInput(2).getAttribute('aria-describedby')).textContent).toBe(
+                    'Give the new field a name.',
+                );
+                expect(visible(footerAlert())).toBe(true);
+                expect(alertsOf()).toEqual(['Some columns need your attention.']);
+                expect(document.activeElement).toBe(nameInput(2));
+
+                await type(nameInput(2), 'Price');
+
+                expect(nameInput(2).getAttribute('aria-invalid')).toBe('false');
+                expect(visible(footerAlert())).toBe(false);
+            });
+
+            it('asks for a column for a field that is required', async () => {
+                await openOnMapping();
+                await choose(destination(0), 'ignore');
+
+                await press('Start the import', importDialog());
+
+                expect(visible(footerAlert())).toBe(true);
+                expect(alertsOf()).toEqual(['The field Name is required: match a column with it.']);
+            });
+
+            it('starts the import with the mapping and the options that were chosen, then follows it', async () => {
+                await openOnMapping();
+                http.post.mockResolvedValue({ data: record('i1', 'pending') });
+                await choose(destination(3), 'field:bought');
+                await choose(typeSelect(2), 'percentage');
+                await type(nameInput(2), 'Discount');
+                await choose(importDialog().querySelector('#import-decimal'), 'point');
+                await choose(importDialog().querySelector('#import-date-order'), 'mdy');
+                await tick(importDialog().querySelector('#import-on-error-skip'), true);
+
+                await press('Start the import', importDialog());
+
+                expect(http.post).toHaveBeenLastCalledWith(`${IMPORTS}/i1/start`, {
+                    mapping: [
+                        { column: 0, target: 'field', field: 'name' },
+                        { column: 1, target: 'field', field: 'qty' },
+                        { column: 2, target: 'new', type: 'percentage', name: 'Discount' },
+                        { column: 3, target: 'field', field: 'bought' },
+                    ],
+                    decimal: 'point',
+                    date_order: 'mdy',
+                    on_error: 'skip',
+                });
+                expect(visible(stepOf('result'))).toBe(true);
+                expect(visible(stepOf('mapping'))).toBe(false);
+                expect(stepOf('result').querySelector('h3').textContent).toBe('Import waiting');
+                expect(stepOf('result').textContent).toContain('The import is running. You can close this window');
+                expect(buttons('Start the import', importDialog())).toHaveLength(0);
+                expect(buttons('Import another file', importDialog())).toHaveLength(0);
+                expect(importDialog().querySelector('[role="status"]').textContent).toBe(
+                    'Import started. It will be done in a moment.',
+                );
+            });
+
+            it('tells what an import did, lists the rows it left out, and reads the items again', async () => {
+                await openOnMapping();
+                http.post.mockResolvedValue({
+                    data: record('i1', 'completed', {
+                        rows_imported: 10,
+                        rows_failed: 2,
+                        fields_created: 1,
+                        errors: [
+                            { row: 4, column: 'Weight', message: 'Not a number.' },
+                            { row: 9, column: 'Created on', message: 'Not a date.' },
+                        ],
+                    }),
+                });
+                const reads = http.get.mock.calls.filter((call) => call[0] === '/api/v1/inventories/tools').length;
+
+                await press('Start the import', importDialog());
+
+                const success = stepOf('result').querySelector('.alert-success');
+
+                expect(stepOf('result').querySelector('h3').textContent).toBe('Import finished');
+                expect(visible(success)).toBe(true);
+                expect([...success.querySelectorAll('li')].map((one) => one.textContent)).toEqual([
+                    '10 items imported',
+                    '1 field created',
+                    '2 rows skipped because of errors',
+                ]);
+                expect(visible(stepOf('result').querySelector('.alert-danger'))).toBe(false);
+
+                const rows = [...stepOf('result').querySelectorAll('[data-import-error]')];
+
+                expect(rows.map((one) => [...one.children].map((cell) => cell.lastElementChild.textContent))).toEqual([
+                    ['4', 'Weight', 'Not a number.'],
+                    ['9', 'Created on', 'Not a date.'],
+                ]);
+                expect(visible(stepOf('result').querySelector('[role="table"]'))).toBe(true);
+                expect(
+                    [...stepOf('result').querySelectorAll('[role="columnheader"]')].map((one) => one.textContent),
+                ).toEqual(['Row', 'Column', 'Problem']);
+                expect(http.get.mock.calls.filter((call) => call[0] === '/api/v1/inventories/tools')).toHaveLength(
+                    reads + 1,
+                );
+                expect(buttons('Import another file', importDialog())).toHaveLength(1);
+                expect(importDialog().querySelector('[role="status"]').textContent).toBe(
+                    'Import finished: 10 items imported.',
+                );
+            });
+
+            it('tells why an import failed, in the words of the server', async () => {
+                await openOnMapping();
+                http.post.mockResolvedValue({
+                    data: record('i1', 'failed', {
+                        error: 'Some rows are not valid, so nothing was imported.',
+                        rows_failed: 3,
+                        errors: [{ row: 4, column: 'Weight', message: 'Not a number.' }],
+                    }),
+                });
+
+                await press('Start the import', importDialog());
+
+                const danger = stepOf('result').querySelector('.alert-danger');
+
+                expect(stepOf('result').querySelector('h3').textContent).toBe('Import failed');
+                expect(visible(danger)).toBe(true);
+                expect(danger.textContent).toContain('Some rows are not valid, so nothing was imported.');
+                expect(danger.textContent).toContain('3 rows are not valid');
+                expect(visible(stepOf('result').querySelector('.alert-success'))).toBe(false);
+                expect(stepOf('result').textContent).toContain('Only the first 1 rows in error out of 3 are listed.');
+            });
+
+            it('asks for another file once an import has ended', async () => {
+                await openOnMapping();
+                http.post.mockResolvedValue({ data: record('i1', 'completed', { rows_imported: 1 }) });
+                await press('Start the import', importDialog());
+
+                await press('Import another file', importDialog());
+
+                expect(visible(stepOf('file'))).toBe(true);
+                expect(visible(stepOf('result'))).toBe(false);
+                expect(columnsOf()).toHaveLength(0);
+            });
+
+            it('says why the import was refused, under the buttons, where it stays in view', async () => {
+                await openOnMapping();
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', { errors: { mapping: ['Two columns go to one field.'] } }),
+                );
+
+                await press('Start the import', importDialog());
+
+                expect(visible(footerAlert())).toBe(true);
+                expect(alertsOf()).toEqual(['Two columns go to one field.']);
+                expect(visible(stepOf('mapping'))).toBe(true);
+                expect(startButton().disabled).toBe(false);
+            });
+
+            it('gives up the import and asks for a file again', async () => {
+                await openOnMapping();
+                http.delete.mockResolvedValue({});
+
+                await press('Cancel the import', importDialog());
+
+                expect(http.delete).toHaveBeenCalledWith(`${IMPORTS}/i1`);
+                expect(visible(stepOf('file'))).toBe(true);
+                expect(visible(stepOf('mapping'))).toBe(false);
+                expect(buttons('Cancel the import', importDialog())).toHaveLength(0);
+            });
+
+            it('refuses a file larger than the server takes, before it goes up', async () => {
+                await openDialog();
+
+                await sendFile(csv(IMPORT_MAX_SIZE + 1));
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(visible(footerAlert())).toBe(true);
+                expect(alertsOf()).toEqual(['This file is larger than 3 MB.']);
+                expect(visible(stepOf('file'))).toBe(true);
+            });
+
+            it('says what is wrong with the file, in the words of the server', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', { errors: { file: ['The file is empty.'] } }),
+                );
+                await openDialog();
+
+                await sendFile(csv());
+
+                expect(alertsOf()).toEqual(['The file is empty.']);
+            });
+
+            it('goes on with the import the person left on its way', async () => {
+                await openDialog([uploaded('i9')]);
+
+                expect(visible(stepOf('mapping'))).toBe(true);
+                expect(visible(stepOf('file'))).toBe(false);
+                expect(columnsOf()).toHaveLength(4);
+                expect(http.post).not.toHaveBeenCalled();
+            });
+
+            it('goes on with the progress of an import that a worker has, and with the end of one that is over', async () => {
+                await openDialog([record('i9', 'running')]);
+
+                expect(visible(stepOf('result'))).toBe(true);
+                expect(stepOf('result').querySelector('h3').textContent).toBe('Import in progress');
+                expect(stepOf('result').textContent).toContain('The import is running.');
+                expect(visible(stepOf('result').querySelector('.alert-warning'))).toBe(false);
+            });
+
+            it('puts the cursor on the file chooser once the file step shows', async () => {
+                await openDialog();
+
+                expect(visible(stepOf('file'))).toBe(true);
+                expect(document.activeElement).toBe(importDialog().querySelector('#import-file'));
+            });
+
+            it('labels each cell of the rows in error on a phone, where the header row is not displayed', async () => {
+                await openOnMapping();
+                http.post.mockResolvedValue({
+                    data: record('i1', 'failed', {
+                        error: 'Some rows are not valid, so nothing was imported.',
+                        rows_failed: 1,
+                        errors: [{ row: 4, column: 'Weight', message: 'Not a number.' }],
+                    }),
+                });
+
+                await press('Start the import', importDialog());
+
+                const header = stepOf('result').querySelector('[role="row"]:not([data-import-error])');
+                const [row] = stepOf('result').querySelectorAll('[data-import-error]');
+                const captions = [...row.querySelectorAll('[role="cell"]')].map((cell) => cell.firstElementChild);
+
+                // On a phone the header row is `display: none`, so out of the accessibility tree too...
+                expect(header.classList.contains('d-none')).toBe(true);
+                expect(header.classList.contains('d-md-flex')).toBe(true);
+                // ...which is why each cell names its column itself, in view and for a screen reader, up to the "md" breakpoint
+                // where the header row takes over (a caption that is not displayed is not read either).
+                expect(captions.map((one) => one.textContent)).toEqual(['Row', 'Column', 'Problem']);
+                expect(captions.map((one) => one.textContent)).toEqual(
+                    [...header.querySelectorAll('[role="columnheader"]')].map((one) => one.textContent),
+                );
+                expect(captions.every((one) => one.classList.contains('d-md-none'))).toBe(true);
+                expect(captions.every((one) => !one.hasAttribute('aria-hidden'))).toBe(true);
+            });
+
+            describe('when the values of a column look like fractions', () => {
+                const WARNING =
+                    'These values look like fractions (0.125 for 12.5%): they will be imported as they are.';
+                const DISCOUNT = { id: 'discount', name: 'Discount', type: 'percentage', options: {}, required: false };
+
+                /** The warning under a column (the element is always there: it is hidden when there is nothing to say). */
+                const warningOf = (index) => importDialog().querySelector(`#import-warning-${index}`);
+
+                /** Opens the mapping of a file whose second column looks like fractions and goes to the percentage field. */
+                async function openOnFractions() {
+                    http.post.mockResolvedValue({
+                        data: uploaded('i1', {
+                            columns: [
+                                column(0, 'Name', ['Hammer']),
+                                { ...column(1, 'Rate', ['0.125', '0.5'], 'percentage'), fraction_like: true },
+                                { ...column(2, 'Margin', ['12.5', '30'], 'percentage'), fraction_like: false },
+                            ],
+                            mapping: [
+                                { column: 0, target: 'field', field: 'name' },
+                                { column: 1, target: 'field', field: 'discount' },
+                                { column: 2, target: 'new', type: 'percentage', name: 'Margin' },
+                            ],
+                        }),
+                    });
+                    await openDialog([], {
+                        fields: [...FIELDS, { ...DISCOUNT, position: FIELDS.length, ...queryFacts('percentage') }],
+                    });
+                    await sendFile(csv());
+                }
+
+                it('warns under the column, and ties the warning to its controls', async () => {
+                    await openOnFractions();
+
+                    expect(visible(warningOf(1))).toBe(true);
+                    expect(warningOf(1).textContent).toBe(WARNING);
+                    expect(destination(1).getAttribute('aria-describedby')).toBe('import-error-1 import-warning-1');
+                    expect(columnsOf()[1].contains(warningOf(1))).toBe(true);
+                    // Values that are whole percentages, and a column that goes nowhere near, are left alone.
+                    expect(visible(warningOf(2))).toBe(false);
+                    expect(warningOf(2).textContent).toBe('');
+                    expect(visible(warningOf(0))).toBe(false);
+                    expect(nameInput(2).getAttribute('aria-describedby')).toBe('import-error-2');
+                });
+
+                it('follows the destination and the type of the field to create', async () => {
+                    await openOnFractions();
+
+                    await choose(destination(1), 'field:qty');
+
+                    expect(visible(warningOf(1))).toBe(false);
+                    expect(destination(1).getAttribute('aria-describedby')).toBe('import-error-1');
+
+                    await choose(destination(1), 'new');
+
+                    expect(typeSelect(1).value).toBe('percentage');
+                    expect(visible(warningOf(1))).toBe(true);
+                    expect(nameInput(1).getAttribute('aria-describedby')).toBe('import-error-1 import-warning-1');
+
+                    await choose(typeSelect(1), 'number');
+
+                    expect(visible(warningOf(1))).toBe(false);
+                });
+
+                it('does not hold the import back', async () => {
+                    await openOnFractions();
+                    http.post.mockResolvedValue({ data: record('i1', 'pending') });
+
+                    await press('Start the import', importDialog());
+
+                    expect(visible(stepOf('result'))).toBe(true);
+                    expect(http.post).toHaveBeenLastCalledWith(
+                        `${IMPORTS}/i1/start`,
+                        expect.objectContaining({
+                            mapping: expect.arrayContaining([{ column: 1, target: 'field', field: 'discount' }]),
+                        }),
+                    );
+                });
             });
         });
 

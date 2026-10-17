@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
+use App\Inventories\Imports\ImportDates;
 use App\Models\InventoryField;
 use Closure;
 
@@ -70,5 +73,13 @@ final class DateType extends AbstractFieldType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return is_string($stored) && self::isDate($stored) ? ExportValue::date($stored) : ExportValue::empty();
+    }
+
+    /**
+     * The day the cell holds, as `YYYY-MM-DD`: a date cell, an ISO date, or a day written in the order of the settings of the import.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : ImportDates::day($cell, $context);
     }
 }

@@ -31,7 +31,9 @@
  * up on its own request, and the files chosen while an item is added go up right after the form was saved.
  *
  * The toolbar's "Export" button opens a second dialog, `../export/dialog.js`: it exports the items, or the view the grid
- * holds (its `query`), in a format the person picks, and lists the exports they asked for lately.
+ * holds (its `query`), in a format the person picks, and lists the exports they asked for lately. Its "Import" button
+ * (for the people who may edit) opens a third, `../import/dialog.js`: a spreadsheet goes in, its columns are matched with
+ * the fields (or with fields it creates), and the grid is read again when the items have come in.
  *
  * The dialog cannot be closed by hand (Escape, a click outside, a button) while a request that holds it is on its way: it
  * closes itself when the request is done. A request belongs to the dialog that was open when it began (`dialogToken`): an
@@ -58,6 +60,7 @@ import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
 import { compose } from '../lib/compose.js';
 import exportDialog from '../export/dialog.js';
+import importDialog from '../import/dialog.js';
 import gridCriteria from '../grid/criteria.js';
 import gridInline from '../grid/inline.js';
 import gridView from '../grid/gallery.js';
@@ -99,7 +102,10 @@ function summedIds(fields) {
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), exportDialog(), {
+    // The two dialogs of the toolbar, which export the items and import some, as one part.
+    const dialogs = compose(exportDialog(), importDialog());
+
+    return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), dialogs, {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
         fields: [],
 
@@ -396,6 +402,7 @@ export default function inventoryItems() {
         destroy() {
             this.stopSearchTimer();
             this.stopExportPolling();
+            this.stopImportPolling();
         },
 
         /**

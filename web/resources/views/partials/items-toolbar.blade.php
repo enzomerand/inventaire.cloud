@@ -1,7 +1,9 @@
 {{--
     What narrows, orders and lays out the items of an inventory: the search box, the filters button (with how many filters
     are in force), the choice between the table and the gallery, the button that opens the export dialog (partials/export-dialog,
-    for every role: reading the items is all it takes), the sort, the filters as removable chips, and how many items match.
+    for every role: reading the items is all it takes), the button that opens the import dialog (partials/import-dialog, for
+    the people who may edit the items), the sort, the filters as removable chips, and how many items match. The toolbar is
+    hidden while the inventory holds no item, so the empty states of the page offer the import too.
 
     Included in the items card of the page of an inventory (app/inventory.blade.php), so it reads the inventoryItems
     component (resources/js/components/inventory-items.js, with resources/js/grid/criteria.js). The sort select and its
@@ -56,6 +58,12 @@
             <button type="button" class="btn" aria-haspopup="dialog" @click="openExport">
                 <x-tabler-file-export aria-hidden="true" />
                 {{ __('Export') }}
+            </button>
+        </div>
+        <div class="col-auto" x-show="canEdit">
+            <button type="button" class="btn" aria-haspopup="dialog" @click="openImport">
+                <x-tabler-file-import aria-hidden="true" />
+                {{ __('Import') }}
             </button>
         </div>
         <div class="col-12 col-sm-auto" :class="sortBarClass">

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
 
@@ -100,6 +102,15 @@ abstract class AbstractFieldType implements FieldType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return is_string($stored) ? ExportValue::text($stored) : ExportValue::empty();
+    }
+
+    /**
+     * A text on one line (a text, an address, a reference, a code: what is in the cell, as written; the line breaks and the tabs a
+     * spreadsheet allows in a cell become spaces); a number is its digits, a date is `YYYY-MM-DD`.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : $cell->line();
     }
 
     /**

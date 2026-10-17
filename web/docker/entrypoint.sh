@@ -103,7 +103,7 @@ case "$role" in
         ;;
     worker)
         wait_until_installed
-        # The queues come from the environment so that the exports, which may run for 15 minutes, can have a worker of their own
+        # The queues come from the environment so that the exports and the imports, which may run for 15 minutes, can have a worker of their own
         # (the `export-worker` service of docker/compose.yaml) and never hold up the short jobs (mails, file purges). Without the
         # variable, one worker listens to both, `default` first so that the short jobs pass between two exports: an older
         # compose file, which has no export worker, still runs the exports.

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use Closure;
 
@@ -132,5 +135,37 @@ final class RatingType extends AbstractFieldType
         $max = (int) $field->option('max', self::DEFAULT_MAX);
 
         return is_int($stored) && $stored >= 1 && $stored <= $max ? ExportValue::number($stored, 0, maximum: $max) : ExportValue::empty();
+    }
+
+    /**
+     * The grade the cell holds: a whole number, `3/5` (the 5 is not checked: the field has its own maximum), or stars (`★★★☆☆` is 3).
+     * A grade of 0 is no grade.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        if ($cell->isEmpty()) {
+            return null;
+        }
+
+        $value = $cell->value;
+        $grade = null;
+
+        if (is_int($value) || (is_float($value) && floor($value) === $value)) {
+            $grade = (int) $value;
+        } elseif (is_string($value)) {
+            $text = $cell->line();
+
+            if (preg_match('/^(\d{1,3})(?:[.,]0+)?(?:\s*\/\s*\d+)?$/D', $text, $found) === 1) {
+                $grade = (int) $found[1];
+            } elseif (preg_match('/^[★☆\s]+$/u', $text) === 1 && str_contains($text, '★')) {
+                $grade = mb_substr_count($text, '★');
+            }
+        }
+
+        return match (true) {
+            $grade === null => throw new InvalidImportValue(__('":value" is not a rating.', ['value' => $cell->excerpt()])),
+            $grade === 0 => null,
+            default => $grade,
+        };
     }
 }

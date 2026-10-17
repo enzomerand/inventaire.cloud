@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Inventories\ItemValues;
 use App\Inventories\SearchText;
 use App\Models\InventoryField;
@@ -137,6 +140,23 @@ interface FieldType
      *                                            names of the files. The other types ignore them.
      */
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue;
+
+    /**
+     * A cell of an imported file as the value the API takes for this field, before it is judged by the rules of the field like any
+     * value a person sends. The reading is tolerant, as the people who write the files are: a number may be written `1 234,56` or `12 €`,
+     * a date `15/03/2024`, a yes `oui` or `x`, a choice by its label; the settings of the import ({@see ImportContext}) decide what a
+     * text can mean in more than one way. The value is rounded to what the field keeps (the decimals of a number).
+     *
+     * An empty cell is null: the field of the item stays empty. A cell the type cannot read at all (a word where a number is expected,
+     * a day that does not exist) is an {@see InvalidImportValue}, whose message goes into the report with the row and the column; a
+     * cell that is read but breaks a rule of the field (a number out of the range, a text too long) is left to the rules, which judge
+     * the value this returns.
+     *
+     * @return mixed What the API takes for the field: a text, a decimal string, a boolean, a number, a list.
+     *
+     * @throws InvalidImportValue
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed;
 
     /**
      * What follows the name of the field in the header of a spreadsheet or of a CSV, between brackets: the currency of an

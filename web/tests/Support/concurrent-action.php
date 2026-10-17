@@ -17,6 +17,7 @@
 //        php concurrent-action.php <go file> delete-item <inventory id> <item id>
 //        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload> [<ULID of the file or photo field>]
 //        php concurrent-action.php <go file> remove-attachment <user id> <inventory id> <item id> <attachment id>
+//        php concurrent-action.php <go file> run-import <import id>
 //
 // The files of the attachments are written to the local disk, whose folder the test gives with TEST_STORAGE_ROOT (the
 // folder its own process writes to), so that a child never writes to the real storage of the application.
@@ -24,7 +25,8 @@
 // It follows the protocol of Tests\Support\ConcurrentChild: boots, says "ready", waits for the go file and only then
 // acts. It prints what happened as one JSON line: {"result": "deleted"}, {"result": "refused", "reason":
 // "last_administrator"} (or any other reason or exception name); {"result": "demoted"} for admin-demote. The actions on
-// inventories answer {"result": "created"}, "deleted" or "updated" ("uploaded" and "removed" for a file), or {"result": "refused", "reason": "item_limit_reached"}
+// inventories answer {"result": "created"}, "deleted" or "updated" ("uploaded" and "removed" for a file, "completed" for run-import, which does the work of the job
+// for a pending import and answers {"result": "refused", "reason": <the code of its failure>} when it failed), or {"result": "refused", "reason": "item_limit_reached"}
 // (the code of a quota) / {"result": "refused", "reason": "invalid:<key>"} (a 422: the first key of its errors) /
 // {"result": "refused", "reason": "gone"} (what it works on was deleted by the other process first).
 // post-inventory goes through the whole HTTP kernel, as a call of the API does (`POST /api/v1/workspaces/{workspace}/inventories`,
@@ -48,10 +50,13 @@ use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
 use App\Inventories\Exceptions\ItemLimitReachedException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
+use App\Inventories\Imports\ImportRunner;
+use App\Inventories\Imports\ImportStatus;
 use App\Inventories\Inventories;
 use App\Inventories\InventoryFields;
 use App\Inventories\Items;
 use App\Models\Attachment;
+use App\Models\Import;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
@@ -244,6 +249,11 @@ function changeInventories(Application $app, string $action, array $arguments): 
             );
 
             return ['result' => 'removed'];
+        case 'run-import':
+            $import = Import::query()->findOrFail((int) $arguments[0]);
+            $app->make(ImportRunner::class)->run($import);
+
+            return $import->refresh()->status === ImportStatus::Completed ? ['result' => 'completed'] : ['result' => 'refused', 'reason' => (string) $import->error];
         case 'update-item':
             $app->make(Items::class)->update(Inventory::query()->findOrFail((int) $arguments[1]), Item::query()->findOrFail((int) $arguments[2]), [$arguments[3] => $arguments[4]], User::query()->findOrFail((int) $arguments[0]));
 
@@ -258,7 +268,7 @@ try {
         'hold-admin-lock' => holdAdministratorLock($app->make(Locks::class), $go, (int) $arguments[0]),
         'insert-user' => insertUserWhileLocked($go),
         'post-inventory' => postInventory($app, $arguments),
-        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment' => changeInventories($app, $action, $arguments),
+        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment', 'run-import' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
 } catch (AccountDeletionRefused $refusal) {

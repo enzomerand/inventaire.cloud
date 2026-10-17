@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories\Attachments;
 
 use App\Inventories\Exports\ExportCleanup;
+use App\Inventories\Imports\ImportCleanup;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
@@ -29,7 +30,8 @@ use WeakMap;
  * disks hold files are still there) but queued only in the `deleted` event, once the `DELETE` has gone through: a deletion
  * that fails must not purge anything, and outside a transaction (a bare `$workspace->delete()`) "after the commit" is
  * immediately, which in `deleting` would be before the row is deleted. The folders of the exports of an account that is deleted
- * go through the same two steps ({@see self::collect()}, worked out by {@see ExportCleanup}).
+ * go through the same two steps ({@see self::collect()}, worked out by {@see ExportCleanup}), and so do those of the imports
+ * it sent ({@see ImportCleanup}).
  */
 final class AttachmentCleanup
 {
@@ -100,10 +102,12 @@ final class AttachmentCleanup
      */
     public function collectForInventory(Inventory $inventory): void
     {
-        // The exports of the inventory are stored under its folder too (see AttachmentStorage::exportDirectory()).
+        // The exports and the imports of the inventory are stored under its folder too (see AttachmentStorage::exportDirectory()
+        // and AttachmentStorage::importDirectory()).
         $disks = [
             ...$this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('exports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
+            ...$this->db->table('imports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
         ];
 
         if ($disks === []) {
@@ -136,12 +140,18 @@ final class AttachmentCleanup
                 ->distinct()
                 ->pluck('attachments.disk')
                 ->all(),
-            // The exports are stored under the folder of their inventory too.
+            // The exports and the imports are stored under the folder of their inventory too.
             ...$this->db->table('exports')
                 ->join('inventories', 'inventories.id', '=', 'exports.inventory_id')
                 ->where('inventories.workspace_id', $workspace->getKey())
                 ->distinct()
                 ->pluck('exports.disk')
+                ->all(),
+            ...$this->db->table('imports')
+                ->join('inventories', 'inventories.id', '=', 'imports.inventory_id')
+                ->where('inventories.workspace_id', $workspace->getKey())
+                ->distinct()
+                ->pluck('imports.disk')
                 ->all(),
         ];
 
@@ -210,6 +220,19 @@ final class AttachmentCleanup
     {
         $collected = self::collected();
         $collected[$model] = $folders;
+    }
+
+    /**
+     * Adds folders to purge to what was collected for a model that is being deleted, once a first collection replaced the earlier
+     * try's (see {@see self::collect()}): the account is the model whose folders come from two places, its exports and its imports,
+     * and the imports are added after the exports have been collected.
+     *
+     * @param  list<array{disk: string, directory: string}>  $folders  The disk and the directory of each folder.
+     */
+    public function collectMore(Model $model, array $folders): void
+    {
+        $collected = self::collected();
+        $collected[$model] = [...($collected[$model] ?? []), ...$folders];
     }
 
     /**

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 
 /**
@@ -51,5 +53,23 @@ final class ColorType extends AbstractFieldType
     public function normalize(mixed $value, InventoryField $field): mixed
     {
         return is_string($value) ? strtolower($value) : $value;
+    }
+
+    /**
+     * The color as `#rrggbb`: with or without the hash, and in three digits (`#f80` is `#ff8800`). Anything else is left for the rules.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        if ($cell->isEmpty()) {
+            return null;
+        }
+
+        $text = $cell->line();
+
+        if (preg_match('/^#?([0-9a-fA-F]{3})$/D', $text, $found) === 1) {
+            return '#'.$found[1][0].$found[1][0].$found[1][1].$found[1][1].$found[1][2].$found[1][2];
+        }
+
+        return preg_match('/^#?([0-9a-fA-F]{6})$/D', $text, $found) === 1 ? '#'.$found[1] : $text;
     }
 }

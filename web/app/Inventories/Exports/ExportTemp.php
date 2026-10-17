@@ -37,32 +37,36 @@ final class ExportTemp
     }
 
     /**
-     * A new empty file in the folder of the exports, to write one into.
+     * A new empty file in the folder of the exports (or of another kind of scratch files, such as the `imports`), to write one into.
+     *
+     * @param  string  $directory  The kind of scratch files, as for {@see self::directory()}.
+     * @param  string  $prefix  What the name of the file starts with.
      *
      * @throws RuntimeException When it cannot be created.
      */
-    public static function file(): string
+    public static function file(string $directory = 'exports', string $prefix = 'export-'): string
     {
-        $path = tempnam(self::directory(), 'export-');
+        $path = tempnam(self::directory($directory), $prefix);
 
         if ($path === false) {
-            throw new RuntimeException('A temporary file for the export could not be created.');
+            throw new RuntimeException('A temporary file could not be created.');
         }
 
         return $path;
     }
 
     /**
-     * Deletes the scratch files and folders left in the folder of the exports for longer than an hour (more than an export may
-     * run): the leftovers of a worker that was stopped while it wrote one.
+     * Deletes the scratch files and folders left in the folder of the exports (or of another kind of scratch files) for longer than
+     * an hour (more than an export or an import may run): the leftovers of a worker that was stopped while it wrote one.
      *
+     * @param  string  $directory  The kind of scratch files, as for {@see self::directory()}.
      * @return int How many files and folders were deleted.
      */
-    public static function prune(): int
+    public static function prune(string $directory = 'exports'): int
     {
         $deleted = 0;
 
-        foreach (glob(self::directory().'/*') ?: [] as $path) {
+        foreach (glob(self::directory($directory).'/*') ?: [] as $path) {
             // A file that vanished since the listing (another worker is done with it) has no age: it is not ours to delete.
             $modified = @filemtime($path);
 

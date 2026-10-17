@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use Closure;
 
@@ -109,5 +111,15 @@ final class MultiselectType extends ChoiceType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return ExportValue::text(implode(', ', is_array($stored) ? $this->choiceLabels($stored, $field) : []));
+    }
+
+    /**
+     * The ids of the choices the cell names: the whole cell when it is the label of one choice (a label may hold a comma), else each
+     * part of it, cut at the commas, semicolons and line breaks, the parts put back together where they make the label of a choice
+     * ({@see ChoiceType::choiceIdsOf()}).
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : $this->choiceIdsOf($cell, $field);
     }
 }

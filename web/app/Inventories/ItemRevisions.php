@@ -8,6 +8,8 @@ use App\Models\Item;
 use App\Models\ItemRevision;
 use App\Models\User;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Support\Str;
+use stdClass;
 
 /**
  * Writes the history of the items: one {@see ItemRevision} per change, and no more than
@@ -39,6 +41,52 @@ final class ItemRevisions
         }
 
         $this->write($item, $author, ItemRevision::CREATED, $changes);
+    }
+
+    /**
+     * Records that many items were added at once, each with every value it was given: the revisions are written in bulk, a statement
+     * for every {@see Items::BULK_CHUNK} of them or {@see Items::BULK_BYTES} bytes of changes, whichever comes first (a statement is
+     * one packet, and the database refuses one that is too large). No pruning is needed: an item that was just added has the one
+     * revision.
+     *
+     * @param  int  $inventoryId  The inventory the items were added to.
+     * @param  list<array{id: int, values: array<string, mixed>}>  $items  The numeric key and the stored values of each new item.
+     */
+    public function createdMany(int $inventoryId, array $items, ?User $author): void
+    {
+        $now = now();
+        $rows = [];
+        $bytes = 0;
+
+        foreach ($items as $item) {
+            $changes = [];
+
+            foreach ($item['values'] as $ulid => $value) {
+                $changes[$ulid] = ['before' => null, 'after' => $value];
+            }
+
+            $row = [
+                'ulid' => strtolower((string) Str::ulid()),
+                'inventory_id' => $inventoryId,
+                'item_id' => $item['id'],
+                'user_id' => $author?->getKey(),
+                'action' => ItemRevision::CREATED,
+                'changes' => json_encode($changes === [] ? new stdClass : $changes, JSON_THROW_ON_ERROR),
+                'created_at' => $now,
+            ];
+            $rows[] = $row;
+            $bytes += strlen($row['changes']);
+
+            if (count($rows) >= Items::BULK_CHUNK || $bytes >= Items::BULK_BYTES) {
+                $this->db->table('item_revisions')->insert($rows);
+                $rows = [];
+                $bytes = 0;
+            }
+        }
+
+        if ($rows !== []) {
+            $this->db->table('item_revisions')->insert($rows);
+        }
     }
 
     /**

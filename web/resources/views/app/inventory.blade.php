@@ -11,7 +11,10 @@
     inventory. Values are shown by partials/field-value (x-text, never x-html).
 
     The toolbar's "Export" button opens partials/export-dialog (resources/js/export/dialog.js): the format, the items or the
-    current view, and the exports asked for lately, with a link to the file of each once it is ready.
+    current view, and the exports asked for lately, with a link to the file of each once it is ready. Its "Import" button
+    (and the ones of the empty states, as the toolbar is hidden while there is no item) opens partials/import-dialog
+    (resources/js/import/dialog.js): a spreadsheet, the match of its columns with the fields, and the result.
+    data-import-max-size is the largest spreadsheet the server takes, in bytes.
 
     The dialog of an item that exists has three tabs: its details (the form, or the read-only list), its attachments
     (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
@@ -137,6 +140,7 @@
         data-can-edit="{{ $abilities['edit_items'] ? '1' : '0' }}"
         data-can-manage-fields="{{ $abilities['manage_fields'] ? '1' : '0' }}"
         data-max-attachment-size="{{ config('inventories.max_attachment_size', 20 * 1024 * 1024) }}"
+        data-import-max-size="{{ config('inventories.import_max_size', 10 * 1048576) }}"
     >
         <div class="card">
             <div class="card-header">
@@ -179,10 +183,16 @@
                         {{ __('Fields describe what each item holds: a name, a quantity, a price, a photo... Add them first, then the items.') }}
                     </p>
                     <div class="empty-action" x-show="canManageFields">
-                        <a class="btn btn-primary" href="{{ route('app.inventory.fields', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
-                            <x-tabler-plus aria-hidden="true" />
-                            {{ __('Add fields') }}
-                        </a>
+                        <div class="btn-list justify-content-center">
+                            <a class="btn btn-primary" href="{{ route('app.inventory.fields', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
+                                <x-tabler-plus aria-hidden="true" />
+                                {{ __('Add fields') }}
+                            </a>
+                            <button type="button" class="btn" x-show="canEdit" @click="openImport">
+                                <x-tabler-file-import aria-hidden="true" />
+                                {{ __('Import a file') }}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -197,10 +207,16 @@
                     <p class="empty-title">{{ __('No item yet') }}</p>
                     <p class="empty-subtitle text-secondary">{{ __('The items you add appear here, newest first.') }}</p>
                     <div class="empty-action" x-show="canAdd">
-                        <button type="button" class="btn btn-primary" @click="startCreate">
-                            <x-tabler-plus aria-hidden="true" />
-                            {{ __('Add item') }}
-                        </button>
+                        <div class="btn-list justify-content-center">
+                            <button type="button" class="btn btn-primary" @click="startCreate">
+                                <x-tabler-plus aria-hidden="true" />
+                                {{ __('Add item') }}
+                            </button>
+                            <button type="button" class="btn" @click="openImport">
+                                <x-tabler-file-import aria-hidden="true" />
+                                {{ __('Import a file') }}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -240,6 +256,8 @@
         @include('partials.items-filters')
 
         @include('partials.export-dialog')
+
+        @include('partials.import-dialog')
 
         <div class="modal modal-blur fade" tabindex="-1" x-ref="modal" role="dialog" aria-labelledby="item-modal-title" aria-hidden="true">
             <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">

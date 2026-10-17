@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
 use Closure;
@@ -134,5 +136,15 @@ final class TagsType extends AbstractFieldType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return ExportValue::text(is_array($stored) ? implode(', ', array_filter($stored, is_string(...))) : '');
+    }
+
+    /**
+     * The tags the cell lists, cut at the commas, semicolons and line breaks. A tag that holds a comma is cut in two: unlike the label
+     * of a choice, a tag is not one of a list known beforehand, so there is nothing to put the pieces back together by (and an export
+     * writes the tags separated by commas, so the cell of a tag with a comma could not be told from two tags anyway).
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        return $cell->isEmpty() ? null : $cell->parts();
     }
 }

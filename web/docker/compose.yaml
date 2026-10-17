@@ -8,7 +8,7 @@
 #
 # - app            the web server; it also updates or installs the instance when it starts
 # - worker         the queue worker of the short jobs: mails, file purges (waits until the instance is installed)
-# - export-worker  the queue worker of the exports, which may run for 15 minutes (waits until the instance is installed)
+# - export-worker  the queue worker of the exports and the imports, which may run for 15 minutes (waits until the instance is installed)
 # - scheduler      the task scheduler (waits until the instance is installed)
 # - db             PostgreSQL
 #
@@ -75,11 +75,11 @@ services:
         <<: *worker
         environment:
             <<: *environment
-            # Not the exports: one that runs for minutes would hold up the mails and the file purges behind it.
+            # Not the exports and the imports: one that runs for minutes would hold up the mails and the file purges behind it.
             QUEUE_WORKER_QUEUES: default
 
-    # The exports have a worker of their own. An older compose file, with neither this service nor QUEUE_WORKER_QUEUES on its
-    # worker, keeps one worker on `default,exports` and still writes the exports.
+    # The exports and the imports (the same heavy queue) have a worker of their own. An older compose file, with neither this service nor
+    # QUEUE_WORKER_QUEUES on its worker, keeps one worker on `default,exports` and still writes the exports and does the imports.
     export-worker:
         <<: *worker
         environment:

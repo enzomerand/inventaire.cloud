@@ -58,8 +58,8 @@ class AppServiceProvider extends ServiceProvider
         // someone takes effect at once.
         Gate::define('admin', fn (User $user): bool => $user->is_admin);
 
-        // `composer dev` (`artisan dev`) runs a queue listener; the framework's one only listens to `default`, and the exports are
-        // on their own queue (see GenerateExport). `default` first, as the worker of the Docker image does. Only on a
+        // `composer dev` (`artisan dev`) runs a queue listener; the framework's one only listens to `default`, and the exports (and the
+        // imports) are on their own queue (see GenerateExport). `default` first, as the worker of the Docker image does. Only on a
         // development machine: `artisan dev` is not run anywhere else.
         if ($this->app->isLocal()) {
             DevCommands::artisan('queue:listen --tries=1 --timeout=0 --queue=default,'.GenerateExport::QUEUE, 'queue');
@@ -77,7 +77,8 @@ class AppServiceProvider extends ServiceProvider
      * `uploads_per_minute`), keyed on the user: every upload writes a file, makes a thumbnail and takes locks. And the two
      * of the catalogue of templates, keyed on the user when there is one, else on the network: the one of its API endpoints
      * (`templates_per_minute`) and the one of its public pages and the sitemap (`public_pages_per_minute`), which do not
-     * share a count. And the one of the endpoint that asks for an export (`exports_per_minute`), keyed on the user.
+     * share a count. And the one of the endpoint that asks for an export (`exports_per_minute`), keyed on the user, and the one of the endpoints
+     * that read the file of an import (`imports_per_minute`), keyed on the user too.
      */
     private function registerInventoryLimiters(): void
     {
@@ -98,6 +99,10 @@ class AppServiceProvider extends ServiceProvider
         // Asking for an export queues a job that reads a whole inventory (`exports_per_minute`), keyed on the user.
         RateLimiter::for('exports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.exports_per_minute'))
             ->by('exports:'.$this->signedInKey($request)));
+
+        // Sending a file to import, or reading it again with other options, reads a whole file (`imports_per_minute`), keyed on the user.
+        RateLimiter::for('imports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.imports_per_minute'))
+            ->by('imports:'.$this->signedInKey($request)));
     }
 
     /**

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Inventories\Fields;
 
+use App\Inventories\Exceptions\InvalidImportValue;
+use App\Inventories\Imports\ImportCell;
+use App\Inventories\Imports\ImportContext;
+use App\Inventories\SearchText;
 use App\Models\InventoryField;
 
 /**
@@ -64,5 +68,49 @@ final class BooleanType extends AbstractFieldType
     public function exportValue(mixed $stored, InventoryField $field, array $fileNames = []): ExportValue
     {
         return is_bool($stored) ? ExportValue::boolean($stored) : ExportValue::empty();
+    }
+
+    /**
+     * Whether a text says yes (`true`) or no (`false`), or neither (null): `yes`, `no`, `oui`, `non`, `true`, `false`, `vrai`, `faux`,
+     * and the words of the language of the request, whatever the case and the accents; with `$plainWords` false also `1`, `0`, `y`, `n`,
+     * `o`, `x`, `✓` and `✔`, which a person writes in a column of yes and no but which are no proof that a column is one.
+     */
+    public static function answerOf(string $text, bool $plainWords = false): ?bool
+    {
+        $word = SearchText::normalize($text);
+        $yes = ['yes', 'oui', 'true', 'vrai', SearchText::normalize(__('Yes'))];
+        $no = ['no', 'non', 'false', 'faux', SearchText::normalize(__('No'))];
+
+        if (! $plainWords) {
+            $yes = [...$yes, '1', 'y', 'o', 'x', '✓', '✔'];
+            $no = [...$no, '0', 'n'];
+        }
+
+        return match (true) {
+            in_array($word, $yes, true) => true,
+            in_array($word, $no, true) => false,
+            default => null,
+        };
+    }
+
+    /**
+     * The answer of a yes/no cell: a yes/no cell, 1 or 0, or the words of {@see self::answerOf()}.
+     */
+    public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
+    {
+        if ($cell->isEmpty()) {
+            return null;
+        }
+
+        $value = $cell->value;
+
+        $answer = match (true) {
+            is_bool($value) => $value,
+            is_int($value) || is_float($value) => $value == 1 ? true : ($value == 0 ? false : null),
+            is_string($value) => self::answerOf($value),
+            default => null,
+        };
+
+        return $answer ?? throw new InvalidImportValue(__('":value" is not a yes or no.', ['value' => $cell->excerpt()]));
     }
 }
