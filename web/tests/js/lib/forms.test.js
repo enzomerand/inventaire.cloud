@@ -1,6 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { fillUrl, firstMessages } from '../../../resources/js/lib/forms.js';
+import { fillUrl, firstMessages, throttledMessage } from '../../../resources/js/lib/forms.js';
+
+vi.mock('../../../resources/js/lib/i18n.js', () => ({
+    t: (key, replacements = {}) =>
+        Object.entries(replacements).reduce(
+            (text, [name, value]) => text.replace(':' + name, value),
+            {
+                'error.too_many_requests': 'Slow down',
+                'login.error.throttled': 'Wait :seconds seconds',
+                'login.error.throttled_minutes': 'Wait :minutes minutes',
+            }[key] ?? key,
+        ),
+}));
 
 describe('firstMessages()', () => {
     it('keeps the first message of each field', () => {
@@ -25,5 +37,22 @@ describe('fillUrl()', () => {
     it('cannot be made to leave the path by an identifier with slashes or dots', () => {
         expect(fillUrl('/app/w/__id__', '../admin')).toBe('/app/w/..%2Fadmin');
         expect(fillUrl('/app/w/__id__', 'a?b#c')).toBe('/app/w/a%3Fb%23c');
+    });
+});
+
+describe('throttledMessage()', () => {
+    it('tells the wait in seconds when it is short', () => {
+        expect(throttledMessage(45)).toBe('Wait 45 seconds');
+        expect(throttledMessage(120)).toBe('Wait 120 seconds');
+    });
+
+    it('tells the wait in minutes, rounded up, when it is long', () => {
+        expect(throttledMessage(121)).toBe('Wait 3 minutes');
+        expect(throttledMessage(3600)).toBe('Wait 60 minutes');
+    });
+
+    it('says to slow down when the server gave no wait', () => {
+        expect(throttledMessage(null)).toBe('Slow down');
+        expect(throttledMessage(0)).toBe('Slow down');
     });
 });

@@ -2,7 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\PaceApiTokens;
 use App\Http\Middleware\RedirectIfNotInstalled;
+use App\Http\Middleware\RefuseApiTokens;
+use App\Http\Middleware\RequireStatefulRequest;
+use App\Http\Middleware\RequireTokenAbility;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\SetReferrerPolicy;
 use App\Http\Middleware\SetRobotsTag;
@@ -13,7 +17,10 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 // Before anything reads .env: the installer must know which variables the process really started with.
@@ -37,6 +44,22 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // application's own host (config/sanctum.php) stateful, every other client stays stateless.
         $middleware->statefulApi();
 
+        // `token:read`, `token:write` and `token:manage` on the routes an API token may reach (see routes/api.php).
+        $middleware->alias(['token' => RequireTokenAbility::class]);
+
+        // What a request has to pass, in this order: the authentication; the pace of its token (every request a token makes is
+        // counted, the ones that are refused as well); the refusals (a token on a route for the web front, a token that lacks the
+        // ability); then the limits of the endpoints; then the models of the route are looked up. The limits of the endpoints (an
+        // export, a workspace, a token to make...) are a person's own: a request that is refused before it does anything must not use
+        // them up, or a leaked token that can only read would lock its owner out of their own account. The ability is judged before the
+        // models are looked up too: a token that may not write is told so for any inventory, whether it exists, belongs to somebody
+        // else or is made up, instead of a 404 that tells them apart. Each call puts the class right before the throttles, so they
+        // end up in the order of the calls.
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: PaceApiTokens::class);
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: RefuseApiTokens::class);
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: RequireStatefulRequest::class);
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: RequireTokenAbility::class);
+
         // A signed-out visitor of a page goes to the login page; an API client has nowhere to be redirected to
         // and gets a 401 in JSON (the default would also fail while no "login" route exists).
         $middleware->redirectGuestsTo(fn (Request $request): ?string => $request->is('api/*') ? null : route('login'));
@@ -48,6 +71,20 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // The API always answers JSON, whatever the client asked for: a script that forgets the Accept header must
         // not receive an HTML error page or a redirect to the login page.
         $exceptions->shouldRenderJsonWhen(fn (Request $request, Throwable $exception): bool => $request->is('api/*') || $request->expectsJson());
+
+        // A client that is slowed down is told so the way the other refusals are, with a `code` to switch on: the message is for people.
+        // The headers the limiter chose (Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining) stay, since they are what a script waits by.
+        $exceptions->render(function (ThrottleRequestsException $exception, Request $request): ?JsonResponse {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            return new JsonResponse(
+                ['message' => __('Too many attempts. Please wait a moment before trying again.'), 'code' => 'too_many_requests'],
+                429,
+                $exception->getHeaders(),
+            );
+        });
 
         // A row that is not there is a plain 404. The framework's own message names the model class and the key that was
         // looked up, which tells a row that does not exist from one the person may not see: that one is a 404 too, with

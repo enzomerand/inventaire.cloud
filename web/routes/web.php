@@ -10,6 +10,7 @@ use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\RobotsController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UpdateLocaleController;
+use App\Http\Controllers\Web\ApiDocsController;
 use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
 use App\Http\Controllers\Web\HomePageController;
 use App\Http\Controllers\Web\InventoryFieldsPageController;
@@ -48,6 +49,10 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
             Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
         });
 });
+
+// The documentation of the API: one page at one address (the text of the document is English whatever the language), public and
+// rendered from a file, so limited in pace with the other public pages.
+Route::get('/docs/api', ApiDocsController::class)->middleware('throttle:public-pages')->name('docs.api');
 
 // What robots read. Routes, not files of public/ (a web server would serve a file before the application, and the answer
 // depends on APP_INDEXABLE). Robots keep no session: nothing here starts one or sets a cookie. The sitemap reads the

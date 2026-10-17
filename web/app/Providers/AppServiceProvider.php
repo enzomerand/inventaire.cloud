@@ -8,6 +8,7 @@ use App\Auth\EmailAddress;
 use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
+use App\Http\Middleware\PaceApiTokens;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Jobs\GenerateExport;
@@ -70,6 +71,7 @@ class AppServiceProvider extends ServiceProvider
         $this->registerWorkspaceLimiters();
         $this->registerInventoryLimiters();
         $this->registerAdminLimiters();
+        $this->registerApiTokenLimiters();
     }
 
     /**
@@ -103,6 +105,19 @@ class AppServiceProvider extends ServiceProvider
         // Sending a file to import, or reading it again with other options, reads a whole file (`imports_per_minute`), keyed on the user.
         RateLimiter::for('imports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.imports_per_minute'))
             ->by('imports:'.$this->signedInKey($request)));
+    }
+
+    /**
+     * The rate limiter of the endpoint that makes an API token (`api_token_creations_per_hour`, config/inventories.php), keyed on the
+     * user: a token is a secret that the person copies, and none is worth making in a loop.
+     *
+     * The pace of a token itself (`api_token_requests_per_minute`) is not a named limiter: it is counted for the token the request is
+     * made with, which only the authentication tells, by {@see PaceApiTokens}.
+     */
+    private function registerApiTokenLimiters(): void
+    {
+        RateLimiter::for('api-token-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.api_token_creations_per_hour'))
+            ->by('api-token-creation:'.$this->signedInKey($request)));
     }
 
     /**

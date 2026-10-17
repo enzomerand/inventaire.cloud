@@ -2,12 +2,16 @@
  * Alpine component of the security card of the account page: signing out of every other device.
  *
  * The action asks for a confirmation first, in the card itself. This device stays signed in (the server signs it in
- * again with a fresh session). The endpoint comes from the markup (`data-url` on the root), because the CSP build of
- * Alpine does not allow Blade to inject values into expressions.
+ * again with a fresh session) but the API tokens stop working, which the tokens card is told about with an event. The
+ * endpoint comes from the markup (`data-url` on the root), because the CSP build of Alpine does not allow Blade to
+ * inject values into expressions.
  */
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
+
+/** Event sent to the window once every API token was revoked; the tokens card of the account page listens to it. */
+export const TOKENS_REVOKED_EVENT = 'tokens-revoked';
 
 /**
  * @returns {Record<string, any>}
@@ -70,6 +74,8 @@ export default function accountSecurity() {
 
             this.confirming = false;
             notify('success', t('account.notice.signed_out_everywhere'));
+            // The API tokens went with the other devices: the card that lists them reads its list again.
+            window.dispatchEvent(new CustomEvent(TOKENS_REVOKED_EVENT));
         },
     };
 }

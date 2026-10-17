@@ -39,16 +39,17 @@ final class WorkspaceController extends Controller
     }
 
     /**
-     * Creates a workspace owned by the user, who starts working in it (`201`). Creating is throttled per user
-     * (`workspaces.create_per_hour`), and an account cannot belong to more than `workspaces.max_per_user`
-     * workspaces (`409`, `workspace_limit_reached`).
+     * Creates a workspace owned by the user, who starts working in it (`201`), unless the request is made with an API token: the
+     * workspace the person works in is their choice, made at their browser (`me.current-workspace`, which no token reaches), and a script
+     * does not change it. Creating is throttled per user (`workspaces.create_per_hour`), and an account cannot belong to more than
+     * `workspaces.max_per_user` workspaces (`409`, `workspace_limit_reached`).
      */
     public function store(WorkspaceNameRequest $request): JsonResponse
     {
         $user = $this->user($request);
 
         try {
-            $workspace = $this->workspaces->create($user, $request->name());
+            $workspace = $this->workspaces->create($user, $request->name(), $this->apiToken($request) === null);
         } catch (WorkspaceLimitReachedException $limit) {
             return ApiError::conflict(
                 trans_choice('You cannot belong to more than :count workspace.|You cannot belong to more than :count workspaces.', $limit->limit),
@@ -73,14 +74,15 @@ final class WorkspaceController extends Controller
 
     /**
      * Deletes a workspace of which the user is an owner, and everything in it. The user's last workspace cannot be deleted
-     * (`409`, `last_workspace`); when it was the one they were working in, another takes its place.
+     * (`409`, `last_workspace`); when it was the one they were working in, another takes its place, unless the request is made with an API
+     * token, which does not choose for the person: the first workspace they joined is then the one they work in until they choose.
      */
     public function destroy(Request $request, Workspace $workspace): JsonResponse|Response
     {
         Gate::authorize('delete', $workspace);
 
         try {
-            $this->workspaces->delete($this->user($request), $workspace);
+            $this->workspaces->delete($this->user($request), $workspace, $this->apiToken($request) === null);
         } catch (LastWorkspaceException) {
             return ApiError::conflict(__('You cannot delete your last workspace: create another one first.'), LastWorkspaceException::CODE);
         }

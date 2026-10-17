@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Auth\TokenAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Inventories\StartImportRequest;
 use App\Http\Requests\Inventories\StoreImportRequest;
@@ -75,7 +76,7 @@ final class ImportController extends Controller
     public function store(StoreImportRequest $request, Inventory $inventory): JsonResponse
     {
         try {
-            $import = $this->imports->upload($inventory, $this->user($request), $request->uploaded(), $request->reading(), Gate::allows('manageFields', $inventory));
+            $import = $this->imports->upload($inventory, $this->user($request), $request->uploaded(), $request->reading(), $this->mayCreateFields($request, $inventory));
         } catch (ImportLimitReachedException $limit) {
             return ApiError::conflict(
                 __('You already have too many imports under way for this inventory. Cancel one or wait for it to end, then try again.'),
@@ -107,7 +108,7 @@ final class ImportController extends Controller
         $import = $this->owned($request, $inventory, $import);
 
         try {
-            return new ImportResource($this->imports->reanalyze($import, $inventory, $request->changes(), Gate::allows('manageFields', $inventory)));
+            return new ImportResource($this->imports->reanalyze($import, $inventory, $request->changes(), $this->mayCreateFields($request, $inventory)));
         } catch (ImportNotEditableException $failure) {
             return $this->notEditable($failure);
         } catch (ImportFileException $failure) {
@@ -129,7 +130,7 @@ final class ImportController extends Controller
         $import = $this->owned($request, $inventory, $import);
 
         try {
-            $started = $this->imports->start($import, $inventory, $request->mapping(), $request->settings(), Gate::allows('manageFields', $inventory));
+            $started = $this->imports->start($import, $inventory, $request->mapping(), $request->settings(), $this->mayCreateFields($request, $inventory));
         } catch (ImportNotEditableException $failure) {
             return $this->notEditable($failure);
         } catch (InvalidImportMapping $invalid) {
@@ -182,6 +183,21 @@ final class ImportController extends Controller
         }
 
         return $import;
+    }
+
+    /**
+     * Whether the request may have the import create fields: the role of the person allows it ({@see InventoryPolicy::manageFields()}) and,
+     * if the request is made with an API token, the token holds the `manage` ability. Creating fields is changing the structure of the
+     * inventory, which `write` does not allow; a mapping must not give a token what the routes of the fields refuse it.
+     *
+     * This is judged here, when the import is read and started, and nowhere else: the job that runs it has no token, and only checks the
+     * role again. An import that creates a field is therefore never started with a token that cannot manage.
+     */
+    private function mayCreateFields(Request $request, Inventory $inventory): bool
+    {
+        $token = $this->apiToken($request);
+
+        return Gate::allows('manageFields', $inventory) && ($token === null || $token->can(TokenAbility::Manage->value));
     }
 
     /**

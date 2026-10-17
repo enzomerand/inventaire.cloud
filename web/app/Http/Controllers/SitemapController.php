@@ -14,7 +14,7 @@ use XMLWriter;
  * `/sitemap.xml`: the public pages, for the instances that let search engines index them (`app.indexable`); a 404 for
  * the others.
  *
- * It lists the home page, the gallery in every language and each template in every language it is written in. Each address
+ * It lists the home page, the gallery in every language, each template in every language it is written in and the documentation of the API. Each address
  * of a page that exists in several languages carries the `xhtml:link` alternates of all of them, itself included, and an
  * `x-default`. There is no `lastmod`: the pages are drawn from files whose date says nothing about the content.
  */
@@ -66,6 +66,9 @@ final class SitemapController extends Controller
                 $this->entry($xml, $address, $page->alternates, $page->default);
             }
         }
+
+        // The documentation of the API exists once, so it has no alternates.
+        $this->entry($xml, PublicUrls::apiDocs(), []);
 
         $xml->endElement();
         $xml->endDocument();

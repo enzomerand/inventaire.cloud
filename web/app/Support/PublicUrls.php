@@ -8,7 +8,7 @@ use App\Services\LocaleResolver;
 use Closure;
 
 /**
- * The addresses of the public pages (the home page and the gallery of templates), as search engines and other sites must
+ * The addresses of the public pages (the home page, the documentation of the API and the gallery of templates), as search engines and other sites must
  * see them: absolute, and built from `APP_URL`, never from the request. A `Host` header is written by whoever calls, so an
  * address made from it could be made to point anywhere (the same rule as the welcome mail's link to the sign-in page).
  *
@@ -39,6 +39,23 @@ final class PublicUrls
     public static function home(): string
     {
         return self::to('/');
+    }
+
+    /**
+     * The documentation of the API.
+     */
+    public static function apiDocs(): string
+    {
+        return self::to(self::apiDocsPath());
+    }
+
+    /**
+     * The path of the documentation of the API, for a link that stays on the host the visitor came by. It exists once, in the
+     * language of the request: the text of the document is English.
+     */
+    public static function apiDocsPath(): string
+    {
+        return '/docs/api';
     }
 
     /**

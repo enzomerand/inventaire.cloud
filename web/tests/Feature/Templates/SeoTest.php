@@ -456,7 +456,7 @@ describe('the sitemap', function (): void {
             ->and($response->getContent())->toContain('xmlns:xhtml="http://www.w3.org/1999/xhtml"');
     });
 
-    it('lists the home page, the gallery and each template in every language, with their alternates', function (): void {
+    it('lists the home page, the gallery and each template in every language, with their alternates, and the documentation of the API', function (): void {
         $entries = sitemapEntries($this);
 
         expect(array_column($entries, 'loc'))->toBe([
@@ -467,13 +467,14 @@ describe('the sitemap', function (): void {
             'http://localhost/templates/sample-records', 'http://localhost/en/templates/sample-records',
             'http://localhost/templates/sample-shop', 'http://localhost/en/templates/sample-shop',
             'http://localhost/templates/sample-tools', 'http://localhost/en/templates/sample-tools',
+            'http://localhost/docs/api',
         ]);
 
-        // The home page exists once.
-        expect($entries[0]['alternates'])->toBe([]);
+        // The home page and the documentation exist once.
+        expect($entries[0]['alternates'])->toBe([])->and(end($entries)['alternates'])->toBe([]);
 
         // The others list every language, themselves included, and an x-default.
-        foreach (array_slice($entries, 1) as $entry) {
+        foreach (array_slice($entries, 1, -1) as $entry) {
             $slug = basename($entry['loc']);
             $path = $slug === 'templates' ? '/templates' : "/templates/{$slug}";
 
@@ -511,6 +512,6 @@ describe('the sitemap', function (): void {
     it('lists only the templates the catalogue holds', function (): void {
         templateCatalogueFrom(storage_path('framework/testing/no-such-folder'));
 
-        expect(array_column(sitemapEntries($this), 'loc'))->toBe(['http://localhost/', 'http://localhost/templates', 'http://localhost/en/templates']);
+        expect(array_column(sitemapEntries($this), 'loc'))->toBe(['http://localhost/', 'http://localhost/templates', 'http://localhost/en/templates', 'http://localhost/docs/api']);
     });
 });

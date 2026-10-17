@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import accountSecurity from '../../../resources/js/components/account-security.js';
+import accountSecurity, { TOKENS_REVOKED_EVENT } from '../../../resources/js/components/account-security.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 
@@ -45,6 +45,18 @@ describe('security card of the account page', () => {
         expect(component.busy).toBe(false);
     });
 
+    it('tells the tokens card, with an event, that the API tokens were revoked with the other devices', async () => {
+        const heard = vi.fn();
+        window.addEventListener(TOKENS_REVOKED_EVENT, heard);
+        http.post.mockResolvedValue(null);
+
+        await component.signOutEverywhere();
+        window.removeEventListener(TOKENS_REVOKED_EVENT, heard);
+
+        expect(TOKENS_REVOKED_EVENT).toBe('tokens-revoked');
+        expect(heard).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores a second click while the request is in flight', async () => {
         http.post.mockResolvedValue(null);
 
@@ -54,6 +66,8 @@ describe('security card of the account page', () => {
     });
 
     it('keeps the confirmation and says why when it failed', async () => {
+        const heard = vi.fn();
+        window.addEventListener(TOKENS_REVOKED_EVENT, heard);
         http.post.mockRejectedValue(new HttpError(403, 'Not available from this address'));
         component.ask();
 
@@ -61,6 +75,8 @@ describe('security card of the account page', () => {
 
         expect(notify).toHaveBeenCalledWith('danger', 'Not available from this address');
         expect(notify).not.toHaveBeenCalledWith('success', expect.anything());
+        expect(heard).not.toHaveBeenCalled();
+        window.removeEventListener(TOKENS_REVOKED_EVENT, heard);
         expect(component.confirming).toBe(true);
         expect(component.busy).toBe(false);
     });

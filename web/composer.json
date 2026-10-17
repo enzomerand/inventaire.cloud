@@ -18,7 +18,8 @@
         "laravel/tinker": "^3.0",
         "league/flysystem-aws-s3-v3": "^3.0",
         "openspout/openspout": "^5.12",
-        "secondnetwork/blade-tabler-icons": "^3.49"
+        "secondnetwork/blade-tabler-icons": "^3.49",
+        "symfony/yaml": "^8.1"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -29,6 +30,7 @@
         "laravel/pint": "^1.27",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.6",
+        "opis/json-schema": "^2.6",
         "pestphp/pest": "^4.7",
         "pestphp/pest-plugin-laravel": "^4.1",
         "phpunit/phpunit": "^12.5.12"

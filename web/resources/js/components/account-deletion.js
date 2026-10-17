@@ -12,6 +12,7 @@
  * `data-home-url` on the root), because the CSP build of Alpine does not allow Blade to inject values into
  * expressions.
  */
+import { throttledMessage } from '../lib/forms.js';
 import { HttpError, http, scheduleNavigation } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
@@ -19,9 +20,6 @@ import { redirectTo, reloadPage } from '../lib/page.js';
 
 /** Options shared by every request: the failures are handled here. */
 const QUIET = { silent: true };
-
-/** Past this wait (two minutes), the time to wait is told in minutes rather than seconds. */
-const LONG_WAIT_SECONDS = 120;
 
 /**
  * @returns {Record<string, any>}
@@ -188,26 +186,10 @@ export default function accountDeletion() {
                     this.focus('code');
                 }
             } else if (error.status === 429) {
-                this.error = this.throttledMessage(error.retryAfter);
+                this.error = throttledMessage(error.retryAfter);
             } else {
                 this.error = error.message;
             }
-        },
-
-        /**
-         * Tells how long to wait, in minutes when it is long.
-         *
-         * @param {number | null} seconds The server's Retry-After, if it gave one.
-         * @returns {string}
-         */
-        throttledMessage(seconds) {
-            if (!seconds) {
-                return t('error.too_many_requests');
-            }
-
-            return seconds > LONG_WAIT_SECONDS
-                ? t('login.error.throttled_minutes', { minutes: Math.ceil(seconds / 60) })
-                : t('login.error.throttled', { seconds });
         },
 
         /**

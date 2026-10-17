@@ -81,6 +81,12 @@
                                     </a>
                                 </li>
                                 <li class="list-inline-item">
+                                    <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::apiDocsPath() }}">
+                                        <x-tabler-api aria-hidden="true" />
+                                        {{ __('API') }}
+                                    </a>
+                                </li>
+                                <li class="list-inline-item">
                                     <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ $repository }}" target="_blank" rel="noopener">
                                         <x-tabler-code aria-hidden="true" />
                                         {{ __('Source code') }}

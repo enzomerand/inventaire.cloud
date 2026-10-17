@@ -18,6 +18,9 @@
 //        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload> [<ULID of the file or photo field>]
 //        php concurrent-action.php <go file> remove-attachment <user id> <inventory id> <item id> <attachment id>
 //        php concurrent-action.php <go file> run-import <import id>
+//        php concurrent-action.php <go file> create-token <user id> <name>
+//        php concurrent-action.php <go file> hold-token-revocation <user id>
+//        php concurrent-action.php <go file> insert-token <user id>
 //
 // The files of the attachments are written to the local disk, whose folder the test gives with TEST_STORAGE_ROOT (the
 // folder its own process writes to), so that a child never writes to the real storage of the application.
@@ -37,12 +40,17 @@
 // given account the way the administration does, says so (<go file>.locked) and keeps the lock until the second is done
 // (<go file>.released); the second waits for the lock, inserts an account, and says how long that took:
 // {"result": "inserted", "seconds": 0.01}, or {"result": "error", ...} when the insert had to wait for the lock.
+//
+// hold-token-revocation and insert-token go together the same way (see TokenConcurrencyTest): the first revokes the tokens of an account
+// as the deletion of the account does, in a transaction it keeps open; the second inserts a token for another account meanwhile.
 
 declare(strict_types=1);
 
 use App\Admin\Exceptions\UserAdministrationRefused;
 use App\Admin\UserAdministration;
+use App\Auth\ApiTokens;
 use App\Auth\Exceptions\AccountDeletionRefused;
+use App\Auth\Exceptions\ApiTokenLimitReachedException;
 use App\Inventories\Attachments\Attachments;
 use App\Inventories\Exceptions\AttachmentLimitReachedException;
 use App\Inventories\Exceptions\FieldFileLimitReachedException;
@@ -148,6 +156,47 @@ function insertUserWhileLocked(string $go): array
 }
 
 /**
+ * Revokes the tokens of an account the way the deletion of the account does, in a transaction, tells the other child, and keeps the
+ * transaction open (and what it locked) until the other child says it is done.
+ *
+ * @return array{result: string}
+ */
+function holdTokenRevocation(Application $app, string $go, int $userId): array
+{
+    DB::transaction(function () use ($app, $go, $userId): void {
+        $app->make(ApiTokens::class)->revokeAll(User::query()->findOrFail($userId));
+
+        touch($go.'.locked');
+        waitForFile($go.'.released', 30);
+    });
+
+    return ['result' => 'held'];
+}
+
+/**
+ * Waits for the transaction of the other child, then inserts a token for another account and reports how long that took. A short lock
+ * wait timeout turns "the insert waits for the other transaction" into an error instead of a test that hangs.
+ *
+ * @return array{result: string, seconds: float}
+ */
+function insertTokenWhileHeld(string $go, int $userId): array
+{
+    try {
+        waitForFile($go.'.locked', 30);
+
+        DB::statement(DB::getDriverName() === 'pgsql' ? "SET lock_timeout = '5s'" : 'SET SESSION innodb_lock_wait_timeout = 5');
+
+        $started = microtime(true);
+
+        User::query()->findOrFail($userId)->createToken('neighbour', ['read']);
+
+        return ['result' => 'inserted', 'seconds' => round(microtime(true) - $started, 2)];
+    } finally {
+        touch($go.'.released');
+    }
+}
+
+/**
  * Makes an inventory with a call of the API, through the HTTP kernel: the same middleware, request validation, controller and
  * answers as a request of the web front, for a person who is signed in (a stateless call: no session, no CSRF token).
  *
@@ -180,6 +229,19 @@ function postInventory(Application $app, array $arguments): array
         409 => ['result' => 'refused', 'reason' => is_array($answer) && is_string($answer['code'] ?? null) ? $answer['code'] : 'conflict'],
         default => ['result' => 'error', 'reason' => 'HTTP '.$response->getStatusCode().': '.$response->getContent()],
     };
+}
+
+/**
+ * Makes an API token for a person the way the application does (`{"result": "created"}`; the quota answers like the others).
+ *
+ * @param  list<string>  $arguments  The id of the person, the name of the token.
+ * @return array{result: string}
+ */
+function createToken(Application $app, array $arguments): array
+{
+    $app->make(ApiTokens::class)->create(User::query()->findOrFail((int) $arguments[0]), $arguments[1], ['read'], 30);
+
+    return ['result' => 'created'];
 }
 
 /**
@@ -267,7 +329,10 @@ try {
     $outcome = match ($action) {
         'hold-admin-lock' => holdAdministratorLock($app->make(Locks::class), $go, (int) $arguments[0]),
         'insert-user' => insertUserWhileLocked($go),
+        'hold-token-revocation' => holdTokenRevocation($app, $go, (int) $arguments[0]),
+        'insert-token' => insertTokenWhileHeld($go, (int) $arguments[0]),
         'post-inventory' => postInventory($app, $arguments),
+        'create-token' => createToken($app, $arguments),
         'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment', 'run-import' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
@@ -277,7 +342,7 @@ try {
     $outcome = ['result' => 'refused', 'reason' => $refusal->reason];
 } catch (LastWorkspaceException) {
     $outcome = ['result' => 'refused', 'reason' => LastWorkspaceException::CODE];
-} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException $limit) {
+} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException|ApiTokenLimitReachedException $limit) {
     $outcome = ['result' => 'refused', 'reason' => $limit::CODE];
 } catch (ModelNotFoundException) {
     // Something the action needed was deleted by the other process first (the account that writes, the inventory...).

@@ -113,8 +113,9 @@ describe('who may call it', function (): void {
 
         $this->actingAs($admin)->getJson('/api/v1/admin/users')->assertForbidden()->assertJsonPath('code', 'not_stateful');
         $this->flushSession();
+        // A token is told it is not allowed, not that the address is not stateful: the administrator could do nothing about it.
         $this->withToken($admin->createToken('script')->plainTextToken)->deleteJson('/api/v1/admin/users/'.$victim->id)
-            ->assertForbidden()->assertJsonPath('code', 'not_stateful');
+            ->assertForbidden()->assertJsonPath('code', 'session_required');
 
         expect(User::query()->count())->toBe(2);
     });
