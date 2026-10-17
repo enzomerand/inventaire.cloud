@@ -22,6 +22,7 @@ import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 import { attachment, deferred, queryFacts, ulid, withUlids } from '../support/inventory.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
 import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
+import { VERSIONS_URL, onItsWay, signature, signer, version } from '../support/versions.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -40,6 +41,11 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
     onModalHidden: vi.fn(),
 }));
 vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
+// The page of the versions asks again every two seconds: a test cannot wait that long, nor fake the timers under Alpine.
+vi.mock('../../../resources/js/versions/versions.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    POLL_INTERVAL_MS: 20,
+}));
 
 const VIEWS = join(import.meta.dirname, '../../../resources/views');
 
@@ -66,6 +72,12 @@ const ROUTE_PATTERNS = {
     'app.workspace': '/app/w/{workspace}',
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
+    'app.inventory.versions': '/app/w/{workspace}/inventories/{inventory}/versions',
+    'api.v1.inventories.versions.index': '/api/v1/inventories/{inventory}/versions',
+    'api.v1.inventories.versions.show': '/api/v1/inventories/{inventory}/versions/{version}',
+    'api.v1.inventories.versions.signature.cancel':
+        '/api/v1/inventories/{inventory}/versions/{version}/signature/cancel',
+    'api.v1.inventories.versions.signature.retry': '/api/v1/inventories/{inventory}/versions/{version}/signature/retry',
     'api.v1.workspaces.inventories.index': '/api/v1/workspaces/{workspace}/inventories',
     'api.v1.templates.show': '/api/v1/templates/{slug}',
     'api.v1.inventories.show': '/api/v1/inventories/{inventory}',
@@ -96,6 +108,8 @@ const PAGE = {
         { code: 'USD', name: 'US Dollar' },
     ],
     abilities: {},
+    signaturesAvailable: true,
+    maxSigners: 3,
 };
 
 /** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
@@ -245,6 +259,8 @@ function render(path) {
 
         const values = {
             "$settings->registrationOpen() ? '1' : '0'": '1',
+            "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
+            $maxSigners: String(PAGE.maxSigners),
             $current: 'Shop',
             '$workspace->name': PAGE.workspace.name,
             '$inventory->name': PAGE.inventory.name,
@@ -325,6 +341,7 @@ describe('the pages under the real Alpine CSP build', () => {
             inventoryFields: '../../../resources/js/components/inventory-fields.js',
             inventoryHeader: '../../../resources/js/components/inventory-header.js',
             inventoryItems: '../../../resources/js/components/inventory-items.js',
+            inventoryVersions: '../../../resources/js/components/inventory-versions.js',
             workspaceInventories: '../../../resources/js/components/workspace-inventories.js',
             workspaceSwitcher: '../../../resources/js/components/workspace-switcher.js',
             workspaces: '../../../resources/js/components/workspaces.js',
@@ -409,6 +426,8 @@ describe('the pages under the real Alpine CSP build', () => {
         useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
+        PAGE.signaturesAvailable = true;
+        PAGE.maxSigners = 3;
     });
 
     describe('the switcher of the header', () => {
@@ -6309,6 +6328,680 @@ describe('the pages under the real Alpine CSP build', () => {
 
             expect(http.delete).toHaveBeenCalledWith('/api/v1/inventories/tools/fields/qty');
             expect(notify).toHaveBeenCalledWith('success', 'Field deleted.');
+        });
+    });
+
+    describe('the official versions page', () => {
+        /** Opens the page of the versions of the inventory `tools`; the API answers the list with `versions`. */
+        async function open(versions = [], meta = {}) {
+            http.get.mockReset();
+            http.post.mockReset();
+            http.delete.mockReset();
+            http.get.mockImplementation(async (url) => {
+                if (url === VERSIONS_URL) {
+                    return {
+                        data: versions,
+                        meta: { current_page: 1, last_page: 1, total: versions.length, ...meta },
+                    };
+                }
+
+                // A version on its way is read again every few milliseconds under test: it is still as the list gave it.
+                const one = versions.find((candidate) => url === `${VERSIONS_URL}/${candidate.id}`);
+
+                if (one !== undefined) {
+                    return { data: one };
+                }
+
+                throw new Error(`unexpected reading of ${url}`);
+            });
+            await mount('app/inventory-versions.blade.php');
+        }
+
+        const cards = () => [...document.querySelectorAll('article.card')];
+        const createDialog = () => document.querySelector('#version-create-title').closest('.modal');
+        const confirmDialog = () => document.querySelector('#version-confirm-title').closest('.modal');
+        const live = () => document.querySelector('[role="status"][aria-live="polite"]');
+        const field = (id) => document.getElementById(id);
+
+        /** The text of the elements of a card that match, the ones that are visible. */
+        const shown = (card, selector) =>
+            [...card.querySelectorAll(selector)].filter(visible).map((one) => one.textContent.trim());
+
+        /** The links and buttons of a card that can be seen, by the words they show. */
+        const actions = (card) =>
+            [...card.querySelectorAll('.btn-list > .btn')].filter(visible).map((one) => one.textContent.trim());
+
+        /** The lines of signers of the form. */
+        const signerLines = () => [...createDialog().querySelectorAll('fieldset .row')];
+
+        afterEach(() => {
+            Reflect.deleteProperty(navigator, 'clipboard');
+        });
+
+        describe('the list', () => {
+            it('lists the versions as the API gives them, each with its number, label, details and status', async () => {
+                await open([
+                    version('b', { number: 4, label: 'Handover', items_count: 1, fields_count: 2 }),
+                    onItsWay('a', 'running', { number: 3, label: null }),
+                ]);
+
+                expect(cards().map((card) => card.querySelector('h2').textContent)).toEqual([
+                    'Version no. 4',
+                    'Version no. 3',
+                ]);
+                expect(cards().map((card) => shown(card, '.fw-medium.text-break'))).toEqual([['Handover'], []]);
+                expect(cards()[0].querySelector('.text-secondary.small').textContent).toContain('1 item · 2 fields');
+                expect(cards()[0].querySelector('.text-secondary.small').textContent).toContain('by Ada Lovelace');
+                expect(shown(cards()[0], '.badge')).toEqual(['PDF ready']);
+                expect(shown(cards()[1], '.badge')).toEqual(['In progress']);
+                expect(visible(document.querySelector('.empty'))).toBe(false);
+            });
+
+            it('labels each card by its title', async () => {
+                await open([version('a', { number: 4 })]);
+
+                const card = cards()[0];
+
+                expect(card.getAttribute('aria-labelledby')).toBe('version-a-title');
+                expect(card.querySelector('#version-a-title').textContent).toBe('Version no. 4');
+            });
+
+            it('shows the short SHA-256 with the whole value in its title, and copies it on request', async () => {
+                const writeText = vi.fn().mockResolvedValue(undefined);
+
+                Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+                await open([version('a', { number: 4 })]);
+
+                const code = cards()[0].querySelector('code');
+
+                expect(code.textContent).toBe('aaaaaaaaaaaa…');
+                expect(code.getAttribute('title')).toBe('a'.repeat(64));
+
+                await press('Copy the SHA-256 of version no. 4');
+
+                expect(writeText).toHaveBeenCalledWith('a'.repeat(64));
+                expect(live().textContent).toBe('SHA-256 copied.');
+            });
+
+            it('offers the PDF and the data of a version that is complete, as downloads that keep the referrer', async () => {
+                await open([version('a', { number: 4 })]);
+
+                const links = [...cards()[0].querySelectorAll('a.btn')].filter(visible);
+
+                expect(links.map((link) => link.textContent.trim())).toEqual(['PDF', 'Data (JSON)']);
+                expect(links.map((link) => link.getAttribute('href'))).toEqual([
+                    '/api/v1/inventories/tools/versions/a/pdf',
+                    '/api/v1/inventories/tools/versions/a/snapshot',
+                ]);
+                expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
+                    'Download the PDF of version no. 4',
+                    'Download the data (JSON) of version no. 4',
+                ]);
+
+                for (const link of links) {
+                    expect(link.hasAttribute('download')).toBe(true);
+                    expect(link.getAttribute('rel')).toBeNull();
+                }
+            });
+
+            it('offers no file while the PDF is being written', async () => {
+                await open([onItsWay('a', 'pending')]);
+
+                expect([...cards()[0].querySelectorAll('a.btn')].filter(visible)).toHaveLength(0);
+            });
+
+            it('says why a version failed', async () => {
+                await open([version('a', { status: 'failed', pdf: null, error: 'The PDF could not be written.' })]);
+
+                expect(shown(cards()[0], '.badge')).toEqual(['Failed']);
+                expect(shown(cards()[0], '.text-danger')).toEqual(['The PDF could not be written.']);
+            });
+
+            it('shows the request for signatures and every signer with where they stand', async () => {
+                await open([
+                    version('a', {
+                        signature: signature('awaiting', {
+                            signers: [
+                                signer('Ada Lovelace', { status: 'signed', signed_at: '2026-10-16T09:00:00Z' }),
+                                signer('Grace Hopper', { status: 'rejected', rejection_reason: 'Wrong totals' }),
+                                signer('Alan Turing'),
+                            ],
+                        }),
+                    }),
+                ]);
+
+                const card = cards()[0];
+
+                expect(visible(card.querySelector('h3').closest('div.border-top'))).toBe(true);
+                expect(shown(card, 'h3 + .badge')).toEqual(['Awaiting signatures']);
+                expect(shown(card, '.text-secondary.small')).toContain('Signatures received: 1 of 3');
+
+                const lines = [...card.querySelectorAll('li.list-group-item')];
+
+                expect(lines.map((line) => line.querySelector('.fw-medium').textContent)).toEqual([
+                    'Ada Lovelace',
+                    'Grace Hopper',
+                    'Alan Turing',
+                ]);
+                expect(lines.map((line) => line.querySelector('.badge').textContent)).toEqual([
+                    'Signed',
+                    'Refused',
+                    'Pending',
+                ]);
+                expect(lines[1].textContent).toContain('grace.hopper@example.test');
+                expect(lines[1].textContent).toContain('Reason: Wrong totals');
+            });
+
+            it('shows no block of signatures for a version nobody was asked to sign', async () => {
+                await open([version('a')]);
+
+                expect(visible(cards()[0].querySelector('div.border-top'))).toBe(false);
+            });
+
+            it('offers the signed PDF once it is stored', async () => {
+                await open([
+                    version('a', {
+                        signature: signature('completed', {
+                            signed_pdf: {
+                                sha256: 'c'.repeat(64),
+                                size: 10,
+                                download_url: '/api/v1/inventories/tools/versions/a/signed-pdf',
+                            },
+                        }),
+                    }),
+                ]);
+
+                expect(actions(cards()[0])).toContain('Signed PDF');
+                expect(
+                    [...cards()[0].querySelectorAll('a.btn')]
+                        .find((link) => link.textContent.trim() === 'Signed PDF')
+                        .getAttribute('href'),
+                ).toBe('/api/v1/inventories/tools/versions/a/signed-pdf');
+            });
+
+            it('offers each version the buttons its abilities allow', async () => {
+                await open([
+                    version('owner', {
+                        number: 3,
+                        signature: signature('awaiting'),
+                        abilities: { delete: true, cancel_signature: true, retry_signature: false },
+                    }),
+                    version('editor', {
+                        number: 2,
+                        signature: signature('failed'),
+                        abilities: { delete: false, cancel_signature: false, retry_signature: true },
+                    }),
+                    version('viewer', {
+                        number: 1,
+                        abilities: { delete: false, cancel_signature: false, retry_signature: false },
+                    }),
+                ]);
+
+                expect(cards().map(actions)).toEqual([
+                    ['PDF', 'Data (JSON)', 'Cancel the request', 'Delete'],
+                    ['PDF', 'Data (JSON)', 'Send again'],
+                    ['PDF', 'Data (JSON)'],
+                ]);
+            });
+
+            it('names the version in the label of each button, so that two cards are told apart', async () => {
+                await open([
+                    version('a', {
+                        number: 3,
+                        signature: signature('awaiting'),
+                        abilities: { delete: true, cancel_signature: true, retry_signature: false },
+                    }),
+                ]);
+
+                expect(buttons('Cancel the signature request of version no. 3')).toHaveLength(1);
+                expect(buttons('Delete version no. 3')).toHaveLength(1);
+            });
+
+            it('explains an inventory with no version, and offers to freeze it to somebody who may', async () => {
+                await open([]);
+
+                expect(visible(document.querySelector('.empty'))).toBe(true);
+                expect(document.querySelector('.empty-title').textContent).toBe('No official version yet');
+                expect(cards()).toHaveLength(0);
+                expect(buttons('New version')).toHaveLength(2);
+            });
+
+            it('offers a viewer nothing to create', async () => {
+                PAGE.abilities = { create: false };
+                await open([]);
+
+                expect(visible(document.querySelector('.empty'))).toBe(true);
+                expect(buttons('New version')).toHaveLength(0);
+            });
+
+            it('does not claim the inventory has no version when the list could not be read, and reads it again on request', async () => {
+                http.get.mockReset();
+                http.get.mockRejectedValueOnce(new HttpError(500, 'Server down'));
+                await mount('app/inventory-versions.blade.php');
+
+                const alert = document.querySelector('.alert-danger');
+
+                expect(visible(alert)).toBe(true);
+                expect(alert.textContent).toContain('The versions could not be loaded.');
+                expect(visible(document.querySelector('.empty'))).toBe(false);
+
+                http.get.mockResolvedValue({ data: [version('a')], meta: { current_page: 1, last_page: 1, total: 1 } });
+                await press('Try again', alert);
+
+                expect(visible(alert)).toBe(false);
+                expect(cards()).toHaveLength(1);
+            });
+
+            it('shows more versions on request, and says how many it shows', async () => {
+                await open([version('b', { number: 2 })], { last_page: 2, total: 2 });
+
+                expect(document.querySelector('p.mb-2').textContent).toBe('1 of 2 versions');
+                expect(buttons('Show more')).toHaveLength(1);
+
+                http.get.mockResolvedValue({
+                    data: [version('a', { number: 1 })],
+                    meta: { current_page: 2, last_page: 2, total: 2 },
+                });
+                await press('Show more');
+
+                expect(http.get).toHaveBeenLastCalledWith(VERSIONS_URL, { params: { page: 2 } });
+                expect(cards().map((card) => card.querySelector('h2').textContent)).toEqual([
+                    'Version no. 2',
+                    'Version no. 1',
+                ]);
+                expect(buttons('Show more')).toHaveLength(0);
+            });
+
+            it('links back to the inventory in the breadcrumb and in the header', async () => {
+                await open([]);
+
+                const links = [...document.querySelectorAll('a')].filter(
+                    (link) => link.getAttribute('href') === '/app/w/shop/inventories/tools',
+                );
+
+                expect(links.map((link) => link.textContent.trim())).toEqual(['Tools', 'Back to the items']);
+                expect(document.querySelector('.breadcrumb-item.active').textContent).toBe('Official versions');
+                expect(document.querySelector('.breadcrumb a[href="/app/w/shop"]').textContent).toBe('Shop');
+            });
+
+            it('has a polite live region from the start, and a title to put the cursor on', async () => {
+                await open([]);
+
+                expect(live()).not.toBeNull();
+                expect(live().getAttribute('aria-atomic')).toBe('true');
+                expect(document.querySelector('h1').getAttribute('tabindex')).toBe('-1');
+            });
+        });
+
+        describe('following a version that is on its way', () => {
+            /** Waits for the page to ask again (the interval is shortened under test), and for Alpine to draw what it learnt. */
+            async function nextReading() {
+                await new Promise((resolve) => setTimeout(resolve, 60));
+                await flush();
+            }
+
+            it('asks again, shows the version when its PDF is ready, and says so', async () => {
+                http.get.mockReset();
+                await open([onItsWay('a', 'pending', { number: 4 })]);
+
+                expect(shown(cards()[0], '.badge')).toEqual(['Waiting']);
+                expect(actions(cards()[0])).toEqual(['Delete']);
+
+                http.get.mockResolvedValue({ data: version('a', { number: 4 }) });
+                await nextReading();
+
+                expect(http.get).toHaveBeenLastCalledWith(
+                    `${VERSIONS_URL}/a`,
+                    expect.objectContaining({ silent: true }),
+                );
+                expect(shown(cards()[0], '.badge')).toEqual(['PDF ready']);
+                expect(actions(cards()[0])).toEqual(['PDF', 'Data (JSON)', 'Delete']);
+                expect(live().textContent).toBe('Version no. 4 is ready.');
+            });
+
+            it('offers to ask again when the readings fail', async () => {
+                await open([onItsWay('a')]);
+                http.get.mockRejectedValue(new HttpError(500, 'Server down'));
+
+                await nextReading();
+
+                const alert = [...document.querySelectorAll('.alert-warning')].find((one) => visible(one));
+
+                expect(alert.textContent).toContain('The progress of the versions could not be refreshed.');
+
+                http.get.mockResolvedValue({ data: version('a') });
+                await press('Try again', alert);
+
+                expect(shown(cards()[0], '.badge')).toEqual(['PDF ready']);
+                expect([...document.querySelectorAll('.alert-warning')].filter(visible)).toHaveLength(0);
+            });
+        });
+
+        describe('freezing the inventory', () => {
+            const form = () => createDialog().querySelector('form');
+            const switchBox = () => field('version-sign');
+
+            it('opens the dialog, empty, on the label', async () => {
+                await open([version('a')]);
+
+                await press('New version');
+
+                expect(showModal).toHaveBeenCalledWith(createDialog());
+                expect(field('version-label').value).toBe('');
+                expect(field('version-label').getAttribute('maxlength')).toBe('120');
+                expect(field('version-label').hasAttribute('data-autofocus')).toBe(true);
+                expect(switchBox().checked).toBe(false);
+                expect(visible(createDialog().querySelector('fieldset'))).toBe(false);
+            });
+
+            it('freezes the inventory with a label and puts the new version at the top', async () => {
+                await open([version('a', { number: 1 })]);
+                http.post.mockResolvedValue({ data: onItsWay('b', 'pending', { number: 2, label: 'Year-end' }) });
+                await press('New version');
+                await type(field('version-label'), 'Year-end');
+
+                await submit(form());
+
+                expect(http.post).toHaveBeenCalledWith(VERSIONS_URL, { label: 'Year-end' });
+                expect(hideModal).toHaveBeenCalledWith(createDialog());
+                expect(notify).toHaveBeenCalledWith('success', 'Version no. 2 is being created.');
+                expect(cards().map((card) => card.querySelector('h2').textContent)).toEqual([
+                    'Version no. 2',
+                    'Version no. 1',
+                ]);
+                expect(shown(cards()[0], '.badge')).toEqual(['Waiting']);
+            });
+
+            it('asks for signatures: the switch shows the lines of signers, and the request carries them', async () => {
+                await open([]);
+                http.post.mockResolvedValue({ data: onItsWay('b', 'pending', { signature: signature('requested') }) });
+                await press('New version', document.querySelector('.btn-list'));
+
+                await tick(switchBox(), true);
+
+                expect(visible(createDialog().querySelector('fieldset'))).toBe(true);
+                expect(signerLines()).toHaveLength(1);
+                expect(createDialog().querySelector('fieldset .form-hint').textContent).toBe('Up to 3 signers.');
+
+                const [name, email] = signerLines()[0].querySelectorAll('input');
+
+                await type(name, 'Ada Lovelace');
+                await type(email, 'ada@example.test');
+                await press('Add a signer');
+
+                const [secondName, secondEmail] = signerLines()[1].querySelectorAll('input');
+
+                await type(secondName, 'Grace Hopper');
+                await type(secondEmail, 'grace@example.test');
+                await submit(form());
+
+                expect(http.post).toHaveBeenCalledWith(VERSIONS_URL, {
+                    signers: [
+                        { name: 'Ada Lovelace', email: 'ada@example.test' },
+                        { name: 'Grace Hopper', email: 'grace@example.test' },
+                    ],
+                });
+            });
+
+            it('labels the inputs of each line with whose line it is', async () => {
+                await open([]);
+                await press('New version', document.querySelector('.btn-list'));
+                await tick(switchBox(), true);
+                await press('Add a signer');
+
+                const lines = signerLines();
+
+                expect(
+                    lines.map((line) =>
+                        [...line.querySelectorAll('input')].map((input) => input.getAttribute('aria-label')),
+                    ),
+                ).toEqual([
+                    ['Name of signer 1', 'Email address of signer 1'],
+                    ['Name of signer 2', 'Email address of signer 2'],
+                ]);
+
+                for (const input of createDialog().querySelectorAll('fieldset input')) {
+                    expect(createDialog().querySelector(`label[for="${input.id}"]`), input.id).not.toBeNull();
+                }
+
+                expect(lines.map((line) => line.querySelector('button').getAttribute('aria-label'))).toEqual([
+                    'Remove signer 1',
+                    'Remove signer 2',
+                ]);
+            });
+
+            it('adds lines of signers up to the most the instance takes, and removes them down to one', async () => {
+                await open([]);
+                await press('New version', document.querySelector('.btn-list'));
+                await tick(switchBox(), true);
+
+                expect(signerLines()[0].querySelector('button').disabled).toBe(true);
+
+                await press('Add a signer');
+                await press('Add a signer');
+
+                expect(signerLines()).toHaveLength(3);
+                expect(buttons('Add a signer')).toHaveLength(1);
+                expect(buttons('Add a signer')[0].disabled).toBe(true);
+
+                const [name] = signerLines()[1].querySelectorAll('input');
+
+                await type(name, 'Second');
+                signerLines()[0].querySelector('button').click();
+                await flush();
+
+                expect(signerLines()).toHaveLength(2);
+                expect(signerLines()[0].querySelector('input').value).toBe('Second');
+                expect(buttons('Add a signer')[0].disabled).toBe(false);
+            });
+
+            it('turns the signatures off for a request without signers even when lines were filled', async () => {
+                await open([]);
+                http.post.mockResolvedValue({ data: onItsWay('b') });
+                await press('New version', document.querySelector('.btn-list'));
+                await tick(switchBox(), true);
+                await type(signerLines()[0].querySelector('input'), 'Ada');
+                await tick(switchBox(), false);
+
+                await submit(form());
+
+                expect(http.post).toHaveBeenCalledWith(VERSIONS_URL, {});
+            });
+
+            it('keeps the switch off, with an explanation, where the instance has no signature service', async () => {
+                PAGE.signaturesAvailable = false;
+                await open([]);
+                await press('New version', document.querySelector('.btn-list'));
+
+                const hint = field('version-sign-hint');
+                const [unavailable, available] = hint.querySelectorAll('span');
+
+                expect(switchBox().disabled).toBe(true);
+                expect(switchBox().getAttribute('aria-describedby')).toBe('version-sign-hint');
+                expect(visible(unavailable)).toBe(true);
+                expect(unavailable.textContent).toContain('this instance has no signature service');
+                expect(visible(available)).toBe(false);
+            });
+
+            it('explains what signatures do where the instance can ask for them', async () => {
+                await open([]);
+                await press('New version', document.querySelector('.btn-list'));
+
+                const [unavailable, available] = field('version-sign-hint').querySelectorAll('span');
+
+                expect(switchBox().disabled).toBe(false);
+                expect(visible(unavailable)).toBe(false);
+                expect(visible(available)).toBe(true);
+            });
+
+            it('shows the refusals under the inputs they are about', async () => {
+                await open([]);
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: {
+                            label: ['The label is too long.'],
+                            'signers.0.name': ['Give a name.'],
+                            'signers.0.email': ['Give a valid address.'],
+                        },
+                    }),
+                );
+                await press('New version', document.querySelector('.btn-list'));
+                await tick(switchBox(), true);
+
+                await submit(form());
+
+                const [name, email] = signerLines()[0].querySelectorAll('input');
+
+                expect(field('version-label').classList.contains('is-invalid')).toBe(true);
+                expect(field('version-label').parentElement.querySelector('.invalid-feedback').textContent).toBe(
+                    'The label is too long.',
+                );
+                expect(name.classList.contains('is-invalid')).toBe(true);
+                expect(name.parentElement.querySelector('.invalid-feedback').textContent).toBe('Give a name.');
+                expect(email.parentElement.querySelector('.invalid-feedback').textContent).toBe(
+                    'Give a valid address.',
+                );
+                expect(hideModal).not.toHaveBeenCalled();
+                expect(cards()).toHaveLength(0);
+            });
+
+            it('says the limit and the wait under the buttons', async () => {
+                await open([]);
+                await press('New version', document.querySelector('.btn-list'));
+
+                http.post.mockRejectedValueOnce(
+                    new HttpError(409, 'Conflict', { code: 'version_limit_reached', body: { limit: 200 } }),
+                );
+                await submit(form());
+
+                const error = () => createDialog().querySelector('.modal-footer .alert-danger');
+
+                expect(visible(error())).toBe(true);
+                expect(error().textContent).toBe('An inventory cannot hold more than 200 official versions.');
+
+                http.post.mockRejectedValueOnce(new HttpError(429, 'Slow', { retryAfter: 30 }));
+                await submit(form());
+
+                expect(error().textContent).toBe('Wait 30 seconds');
+            });
+
+            it('forgets the refusals on a new attempt', async () => {
+                await open([]);
+                http.post.mockRejectedValueOnce(new HttpError(422, 'Invalid.', { errors: { label: ['Too long.'] } }));
+                await press('New version', document.querySelector('.btn-list'));
+                await submit(form());
+
+                expect(field('version-label').classList.contains('is-invalid')).toBe(true);
+
+                http.post.mockResolvedValueOnce({ data: onItsWay('b') });
+                await submit(form());
+
+                expect(field('version-label').classList.contains('is-invalid')).toBe(false);
+                expect(cards()).toHaveLength(1);
+            });
+        });
+
+        describe('cancelling a request for signatures', () => {
+            const awaiting = () =>
+                version('a', {
+                    number: 6,
+                    signature: signature('awaiting'),
+                    abilities: { delete: true, cancel_signature: true, retry_signature: false },
+                });
+
+            it('asks first, names the version, and cancels once confirmed', async () => {
+                await open([awaiting()]);
+                http.post.mockResolvedValue({
+                    data: {
+                        ...awaiting(),
+                        signature: signature('cancelled'),
+                        abilities: { delete: true, cancel_signature: false, retry_signature: false },
+                    },
+                });
+
+                await press('Cancel the request', cards()[0]);
+
+                expect(showModal).toHaveBeenCalledWith(confirmDialog());
+                expect(confirmDialog().querySelector('#version-confirm-title').textContent).toBe(
+                    'Cancel the signature request',
+                );
+                expect(confirmDialog().querySelector('.modal-body').textContent.trim()).toBe(
+                    'Cancel the signature request of version no. 6? The signers can no longer sign it.',
+                );
+                expect(http.post).not.toHaveBeenCalled();
+
+                await press('Cancel the request', confirmDialog());
+
+                expect(http.post).toHaveBeenCalledWith('/api/v1/inventories/tools/versions/a/signature/cancel');
+                expect(hideModal).toHaveBeenCalledWith(confirmDialog());
+                expect(notify).toHaveBeenCalledWith('success', 'Signature request cancelled.');
+                expect(shown(cards()[0], 'h3 + .badge')).toEqual(['Cancelled']);
+                expect(actions(cards()[0])).toEqual(['PDF', 'Data (JSON)', 'Delete']);
+            });
+        });
+
+        describe('sending a request for signatures again', () => {
+            it('sends it at once, with no question, and shows the request on its way', async () => {
+                const failed = version('a', {
+                    number: 6,
+                    signature: signature('failed', { error: 'The signature service could not be reached.' }),
+                    abilities: { delete: false, cancel_signature: false, retry_signature: true },
+                });
+
+                await open([failed]);
+
+                expect(shown(cards()[0], '.text-danger')).toEqual(['The signature service could not be reached.']);
+
+                const requested = {
+                    ...failed,
+                    signature: signature('requested'),
+                    abilities: { delete: false, cancel_signature: false, retry_signature: false },
+                };
+
+                // The request is on its way, so the page reads the version again: it is still as the API just said.
+                http.get.mockResolvedValue({ data: requested });
+                http.post.mockResolvedValue({ data: requested });
+                await press('Send again', cards()[0]);
+
+                expect(showModal).not.toHaveBeenCalled();
+                expect(http.post).toHaveBeenCalledWith('/api/v1/inventories/tools/versions/a/signature/retry');
+                expect(shown(cards()[0], 'h3 + .badge')).toEqual(['Waiting to be sent']);
+                expect(shown(cards()[0], '.text-danger')).toEqual([]);
+                expect(actions(cards()[0])).toEqual(['PDF', 'Data (JSON)']);
+            });
+        });
+
+        describe('deleting a version', () => {
+            it('asks first, names the version, and deletes once confirmed', async () => {
+                await open([version('b', { number: 7 }), version('a', { number: 6 })]);
+                http.delete.mockResolvedValue(null);
+
+                await press('Delete version no. 6');
+
+                expect(showModal).toHaveBeenCalledWith(confirmDialog());
+                expect(confirmDialog().querySelector('#version-confirm-title').textContent).toBe('Delete the version');
+                expect(confirmDialog().querySelector('.modal-body').textContent.trim()).toBe(
+                    'Delete version no. 6? Its files go with it. This cannot be undone.',
+                );
+                expect(http.delete).not.toHaveBeenCalled();
+
+                await press('Delete', confirmDialog());
+
+                expect(http.delete).toHaveBeenCalledWith('/api/v1/inventories/tools/versions/a');
+                expect(cards().map((card) => card.querySelector('h2').textContent)).toEqual(['Version no. 7']);
+                expect(notify).toHaveBeenCalledWith('success', 'Version deleted.');
+            });
+
+            it('goes back to the empty state when the last version is deleted', async () => {
+                await open([version('a')]);
+                http.delete.mockResolvedValue(null);
+
+                await press('Delete version no. 3');
+                await press('Delete', confirmDialog());
+
+                expect(cards()).toHaveLength(0);
+                expect(visible(document.querySelector('.empty'))).toBe(true);
+            });
         });
     });
 });

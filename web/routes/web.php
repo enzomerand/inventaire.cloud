@@ -15,6 +15,7 @@ use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
 use App\Http\Controllers\Web\HomePageController;
 use App\Http\Controllers\Web\InventoryFieldsPageController;
 use App\Http\Controllers\Web\InventoryPageController;
+use App\Http\Controllers\Web\InventoryVersionsPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
@@ -93,6 +94,7 @@ Route::middleware(['auth', AuthenticateSession::class])->group(function (): void
         Route::scopeBindings()->group(function (): void {
             Route::get('/inventories/{inventory}', InventoryPageController::class)->name('inventory');
             Route::get('/inventories/{inventory}/fields', InventoryFieldsPageController::class)->name('inventory.fields');
+            Route::get('/inventories/{inventory}/versions', InventoryVersionsPageController::class)->name('inventory.versions');
         });
     });
 

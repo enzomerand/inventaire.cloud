@@ -16,6 +16,9 @@
     (resources/js/import/dialog.js): a spreadsheet, the match of its columns with the fields, and the result.
     data-import-max-size is the largest spreadsheet the server takes, in bytes.
 
+    The header links to the official versions of the inventory (app/inventory-versions.blade.php) for every member: the page itself
+    shows what the role allows.
+
     The dialog of an item that exists has three tabs: its details (the form, or the read-only list), its attachments
     (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
     partials/item-file-field. data-max-attachment-size is the largest file the server takes, in bytes.
@@ -51,6 +54,10 @@
                 <p class="text-secondary text-break app-multiline mb-0 mt-1" :hidden="!description" x-text="description">{{ $inventory->description }}</p>
             </div>
             <div class="btn-list">
+                <a class="btn" href="{{ route('app.inventory.versions', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
+                    <x-tabler-certificate aria-hidden="true" />
+                    {{ __('Official versions') }}
+                </a>
                 <a class="btn" x-show="canManageFields" href="{{ route('app.inventory.fields', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
                     <x-tabler-layout-columns aria-hidden="true" />
                     {{ __('Fields') }}
