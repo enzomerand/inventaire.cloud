@@ -47,6 +47,11 @@ describe('on a fresh instance', function (): void {
         $this->postJson('/api/whatever')->assertStatus(503)->assertJsonPath('code', 'not_installed');
     });
 
+    it('answers the webhooks of other services in JSON too, whatever they ask for: they cannot follow a redirect', function (): void {
+        $this->post('/webhooks/documenso')->assertStatus(503)->assertJsonPath('code', 'not_installed');
+        $this->postJson('/webhooks/documenso')->assertStatus(503)->assertJsonPath('code', 'not_installed');
+    });
+
     it('keeps serving the wizard, the health check and what the wizard page calls', function (string $uri): void {
         expect($this->get($uri)->status())->not->toBe(302)->not->toBe(503);
     })->with(['/install', '/up', '/csrf-token']);

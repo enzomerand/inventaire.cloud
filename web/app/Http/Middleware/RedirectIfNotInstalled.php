@@ -24,9 +24,9 @@ use Throwable;
  * It is global middleware, ahead of the web group, so it applies to every URL
  * (including unknown ones) and never needs a session, a database or a
  * translated route: an instance that is not configured yet has none of them.
- * API clients (anything under /api, or asking for JSON) cannot follow a
- * redirect to an HTML page, so they get a 503 with a machine-readable code
- * instead.
+ * API clients (anything under /api, or asking for JSON) and the webhooks
+ * of other services (anything under /webhooks) cannot follow a redirect to
+ * an HTML page, so they get a 503 with a machine-readable code instead.
  */
 final class RedirectIfNotInstalled
 {
@@ -67,7 +67,7 @@ final class RedirectIfNotInstalled
             return $next($request);
         }
 
-        if ($request->expectsJson() || $request->is('api/*')) {
+        if ($request->expectsJson() || $request->is('api/*', 'webhooks/*')) {
             return new JsonResponse([
                 'message' => __('The application is not installed yet.'),
                 'code' => 'not_installed',

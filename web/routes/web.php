@@ -19,6 +19,7 @@ use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
 use App\Http\Controllers\Web\WorkspacePageController;
+use App\Http\Controllers\Webhooks\DocumensoWebhookController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
@@ -60,6 +61,13 @@ Route::get('/docs/api', ApiDocsController::class)->middleware('throttle:public-p
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
     Route::get('/robots.txt', RobotsController::class)->name('robots');
     Route::get('/sitemap.xml', SitemapController::class)->middleware('throttle:public-pages')->name('sitemap');
+});
+
+// What Documenso (the e-signature service) calls when something happens to an envelope: a machine, with no session and no cookie, that
+// proves who it is by the secret of the instance in a header (no CSRF token: it has no page to read one from). It is limited in
+// pace per network address (the `documenso-webhook` limiter), whatever it sends. It only wakes up a synchronisation: see the controller.
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
+    Route::post('/webhooks/documenso', DocumensoWebhookController::class)->middleware('throttle:documenso-webhook')->name('webhooks.documenso');
 });
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the

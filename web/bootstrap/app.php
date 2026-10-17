@@ -69,13 +69,14 @@ $app = Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // The API always answers JSON, whatever the client asked for: a script that forgets the Accept header must
-        // not receive an HTML error page or a redirect to the login page.
-        $exceptions->shouldRenderJsonWhen(fn (Request $request, Throwable $exception): bool => $request->is('api/*') || $request->expectsJson());
+        // not receive an HTML error page or a redirect to the login page. So do the webhooks of other services
+        // (`/webhooks/*`), machines that read nothing else.
+        $exceptions->shouldRenderJsonWhen(fn (Request $request, Throwable $exception): bool => $request->is('api/*', 'webhooks/*') || $request->expectsJson());
 
         // A client that is slowed down is told so the way the other refusals are, with a `code` to switch on: the message is for people.
         // The headers the limiter chose (Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining) stay, since they are what a script waits by.
         $exceptions->render(function (ThrottleRequestsException $exception, Request $request): ?JsonResponse {
-            if (! $request->is('api/*')) {
+            if (! $request->is('api/*', 'webhooks/*')) {
                 return null;
             }
 
