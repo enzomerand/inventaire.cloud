@@ -11,8 +11,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { momentText } from '../../../resources/js/grid/rows.js';
 import { HttpError, http, scheduleNavigation } from '../../../resources/js/lib/http.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
@@ -50,6 +51,7 @@ const ROUTES = {
     'api.v1.me.sign-out-everywhere': '/api/v1/me/sign-out-everywhere',
     'api.v1.me.export': '/api/v1/me/export',
     'api.v1.me.deletion-code': '/api/v1/me/deletion-code',
+    'api.v1.me.tokens.index': '/api/v1/me/tokens',
     'api.v1.me.destroy': '/api/v1/me',
     'api.v1.admin.users.index': '/api/v1/admin/users',
     'api.v1.admin.settings.show': '/api/v1/admin/settings',
@@ -132,6 +134,21 @@ const MESSAGES = {
     'login.notice.code_resent': 'New code sent',
     'account.error.last_administrator': 'Last administrator',
     'account.error.sole_owner': 'Hand your workspaces over',
+    'tokens.ability.read': 'Read',
+    'tokens.ability.write': 'Write',
+    'tokens.ability.manage': 'Manage',
+    'tokens.created': 'Created :date',
+    'tokens.last_used': 'Last used :date',
+    'tokens.never_used': 'Never used',
+    'tokens.expires': 'Expires :date',
+    'tokens.never_expires': 'Never expires',
+    'tokens.revoke_named': 'Revoke the token :name',
+    'tokens.confirm_revoke': 'Revoke the token :name? Anything that uses it stops working at once.',
+    'tokens.copy': 'Copy',
+    'tokens.copied': 'Copied',
+    'tokens.select_hint': 'The token is selected: copy it with your keyboard.',
+    'tokens.notice.revoked': 'Token revoked.',
+    'tokens.error.limit': 'You already have :count API tokens.',
     'admin.settings.notice.opened': 'Sign-ups are open',
     'admin.settings.notice.closed': 'Sign-ups are closed',
     'admin.users.workspace_count': 'Workspaces: :count',
@@ -211,6 +228,10 @@ function render(path) {
 
         if ((found = expression.match(/^\$abilities\['(\w+)'\] \? '1' : '0'$/))) {
             return abilitiesOfPage()[found[1]] ? '1' : '0';
+        }
+
+        if (expression === "url('/docs/api')") {
+            return '/docs/api';
         }
 
         if (expression === 'json_encode($types, JSON_THROW_ON_ERROR)') {
@@ -301,6 +322,7 @@ describe('the pages under the real Alpine CSP build', () => {
             accountDeletion: '../../../resources/js/components/account-deletion.js',
             accountProfile: '../../../resources/js/components/account-profile.js',
             accountSecurity: '../../../resources/js/components/account-security.js',
+            accountTokens: '../../../resources/js/components/account-tokens.js',
             adminSettings: '../../../resources/js/components/admin-settings.js',
             adminUsers: '../../../resources/js/components/admin-users.js',
             inventoryFields: '../../../resources/js/components/inventory-fields.js',
@@ -649,6 +671,431 @@ describe('the pages under the real Alpine CSP build', () => {
                     file,
                     expect.stringMatching(/^inventaire-export-\d{4}-\d{2}-\d{2}\.json$/),
                 );
+            });
+        });
+
+        describe('the API tokens', () => {
+            const TOKENS = [
+                {
+                    id: 12,
+                    name: 'Stock sync',
+                    abilities: ['read', 'write'],
+                    created_at: '2026-10-01T10:00:00+00:00',
+                    last_used_at: '2026-10-05T08:30:00+00:00',
+                    expires_at: null,
+                },
+                {
+                    id: 9,
+                    name: 'Reporting',
+                    abilities: ['read'],
+                    created_at: '2026-09-01T10:00:00+00:00',
+                    last_used_at: null,
+                    expires_at: '2027-01-01T10:00:00+00:00',
+                },
+            ];
+
+            /** What a creation answers: the token and, once, its value. */
+            const CREATED = {
+                data: {
+                    id: 15,
+                    name: 'Nightly',
+                    abilities: ['read', 'write'],
+                    created_at: '2026-10-17T09:00:00+00:00',
+                    last_used_at: null,
+                    expires_at: '2026-11-16T09:00:00+00:00',
+                    plain_text_token: 'inv_abc123',
+                },
+            };
+
+            /** Where the cursor was put, and whether the element could take it at that moment (a hidden one cannot). */
+            let focused;
+            let focusSpy;
+
+            const card = () => document.querySelector('[data-url="/api/v1/me/tokens"]');
+            const form = () => card().querySelector('form');
+            const field = (id) => card().querySelector(`#${id}`);
+            const names = () => [...card().querySelectorAll('li .fw-bold')].map((name) => name.textContent);
+            const words = (text) => text.replace(/\s+/g, ' ').trim();
+            const live = () => card().querySelector('.visually-hidden[role="status"]');
+
+            /** The block of the card that says there is no token, if it is shown. */
+            const emptyMessage = () =>
+                [...card().querySelectorAll('.card-body')].find(
+                    (body) => body.textContent.trim() === 'You have no API token yet.',
+                );
+
+            /** Ticks or unticks a box the way a person does. */
+            async function tick(box, checked) {
+                box.checked = checked;
+                box.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+            }
+
+            /** Opens the form and fills it in. */
+            async function fillIn({ name, abilities = [], expires } = {}) {
+                await press('Create a token');
+                await type(field('api-token-name'), name);
+
+                for (const ability of abilities) {
+                    await tick(form().querySelector(`input[value="${ability}"]`), true);
+                }
+
+                if (expires !== undefined) {
+                    field('api-token-expiry').value = expires;
+                    field('api-token-expiry').dispatchEvent(new Event('change', { bubbles: true }));
+                    await flush();
+                }
+            }
+
+            /** Sends the form. */
+            async function submit() {
+                form().dispatchEvent(new Event('submit', { cancelable: true }));
+                await flush();
+            }
+
+            beforeEach(async () => {
+                focused = [];
+                focusSpy = vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function () {
+                    focused.push({
+                        id: this.id,
+                        action: this.dataset.tokenAction ?? null,
+                        label: this.textContent.trim(),
+                        visible: visible(this),
+                    });
+                });
+                http.get.mockResolvedValue({ data: TOKENS });
+                await mount('app/account.blade.php');
+            });
+
+            afterEach(() => {
+                focusSpy.mockRestore();
+                Reflect.deleteProperty(navigator, 'clipboard');
+            });
+
+            describe('the list', () => {
+                it('lists the tokens, with their permissions and dates in words, as the API gives them', () => {
+                    expect(http.get).toHaveBeenCalledWith('/api/v1/me/tokens');
+                    expect(names()).toEqual(['Stock sync', 'Reporting']);
+
+                    const [first, second] = card().querySelectorAll('li');
+                    expect([...first.querySelectorAll('.badge')].map((badge) => badge.textContent)).toEqual([
+                        'Read',
+                        'Write',
+                    ]);
+                    expect([...second.querySelectorAll('.badge')].map((badge) => badge.textContent)).toEqual(['Read']);
+                    expect(words(first.querySelector('.small').textContent)).toBe(
+                        words(
+                            `Created ${momentText(TOKENS[0].created_at)} · Last used ${momentText(TOKENS[0].last_used_at)} · Never expires`,
+                        ),
+                    );
+                    expect(words(second.querySelector('.small').textContent)).toBe(
+                        words(
+                            `Created ${momentText(TOKENS[1].created_at)} · Never used · Expires ${momentText(TOKENS[1].expires_at)}`,
+                        ),
+                    );
+                    expect(emptyMessage() === undefined || !visible(emptyMessage())).toBe(true);
+                });
+
+                it('says there is no token yet when there is none', async () => {
+                    http.get.mockResolvedValue({ data: [] });
+                    await mount('app/account.blade.php');
+
+                    expect(card().querySelectorAll('li')).toHaveLength(0);
+                    expect(visible(emptyMessage())).toBe(true);
+                });
+
+                it('says it could not be read, and reads it again on demand', async () => {
+                    http.get.mockRejectedValueOnce(new HttpError(500, 'The server hit an error.'));
+                    await mount('app/account.blade.php');
+
+                    expect(card().textContent).toContain('Your API tokens could not be loaded.');
+                    expect(visible(emptyMessage())).toBe(false);
+
+                    await press('Try again', card());
+
+                    expect(names()).toEqual(['Stock sync', 'Reporting']);
+                });
+
+                it('links to the documentation of the API', () => {
+                    const link = card().querySelector('a');
+
+                    expect(link.textContent.trim()).toBe('API documentation');
+                    expect(link.getAttribute('href')).toBe('/docs/api');
+                });
+
+                it('reads the list again when the security card has signed every other device out', async () => {
+                    http.post.mockResolvedValue(null);
+                    http.get.mockResolvedValue({ data: [] });
+                    const security = document.querySelector('[data-url="/api/v1/me/sign-out-everywhere"]');
+
+                    await press('Sign out everywhere', security);
+                    await press('Sign out everywhere', security);
+
+                    expect(names()).toEqual([]);
+                    expect(visible(emptyMessage())).toBe(true);
+                });
+            });
+
+            describe('making a token', () => {
+                it('keeps the form closed until it is asked for, then puts the cursor on the name', async () => {
+                    expect(visible(form())).toBe(false);
+
+                    await press('Create a token');
+
+                    expect(visible(form())).toBe(true);
+                    expect(buttons('Create a token')).toHaveLength(0);
+                    expect(focused).toEqual([{ id: 'api-token-name', action: null, label: '', visible: true }]);
+                });
+
+                it('offers read, 90 days and the other lifetimes, and the three permissions with a line each', async () => {
+                    await press('Create a token');
+
+                    const boxes = [...form().querySelectorAll('input[name="abilities"]')];
+                    expect(boxes.map((box) => [box.value, box.checked])).toEqual([
+                        ['read', true],
+                        ['write', false],
+                        ['manage', false],
+                    ]);
+                    expect(boxes.map((box) => words(box.closest('label').textContent))).toEqual([
+                        expect.stringMatching(/^Read \S/),
+                        expect.stringMatching(/^Write \S/),
+                        expect.stringMatching(/^Manage \S/),
+                    ]);
+                    const expiry = field('api-token-expiry');
+                    expect(expiry.value).toBe('90');
+                    expect([...expiry.options].map((option) => [option.value, option.textContent])).toEqual([
+                        ['7', '7 days'],
+                        ['30', '30 days'],
+                        ['90', '90 days'],
+                        ['365', '365 days'],
+                        ['', 'Never'],
+                    ]);
+                    expect(field('api-token-name').maxLength).toBe(80);
+                    expect(field('api-token-name').required).toBe(true);
+                });
+
+                it('needs a name and at least one permission', async () => {
+                    await press('Create a token');
+                    const send = form().querySelector('button[type="submit"]');
+                    expect(send.disabled).toBe(true);
+
+                    await type(field('api-token-name'), 'Nightly');
+                    expect(send.disabled).toBe(false);
+
+                    await tick(form().querySelector('input[value="read"]'), false);
+                    expect(send.disabled).toBe(true);
+                });
+
+                it('makes the token with what the form says, then shows its value once, and lists the token first', async () => {
+                    http.post.mockResolvedValue(CREATED);
+                    await fillIn({ name: 'Nightly', abilities: ['write'], expires: '30' });
+                    focused.length = 0;
+
+                    await submit();
+
+                    expect(http.post).toHaveBeenCalledWith(
+                        '/api/v1/me/tokens',
+                        { name: 'Nightly', abilities: ['read', 'write'], expires_in_days: 30 },
+                        { silent: true },
+                    );
+                    expect(names()).toEqual(['Nightly', 'Stock sync', 'Reporting']);
+                    expect(visible(form())).toBe(false);
+
+                    const value = field('api-token-value');
+                    expect(value.value).toBe('inv_abc123');
+                    expect(value.readOnly).toBe(true);
+                    expect(visible(value)).toBe(true);
+                    expect(card().querySelector('#api-token-warning').textContent).toContain(
+                        'it will not be shown again',
+                    );
+                    expect(value.getAttribute('aria-describedby')).toBe('api-token-warning');
+                    expect(card().querySelector('ul').textContent).not.toContain('inv_abc123');
+                    expect(buttons('Create a token')).toHaveLength(0);
+                    expect(focused).toEqual([{ id: 'api-token-value', action: null, label: '', visible: true }]);
+                });
+
+                it('sends null for a token that never expires', async () => {
+                    http.post.mockResolvedValue(CREATED);
+                    await fillIn({ name: 'Forever', expires: '' });
+
+                    await submit();
+
+                    expect(http.post.mock.calls[0][1].expires_in_days).toBeNull();
+                });
+
+                it('copies the value, says so, and hides it for good when the person has it', async () => {
+                    const writeText = vi.fn().mockResolvedValue(undefined);
+                    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+                    http.post.mockResolvedValue(CREATED);
+                    await fillIn({ name: 'Nightly' });
+                    await submit();
+
+                    await press('Copy', card());
+
+                    expect(writeText).toHaveBeenCalledWith('inv_abc123');
+                    expect(buttons('Copied', card())).toHaveLength(1);
+                    expect(live().textContent).toBe('Copied');
+
+                    focused.length = 0;
+                    await press('I have copied the token');
+
+                    expect(field('api-token-value').value).toBe('');
+                    expect(visible(field('api-token-value'))).toBe(false);
+                    expect(buttons('Create a token')).toHaveLength(1);
+                    expect(focused).toEqual([{ id: '', action: null, label: 'Create a token', visible: true }]);
+                    expect(card().textContent).not.toContain('inv_abc123');
+                });
+
+                it('can be given up: the form closes and the cursor goes back to its button', async () => {
+                    await fillIn({ name: 'Nightly' });
+                    focused.length = 0;
+
+                    await press('Cancel', form());
+
+                    expect(visible(form())).toBe(false);
+                    expect(http.post).not.toHaveBeenCalled();
+                    expect(focused).toEqual([{ id: '', action: null, label: 'Create a token', visible: true }]);
+
+                    await press('Create a token');
+                    expect(field('api-token-name').value).toBe('');
+                });
+
+                it('shows the validation messages next to their fields, wired to them', async () => {
+                    http.post.mockRejectedValue(
+                        new HttpError(422, 'The given data was invalid.', {
+                            errors: {
+                                name: ['The name field is required.'],
+                                abilities: ['Pick a permission.'],
+                                expires_in_days: ['The lifetime is not valid.'],
+                            },
+                        }),
+                    );
+                    await fillIn({ name: 'x' });
+                    focused.length = 0;
+
+                    await submit();
+
+                    const name = field('api-token-name');
+                    expect(name.classList.contains('is-invalid')).toBe(true);
+                    expect(name.getAttribute('aria-invalid')).toBe('true');
+                    expect(name.getAttribute('aria-describedby').split(' ')).toContain('api-token-name-error');
+                    expect(field('api-token-name-error').textContent).toBe('The name field is required.');
+                    expect(visible(field('api-token-abilities-error'))).toBe(true);
+                    expect(field('api-token-abilities-error').textContent).toBe('Pick a permission.');
+                    expect(field('api-token-expiry').classList.contains('is-invalid')).toBe(true);
+                    expect(field('api-token-expiry-error').textContent).toBe('The lifetime is not valid.');
+                    expect(visible(form())).toBe(true);
+                    expect(names()).toEqual(['Stock sync', 'Reporting']);
+                    expect(focused).toEqual([{ id: 'api-token-name', action: null, label: '', visible: true }]);
+                });
+
+                it('says in an alert that the limit of tokens is reached, or that creations come too fast', async () => {
+                    http.post.mockRejectedValueOnce(
+                        new HttpError(409, 'Conflict', { code: 'token_limit_reached', body: { limit: 20 } }),
+                    );
+                    await fillIn({ name: 'Nightly' });
+                    await submit();
+
+                    const alert = form().querySelector('.alert-danger');
+                    expect(alert.getAttribute('role')).toBe('alert');
+                    expect(visible(alert)).toBe(true);
+                    expect(alert.textContent).toBe('You already have 20 API tokens.');
+
+                    http.post.mockRejectedValueOnce(new HttpError(429, 'Too many', { retryAfter: 1800 }));
+                    await submit();
+
+                    expect(alert.textContent).toBe('Wait 30 minutes');
+                });
+            });
+
+            describe('revoking a token', () => {
+                it('asks for a confirmation in the row, with the cursor on its button, before revoking anything', async () => {
+                    await press('Revoke the token Stock sync');
+
+                    const row = card().querySelectorAll('li')[0];
+                    expect(http.delete).not.toHaveBeenCalled();
+                    expect(words(row.textContent)).toContain(
+                        'Revoke the token Stock sync? Anything that uses it stops working at once.',
+                    );
+                    expect(buttons('Revoke the token Reporting')).toHaveLength(1);
+                    expect(focused).toEqual([{ id: '', action: 'confirm', label: 'Revoke', visible: true }]);
+                });
+
+                it('can be given up, which gives the cursor back to the button of the row', async () => {
+                    await press('Revoke the token Stock sync');
+                    focused.length = 0;
+
+                    await press('Cancel', card().querySelectorAll('li')[0]);
+
+                    expect(http.delete).not.toHaveBeenCalled();
+                    expect(names()).toEqual(['Stock sync', 'Reporting']);
+                    expect(focused).toEqual([{ id: '', action: 'revoke', label: 'Revoke', visible: true }]);
+                });
+
+                it('revokes the token, takes it off the list and says so politely', async () => {
+                    http.delete.mockResolvedValue(null);
+                    await press('Revoke the token Stock sync');
+                    focused.length = 0;
+
+                    await press('Revoke the token Stock sync');
+
+                    expect(http.delete).toHaveBeenCalledWith('/api/v1/me/tokens/12');
+                    expect(names()).toEqual(['Reporting']);
+                    expect(live().textContent).toBe('Token revoked.');
+                    expect(live().getAttribute('aria-live')).toBe('polite');
+                    expect(focused).toEqual([{ id: '', action: null, label: 'Active tokens', visible: true }]);
+                });
+
+                it('keeps the token in the list when it could not be revoked', async () => {
+                    http.delete.mockRejectedValue(new HttpError(422, 'Cannot do it.'));
+                    await press('Revoke the token Stock sync');
+                    await press('Revoke the token Stock sync');
+
+                    expect(names()).toEqual(['Stock sync', 'Reporting']);
+                    expect(notify).toHaveBeenCalledWith('danger', 'Cannot do it.');
+                });
+            });
+
+            describe('what assistive technology finds', () => {
+                it('has a name on every button, a label on every field, and every description it points to', async () => {
+                    http.post.mockResolvedValue(CREATED);
+                    await fillIn({ name: 'Nightly' });
+                    await submit();
+
+                    for (const button of card().querySelectorAll('button')) {
+                        expect(
+                            (button.getAttribute('aria-label') ?? button.textContent).trim(),
+                            `the name of ${button.outerHTML.slice(0, 80)}`,
+                        ).not.toBe('');
+                    }
+
+                    for (const input of card().querySelectorAll('input, select')) {
+                        const label = input.id
+                            ? card().querySelector(`label[for="${input.id}"]`)
+                            : input.closest('label');
+
+                        expect(label, `the label of ${input.outerHTML.slice(0, 80)}`).not.toBeNull();
+                    }
+
+                    for (const element of card().querySelectorAll('[aria-describedby]')) {
+                        for (const id of element.getAttribute('aria-describedby').split(' ')) {
+                            expect(card().querySelector(`#${id}`), `#${id}`).not.toBeNull();
+                        }
+                    }
+
+                    expect(form().querySelector('fieldset > legend').textContent.trim()).toBe('Permissions');
+                    expect(card().querySelector('h2').textContent.trim()).toBe('API tokens');
+                });
+
+                it('stacks the rows on a narrow screen, and breaks the long names', () => {
+                    const row = card().querySelector('li .row');
+
+                    expect([...row.children].map((column) => column.className)).toEqual([
+                        'col-12 col-md',
+                        'col-12 col-md-auto',
+                    ]);
+                    expect(row.querySelector('.fw-bold').classList.contains('text-break')).toBe(true);
+                });
             });
         });
 
