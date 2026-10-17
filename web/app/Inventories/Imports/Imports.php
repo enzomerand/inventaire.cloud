@@ -19,6 +19,7 @@ use App\Models\Inventory;
 use App\Models\User;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
@@ -164,6 +165,7 @@ final class Imports
      *                                         file is read; `decimal`, `date_order`, `on_error` are kept.
      *
      * @throws ImportNotEditableException When the import was started, or its time is up.
+     * @throws ModelNotFoundException When the import was deleted while the file was read.
      * @throws ImportFileException When the file cannot be read with these options.
      */
     public function reanalyze(Import $import, Inventory $inventory, array $changes, bool $canManageFields): Import
@@ -208,6 +210,11 @@ final class Imports
             ]);
 
         if ($updated !== 1) {
+            // Not `uploaded` any more, or not there any more (deleted while the file was read).
+            if (! Import::query()->whereKey($import->getKey())->exists()) {
+                $this->gone($import);
+            }
+
             throw new ImportNotEditableException;
         }
 
@@ -221,6 +228,7 @@ final class Imports
      * @param  array<string, mixed>  $settings  `decimal`, `date_order`, `on_error`: kept from the import when not given.
      *
      * @throws ImportNotEditableException When the import was started already, or its time is up.
+     * @throws ModelNotFoundException When the import was deleted since the request loaded it.
      * @throws InvalidImportMapping When the mapping cannot be started (see {@see ImportMapping::assertValid()}).
      * @throws FieldLimitReachedException When the new fields would take the inventory past the number of fields it may have.
      */
@@ -238,7 +246,11 @@ final class Imports
             // was loaded can be started.
             $current = Import::query()->whereKey($import->getKey())->lockForUpdate()->first();
 
-            if ($current === null || $current->status !== ImportStatus::Uploaded || $current->isExpired() || $current->columns !== $import->columns || $current->options !== $import->options) {
+            if ($current === null) {
+                $this->gone($import);
+            }
+
+            if ($current->status !== ImportStatus::Uploaded || $current->isExpired() || $current->columns !== $import->columns || $current->options !== $import->options) {
                 throw new ImportNotEditableException;
             }
 
@@ -271,6 +283,17 @@ final class Imports
     public function activeCount(Inventory $inventory, User $user): int
     {
         return Import::query()->where('user_id', $user->getKey())->where('inventory_id', $inventory->getKey())->active()->count();
+    }
+
+    /**
+     * The failure for an import that was deleted while a request was working on it (by the person, or with its inventory): it is no
+     * longer there, which the API answers with a 404 like any import that does not exist, and not with a conflict.
+     *
+     * @throws ModelNotFoundException
+     */
+    private function gone(Import $import): never
+    {
+        throw (new ModelNotFoundException)->setModel(Import::class, [$import->ulid]);
     }
 
     /**

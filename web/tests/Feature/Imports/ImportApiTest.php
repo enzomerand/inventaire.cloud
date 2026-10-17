@@ -404,6 +404,17 @@ describe('reading the file again', function (): void {
         inventoryCall($this, $case['team']['owner'], 'PATCH', importUri($case['inventory'], $expired), ['has_header' => false])->assertNotFound()->assertJsonPath('code', 'import_expired');
     });
 
+    it('answers 404, not that it was started, when the import was deleted while the file was read again', function (): void {
+        $case = importFixture();
+        importPost($this, $case['team']['owner'], $case['inventory'], $case['csv'])->assertCreated();
+        $import = Import::query()->sole();
+        importAfterStatement('/^select .* from [`"]inventory_fields[`"]/i', fn () => DB::table('imports')->where('id', $import->id)->delete());
+
+        $response = inventoryCall($this, $case['team']['owner'], 'PATCH', importUri($case['inventory'], $import), ['has_header' => false])->assertNotFound();
+
+        expect($response->json('code'))->not->toBe('import_not_editable');
+    });
+
     it('answers 422 for an option it does not know', function (): void {
         $case = importFixture();
         $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id]);
@@ -534,6 +545,20 @@ describe('starting an import', function (): void {
         inventoryCall($this, $case['team']['owner'], 'POST', importUri($case['inventory'], $expired, '/start'), ['mapping' => $mapping])->assertNotFound()->assertJsonPath('code', 'import_expired');
 
         Queue::assertNothingPushed();
+    });
+
+    it('answers 404, not that it was started, when the import was deleted while the request went on', function (): void {
+        Queue::fake();
+        $case = importFixture();
+        $sent = importPost($this, $case['team']['owner'], $case['inventory'], $case['csv'])->assertCreated();
+        $import = Import::query()->sole();
+        // The person deletes the import (or the inventory is, with it) after this request loaded it and before it locks it to start it.
+        importAfterStatement('/^select .* from [`"]inventory_fields[`"]/i', fn () => DB::table('imports')->where('id', $import->id)->delete());
+
+        $response = inventoryCall($this, $case['team']['owner'], 'POST', importUri($case['inventory'], $import, '/start'), ['mapping' => $sent->json('data.mapping')])->assertNotFound();
+
+        expect($response->json('code'))->not->toBe('import_not_editable');
+        Queue::assertNotPushed(ImportItems::class);
     });
 
     it('is refused when the file was read again after the copy that is started was loaded', function (): void {
