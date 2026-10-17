@@ -623,12 +623,17 @@ export default function importDialog() {
 
                 this.followImport(answer.data);
             } catch (error) {
-                if (reading === mine) {
-                    if (error instanceof HttpError && error.status === 404) {
-                        this.dropImport(t('imports.error.gone'));
-                    } else {
-                        this.importFollowFailed = true;
+                if (error instanceof HttpError) {
+                    if (reading === mine) {
+                        if (error.status === 404) {
+                            this.dropImport(t('imports.error.gone'));
+                        } else {
+                            this.importFollowFailed = true;
+                        }
                     }
+                } else if (error?.name !== 'AbortError') {
+                    // Not a failure of the request (the helper lets a cancellation through as an AbortError): a bug, which must show.
+                    throw error;
                 }
             } finally {
                 if (reading === mine) {

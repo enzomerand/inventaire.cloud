@@ -1295,6 +1295,29 @@ describe('the import dialog', () => {
             expect(component.importCompleted).toBe(true);
         });
 
+        it('does not hide a bug behind the offer to try again', async () => {
+            await startFollowing([record('i1', 'running')]);
+            const bug = new TypeError('boom');
+
+            vi.spyOn(component, 'followImport').mockImplementation(() => {
+                throw bug;
+            });
+
+            await expect(component.readImport()).rejects.toBe(bug);
+            expect(component.importFollowFailed).toBe(false);
+        });
+
+        it('says nothing of a reading that was cancelled', async () => {
+            await startFollowing([record('i1', 'running')]);
+            http.get.mockImplementationOnce(async () => {
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            });
+
+            await expect(component.readImport()).resolves.toBeUndefined();
+            expect(component.importFollowFailed).toBe(false);
+            expect(component.importOnFile).toBe(false);
+        });
+
         it('asks for a file again when the import is gone', async () => {
             await startFollowing([new HttpError(404, 'Gone.')]);
 
