@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Inventories\Fields\ChoiceType;
 use App\Inventories\Imports\ImportError;
+use App\Inventories\Imports\ImportRows;
 use App\Inventories\Imports\ImportRunner;
 use App\Inventories\Imports\ImportStatus;
 use App\Inventories\InventoryFields;
@@ -710,6 +711,32 @@ describe('the job', function (): void {
 
         expect($import->status)->toBe(ImportStatus::Failed)->and($import->error)->toBe('file_unreadable');
     });
+
+    it('says why when the file turns out to be too large further down than the analysis looked', function (string $format, string $code, string $sentence): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        $rows = array_map(fn (int $number): array => ["Item {$number}"], range(1, 60));
+        $path = $format === 'ods'
+            // A million empty lines after the sixtieth row.
+            ? importOdsAfterRow(importSpreadsheet('ods', [['Name'], ...$rows]), 61, '<table:table-row table:number-rows-repeated="'.ImportRows::MAX_LINES.'"><table:table-cell/></table:table-row>')
+            // A row of 300 cells after the sixtieth.
+            : importFile(importCsv([['Name'], ...$rows, array_fill(0, 300, 'x')]));
+        $import = importAsked($this, $case, $path, [runToField(0, $name->ulid)]);
+
+        $import = importDone($import);
+
+        expect($import->status)->toBe(ImportStatus::Failed)
+            ->and($import->error)->toBe($code)
+            ->and($import->path)->toBeNull()
+            ->and(Item::query()->count())->toBe(0)
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toBe([]);
+
+        inventoryCall($this, $case['team']['owner'], 'GET', importUri($case['inventory'], $import))->assertOk()
+            ->assertJsonPath('data.error', fn (string $message): bool => str_contains($message, $sentence));
+    })->with([
+        'more lines than a spreadsheet holds' => ['ods', 'too_many_lines', 'The file has more than 1,100,000 lines'],
+        'a row too wide' => ['csv', 'too_many_columns', 'A row of the file uses more than 200 columns'],
+    ]);
 
     it('is dropped without a fuss when its import was deleted while it waited', function (): void {
         $case = importCase();

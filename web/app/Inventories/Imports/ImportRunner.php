@@ -111,7 +111,7 @@ final class ImportRunner
         } catch (ImportFailure $failure) {
             $this->fail($import, $failure->error, $failure->errors, $failure->failedRows, $failure->rowsTotal);
         } catch (ImportFileException $failure) {
-            $this->fail($import, ImportError::FileUnreadable);
+            $this->fail($import, ImportError::forFile($failure));
         } catch (Throwable $exception) {
             Log::error('An import could not be done.', ['import' => $import->ulid, 'exception' => $exception]);
             $this->fail($import, ImportError::ImportFailed);
