@@ -10,6 +10,7 @@ use App\Inventories\Attachments\WorkspaceStorage;
 use App\Inventories\Exceptions\PdfTooLargeException;
 use App\Inventories\Exports\ExportTemp;
 use App\Jobs\GenerateOfficialVersion;
+use App\Jobs\RequestSignatures;
 use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use App\Workspaces\Locks;
@@ -34,7 +35,8 @@ use Throwable;
  * Anything that goes wrong marks the version `failed` with a code ({@see VersionError}) and deletes what was stored: a version that
  * holds nothing is not counted for anything, and one that cannot be read back would only confuse. The PDF is written in the language
  * of the version, whatever the language of the worker. When signers were asked for, the position of each one's signature area, measured
- * on the laid-out page ({@see OfficialPdfWriter}), is recorded with them in `signers` (`field`).
+ * on the laid-out page ({@see OfficialPdfWriter}), is recorded with them in `signers` (`field`), and once the version is completed
+ * the request for signatures is queued ({@see RequestSignatures}).
  */
 final class VersionGenerator
 {
@@ -153,6 +155,26 @@ final class VersionGenerator
             // Deleted, or given up on, while it was being written: nobody will ever ask for this file. Purged by its folder, not
             // through the row, which is gone with the inventory or the workspace that may be gone too.
             $this->storage->purgeAfterCommit($version->disk, [], [$directory]);
+
+            return;
+        }
+
+        if ($version->signature_status === SignatureStatus::Requested) {
+            $this->requestSignatures($version);
+        }
+    }
+
+    /**
+     * Queues the sending of the request for signatures of a version that has just been completed. A queue that cannot be reached is
+     * written in the log and does not fail the version, which is fine as it is: the schedule gives up on a request nothing picked up
+     * (`failed`/`stale`), and the person can send it again.
+     */
+    private function requestSignatures(InventoryVersion $version): void
+    {
+        try {
+            RequestSignatures::dispatch($version);
+        } catch (Throwable $exception) {
+            Log::error('The job that sends the request for signatures of an official version could not be queued.', ['version' => $version->ulid, 'exception' => $exception]);
         }
     }
 

@@ -10,16 +10,68 @@ use App\Inventories\Versions\VersionGenerator;
 use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use App\Models\User;
+use App\Signatures\SignatureRequests;
+use App\Signatures\SignatureSync;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\FakeDocumenso;
 
 require_once __DIR__.'/exports.php';
 
 /**
- * An instance that has a Documenso (nothing is ever sent to it: the tests of this lot fake the network).
+ * An instance that has a Documenso, with the settings only (a test that fakes the network itself uses this one).
  */
-function versionDocumenso(): void
+function versionDocumensoConfig(): void
 {
     config(['services.documenso.url' => 'https://sign.example.test', 'services.documenso.api_key' => 'api_test_key', 'services.documenso.webhook_secret' => 'secret-test']);
+}
+
+/**
+ * An instance that has a Documenso, and a Documenso for it: nothing is ever sent for real, the network is a {@see FakeDocumenso} that
+ * answers like the real one and refuses any other request. A test that freezes a version with signers needs it even when it does not
+ * look at Documenso: the queue of the tests is synchronous, so the request for signatures is sent as the version is completed.
+ */
+function versionDocumenso(): FakeDocumenso
+{
+    versionDocumensoConfig();
+
+    return FakeDocumenso::install();
+}
+
+/**
+ * Sends the request for signatures of a version now, in the process, as the `RequestSignatures` job would (the caller fakes the queue and
+ * the network: see {@see FakeDocumenso::install()}).
+ */
+function versionSend(InventoryVersion $version): InventoryVersion
+{
+    app(SignatureRequests::class)->send($version);
+
+    return $version->fresh() ?? $version;
+}
+
+/**
+ * Looks at the envelope of a version now, in the process, as the `SyncSignature` job would.
+ */
+function versionSync(InventoryVersion $version): InventoryVersion
+{
+    app(SignatureSync::class)->sync($version->id);
+
+    return $version->fresh() ?? $version;
+}
+
+/**
+ * A version of a table inventory whose request for signatures was sent: frozen, its PDF written, its envelope created and distributed
+ * at a fake Documenso, `awaiting` its signers. The caller fakes the queue.
+ *
+ * @param  array{team: array<string, mixed>, inventory: Inventory}|null  $case  The inventory to freeze; a new one when null.
+ * @return array{case: array{team: array<string, mixed>, inventory: Inventory}, version: InventoryVersion, fake: FakeDocumenso}
+ */
+function versionAwaiting(int $signers = 2, ?array $case = null): array
+{
+    $fake = versionDocumenso();
+    $case ??= versionTableCase();
+    $version = versionSend(versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners($signers))));
+
+    return ['case' => $case, 'version' => $version, 'fake' => $fake];
 }
 
 /**

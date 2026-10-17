@@ -1184,5 +1184,13 @@
     "A version of this inventory cannot hold more than :count item, which is all a PDF can hold.|A version of this inventory cannot hold more than :count items, which is all a PDF can hold.": "Une version de cet inventaire ne peut pas contenir plus de :count article, ce qu'un PDF peut contenir au maximum.|Une version de cet inventaire ne peut pas contenir plus de :count articles, ce qu'un PDF peut contenir au maximum.",
     "This version is not ready yet.": "Cette version n'est pas encore prête.",
     "version :number": "version :number",
-    "Inventory": "Inventaire"
+    "Inventory": "Inventaire",
+    "version :number (signed)": "version :number (signée)",
+    "The signed PDF is not ready yet.": "Le PDF signé n'est pas encore prêt.",
+    "This signature request is not waiting for its signers: it cannot be cancelled.": "Cette demande de signature n'attend pas ses signataires : elle ne peut pas être annulée.",
+    "The signature service cannot be used right now. Try again in a moment.": "Le service de signature est indisponible pour le moment. Réessayez dans un instant.",
+    "This signature request did not fail: there is nothing to send again.": "Cette demande de signature n'a pas échoué : il n'y a rien à renvoyer.",
+    "This signature request was cancelled.": "Cette demande de signature a été annulée.",
+    ":author invites you to sign official version no. :number of the inventory “:inventory” (:workspace).": ":author vous invite à signer la version officielle n° :number de l'inventaire « :inventory » (:workspace).",
+    "Signature requested: :title": "Signature demandée : :title"
 }

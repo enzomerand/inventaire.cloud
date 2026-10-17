@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Versions;
 
+use App\Jobs\SyncSignature;
 use App\Models\InventoryVersion;
 
 /**
@@ -18,7 +19,12 @@ use App\Models\InventoryVersion;
  *    ({@see VersionGenerator::fail()}); a job that still turns up finds it failed and does nothing.
  * 2. A request for signatures still `requested` or `sending` after {@see self::REQUEST_STALE_MINUTES} minutes, with no envelope at the
  *    signature service, will never be sent: it is marked `failed`/`stale`, so that the person can send it again. One that has an
- *    envelope is not lost: the service knows it, and it is resynchronised instead (not by this class yet).
+ *    envelope is not lost: the service knows it, and the next step looks at it once it awaits its signers.
+ * 3. A request that awaits its signers and has not been looked at for {@see self::SYNC_STALE_MINUTES} minutes (or never) is looked at
+ *    again ({@see SyncSignature}), at most {@see self::SYNC_BATCH} at a time, the longest waiting first. This is the safety net of the
+ *    webhook of the signature service, which cannot reach an instance behind a NAT or on a private address, and which may be lost.
+ *    So is a request still `sending` after {@see self::REQUEST_STALE_MINUTES} minutes that has an envelope (the job that was sending it
+ *    is gone): the service knows it, and says where it stands.
  *
  * Every step is safe to run at any time and as often as wanted: it changes the rows that match, once.
  */
@@ -30,6 +36,12 @@ final class VersionMaintenance
     /** Minutes a request for signatures may stay `requested` or `sending` without an envelope before it is given up on. */
     public const REQUEST_STALE_MINUTES = 120;
 
+    /** Minutes after which a request that awaits its signers is looked at again. */
+    public const SYNC_STALE_MINUTES = 30;
+
+    /** The most requests looked at again in one run. */
+    public const SYNC_BATCH = 100;
+
     /**
      * Gets the generator that gives up on a version.
      */
@@ -38,13 +50,14 @@ final class VersionMaintenance
     /**
      * Runs every step.
      *
-     * @return array{generation: int, requests: int} How many versions were given up on, how many requests for signatures were.
+     * @return array{generation: int, requests: int, synced: int} How many versions were given up on, how many requests for signatures were, how many were queued to be looked at again.
      */
     public function run(): array
     {
         return [
             'generation' => $this->giveUpOnUnfinishedVersions(),
             'requests' => $this->giveUpOnUnsentRequests(),
+            'synced' => $this->syncAwaitingRequests(),
         ];
     }
 
@@ -86,5 +99,45 @@ final class VersionMaintenance
                 'signature_status' => SignatureStatus::Failed->value,
                 'signature_error' => SignatureError::Stale->value,
             ]);
+    }
+
+    /**
+     * Queues {@see SyncSignature} for the requests that await their signers (or are stuck sending, with an envelope) and were last looked at
+     * more than half an hour ago, or never:
+     * those never looked at first, then the longest waiting, up to {@see self::SYNC_BATCH} in all. The jobs are unique per version, so
+     * a request already waiting in the queue is not queued twice.
+     *
+     * @return int How many requests were queued to be looked at again.
+     */
+    public function syncAwaitingRequests(): int
+    {
+        $followed = fn () => InventoryVersion::query()->where(function ($query): void {
+            $query->where('signature_status', SignatureStatus::Awaiting->value)
+                ->orWhere(function ($sending): void {
+                    $sending->where('signature_status', SignatureStatus::Sending->value)
+                        ->whereNotNull('documenso_envelope_id')
+                        ->where('updated_at', '<', now()->subMinutes(self::REQUEST_STALE_MINUTES));
+                });
+        });
+
+        // The two groups are read apart: ordering a column that has NULLs puts them first on some engines and last on others.
+        $never = $followed()->whereNull('signature_synced_at')->orderBy('id')->limit(self::SYNC_BATCH)->pluck('id')->all();
+        $room = self::SYNC_BATCH - count($never);
+        $stale = $room <= 0 ? [] : $followed()
+            ->where('signature_synced_at', '<', now()->subMinutes(self::SYNC_STALE_MINUTES))
+            ->orderBy('signature_synced_at')
+            ->orderBy('id')
+            ->limit($room)
+            ->pluck('id')
+            ->all();
+
+        $queued = 0;
+
+        foreach ([...$never, ...$stale] as $id) {
+            SyncSignature::dispatch((int) $id);
+            $queued++;
+        }
+
+        return $queued;
     }
 }

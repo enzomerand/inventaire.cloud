@@ -42,6 +42,23 @@ final class Documenso
     }
 
     /**
+     * The API token of the team, sent bare in the `Authorization` header of every call. Never to be written in a log, an answer or an
+     * exception message.
+     */
+    public static function apiKey(): string
+    {
+        return self::setting('api_key');
+    }
+
+    /**
+     * The secret Documenso is told to send in the `X-Documenso-Secret` header of its webhook; an empty text when there is none.
+     */
+    public static function webhookSecret(): string
+    {
+        return self::setting('webhook_secret');
+    }
+
+    /**
      * A value of `services.documenso`, trimmed; an empty text when it is not set.
      */
     private static function setting(string $key): string

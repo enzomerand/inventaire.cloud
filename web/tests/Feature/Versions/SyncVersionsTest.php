@@ -185,17 +185,17 @@ describe('the command', function (): void {
         versionAged($request, 130);
 
         $this->artisan('inventaire:sync-versions')
-            ->expectsOutputToContain('1 stuck version(s) given up on, 1 unsent signature request(s) given up on.')
+            ->expectsOutputToContain('1 stuck version(s) given up on, 1 unsent signature request(s) given up on, 0 signature request(s) queued to be looked at again.')
             ->assertSuccessful();
 
         $this->artisan('inventaire:sync-versions')
-            ->expectsOutputToContain('0 stuck version(s) given up on, 0 unsent signature request(s) given up on.')
+            ->expectsOutputToContain('0 stuck version(s) given up on, 0 unsent signature request(s) given up on, 0 signature request(s) queued to be looked at again.')
             ->assertSuccessful();
     });
 
     it('does nothing when there is nothing', function (): void {
         $this->artisan('inventaire:sync-versions')
-            ->expectsOutputToContain('0 stuck version(s) given up on, 0 unsent signature request(s) given up on.')
+            ->expectsOutputToContain('0 stuck version(s) given up on, 0 unsent signature request(s) given up on, 0 signature request(s) queued to be looked at again.')
             ->assertSuccessful();
     });
 
