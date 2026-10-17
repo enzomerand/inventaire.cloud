@@ -9,7 +9,7 @@ use App\Services\LocaleResolver;
 use App\Support\PublicUrls;
 
 /**
- * Builds the {@see PageMeta} of the public pages: the home page, the gallery of templates and the page of each template.
+ * Builds the {@see PageMeta} of the public pages: the home page, the documentation of the API, the gallery of templates and the page of each template.
  *
  * A template is offered in the languages it is written in: the other languages of the application show it with the
  * texts of the default language (the language switcher links to them), but they are not listed as alternates, which
@@ -34,6 +34,40 @@ final class PublicPageMeta
             description: __('A free inventory tool for professionals and individuals.'),
             canonical: PublicUrls::home(),
             locale: $locale,
+        );
+    }
+
+    /**
+     * The documentation of the API (it exists at one address, in the language of the request).
+     */
+    public function apiDocs(string $locale): PageMeta
+    {
+        $canonical = PublicUrls::apiDocs();
+        $title = __('API documentation');
+        $description = __('Reference of the JSON API: personal access tokens, permissions, rate limits, errors, and every operation with its parameters, bodies and responses.');
+
+        return new PageMeta(
+            title: $title,
+            description: $description,
+            canonical: $canonical,
+            locale: $locale,
+            jsonLd: [
+                [
+                    '@type' => 'WebPage',
+                    'name' => $title,
+                    'description' => $description,
+                    'url' => $canonical,
+                    'inLanguage' => $locale,
+                    'isPartOf' => $this->site(),
+                ],
+                [
+                    '@type' => 'BreadcrumbList',
+                    'itemListElement' => [
+                        ['@type' => 'ListItem', 'position' => 1, 'name' => __('Home'), 'item' => PublicUrls::home()],
+                        ['@type' => 'ListItem', 'position' => 2, 'name' => $title, 'item' => $canonical],
+                    ],
+                ],
+            ],
         );
     }
 

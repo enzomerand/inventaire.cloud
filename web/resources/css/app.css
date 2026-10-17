@@ -295,3 +295,26 @@
 .app-template-card .stretched-link:focus-visible {
     outline: none;
 }
+
+/*
+ * The documentation of the API (docs/api.blade.php). The column of links follows the reader on a wide screen and scrolls
+ * inside itself when it is longer than the screen; the column of text may shrink below the width of its widest table or
+ * command, which then scroll inside their own container instead of widening the page.
+ */
+.app-docs-content {
+    min-width: 0;
+}
+
+/* A description keeps room to read in a table that scrolls, instead of being squeezed to a few letters a line. */
+.app-docs-wide {
+    min-width: 16rem;
+}
+
+@media (min-width: 992px) {
+    .app-docs-nav {
+        position: sticky;
+        top: 1rem;
+        max-height: calc(100vh - 2rem);
+        overflow-y: auto;
+    }
+}
