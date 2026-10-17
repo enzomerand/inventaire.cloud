@@ -157,6 +157,17 @@ describe('a CSV', function (): void {
             ->and($rows[4])->toBe(['z', 'w']);
     });
 
+    it('reads a quote just after the byte order mark as the library does, which skips the mark', function (): void {
+        // A quote opens a field that holds the line feed; each line after it closes the quote at its first character, makes 500 empty fields
+        // of its commas, and opens a quote again with its last: all of them are fields of one record.
+        $lines = implode('', array_map(fn (): string => '"'.str_repeat(',', 500)."\"\n", range(1, 10)));
+
+        foreach (["\xEF\xBB\xBF", ''] as $mark) {
+            expect(fn () => importRead(importFile($mark."\"\n".$lines), ImportFormat::Csv))
+                ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+        }
+    });
+
     it('counts the separators the same way wherever the megabyte that is read at a time ends', function (): void {
         $wide = str_repeat(',', 20000);
 
@@ -350,7 +361,6 @@ describe('a worksheet of a workbook that announces a width no sheet has', functi
         'the spans of a row' => ['spans="1:2"', 'spans="1:50000000"'],
         // The only one the library does not check itself: with no dimension it fills each row to its spans, fifty million cells.
         'the spans of a row, in a sheet with no dimension' => [['<dimension ref="A1:B1"/>', 'spans="1:2"'], ['', 'spans="1:50000000"']],
-        'a cell far to the right' => ['<c r="B1"', '<c r="ZZZZZZ1"'],
         'a cell past the last column' => ['<c r="B1"', '<c r="XFE1"'],
     ]);
 
@@ -395,7 +405,6 @@ describe('a worksheet whose cells are placed one after the other, or by a refere
     })->with([
         // The library puts a cell with no reference after the last one it placed, and builds all of them.
         'cells with no reference' => [str_repeat('<c/>', ImportWidthGuard::MATERIALISED_XLSX_COLUMNS + 1)],
-        'cells whose reference is none' => [str_repeat('<c r="?"/>', ImportWidthGuard::MATERIALISED_XLSX_COLUMNS + 1)],
         'the same cell again and again' => [str_repeat('<c r="A1"/>', ImportWidthGuard::MATERIALISED_XLSX_COLUMNS + 1)],
         // `SR` is the 512th column.
         'a cell with no reference after the last column' => ['<c r="SR1"/><c/>'],
@@ -421,6 +430,46 @@ describe('a worksheet whose cells are placed one after the other, or by a refere
     });
 });
 
+describe('a worksheet whose references and spans are not what the library reads', function (): void {
+    it('is refused as unreadable when the reference of a cell is not a column of letters and a row', function (string $reference): void {
+        // The library reads `SR1` followed by a line feed as a valid reference (`$` matches before it) and works out another column for it.
+        $path = importXlsxRows('<row r="1"><c r="'.$reference.'"/></row>');
+
+        expect(fn () => ImportWidthGuard::xlsx($path))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNREADABLE));
+    })->with([
+        'a line feed after it' => ['SR1&#10;'],
+        'a line feed in it' => ['S&#10;R1'],
+        'lowercase letters' => ['a1'],
+        'no row' => ['A'],
+        'no column' => ['1'],
+        'four letters' => ['ABCD1'],
+        'something that is none' => ['?'],
+        'nothing' => [''],
+        'a space after it' => ['A1 '],
+    ]);
+
+    it('is refused as unreadable when the spans of a row are not a range of columns', function (string $spans): void {
+        $path = importXlsxRows('<row r="1" spans="'.$spans.'"><c r="A1"/></row>');
+
+        expect(fn () => ImportWidthGuard::xlsx($path))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNREADABLE));
+    })->with([
+        'a negative end' => ['1:-5'],
+        'a range that goes back' => ['5:1'],
+        'no end' => ['1:'],
+        'no start' => [':5'],
+        'one number' => ['5'],
+        'letters' => ['a:b'],
+    ]);
+
+    it('lets through the references and spans that a sheet has', function (string $spans): void {
+        ImportWidthGuard::xlsx(importXlsxRows('<row r="1" spans="'.$spans.'"><c r="A1"/><c r="AB12"/><c r="SR3"/></row>'));
+
+        expect(true)->toBeTrue();
+    })->with([['1:14'], ['1:1'], ['2:10 12:14'], ['']]);
+});
+
 describe('a worksheet the workbook points to by a name that is not the usual one', function (): void {
     it('is read as any sheet is', function (string $to, ?string $target): void {
         $path = importRenamePart(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', $to, $target);
@@ -442,7 +491,7 @@ describe('a worksheet the workbook points to by a name that is not the usual one
     })->with([
         'a dimension, with no extension' => ['xl/worksheets/data', null, '<dimension ref="A1:B1"/>', '<dimension ref="A1:ZZZZZZ1"/>'],
         'cells with no reference, with another extension' => ['xl/worksheets/data.bin', null, '<c r="B1"', '<c r="B1"/>'.str_repeat('<c/>', ImportWidthGuard::MATERIALISED_XLSX_COLUMNS + 1).'<c r="C1"'],
-        'a far cell, by an absolute name' => ['xl/worksheets/data.dat', '/xl/worksheets/data.dat', '<c r="B1"', '<c r="ZZZZZZ1"'],
+        'a far cell, by an absolute name' => ['xl/worksheets/data.dat', '/xl/worksheets/data.dat', '<c r="B1"', '<c r="XFE1"'],
     ]);
 
     it('is the only kind of part whose cells are counted', function (): void {
@@ -622,6 +671,28 @@ describe('a sheet with more cells than an import can build', function (): void {
         $failure = new ImportFileException(ImportFileException::TOO_MANY_CELLS);
 
         expect($failure->getMessage())->toBe('This file holds more than 4,000,000 cells, counting the empty ones that a spreadsheet keeps for its formatting. Delete the rows and columns you do not use, then send it again.');
+    });
+});
+
+describe('an OpenDocument sheet whose repeats are not whole numbers', function (): void {
+    it('is refused as unreadable when a row says it is repeated 0 times, a negative number or a text: the library then gives it for ever', function (string $repeats): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['a'], ['b']]), 1, '<table:table-row table:number-rows-repeated="'.$repeats.'"><table:table-cell office:value-type="string" table:number-columns-repeated="1000"><text:p>x</text:p></table:table-cell></table:table-row>');
+
+        expect(fn () => ImportWidthGuard::ods($path))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNREADABLE));
+    })->with(['0', '-3', 'abc', '', '2.5', '01', ' 3']);
+
+    it('is refused as unreadable when a cell says the same', function (string $repeats): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['a'], ['b']]), 1, '<table:table-row><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell><table:table-cell table:number-columns-repeated="'.$repeats.'"/></table:table-row>');
+
+        expect(fn () => ImportWidthGuard::ods($path))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNREADABLE));
+    })->with(['0', '-3', 'abc', '', '2.5']);
+
+    it('gives a row repeated twice twice, and the one after it once', function (): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['a'], ['c']]), 1, '<table:table-row table:number-rows-repeated="2"><table:table-cell office:value-type="string"><text:p>b</text:p></table:table-cell></table:table-row>');
+
+        expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['a'], 2 => ['b'], 3 => ['b'], 4 => ['c']]);
     });
 });
 

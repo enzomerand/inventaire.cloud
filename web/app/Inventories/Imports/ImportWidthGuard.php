@@ -43,7 +43,11 @@ use XMLReader;
  *   that would have to be as wrong as the library is. The cells of a row are counted down to the shortcuts the library takes: a row
  *   with nothing in it gets one cell however many it repeats, and a trailing cell that completes the width of an Excel sheet is not
  *   expanded.
- * - A text file costs the fields of its records, counted as the library splits them.
+ * - A text file costs the fields of its records, counted as the library splits them, from where it starts (after the byte order mark).
+ *
+ * What the scan reads is read as strictly as the library reads it, and a file that says something the library cannot honour is refused
+ * as unreadable instead of being followed: a cell reference that is not a column of capital letters and a row, the spans of a row that
+ * are not a range, a number of repeats that is not a whole number from 1.
  */
 final class ImportWidthGuard
 {
@@ -114,7 +118,7 @@ final class ImportWidthGuard
                 $last = null;
                 $filled = false;
                 // More than the lines of a sheet is refused anyway, and the product below stays a whole number.
-                $rowRepeats = min(max(1, (int) ($xml->getAttribute('table:number-rows-repeated') ?? 1)), ImportRows::MAX_LINES + 1);
+                $rowRepeats = min(self::repeats($xml->getAttribute('table:number-rows-repeated')), ImportRows::MAX_LINES + 1);
 
                 return;
             }
@@ -124,7 +128,8 @@ final class ImportWidthGuard
                     throw new ImportFileException(ImportFileException::UNREADABLE);
                 }
 
-                $repeats = max(0, (int) ($xml->getAttribute('table:number-columns-repeated') ?? 1));
+                // Beyond the width of an Excel sheet it is refused whatever it is: the sum below stays a whole number.
+                $repeats = min(self::repeats($xml->getAttribute('table:number-columns-repeated')), self::SPREADSHEET_COLUMNS + 1);
                 $holds = $xml->getAttribute('office:value-type') !== null || ! $xml->isEmptyElement;
 
                 if ($last !== null) {
@@ -213,16 +218,22 @@ final class ImportWidthGuard
                         $last = -1;
                         $top = -1;
                         // `1:5`, when the sheet gives no dimension: the library takes what follows the first colon, whatever else there is.
-                        $spans = (int) (explode(':', (string) $xml->getAttribute('spans'))[1] ?? 0);
+                        $spans = self::spans($xml->getAttribute('spans'));
                         self::assertColumns($spans, $limit);
                         $fill = $dimension > 0 ? $dimension : $spans;
 
                         break;
                     case 'c':
                         $cells++;
-                        $reference = (string) $xml->getAttribute('r');
-                        // A reference the library cannot read stops it; one it reads puts the cell at its column, none puts it after the last.
-                        $column = preg_match('/^([A-Za-z]+)\d*$/', $reference, $found) === 1 ? self::columnsOf($found[1]) - 1 : $last + 1;
+                        $reference = $xml->getAttribute('r');
+                        // None puts the cell after the last; one is a column of one to three capital letters and a row, which puts the
+                        // cell at its column; any other stops the library (and one with a line feed after it, which the library takes for
+                        // valid, would be put at a column that it works out wrong).
+                        if ($reference !== null && preg_match('/^([A-Z]{1,3})\d+\z/', $reference, $found) !== 1) {
+                            throw new ImportFileException(ImportFileException::UNREADABLE);
+                        }
+
+                        $column = $reference === null ? $last + 1 : self::columnsOf($found[1]) - 1;
                         $last = $column;
                         $top = max($top, $column);
 
@@ -255,6 +266,12 @@ final class ImportWidthGuard
 
         if ($handle === false) {
             throw new ImportFileException(ImportFileException::UNREADABLE);
+        }
+
+        // The library starts after the byte order mark of a file that has one, and the scan has to: a quote that follows it opens a field
+        // there, and here it would be a character like another.
+        if (fread($handle, 3) !== "\xEF\xBB\xBF") {
+            rewind($handle);
         }
 
         $limit = self::limit(ImportFormat::Csv);
@@ -398,6 +415,45 @@ final class ImportWidthGuard
         });
 
         return array_map(strval(...), array_keys($parts));
+    }
+
+    /**
+     * How many times a cell or a row of an OpenDocument sheet is repeated: 1 when it does not say, else a whole number from 1. Anything
+     * else (0, a negative number, a text) is a damaged file: the library takes it for a count it cannot honour, and a row that is
+     * repeated 0 times is given for ever.
+     *
+     * @throws ImportFileException When the attribute is there and is not a whole number from 1.
+     */
+    private static function repeats(?string $attribute): int
+    {
+        if ($attribute === null) {
+            return 1;
+        }
+
+        if (preg_match('/^[1-9]\d*\z/', $attribute) !== 1) {
+            throw new ImportFileException(ImportFileException::UNREADABLE);
+        }
+
+        return (int) $attribute;
+    }
+
+    /**
+     * The last column the `spans` of a row of an Excel sheet announce (`1:14` is 14), 0 when it says nothing. The library takes what follows
+     * the first colon; a range that does not start with two whole numbers, or goes back, makes it fail (a negative end) or means nothing.
+     *
+     * @throws ImportFileException When the spans are there and are not a range of columns.
+     */
+    private static function spans(?string $attribute): int
+    {
+        if ($attribute === null || $attribute === '') {
+            return 0;
+        }
+
+        if (preg_match('/^(\d+):(\d+)/', $attribute, $found) !== 1 || (int) $found[1] > (int) $found[2]) {
+            throw new ImportFileException(ImportFileException::UNREADABLE);
+        }
+
+        return (int) $found[2];
     }
 
     /**
