@@ -1082,7 +1082,7 @@
     "This API token lacks the :ability permission.": "Ce jeton d'API n'a pas la permission « :ability ».",
     "You can have :count API token at a time: revoke one, or wait for one to expire.|You can have :count API tokens at a time: revoke one, or wait for one to expire.": "Vous pouvez avoir :count jeton d'API à la fois : révoquez-en un, ou attendez qu'un expire.|Vous pouvez avoir :count jetons d'API à la fois : révoquez-en un, ou attendez qu'un expire.",
     "API tokens": "Jetons d'API",
-    "An API token lets a script or another application use your inventories without your password. It acts with your rights in your workspaces, never beyond them, and stops working when it expires or when you revoke it.": "Un jeton d'API permet à un script ou à une autre application d'utiliser vos inventaires sans votre mot de passe. Il agit avec vos droits dans vos espaces de travail, jamais au-delà, et cesse de fonctionner quand il expire ou quand vous le révoquez.",
+    "An API token lets a script or another application use your inventories without signing in. It acts with your rights in your workspaces, never beyond them, and stops working when it expires or when you revoke it.": "Un jeton d'API permet à un script ou à une autre application d'utiliser vos inventaires sans se connecter. Il agit avec vos droits dans vos espaces de travail, jamais au-delà, et cesse de fonctionner quand il expire ou quand vous le révoquez.",
     "API documentation": "Documentation de l'API",
     "Active tokens": "Jetons actifs",
     "You have no API token yet.": "Vous n'avez pas encore de jeton d'API.",
