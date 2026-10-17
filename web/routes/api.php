@@ -55,7 +55,9 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::post('/logout', LogoutController::class)->middleware('auth:sanctum')->name('logout');
     });
 
-    Route::middleware('auth:sanctum')->group(function (): void {
+    // Every route behind the authentication is counted for the token it is called with (`api-tokens`, per token and minute); the
+    // session of the web front has none, and is not.
+    Route::middleware(['auth:sanctum', 'throttle:api-tokens'])->group(function (): void {
         // What belongs to a person at their browser: their account and its security. No token, whatever its abilities.
         Route::middleware(RefuseApiTokens::class)->group(function (): void {
             Route::patch('/me', [MeController::class, 'update'])->name('me.update');

@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * Registers and boots application-wide services.
@@ -107,11 +108,27 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * The rate limiter of the endpoint that makes an API token (limit in config/inventories.php, `api_token_creations_per_hour`),
-     * keyed on the user: a token is a secret that the person copies, and none is worth making in a loop.
+     * The rate limiters of API tokens (limits in config/inventories.php).
+     *
+     * `api-tokens` is the pace of a token (`api_token_requests_per_minute`), whatever it asks for: it is counted for each token
+     * apart, on top of the limits of the endpoints, and by the token rather than the person, so that the script of one of their
+     * tokens cannot use up what another one is for. A request that has no token (the web front's session) is not counted. It is
+     * applied to every route behind `auth:sanctum`, and runs after the authentication, which is what tells it the token.
+     *
+     * `api-token-creation` is the one of the endpoint that makes a token (`api_token_creations_per_hour`), keyed on the user: a
+     * token is a secret that the person copies, and none is worth making in a loop.
      */
     private function registerApiTokenLimiters(): void
     {
+        RateLimiter::for('api-tokens', function (Request $request): Limit {
+            $user = $request->user();
+            $token = $user instanceof User ? $user->currentAccessToken() : null;
+
+            return $token instanceof PersonalAccessToken
+                ? Limit::perMinute(config()->integer('inventories.api_token_requests_per_minute'))->by('api-token:'.$token->getKey())
+                : Limit::none();
+        });
+
         RateLimiter::for('api-token-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.api_token_creations_per_hour'))
             ->by('api-token-creation:'.$this->signedInKey($request)));
     }

@@ -17,3 +17,7 @@ Schedule::command('inventaire:prune-exports')->hourly()->withoutOverlapping(30);
 // The imports that expired (the reports nobody read, the files sent and never started) are deleted with their files, and the ones
 // whose worker was lost are given up on.
 Schedule::command('inventaire:prune-imports')->hourly()->withoutOverlapping(30);
+
+// The API tokens that expired are deleted a day later. They stop working the moment they expire (and the list of tokens hides them):
+// this only clears the table. The lock of a run that was killed is forgotten after 30 minutes, as for the exports.
+Schedule::command('sanctum:prune-expired --hours=24')->daily()->withoutOverlapping(30);

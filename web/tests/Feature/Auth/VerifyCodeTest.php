@@ -563,7 +563,8 @@ describe('throttling and access', function (): void {
         $this->withServerVariables(['REMOTE_ADDR' => '2001:db8:aaaa:1:ffff::1'])
             ->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => wrongCode($code)], frontend())
             ->assertStatus(429)
-            ->assertJsonMissingPath('code');
+            // The throttle, not the cap on wrong codes of an address (which has a code of its own: login_code_locked).
+            ->assertJsonPath('code', 'too_many_requests');
 
         $this->withServerVariables(['REMOTE_ADDR' => '2001:db8:aaaa:2::1'])
             ->postJson('/api/v1/auth/verify', ['email' => 'ada@example.com', 'code' => wrongCode($code)], frontend())
