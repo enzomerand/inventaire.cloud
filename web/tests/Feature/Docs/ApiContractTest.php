@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Inventories\Exports\ExportFormat;
+use App\Inventories\Versions\SignatureError;
+use App\Inventories\Versions\SignatureStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 
@@ -326,6 +328,29 @@ function contractScenarios(): array
             $version = contractVersion($world);
 
             contractCheck(contractCall($test, $world['owner'], 'downloadVersionSnapshot', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/snapshot")), 'downloadVersionSnapshot', 200, 'application/json');
+        },
+
+        'downloadVersionSignedPdf' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractSigned($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'downloadVersionSignedPdf', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/signed-pdf")), 'downloadVersionSignedPdf', 200, 'application/pdf');
+        },
+
+        'cancelVersionSignature' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world, versionSigners(2));
+
+            contractCheck(contractCall($test, $world['owner'], 'cancelVersionSignature', 'POST', contractUri($world['inventory'], "/versions/{$version->ulid}/signature/cancel")), 'cancelVersionSignature', 200);
+        },
+
+        'retryVersionSignature' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world, versionSigners(2));
+            $version->forceFill(['signature_status' => SignatureStatus::Failed, 'signature_error' => SignatureError::DocumensoUnavailable])->save();
+            Queue::fake();
+
+            contractCheck(contractCall($test, $world['owner'], 'retryVersionSignature', 'POST', contractUri($world['inventory'], "/versions/{$version->ulid}/signature/retry")), 'retryVersionSignature', 202);
         },
 
         'listTemplates' => function (object $test): void {

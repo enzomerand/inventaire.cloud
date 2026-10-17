@@ -24,13 +24,13 @@ function tokenRouteClassification(): array
         'inventories.items.show', 'inventories.items.revisions.index', 'inventories.items.attachments.show',
         'inventories.items.attachments.thumbnail', 'inventories.exports.index', 'inventories.exports.show', 'inventories.exports.download',
         'inventories.imports.index', 'inventories.imports.show', 'inventories.versions.index', 'inventories.versions.show',
-        'inventories.versions.pdf', 'inventories.versions.snapshot',
+        'inventories.versions.pdf', 'inventories.versions.snapshot', 'inventories.versions.signed-pdf',
     ];
     $write = [
         'inventories.items.store', 'inventories.items.update', 'inventories.items.destroy', 'inventories.items.attachments.store',
         'inventories.items.attachments.destroy', 'inventories.exports.store', 'inventories.exports.destroy', 'inventories.imports.store',
         'inventories.imports.update', 'inventories.imports.start', 'inventories.imports.destroy', 'inventories.versions.store',
-        'inventories.versions.destroy',
+        'inventories.versions.destroy', 'inventories.versions.signature.cancel', 'inventories.versions.signature.retry',
     ];
     $manage = [
         'workspaces.store', 'workspaces.update', 'workspaces.destroy', 'workspaces.inventories.store', 'inventories.update',

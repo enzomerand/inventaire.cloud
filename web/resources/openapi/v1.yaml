@@ -3661,6 +3661,268 @@ paths:
           x-codes:
             - code: file_unavailable
               description: The storage cannot be read right now.
+  /inventories/{inventory}/versions/{version}/signed-pdf:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    get:
+      tags:
+        - Official versions
+      operationId: downloadVersionSignedPdf
+      summary: Download the signed PDF of a version
+      description: >-
+        The PDF with the signatures, once every signer has signed: the signature service (Documenso) gives it back with the
+        signatures and the certificate of completion, and it is stored with the version. It is always a download, and never kept by
+        a cache. Its SHA-256 and its size are under `signature.signed_pdf` of the version. It answers `409` until then, and for a
+        version nobody was asked to sign.
+      x-ability: read
+      responses:
+        '200':
+          description: The signed PDF.
+          headers:
+            Content-Disposition:
+              description: '`attachment` with the name of the file.'
+              schema:
+                type: string
+            Content-Length:
+              description: Bytes.
+              schema:
+                type: integer
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          x-codes:
+            - code: file_not_found
+              description: The version exists but its file is no longer on the storage.
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: signed_pdf_not_ready
+              description: Not every signer has signed yet, or nobody was asked to sign. Check `signature.status`.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+  /inventories/{inventory}/versions/{version}/signature/cancel:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      tags:
+        - Official versions
+      operationId: cancelVersionSignature
+      summary: Cancel the signature request of a version
+      description: >-
+        Editors and owners only. Cancels the request for signatures while its signers are awaited (`signature.status` is `awaiting`):
+        the signature service (Documenso) is asked at once, tells the signers, and the request becomes `cancelled`. The version, its
+        PDF and its data are untouched; to ask for signatures again, freeze the inventory again. The answer is the version.
+
+        If Documenso says the request is not pending any more (the last signer signed, or somebody refused, a moment before), nothing is
+        cancelled: the request is read again in the background and the answer is `409` (`signature_not_pending`). If Documenso cannot
+        be reached, the answer is `503` (`documenso_unavailable`) and nothing has changed: try again.
+      x-ability: write
+      responses:
+        '200':
+          description: The version, with a `cancelled` request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InventoryVersion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: signature_not_pending
+              description: The request is not waiting for its signers (it was never sent, or it is over), or Documenso says it is not pending.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          description: The signature service cannot be used right now. Nothing was cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: The signature service cannot be used right now. Try again in a moment.
+                code: documenso_unavailable
+          x-codes:
+            - code: documenso_unavailable
+              description: Documenso cannot be reached, is failing, or refuses the token of the instance.
+  /inventories/{inventory}/versions/{version}/signature/retry:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      tags:
+        - Official versions
+      operationId: retryVersionSignature
+      summary: Send the signature request of a version again
+      description: >-
+        Editors and owners only. Sends again a request for signatures that failed (`signature.status` is `failed`) on a completed
+        version: it becomes `requested` and a worker takes it from where it stopped, with the same PDF (an envelope that exists at
+        Documenso is not created twice). The answer is the version; poll it until `signature.status` is `awaiting` (or `failed`
+        again, with the `error`).
+      x-ability: write
+      responses:
+        '202':
+          description: The version, with a `requested` request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InventoryVersion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: signature_not_failed
+              description: The request did not fail, or its version is not completed.
+            - code: signature_unavailable
+              description: The instance has no signature service.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
   /templates:
     get:
       tags:

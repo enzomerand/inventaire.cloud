@@ -89,6 +89,8 @@ describe('the errors', function (): void {
             ['editor', 'manage', 'deleteInventory', 'DELETE', contractUri($inventory), []],
             ['viewer', 'write', 'createVersion', 'POST', contractUri($inventory, '/versions'), []],
             ['editor', 'write', 'deleteVersion', 'DELETE', contractUri($inventory, "/versions/{$version->ulid}"), []],
+            ['viewer', 'write', 'cancelVersionSignature', 'POST', contractUri($inventory, "/versions/{$version->ulid}/signature/cancel"), []],
+            ['viewer', 'write', 'retryVersionSignature', 'POST', contractUri($inventory, "/versions/{$version->ulid}/signature/retry"), []],
         ] as [$role, $ability, $operationId, $method, $uri, $data]) {
             $response = tokenCall($this, tokenFor($world['team'][$role], [$ability]), $method, $uri, $data);
 
@@ -273,6 +275,71 @@ describe('the errors of the official versions', function (): void {
         }
 
         expect($response->json('code'))->toBe('too_many_requests');
+    });
+});
+
+describe('the errors of the requests for signatures', function (): void {
+    it('answers 409 to the download of a signed PDF that is not ready, with a code the document lists', function (): void {
+        $world = contractWorld();
+        $version = contractVersion($world, versionSigners(1));
+
+        $response = contractCall($this, $world['owner'], 'downloadVersionSignedPdf', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/signed-pdf"));
+
+        contractCheck($response, 'downloadVersionSignedPdf', 409);
+        expect($response->json('code'))->toBe('signed_pdf_not_ready')->and(contractCodes('downloadVersionSignedPdf', 409))->toContain('signed_pdf_not_ready');
+    });
+
+    it('answers 404 with a code the document lists to a signed PDF that is gone from the storage', function (): void {
+        $world = contractWorld();
+        $version = contractSigned($world);
+        Storage::disk(ATTACHMENT_TEST_DISK)->delete((string) $version->signed_pdf_path);
+
+        $response = contractCall($this, $world['owner'], 'downloadVersionSignedPdf', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/signed-pdf"));
+
+        contractCheck($response, 'downloadVersionSignedPdf', 404);
+        expect($response->json('code'))->toBe('file_not_found')->and(contractCodes('downloadVersionSignedPdf', 404))->toContain('file_not_found');
+    });
+
+    it('answers 409 to the cancellation of a request that does not await its signers, and 503 when Documenso cannot be reached', function (): void {
+        $fake = versionDocumenso();
+        $world = contractWorld();
+        $uri = fn (InventoryVersion $version): string => contractUri($world['inventory'], "/versions/{$version->ulid}/signature/cancel");
+
+        $none = contractVersion($world);
+        $refused = contractCall($this, $world['owner'], 'cancelVersionSignature', 'POST', $uri($none));
+        contractCheck($refused, 'cancelVersionSignature', 409);
+
+        $awaiting = contractVersion($world, versionSigners(1));
+        $fake->failNext('POST /envelope/cancel', null);
+        $unavailable = contractCall($this, $world['owner'], 'cancelVersionSignature', 'POST', $uri($awaiting));
+        contractCheck($unavailable, 'cancelVersionSignature', 503);
+
+        // Documenso says the envelope is not pending any more.
+        Queue::fake();
+        $fake->failNext('POST /envelope/cancel', 400);
+        $notPending = contractCall($this, $world['owner'], 'cancelVersionSignature', 'POST', $uri($awaiting));
+        contractCheck($notPending, 'cancelVersionSignature', 409);
+
+        expect([$refused->json('code'), $unavailable->json('code'), $notPending->json('code')])->toBe(['signature_not_pending', 'documenso_unavailable', 'signature_not_pending'])
+            ->and(contractCodes('cancelVersionSignature', 409))->toContain('signature_not_pending')
+            ->and(contractCodes('cancelVersionSignature', 503))->toContain('documenso_unavailable');
+    });
+
+    it('answers 409 to the sending again of a request that did not fail, or on an instance with no Documenso', function (): void {
+        $world = contractWorld();
+        $version = contractVersion($world, versionSigners(1));
+        $uri = contractUri($world['inventory'], "/versions/{$version->ulid}/signature/retry");
+
+        $notFailed = contractCall($this, $world['owner'], 'retryVersionSignature', 'POST', $uri);
+        contractCheck($notFailed, 'retryVersionSignature', 409);
+
+        $version->forceFill(['signature_status' => SignatureStatus::Failed, 'signature_error' => SignatureError::Stale])->save();
+        config(['services.documenso.url' => null, 'services.documenso.api_key' => null]);
+        $unavailable = contractCall($this, $world['owner'], 'retryVersionSignature', 'POST', $uri);
+        contractCheck($unavailable, 'retryVersionSignature', 409);
+
+        expect([$notFailed->json('code'), $unavailable->json('code')])->toBe(['signature_not_failed', 'signature_unavailable'])
+            ->and(contractCodes('retryVersionSignature', 409))->toContain('signature_not_failed', 'signature_unavailable');
     });
 });
 

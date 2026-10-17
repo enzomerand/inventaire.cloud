@@ -127,17 +127,33 @@ function contractImport(array $world, array $attributes = []): Import
 
 /**
  * An official version of the inventory of the world, frozen for real and with its PDF written (the queue of the tests is synchronous).
- * With signers, the instance is given a Documenso so that they can be asked for.
+ * With signers, the instance is given a (fake) Documenso so that they can be asked for: the request is sent, so the version is `awaiting` them.
  *
  * @param  list<array{name: string, email: string}>  $signers
  */
 function contractVersion(array $world, array $signers = [], ?string $label = null): InventoryVersion
 {
     if ($signers !== []) {
+        // Their request is sent as the version is completed (the queue of the tests is synchronous): to a Documenso that answers.
         versionDocumenso();
     }
 
     $version = versionFreeze($world['inventory'], $world['owner'], $label, $signers);
 
     return $version->fresh() ?? $version;
+}
+
+/**
+ * An official version whose signers have all signed: its request was sent to a fake Documenso (`awaiting`), the envelope was completed
+ * there, and the request was read again, so that the signed PDF is stored.
+ *
+ * @param  list<array{name: string, email: string}>  $signers
+ */
+function contractSigned(array $world, array $signers = []): InventoryVersion
+{
+    $fake = versionDocumenso();
+    $version = versionFreeze($world['inventory'], $world['owner'], 'Year end', $signers === [] ? versionSigners(2) : $signers);
+    $fake->complete();
+
+    return versionSync($version->fresh() ?? $version);
 }

@@ -10,16 +10,21 @@ use App\Http\Resources\InventoryVersionResource;
 use App\Http\Responses\ApiError;
 use App\Http\Responses\StoredFileResponse;
 use App\Inventories\Attachments\AttachmentStorage;
+use App\Inventories\Exceptions\DocumensoUnavailableException;
 use App\Inventories\Exceptions\ExportRefusedException;
+use App\Inventories\Exceptions\SignatureNotFailedException;
+use App\Inventories\Exceptions\SignatureNotPendingException;
 use App\Inventories\Exceptions\SignatureUnavailableException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Inventories\Exceptions\VersionLimitReachedException;
 use App\Inventories\Versions\OfficialVersions;
+use App\Inventories\Versions\SignatureStatus;
 use App\Inventories\Versions\VersionFileName;
 use App\Inventories\Versions\VersionStatus;
 use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use App\Policies\InventoryVersionPolicy;
+use App\Signatures\SignatureRequests;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Http\JsonResponse;
@@ -31,11 +36,11 @@ use Illuminate\Support\Number;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * The official versions of an inventory: freeze it (`202`: a job writes the PDF), list them, read one, download its PDF and its data
- * (the canonical JSON that was frozen), delete one.
+ * The official versions of an inventory: freeze it (`202`: a job writes the PDF), list them, read one, download its PDF, its data
+ * (the canonical JSON that was frozen) and its signed PDF, delete one, and cancel or send again its request for signatures.
  *
- * Every member of the workspace may read and download; editors and owners freeze; owners delete (see {@see InventoryVersionPolicy}; a
- * viewer is refused with a `403`, a stranger told the inventory is not there). Unlike an export, a version belongs to the inventory,
+ * Every member of the workspace may read and download; editors and owners freeze and cancel or send again a request for signatures;
+ * owners delete (see {@see InventoryVersionPolicy}; a viewer is refused with a `403`, a stranger told the inventory is not there). Unlike an export, a version belongs to the inventory,
  * not to the person who froze it: everybody who can see the inventory sees every version. A version of another inventory is a `404`
  * like one that does not exist.
  */
@@ -45,10 +50,12 @@ final class InventoryVersionController extends Controller
     public const PER_PAGE = 20;
 
     /**
-     * Gets the service that freezes and deletes the versions, the one that knows the roles, and the storage the files are read from.
+     * Gets the service that freezes and deletes the versions, the one that cancels and sends again the requests for signatures, the one
+     * that knows the roles, and the storage the files are read from.
      */
     public function __construct(
         private readonly OfficialVersions $versions,
+        private readonly SignatureRequests $signatures,
         private readonly Workspaces $workspaces,
         private readonly AttachmentStorage $storage,
     ) {}
@@ -159,6 +166,69 @@ final class InventoryVersionController extends Controller
             $version->snapshot_size,
             $this->storage,
         );
+    }
+
+    /**
+     * The PDF with the signatures, once every signer has signed, as a download. `409` (`signed_pdf_not_ready`) until then (and for a
+     * version nobody was asked to sign).
+     */
+    public function signedPdf(Inventory $inventory, InventoryVersion $version): StreamedResponse|JsonResponse
+    {
+        Gate::authorize('view', [$version, $inventory]);
+
+        if ($version->signature_status !== SignatureStatus::Completed || $version->signed_pdf_path === null) {
+            return ApiError::conflict(__('The signed PDF is not ready yet.'), 'signed_pdf_not_ready');
+        }
+
+        return StoredFileResponse::version(
+            $version,
+            $version->signed_pdf_path,
+            VersionFileName::for($inventory->name, $version->number, 'pdf', signed: true),
+            'application/pdf',
+            (int) $version->signed_pdf_size,
+            $this->storage,
+        );
+    }
+
+    /**
+     * Cancels the request for signatures of a version while it awaits its signers (`200`, with the version): Documenso is asked at once
+     * and tells the signers. `409` (`signature_not_pending`) when the request is not waiting for them, or Documenso says it is not
+     * pending any more (the request is then read again in the background); `503` (`documenso_unavailable`) when Documenso cannot be
+     * reached.
+     */
+    public function cancelSignature(Request $request, Inventory $inventory, InventoryVersion $version): InventoryVersionResource|JsonResponse
+    {
+        Gate::authorize('cancelSignature', [$version, $inventory]);
+
+        try {
+            $cancelled = $this->signatures->cancel($version);
+        } catch (SignatureNotPendingException) {
+            return ApiError::conflict(__('This signature request is not waiting for its signers: it cannot be cancelled.'), SignatureNotPendingException::CODE);
+        } catch (DocumensoUnavailableException) {
+            return ApiError::unavailable(__('The signature service cannot be used right now. Try again in a moment.'), DocumensoUnavailableException::CODE);
+        }
+
+        return $this->describe($request, $inventory, $cancelled);
+    }
+
+    /**
+     * Sends again the request for signatures of a completed version that failed (`202`, with the version, `requested`): a job takes it
+     * from where it stopped. `409` (`signature_not_failed`) when the request did not fail, `409` (`signature_unavailable`) when the
+     * instance has no signature service.
+     */
+    public function retrySignature(Request $request, Inventory $inventory, InventoryVersion $version): JsonResponse
+    {
+        Gate::authorize('retrySignature', [$version, $inventory]);
+
+        try {
+            $retried = $this->signatures->retry($version);
+        } catch (SignatureNotFailedException) {
+            return ApiError::conflict(__('This signature request did not fail: there is nothing to send again.'), SignatureNotFailedException::CODE);
+        } catch (SignatureUnavailableException) {
+            return ApiError::conflict(__('Signatures cannot be asked for: this instance has no signature service configured.'), SignatureUnavailableException::CODE);
+        }
+
+        return $this->describe($request, $inventory, $retried)->response()->setStatusCode(202);
     }
 
     /**

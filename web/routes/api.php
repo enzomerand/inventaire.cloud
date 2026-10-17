@@ -112,6 +112,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 Route::get('/inventories/{inventory}/versions/{version}', [InventoryVersionController::class, 'show'])->name('inventories.versions.show');
                 Route::get('/inventories/{inventory}/versions/{version}/pdf', [InventoryVersionController::class, 'pdf'])->name('inventories.versions.pdf');
                 Route::get('/inventories/{inventory}/versions/{version}/snapshot', [InventoryVersionController::class, 'snapshot'])->name('inventories.versions.snapshot');
+                Route::get('/inventories/{inventory}/versions/{version}/signed-pdf', [InventoryVersionController::class, 'signedPdf'])->name('inventories.versions.signed-pdf');
             });
         });
 
@@ -142,6 +143,11 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             // owners (and counted per person, since it locks the inventory while it reads every item), deleting for owners.
             Route::post('/inventories/{inventory}/versions', [InventoryVersionController::class, 'store'])->middleware('throttle:official-versions')->name('inventories.versions.store');
             Route::delete('/inventories/{inventory}/versions/{version}', [InventoryVersionController::class, 'destroy'])->name('inventories.versions.destroy');
+
+            // The request for signatures of a version: cancelling it while its signers are awaited (Documenso is asked at once) and sending
+            // it again after it failed. Editors and owners, like asking for signatures in the first place.
+            Route::post('/inventories/{inventory}/versions/{version}/signature/cancel', [InventoryVersionController::class, 'cancelSignature'])->name('inventories.versions.signature.cancel');
+            Route::post('/inventories/{inventory}/versions/{version}/signature/retry', [InventoryVersionController::class, 'retrySignature'])->name('inventories.versions.signature.retry');
         });
 
         // Managing: the structure. Workspaces, the inventories in them and their fields.
