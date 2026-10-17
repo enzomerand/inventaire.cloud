@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\InventoryFieldController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\OpenApiController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\TemplateController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
@@ -46,6 +47,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         Route::get('/templates', [TemplateController::class, 'index'])->name('templates.index');
         Route::get('/templates/{slug}', [TemplateController::class, 'show'])->name('templates.show');
     });
+
+    // The description of the API (OpenAPI 3.1), written by hand and checked against the routes by the tests of tests/Feature/Docs.
+    // Public, and counted with the public pages (the page /docs/api draws the same file).
+    Route::get('/openapi.json', OpenApiController::class)->middleware('throttle:public-pages')->name('openapi');
 
     // Passwordless sign-in: a code is emailed, then typed back. Session actions, so the web front only (a token is told so
     // before anything else: it is the more useful answer than "this address is not stateful").

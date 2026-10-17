@@ -66,7 +66,7 @@ function tokenSessionOnlyRoutes(): array
  */
 function tokenPublicRoutes(): array
 {
-    return ['api.v1.templates.index', 'api.v1.templates.show'];
+    return ['api.v1.openapi', 'api.v1.templates.index', 'api.v1.templates.show'];
 }
 
 /**

@@ -85,11 +85,11 @@ describe('the routes of the API', function (): void {
         }
     });
 
-    it('have no account-less route but the sign-in and the catalogue of templates', function (): void {
+    it('have no account-less route but the sign-in, the description of the API and the catalogue of templates', function (): void {
         $open = array_diff(array_keys(apiRoutes()), tokenAuthenticatedRoutes());
         sort($open);
 
-        expect($open)->toBe(['api.v1.auth.code', 'api.v1.auth.verify', 'api.v1.templates.index', 'api.v1.templates.show']);
+        expect($open)->toBe(['api.v1.auth.code', 'api.v1.auth.verify', 'api.v1.openapi', 'api.v1.templates.index', 'api.v1.templates.show']);
     });
 
     it('classify every route behind auth:sanctum once, in one list or the other', function (): void {
