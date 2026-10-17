@@ -38,31 +38,95 @@ function contractOperations(): array
 }
 
 /**
- * The `components` of the document as JSON Schema reads them (objects, not arrays), decoded once: every schema validated below
- * carries them, so that its `#/components/...` references find their target.
+ * A Schema Object of the document the way the tests validate with it: every `$ref` followed, and every object it describes closed.
+ *
+ * JSON Schema lets an object carry any property it does not mention, so a key a response has and the document does not know would
+ * pass. The test-side copy of the schema forbids it (`unevaluatedProperties: false`, which counts what `allOf` and `oneOf` evaluate), on
+ * every object schema that has `properties` (or gets them from `allOf`, `anyOf` or `oneOf`) and says nothing of `additionalProperties`
+ * or `unevaluatedProperties` itself. The file is left as it is written.
+ *
+ * A schema that is a branch of `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then` or `else` is left open: it describes a part of the object,
+ * and the schema that holds the branches closes it. That is why the `$ref` are followed instead of being left to the validator: the
+ * same component is a whole object in one place (closed) and a part of another in the next (open).
+ *
+ * @param  array<string, mixed>  $schema  The Schema Object, its `$ref` not followed.
+ * @param  list<string>  $following  The references being followed, from the root down to this node.
+ * @return array<string, mixed>
  */
-function contractComponents(): stdClass
+function contractStrictSchema(array $schema, bool $branch = false, array $following = []): array
 {
-    static $components = null;
+    if (isset($schema['$ref']) && is_string($schema['$ref'])) {
+        if (in_array($schema['$ref'], $following, true)) {
+            throw new RuntimeException('The schema '.$schema['$ref'].' contains itself, which the contract tests cannot close.');
+        }
 
-    return $components ??= json_decode((string) json_encode(contractSpec()['components'], JSON_THROW_ON_ERROR), false, 512, JSON_THROW_ON_ERROR);
+        $following[] = $schema['$ref'];
+        $schema = app(OpenApi::class)->resolve($schema);
+    }
+
+    foreach (['items', 'additionalProperties', 'unevaluatedProperties', 'unevaluatedItems', 'contains', 'propertyNames'] as $keyword) {
+        if (isset($schema[$keyword]) && is_array($schema[$keyword])) {
+            $schema[$keyword] = contractStrictSchema($schema[$keyword], false, $following);
+        }
+    }
+
+    foreach (['not', 'if', 'then', 'else'] as $keyword) {
+        if (isset($schema[$keyword]) && is_array($schema[$keyword])) {
+            $schema[$keyword] = contractStrictSchema($schema[$keyword], true, $following);
+        }
+    }
+
+    foreach (['allOf', 'anyOf', 'oneOf'] as $keyword) {
+        if (isset($schema[$keyword]) && is_array($schema[$keyword])) {
+            $schema[$keyword] = array_map(fn (mixed $part): mixed => is_array($part) ? contractStrictSchema($part, true, $following) : $part, $schema[$keyword]);
+        }
+    }
+
+    foreach (['properties', 'patternProperties', '$defs', 'dependentSchemas'] as $keyword) {
+        if (isset($schema[$keyword]) && is_array($schema[$keyword])) {
+            $schema[$keyword] = array_map(fn (mixed $part): mixed => is_array($part) ? contractStrictSchema($part, false, $following) : $part, $schema[$keyword]);
+        }
+    }
+
+    if (! $branch && ! array_key_exists('additionalProperties', $schema) && ! array_key_exists('unevaluatedProperties', $schema) && contractDeclaresProperties($schema)) {
+        $schema['unevaluatedProperties'] = false;
+    }
+
+    return $schema;
 }
 
 /**
- * Checks a decoded JSON value against a Schema Object of the document (OpenAPI 3.1 schemas are JSON Schema 2020-12).
+ * Whether a schema (its `$ref` already followed) names the properties of an object, itself or through its `allOf`, `anyOf` or `oneOf`.
+ *
+ * @param  array<string, mixed>  $schema
+ */
+function contractDeclaresProperties(array $schema): bool
+{
+    if (isset($schema['properties']) && is_array($schema['properties'])) {
+        return true;
+    }
+
+    foreach (['allOf', 'anyOf', 'oneOf'] as $keyword) {
+        foreach (is_array($schema[$keyword] ?? null) ? $schema[$keyword] : [] as $part) {
+            if (is_array($part) && contractDeclaresProperties($part)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Checks a decoded JSON value against a Schema Object of the document (OpenAPI 3.1 schemas are JSON Schema 2020-12), closed as
+ * {@see contractStrictSchema()} says: a property the schema does not name is a violation.
  *
  * @param  array<string, mixed>  $schema  The Schema Object, its `$ref` not followed.
  * @return list<string> What is wrong with the value, empty when it fits.
  */
 function contractViolations(mixed $value, array $schema): array
 {
-    $root = json_decode((string) json_encode($schema, JSON_THROW_ON_ERROR), false, 512, JSON_THROW_ON_ERROR);
-
-    if (! $root instanceof stdClass) {
-        $root = new stdClass;
-    }
-
-    $root->components = contractComponents();
+    $root = json_decode((string) json_encode(contractStrictSchema($schema), JSON_THROW_ON_ERROR), false, 512, JSON_THROW_ON_ERROR);
 
     $result = (new Validator(max_errors: 20))->validate($value, $root);
 
@@ -82,6 +146,71 @@ function contractViolations(mixed $value, array $schema): array
 }
 
 /**
+ * What is wrong with the body a scenario sends, held to the `requestBody` the operation documents: the operation documents one, in that
+ * media type, and the payload fits its schema (closed, see {@see contractStrictSchema()}). A call with no payload is fine unless the
+ * document says the body is required.
+ *
+ * @param  array<string, mixed>  $payload  The JSON body; for a form, its fields other than the file.
+ * @return list<string>
+ */
+function contractRequestViolations(string $operationId, array $payload, string $mediaType = 'application/json'): array
+{
+    $operation = contractOperations()[$operationId] ?? null;
+
+    if ($operation === null) {
+        return ["{$operationId} is not an operation of the document"];
+    }
+
+    $body = $operation['operation']['requestBody'] ?? null;
+
+    if (! is_array($body)) {
+        return $payload === [] ? [] : ["{$operationId} documents no request body, and the scenario sends ".json_encode($payload)];
+    }
+
+    $body = app(OpenApi::class)->resolve($body);
+
+    if ($payload === [] && ($body['required'] ?? false) !== true) {
+        return [];
+    }
+
+    $schema = $body['content'][$mediaType]['schema'] ?? null;
+
+    if (! is_array($schema)) {
+        return ["{$operationId} documents no {$mediaType} request body with a schema"];
+    }
+
+    return contractViolations(json_decode((string) json_encode($payload === [] ? new stdClass : $payload, JSON_THROW_ON_ERROR), false, 512, JSON_THROW_ON_ERROR), $schema);
+}
+
+/**
+ * The query parameters a scenario sends that the operation does not document (the names of `totals[]`, `filter[...]` and the like are
+ * read without their brackets, as the document names them).
+ *
+ * @return list<string>
+ */
+function contractUndocumentedQuery(string $operationId, string $uri): array
+{
+    $operation = contractOperations()[$operationId] ?? null;
+    $query = (string) parse_url($uri, PHP_URL_QUERY);
+
+    if ($operation === null || $query === '') {
+        return [];
+    }
+
+    $documented = [];
+
+    foreach ($operation['parameters'] as $parameter) {
+        if (($parameter['in'] ?? '') === 'query') {
+            $documented[] = (string) preg_replace('/\[.*$/', '', (string) $parameter['name']);
+        }
+    }
+
+    parse_str($query, $sent);
+
+    return array_values(array_diff(array_map(strval(...), array_keys($sent)), $documented));
+}
+
+/**
  * The Response Object an operation documents for a status, its `$ref` followed; null when the status is not documented.
  *
  * @param  array<string, mixed>  $operation  As {@see contractOperations()} gives it.
@@ -96,7 +225,9 @@ function contractResponse(array $operation, int|string $status): ?array
 
 /**
  * Holds a real answer to what the document says of it: the status is the one that was expected and the operation documents it, and the
- * body is of a documented media type and, for JSON, fits the schema the document gives for that status.
+ * body is of a documented media type that has a schema and, for JSON, fits it (closed: a property the schema does not name is a
+ * violation, see {@see contractStrictSchema()}). A file (`type: string, format: binary`) is not read, but its `Content-Disposition` is
+ * held to the document both ways: sent only if the response documents it, and documented only if it is sent.
  *
  * @param  string|null  $mediaType  The media type the body is expected to have (the first documented one when null).
  */
@@ -128,9 +259,24 @@ function contractCheck(TestResponse $response, string $operationId, int $status,
         expect($actual)->toBe($mediaType);
     }
 
-    $schema = $content[$actual]['schema'] ?? null;
+    $schema = app(OpenApi::class)->resolve(is_array($content[$actual]['schema'] ?? null) ? $content[$actual]['schema'] : []);
 
-    if ($actual !== 'application/json' || ! is_array($schema)) {
+    expect($schema)->not->toBe([], "no schema: {$operationId} {$status} documents {$actual} without saying what it looks like");
+
+    if (($schema['type'] ?? null) === 'string' && ($schema['format'] ?? null) === 'binary') {
+        $sent = $response->headers->has('Content-Disposition');
+        $documents = in_array('content-disposition', array_map('strtolower', array_keys($documented['headers'] ?? [])), true);
+
+        expect($documents)->toBe($sent, "{$operationId} {$status}: the file ".($sent ? 'is sent with a Content-Disposition, which the document does not list' : 'is documented with a Content-Disposition, which is not sent'));
+
+        if ($sent) {
+            expect((string) $response->headers->get('Content-Disposition'))->toMatch('/^(attachment|inline)(;|$)/', "{$operationId} {$status} Content-Disposition");
+        }
+
+        return;
+    }
+
+    if ($actual !== 'application/json') {
         return;
     }
 

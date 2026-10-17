@@ -31,8 +31,12 @@ info:
     - `write`: the content of an inventory, that is items, attachments, exports and imports (create, change, delete);
     - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete).
 
-    The abilities are independent: `write` does not include `read`. A request made with a token that lacks the ability is
-    answered with `403` and the code `token_ability_missing`.
+    The abilities are independent: `write` and `manage` do not include `read`. A token that cannot read can hardly be
+    used, since the ids that the other operations need are found with `GET`: give `read` along with the others. What a
+    `write` operation answers is the resource it wrote (the item, the attachment, the export or the import), so `write`
+    sees what it writes. `manage` can delete a workspace or an inventory with all the data in it: give it only to what
+    needs it. A request made with a token that lacks the ability is answered with `403` and the code
+    `token_ability_missing`.
 
     A token never goes beyond its owner. Whatever its abilities, it can do only what the owner may do in each workspace
     with their role: `owner`, `editor` or `viewer`. A resource of a workspace the owner does not belong to is answered
@@ -42,12 +46,18 @@ info:
     ## Rate limits
 
     Each token may make 120 requests per minute by default (the administrator of the instance can change it). Every
-    answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`. Beyond the limit the answer is `429` with the code
+    request made with a token counts, those that are refused too. Beyond the limit the answer is `429` with the code
     `too_many_requests` and a `Retry-After` header, the number of seconds to wait.
 
     Some operations have a stricter limit of their own, counted per user: creating a workspace, uploading a file,
-    asking for an export, sending or re-reading a file to import. They are `429` too, with the same headers. The public
-    template catalogue has its own limit, per network address.
+    asking for an export, sending or re-reading a file to import. A request that is refused before it gets that far (a
+    token that lacks the ability, for instance) does not use it up. Past it the answer is `429` as well, with
+    `Retry-After`. The public template catalogue has its own limit, per network address.
+
+    Answers carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`. When several limits apply to a request (the token's
+    and the operation's), the headers describe the one with the fewest requests left: on an export they are those of the
+    export limit as soon as it is closer than the token's. On a `429` they are those of the limit that was exceeded,
+    with `Retry-After`.
 
     ## Errors
 
@@ -897,7 +907,7 @@ paths:
                   default: false
                 options:
                   oneOf:
-                    - $ref: '#/components/schemas/FieldOptions'
+                    - $ref: '#/components/schemas/FieldOptionsInput'
                     - type: 'null'
                   description: The options of the type. Each type fills in its defaults.
       responses:
@@ -1075,7 +1085,7 @@ paths:
                   type: boolean
                 options:
                   oneOf:
-                    - $ref: '#/components/schemas/FieldOptions'
+                    - $ref: '#/components/schemas/FieldOptionsInput'
                     - type: 'null'
       responses:
         '200':
@@ -1986,6 +1996,10 @@ paths:
         '200':
           description: The thumbnail.
           headers:
+            Content-Disposition:
+              description: Always `inline; filename=thumbnail.jpg`.
+              schema:
+                type: string
             Cache-Control:
               description: Always `private, max-age=3600`.
               schema:
@@ -2573,7 +2587,8 @@ paths:
       description: >-
         Sends a spreadsheet (XLSX, ODS) or a text file (CSV, TSV, TXT) of 10 MB at most by default. It is read at once:
         the answer lists the columns, a guess of the type of field each looks like and a proposed `mapping`. Nothing is
-        added to the inventory until you start the import. Editors and owners only. A user can have 3 unfinished imports
+        added to the inventory until you start the import. A token without `manage` is not proposed new fields (the
+        columns that match no field are `ignore`). Editors and owners only. A user can have 3 unfinished imports
         of an inventory at a time by default, and sends 10 files a minute by default.
       x-ability: write
       requestBody:
@@ -2974,7 +2989,8 @@ paths:
         Says where each column goes and starts the import: a worker converts, checks and adds the rows in one
         transaction, and creates the new fields. `mapping` has one entry per column to use; a column left out is
         ignored. A required field of the inventory must be mapped. Creating fields (`target: new`) needs the right to
-        change the fields (editors and owners). The answer is the import, `pending`; poll it. An inventory holds 10000
+        change the fields (editors and owners) and, for a token, the `manage` permission on top of `write`: with
+        `write` alone the mapping can only go to existing fields (`cannot_manage_fields` otherwise). The answer is the import, `pending`; poll it. An inventory holds 10000
         items by default and a file 10000 rows.
       x-ability: write
       requestBody:
@@ -3121,7 +3137,7 @@ paths:
             - code: field_name_taken
               description: The inventory already has a field with this name (with `column`).
             - code: cannot_manage_fields
-              description: The user may not create fields (with `column`).
+              description: The user may not create fields, or the token lacks `manage`, which creating a field takes (with `column`).
             - code: required_field_unmapped
               description: A required field has no column (with `field`).
             - code: nothing_mapped
@@ -3703,7 +3719,7 @@ components:
       required:
         - id
         - label
-      properties:
+      properties: &choiceProperties
         id:
           type: string
           pattern: ^[a-z0-9]{8}$
@@ -3727,14 +3743,19 @@ components:
             - indigo
             - purple
             - pink
+    ChoiceInput:
+      type: object
+      description: A choice of a single or multiple choice field as you send it, with no `id` for a new one.
+      required:
+        - label
+      properties: *choiceProperties
     FieldOptions:
       type: object
       description: >-
-        The options of a field. Which ones exist depends on its type; a type without options has an empty object, and an
-        option the type does not have is refused with `422`. When you change a field, the options you send are merged
-        over the existing ones and an option sent as `null` goes back to its default.
+        The options of a field, as answered. Which ones exist depends on its type; a type without options has an empty
+        object. What you send is `FieldOptionsInput`.
       additionalProperties: false
-      properties:
+      properties: &fieldOptionProperties
         max_length:
           type:
             - integer
@@ -3804,6 +3825,23 @@ components:
           description: '`select` and `multiselect`: the choices, at least one. The list you send replaces the existing one.'
           items:
             $ref: '#/components/schemas/Choice'
+    FieldOptionsInput:
+      type: object
+      description: >-
+        The options you send for a field: the ones of `FieldOptions`, with the choices as `ChoiceInput`. Which ones exist
+        depends on its type, and an option the type does not have is refused with `422`. When you change a field, the
+        options you send are merged over the existing ones and an option sent as `null` goes back to its default.
+      additionalProperties: false
+      properties:
+        <<: *fieldOptionProperties
+        choices:
+          type:
+            - array
+            - 'null'
+          maxItems: 200
+          description: '`select` and `multiselect`: the choices, at least one. The list you send replaces the existing one.'
+          items:
+            $ref: '#/components/schemas/ChoiceInput'
     Field:
       type: object
       description: A typed column of an inventory.
@@ -4509,8 +4547,28 @@ components:
           type: boolean
         options:
           type: object
-          description: The options of the field as the template file gives them (see `FieldOptions`); `choices` list `TemplateChoice`.
+          description: The options of the field as the template file gives them (see `FieldOptions` for what each one means); `choices` list `TemplateChoice`.
           properties:
+            max_length:
+              type: integer
+            decimals:
+              type: integer
+            min:
+              type:
+                - string
+                - number
+            max:
+              type:
+                - string
+                - number
+            unit:
+              type: string
+            currency:
+              type: string
+            format:
+              type: string
+            max_files:
+              type: integer
             choices:
               type: array
               items:

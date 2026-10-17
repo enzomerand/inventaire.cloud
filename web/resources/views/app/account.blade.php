@@ -216,9 +216,9 @@
                                 <label class="form-check">
                                     <input type="checkbox" class="form-check-input" name="abilities" value="manage" x-model="form.abilities">
                                     <span class="form-check-label">{{ __('Manage') }}</span>
-                                    <span class="form-check-description">{{ __('Create, change and delete workspaces, inventories and fields.') }}</span>
+                                    <span class="form-check-description">{{ __('Create, change and delete workspaces, inventories and fields, including deleting a workspace or an inventory with all its data.') }}</span>
                                 </label>
-                                <div class="form-hint" id="api-token-abilities-hint">{{ __('Choose at least one. Each permission stands alone: a token that can only write cannot read.') }}</div>
+                                <div class="form-hint" id="api-token-abilities-hint">{{ __('Choose at least one. Each permission stands alone: without Read a token can hardly be used, since the identifiers are found by reading. What a token writes is sent back to it.') }}</div>
                                 <div class="text-danger small" id="api-token-abilities-error" :hidden="!errors.abilities" x-text="errors.abilities"></div>
                             </fieldset>
 

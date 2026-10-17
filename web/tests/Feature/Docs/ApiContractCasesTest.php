@@ -119,7 +119,7 @@ describe('the errors', function (): void {
     it('answers 422 with the faults of the body under their keys', function (): void {
         $world = contractWorld();
 
-        $response = contractCall($this, $world['owner'], 'createWorkspace', 'POST', '/api/v1/workspaces', ['name' => '']);
+        $response = contractCall($this, $world['owner'], 'createWorkspace', 'POST', '/api/v1/workspaces', ['name' => ''], valid: false);
         contractCheck($response, 'createWorkspace', 422);
         expect($response->json('errors'))->toHaveKey('name');
 
@@ -134,7 +134,7 @@ describe('the errors', function (): void {
         config(['inventories.max_items' => 1]);
         $world = contractWorld();
 
-        $response = contractCall($this, $world['owner'], 'createItem', 'POST', contractUri($world['inventory'], '/items'), ['values' => []]);
+        $response = contractCall($this, $world['owner'], 'createItem', 'POST', contractUri($world['inventory'], '/items'), ['values' => (object) []]);
 
         contractCheck($response, 'createItem', 409);
         expect(contractCodes('createItem', 409))->toContain((string) $response->json('code'))->and($response->json('limit'))->toBe(1);

@@ -39,6 +39,9 @@ final class OpenApi
     /** @var array<string, mixed>|null The parsed file, once read by this process. */
     private ?array $parsed = null;
 
+    /** @var string|null The hash of the content of the file the parsed document comes from. */
+    private ?string $hash = null;
+
     /**
      * @param  string|null  $path  The file to read; the specification shipped with the application when null.
      */
@@ -78,6 +81,17 @@ final class OpenApi
     public function raw(): array
     {
         return $this->parsed ??= $this->load();
+    }
+
+    /**
+     * The hash of the content of the file, which says whether what was made of the document (the page that shows it, for one) is still
+     * what the file says.
+     */
+    public function hash(): string
+    {
+        $this->raw();
+
+        return (string) $this->hash;
     }
 
     /**
@@ -305,7 +319,7 @@ final class OpenApi
             throw new RuntimeException('The OpenAPI document cannot be read: '.$this->path());
         }
 
-        $hash = hash('xxh128', $content);
+        $hash = $this->hash = hash('xxh128', $content);
 
         try {
             $cached = Cache::get(self::CACHE_KEY);

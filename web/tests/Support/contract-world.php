@@ -49,12 +49,22 @@ function contractUri(Inventory $inventory, string $suffix = ''): string
 /**
  * A call to an operation with a token that holds the ability the document says it needs (and only that one), the way a script makes it.
  *
+ * What the call sends is held to the document first: the body fits the `requestBody` of the operation, and the query holds only
+ * parameters the operation lists. A scenario that sends a mistake on purpose (to see the 422) says so with `$valid: false`.
+ *
  * @param  array<string, mixed>  $data
  * @param  array<string, string>  $headers
+ * @param  bool  $valid  Whether the body is meant to fit the document.
  */
-function contractCall(object $test, ?User $as, string $operationId, string $method, string $uri, array $data = [], array $headers = []): TestResponse
+function contractCall(object $test, ?User $as, string $operationId, string $method, string $uri, array $data = [], array $headers = [], bool $valid = true): TestResponse
 {
     $ability = contractOperations()[$operationId]['ability'] ?? null;
+
+    expect(contractUndocumentedQuery($operationId, $uri))->toBe([], "{$operationId} is called with query parameters its document does not list");
+
+    if ($valid) {
+        expect(contractRequestViolations($operationId, $data))->toBe([], "{$operationId} is called with a body that does not fit its document");
+    }
 
     if ($as === null || $ability === null) {
         // No token: the operation is public.
@@ -69,22 +79,18 @@ function contractCall(object $test, ?User $as, string $operationId, string $meth
 }
 
 /**
- * Sends a file to an operation with a token that holds the ability the document says it needs.
+ * Sends a file to an operation with a token that holds the ability the document says it needs. The fields of the form other than the
+ * file are held to the document as `contractCall()` holds a body.
  *
  * @param  array<string, mixed>  $data  More parts of the form.
  */
 function contractUpload(object $test, User $as, string $operationId, string $uri, UploadedFile $file, array $data = []): TestResponse
 {
+    expect(contractRequestViolations($operationId, ['file' => 'the bytes of the file'] + $data, 'multipart/form-data'))->toBe([], "{$operationId} is called with a form that does not fit its document");
+
     $token = tokenFor($as, [(string) contractOperations()[$operationId]['ability']]);
 
-    $test->flushSession();
-    $test->flushHeaders();
-    app('auth')->forgetGuards();
-
-    $response = $test->withToken($token)->post($uri, ['file' => $file] + $data, ['Accept' => 'application/json']);
-    $test->flushHeaders();
-
-    return $response;
+    return tokenUpload($test, $token, $uri, $file, $data);
 }
 
 /**

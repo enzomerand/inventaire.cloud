@@ -283,6 +283,45 @@ describe('the codes of the document', function (): void {
     });
 });
 
+/**
+ * The text of a section of the introduction, from its heading to the next one.
+ */
+function openApiSection(string $heading): string
+{
+    $description = (string) contractSpec()['info']['description'];
+    $start = strpos($description, "## {$heading}");
+
+    expect($start)->not->toBeFalse("no section {$heading}");
+
+    $rest = substr($description, (int) $start + strlen($heading) + 3);
+    $end = strpos($rest, "\n## ");
+
+    return trim(preg_replace('/\s+/', ' ', $end === false ? $rest : substr($rest, 0, $end)) ?? '');
+}
+
+describe('the introduction of the document', function (): void {
+    it('says what the abilities are not: they are independent, `write` answers what it wrote, and `manage` deletes data', function (): void {
+        $abilities = openApiSection('Abilities');
+
+        expect($abilities)->toContain('`write` and `manage` do not include `read`')
+            ->and($abilities)->toContain('can hardly be used')
+            ->and($abilities)->toContain('found with `GET`')
+            ->and($abilities)->toContain('is the resource it wrote')
+            ->and($abilities)->toContain('sees what it writes')
+            ->and($abilities)->toContain('can delete a workspace or an inventory with all the data in it');
+    });
+
+    it('says which limit the rate-limit headers describe, and that the limits of the endpoints answer with Retry-After', function (): void {
+        $limits = openApiSection('Rate limits');
+
+        expect($limits)->toContain('Every request made with a token counts, those that are refused too')
+            ->and($limits)->toContain('does not use it up')
+            ->and($limits)->toContain('the headers describe the one with the fewest requests left')
+            ->and($limits)->toContain('On a `429` they are those of the limit that was exceeded, with `Retry-After`')
+            ->and($limits)->toContain('Past it the answer is `429` as well, with `Retry-After`');
+    });
+});
+
 describe('the check of a body against a schema', function (): void {
     it('notices a body that does not fit', function (): void {
         $schema = contractSpec()['components']['schemas']['Workspace'];
