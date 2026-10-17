@@ -20,6 +20,9 @@ info:
     belong to the web application and are not part of this API: they refuse a request made with a token (`403`,
     `session_required`).
 
+    Send the token alone. A request that carries the session cookie of the web application as well is answered with `403`
+    and the code `token_with_session`, whatever the token can do: with both, it would be unclear which of the two decides.
+
     ## Abilities
 
     A token carries one or more abilities, and every operation of this document names the one it needs in `x-ability`:
@@ -51,7 +54,7 @@ info:
     An error always has a JSON body, whatever the `Accept` header:
 
     - `{"message": "…"}` for `401`, `403` and `404`; the message is for people and may change. `403` has a `code` when a
-      machine-readable reason exists (`token_ability_missing`, `session_required`), `404` has one for the few cases that
+      machine-readable reason exists (`token_ability_missing`, `token_with_session`, `session_required`), `404` has one for the few cases that
       are not a plain "not found";
     - `{"message": "…", "code": "…"}` for `409`, `429` and `503`, where `code` is the reason to switch on. A `409` that
       comes from a quota also has a `limit`, the number that was crossed;

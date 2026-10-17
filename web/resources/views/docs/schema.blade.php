@@ -29,12 +29,19 @@
             <div class="text-secondary small text-break mb-1" lang="en">{{ $detail }}</div>
         @endforeach
 
-        <x-docs.rows :rows="$schema['rows']" :label="__('Properties of :schema', ['schema' => $schema['name']])" />
+        @php
+            // Worked out here and handed over as a variable: a `=>` in a bound attribute reads as an arrow function to the Alpine guard.
+            $schemaLabel = __('Properties of :schema', ['schema' => $schema['name']]);
+        @endphp
+        <x-docs.rows :rows="$schema['rows']" :label="$schemaLabel" />
 
         @if ($schema['variants'] !== [])
             <p class="mb-2">{{ __('One of these shapes:') }}</p>
 
             @foreach ($schema['variants'] as $variant)
+                @php
+                    $variantLabel = __('Properties of :schema', ['schema' => $variant['title'] !== '' ? $variant['title'] : $schema['name']]);
+                @endphp
                 <div class="mb-3">
                     <div class="mb-1">
                         @if ($variant['title'] !== '')
@@ -45,7 +52,7 @@
                     @if ($variant['documentation']->toHtml() !== '')
                         <div class="markdown mb-2" lang="en">{{ $variant['documentation'] }}</div>
                     @endif
-                    <x-docs.rows :rows="$variant['rows']" :label="__('Properties of :schema', ['schema' => $variant['title'] !== '' ? $variant['title'] : $schema['name']])" />
+                    <x-docs.rows :rows="$variant['rows']" :label="$variantLabel" />
                 </div>
             @endforeach
         @endif

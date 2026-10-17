@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\View\Components;
 
+use App\Auth\TokenAbility;
 use Illuminate\Contracts\View\View;
 use Illuminate\View\Component;
 
@@ -21,7 +22,8 @@ class ClientMessages extends Component
      *
      * Each string is wrapped in __() with its English source text so the
      * translation extractor and lang/*.json files stay the single source of
-     * truth. Add a key here whenever a script needs a new user-facing string.
+     * truth. Add a key here whenever a script needs a new user-facing string. The names of the permissions of an API token
+     * (`tokens.ability.*`) are the exception: they are added at the end from {@see TokenAbility::label()}.
      *
      * @return array<string, string>
      */
@@ -66,9 +68,6 @@ class ClientMessages extends Component
             'account.notice.code_sent' => __('A code was sent to your email address.'),
             'account.error.last_administrator' => __('You are the last administrator of this instance: make somebody else an administrator first (php artisan inventaire:make-admin).'),
             'account.error.sole_owner' => __('You are the only owner of workspaces that other people belong to: hand them over or delete them first.'),
-            'tokens.ability.read' => __('Read'),
-            'tokens.ability.write' => __('Write'),
-            'tokens.ability.manage' => __('Manage'),
             'tokens.created' => __('Created :date'),
             'tokens.last_used' => __('Last used :date'),
             'tokens.never_used' => __('Never used'),
@@ -314,7 +313,24 @@ class ClientMessages extends Component
             'imports.notice.completed.one' => __('Import finished: :count item imported.'),
             'imports.notice.completed.other' => __('Import finished: :count items imported.'),
             'imports.notice.failed' => __('The import failed.'),
-        ];
+        ] + $this->tokenAbilityLabels();
+    }
+
+    /**
+     * The names of the permissions of an API token, under the keys `tokens.ability.<ability>`: {@see TokenAbility::label()} is the
+     * one place that says how a permission is called, so that the page and the script cannot disagree.
+     *
+     * @return array<string, string>
+     */
+    private function tokenAbilityLabels(): array
+    {
+        $labels = [];
+
+        foreach (TokenAbility::cases() as $ability) {
+            $labels['tokens.ability.'.$ability->value] = $ability->label();
+        }
+
+        return $labels;
     }
 
     /**

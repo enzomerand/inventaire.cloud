@@ -252,9 +252,10 @@ describe('the codes of the document', function (): void {
 
     it('include every code the API writes as a literal, but those of the pages that are not part of it', function (): void {
         // Sent by the sign-in, the account, the installer and the guards of the web front: not operations of this document.
+        // `token_with_session` is the guard of every operation that asks for an ability: the description of the document says it once, under "Authentication".
         $outside = [
             'account_not_found', 'deletion_code_exhausted', 'deletion_code_expired', 'deletion_code_wrong', 'login_code_locked',
-            'not_installed', 'not_stateful', 'session_required', 'setup_token_required',
+            'not_installed', 'not_stateful', 'session_required', 'setup_token_required', 'token_with_session',
         ];
         $emitted = contractEmittedCodes();
         $undocumented = array_diff(array_keys($emitted['literal']), array_keys(contractDocumentedCodes()), $outside);
@@ -346,21 +347,35 @@ describe('OpenApi', function (): void {
             ->and($document['paths'])->toBe(contractSpec()['paths']);
     });
 
-    it('keeps the parsed document in the cache under the hash of its content, so a new content is a new entry', function (): void {
+    it('keeps the parsed document in the cache next to the hash of its content, in one entry that a new content replaces', function (): void {
         Cache::flush();
 
-        $first = new OpenApi(contractScratchSpec("openapi: 3.1.0\ninfo:\n  title: One\n"));
-        $second = new OpenApi(contractScratchSpec("openapi: 3.1.0\ninfo:\n  title: Two\n"));
+        $one = "openapi: 3.1.0\ninfo:\n  title: One\n";
+        $two = "openapi: 3.1.0\ninfo:\n  title: Two\n";
+        $first = new OpenApi(contractScratchSpec($one));
+        $second = new OpenApi(contractScratchSpec($two));
 
         expect($first->raw()['info']['title'])->toBe('One')
-            ->and($second->raw()['info']['title'])->toBe('Two');
+            ->and(Cache::get('openapi:v1'))->toBe(['hash' => hash('xxh128', $one), 'document' => ['openapi' => '3.1.0', 'info' => ['title' => 'One']]]);
 
-        $key = 'openapi:v1:'.hash('xxh128', "openapi: 3.1.0\ninfo:\n  title: One\n");
-
-        expect(Cache::get($key)['info']['title'])->toBe('One');
+        // The other content is read and parsed again, not taken for this one, and takes the place of the entry.
+        expect($second->raw()['info']['title'])->toBe('Two')
+            ->and(Cache::get('openapi:v1'))->toBe(['hash' => hash('xxh128', $two), 'document' => ['openapi' => '3.1.0', 'info' => ['title' => 'Two']]])
+            ->and(array_filter(array_keys(Cache::getStore()->all()), fn (string $key): bool => str_starts_with($key, 'openapi')))->toBe(['openapi:v1']);
 
         // A file that is gone is read from the cache no more: the content is what is asked, so it is read first.
         expect(fn () => (new OpenApi('/no/such/file.yaml'))->raw())->toThrow(RuntimeException::class);
+    });
+
+    it('parses the file again when the entry of the cache is damaged, and replaces it', function (): void {
+        $content = "openapi: 3.1.0\ninfo:\n  title: One\n";
+
+        foreach (['plain text', ['hash' => hash('xxh128', $content)], ['hash' => hash('xxh128', $content), 'document' => 'no']] as $damaged) {
+            Cache::forever('openapi:v1', $damaged);
+
+            expect((new OpenApi(contractScratchSpec($content)))->raw()['info']['title'])->toBe('One')
+                ->and(Cache::get('openapi:v1')['document']['info']['title'])->toBe('One');
+        }
     });
 
     it('is parsed once by a process, however many times it is asked', function (): void {
@@ -370,7 +385,7 @@ describe('OpenApi', function (): void {
         Cache::flush();
 
         // The cache is not asked again.
-        expect($api->raw())->toBe($api->raw())->and(Cache::get('openapi:v1:'.hash('xxh128', (string) file_get_contents($api->path()))))->toBeNull();
+        expect($api->raw())->toBe($api->raw())->and(Cache::get('openapi:v1'))->toBeNull();
     });
 
     it('goes on without the cache when it cannot be used, and says so', function (): void {

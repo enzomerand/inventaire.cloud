@@ -221,8 +221,23 @@ describe('the command of an operation', function (): void {
     });
 
     it('sends a file for a form', function (): void {
-        expect(docsCurlFor('uploadAttachment'))->toContain('-F "file=@FILE"')->not->toContain('Content-Type')
-            ->and(docsCurlFor('createImport'))->toContain('-F "file=@FILE"');
+        expect(docsCurlFor('uploadAttachment'))->toContain("-F 'file=@FILE'")->not->toContain('Content-Type')
+            ->and(docsCurlFor('createImport'))->toContain("-F 'file=@FILE'");
+    });
+
+    it('quotes each field of a form as one word for the shell, whatever the value holds', function (): void {
+        $operation = [
+            'method' => 'post', 'path' => '/things', 'ability' => 'write', 'parameters' => [],
+            'operation' => ['requestBody' => ['content' => ['multipart/form-data' => ['schema' => [
+                'type' => 'object',
+                'required' => ['note'],
+                'properties' => ['note' => ['type' => 'string', 'example' => 'say "hi" $HOME `id` it\'s'], 'file' => ['type' => 'string', 'format' => 'binary']],
+            ]]]]],
+        ];
+
+        $command = (new CurlExample(app(OpenApi::class)))->for($operation);
+
+        expect($command)->toContain("-F 'note=say \"hi\" \$HOME `id` it'\\''s'");
     });
 
     it('is a command the shell reads as one: no quote is left open', function (): void {

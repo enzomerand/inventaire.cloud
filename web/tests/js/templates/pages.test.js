@@ -57,6 +57,7 @@ const ROUTES = {
     'api.v1.admin.settings.show': '/api/v1/admin/settings',
     'api.v1.templates.index': '/api/v1/templates',
     home: '/',
+    'docs.api': '/docs/api',
     'app.workspaces': '/app/workspaces',
 };
 
@@ -228,10 +229,6 @@ function render(path) {
 
         if ((found = expression.match(/^\$abilities\['(\w+)'\] \? '1' : '0'$/))) {
             return abilitiesOfPage()[found[1]] ? '1' : '0';
-        }
-
-        if (expression === "url('/docs/api')") {
-            return '/docs/api';
         }
 
         if (expression === 'json_encode($types, JSON_THROW_ON_ERROR)') {

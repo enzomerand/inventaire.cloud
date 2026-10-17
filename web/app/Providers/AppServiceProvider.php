@@ -112,8 +112,11 @@ class AppServiceProvider extends ServiceProvider
      *
      * `api-tokens` is the pace of a token (`api_token_requests_per_minute`), whatever it asks for: it is counted for each token
      * apart, on top of the limits of the endpoints, and by the token rather than the person, so that the script of one of their
-     * tokens cannot use up what another one is for. A request that has no token (the web front's session) is not counted. It is
-     * applied to every route behind `auth:sanctum`, and runs after the authentication, which is what tells it the token.
+     * tokens cannot use up what another one is for. A request that has no token (the web front's session) is not counted. A
+     * request that sends a token and a session is signed in by the session (Sanctum looks at it first) and is refused later by
+     * `token:<ability>`: it is counted all the same, by the hash of what it sends as a token, so that sending both is no way
+     * around the pace. It is applied to every route behind `auth:sanctum`, and runs after the authentication, which is what
+     * tells it the token.
      *
      * `api-token-creation` is the one of the endpoint that makes a token (`api_token_creations_per_hour`), keyed on the user: a
      * token is a secret that the person copies, and none is worth making in a loop.
@@ -123,9 +126,16 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('api-tokens', function (Request $request): Limit {
             $user = $request->user();
             $token = $user instanceof User ? $user->currentAccessToken() : null;
+            $bearer = $request->bearerToken();
+            $perMinute = config()->integer('inventories.api_token_requests_per_minute');
 
-            return $token instanceof PersonalAccessToken
-                ? Limit::perMinute(config()->integer('inventories.api_token_requests_per_minute'))->by('api-token:'.$token->getKey())
+            if ($token instanceof PersonalAccessToken) {
+                return Limit::perMinute($perMinute)->by('api-token:'.$token->getKey());
+            }
+
+            // A bearer the session outranks: the token is not the one that signed the request in, so the text itself is the key.
+            return $bearer !== null
+                ? Limit::perMinute($perMinute)->by('api-token-bearer:'.hash('sha256', $bearer))
                 : Limit::none();
         });
 

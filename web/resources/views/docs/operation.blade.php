@@ -70,6 +70,10 @@
         @endif
 
         @if ($op['body'] !== null)
+            @php
+                // Worked out here and handed over as a variable: a `=>` in a bound attribute reads as an arrow function to the Alpine guard.
+                $bodyLabel = __('Properties of the body of :operation', ['operation' => $op['id']]);
+            @endphp
             <h4 class="h5">
                 {{ __('Request body') }}
                 @unless ($op['body']['required'])
@@ -78,7 +82,7 @@
             </h4>
             @foreach ($op['body']['contents'] as $content)
                 <p class="mb-2"><code>{{ $content['mediaType'] }}</code> <x-docs.type :tokens="$content['type']" /></p>
-                <x-docs.rows :rows="$content['rows']" :label="__('Properties of the body of :operation', ['operation' => $op['id']])" />
+                <x-docs.rows :rows="$content['rows']" :label="$bodyLabel" />
             @endforeach
         @endif
 
@@ -91,6 +95,7 @@
                     '4' => 'bg-orange-lt',
                     default => 'bg-red-lt',
                 };
+                $responseLabel = __('Properties of the response :status of :operation', ['status' => $response['status'], 'operation' => $op['id']]);
             @endphp
 
             <div class="mb-3">
@@ -110,7 +115,7 @@
 
                 @forelse ($response['contents'] as $content)
                     <div class="small mb-2"><code>{{ $content['mediaType'] }}</code> <x-docs.type :tokens="$content['type']" /></div>
-                    <x-docs.rows :rows="$content['rows']" :label="__('Properties of the response :status of :operation', ['status' => $response['status'], 'operation' => $op['id']])" />
+                    <x-docs.rows :rows="$content['rows']" :label="$responseLabel" />
                 @empty
                     <div class="small text-secondary mb-2">{{ __('No body') }}</div>
                 @endforelse

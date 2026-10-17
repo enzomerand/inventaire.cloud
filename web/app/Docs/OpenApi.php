@@ -16,9 +16,10 @@ use Throwable;
  * The OpenAPI 3.1 description of the public API (`resources/openapi/v1.yaml`), written by hand and checked by the contract
  * tests (`tests/Feature/Docs`), as an array.
  *
- * The file is parsed once and the result kept in the application cache under a key made of the hash of its content, so a
- * new version of the file is a new entry and nothing has to be cleared (`inventaire:upgrade` leaves the application cache
- * alone on purpose). A cache that cannot be reached does not fail the request: the file is parsed for this process only.
+ * The file is parsed once and the result kept in the application cache, under one key, next to the hash of the content it was
+ * made from: a new version of the file has another hash, is parsed again and replaces the entry, so nothing has to be cleared
+ * and nothing piles up (`inventaire:upgrade` leaves the application cache alone on purpose). A cache that cannot be reached
+ * does not fail the request: the file is parsed for this process only.
  *
  * Two consumers read it: `GET /api/v1/openapi.json` ({@see self::document()}) and the page `/docs/api` (the operations, and
  * the helpers that follow a `$ref` for rendering).
@@ -29,8 +30,8 @@ final class OpenApi
     /** The keys of a path item that are operations, in the order a page lists them. */
     public const METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 
-    /** The start of the key of the cache entry. */
-    private const CACHE_KEY_PREFIX = 'openapi:v1:';
+    /** The key of the cache entry: a pair `['hash' => hash of the content of the file, 'document' => the parsed file]`. */
+    private const CACHE_KEY = 'openapi:v1';
 
     /** How many `$ref` are followed in a row before giving up (a reference to a reference to...). */
     private const MAX_REFERENCE_DEPTH = 16;
@@ -304,18 +305,21 @@ final class OpenApi
             throw new RuntimeException('The OpenAPI document cannot be read: '.$this->path());
         }
 
-        $key = self::CACHE_KEY_PREFIX.hash('xxh128', $content);
+        $hash = hash('xxh128', $content);
 
         try {
-            $cached = Cache::get($key);
+            $cached = Cache::get(self::CACHE_KEY);
         } catch (Throwable $exception) {
             $this->cacheUnusable($exception);
             $cached = null;
         }
 
-        if (is_array($cached)) {
-            /** @var array<string, mixed> $cached */
-            return $cached;
+        // The entry of another version of the file (or a damaged one) is not this content's: parse again and replace it.
+        if (is_array($cached) && ($cached['hash'] ?? null) === $hash && is_array($cached['document'] ?? null)) {
+            /** @var array<string, mixed> $document */
+            $document = $cached['document'];
+
+            return $document;
         }
 
         $parsed = Yaml::parse($content);
@@ -325,7 +329,7 @@ final class OpenApi
         }
 
         try {
-            Cache::forever($key, $parsed);
+            Cache::forever(self::CACHE_KEY, ['hash' => $hash, 'document' => $parsed]);
         } catch (Throwable $exception) {
             $this->cacheUnusable($exception);
         }

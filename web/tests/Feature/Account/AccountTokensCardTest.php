@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Auth\TokenAbility;
 use App\Models\User;
+use App\View\Components\ClientMessages;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 
@@ -41,7 +42,13 @@ describe('the API tokens card of the account page', function (): void {
     it('links to the documentation of the API', function (): void {
         $this->actingAs(User::factory()->speaking('en')->create())->get(route('app.account'), ['Accept-Language' => 'en'])
             ->assertOk()
-            ->assertSee('<a href="'.url('/docs/api').'">API documentation</a>', false);
+            ->assertSee('<a href="/docs/api">API documentation</a>', false);
+    });
+
+    it('links to the documentation by its path, never by an address built from the Host header', function (): void {
+        $page = $this->actingAs(User::factory()->speaking('en')->create())->get(route('app.account'), ['Accept-Language' => 'en', 'Host' => 'evil.example'])->assertOk();
+
+        expect($page->getContent())->toContain('<a href="/docs/api">API documentation</a>')->not->toContain('evil.example/docs/api');
     });
 
     it('reads its list again when the security card has revoked every token', function (): void {
@@ -108,6 +115,13 @@ describe('the API tokens card of the account page', function (): void {
                 expect($messages["tokens.ability.{$ability->value}"])->toBe($ability->label());
             }
         }
+    });
+
+    it('takes the names of the permissions from TokenAbility::label() and writes none of its own', function (): void {
+        $source = (string) file_get_contents((string) (new ReflectionClass(ClientMessages::class))->getFileName());
+
+        expect($source)->toContain('TokenAbility::cases()')->toContain('$ability->label()')
+            ->and($source)->not->toContain("__('Read')")->not->toContain("__('Write')")->not->toContain("__('Manage')");
     });
 
     it('is translated', function (): void {

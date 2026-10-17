@@ -48,13 +48,21 @@ describe('GET /api/v1/openapi.json', function (): void {
             ->and($response->getContent())->not->toContain('evil.example');
     });
 
-    it('may be kept by any cache for an hour, and says so', function (): void {
+    it('may be kept by a browser for an hour, and says so', function (): void {
         $response = $this->getJson('/api/v1/openapi.json');
 
-        expect($response->headers->hasCacheControlDirective('public'))->toBeTrue()
+        expect($response->headers->hasCacheControlDirective('private'))->toBeTrue()
             ->and($response->headers->getCacheControlDirective('max-age'))->toBe('3600')
-            ->and($response->headers->hasCacheControlDirective('private'))->toBeFalse()
+            ->and($response->headers->hasCacheControlDirective('public'))->toBeFalse()
             ->and($response->headers->getCookies())->toBe([]);
+    });
+
+    it('is never public, not even for a request of the web front, whose answer carries the session cookie', function (): void {
+        $response = $this->actingAs(inventoryPerson())->getJson('/api/v1/openapi.json', frontend());
+
+        expect($response->headers->hasCacheControlDirective('private'))->toBeTrue()
+            ->and($response->headers->hasCacheControlDirective('public'))->toBeFalse()
+            ->and($response->headers->getCacheControlDirective('max-age'))->toBe('3600');
     });
 
     it('needs no account, no token, and ignores one that is wrong', function (): void {
@@ -101,8 +109,9 @@ describe('GET /api/v1/openapi.json', function (): void {
     it('is served from the cache once parsed: the file is not parsed for each request', function (): void {
         $this->getJson('/api/v1/openapi.json')->assertOk();
 
-        $key = 'openapi:v1:'.hash('xxh128', (string) file_get_contents(app(OpenApi::class)->path()));
+        $entry = cache()->get('openapi:v1');
 
-        expect(cache()->has($key))->toBeTrue();
+        expect($entry['hash'])->toBe(hash('xxh128', (string) file_get_contents(app(OpenApi::class)->path())))
+            ->and($entry['document']['openapi'])->toBe(contractSpec()['openapi']);
     });
 });

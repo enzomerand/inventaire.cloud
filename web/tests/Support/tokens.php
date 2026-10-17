@@ -135,6 +135,26 @@ function tokenCall(object $test, string $token, string $method, string $uri, arr
 }
 
 /**
+ * A call that carries a session (the person is signed in at their browser, the headers are the front's) and, on top of it, a token.
+ *
+ * @param  array<string, mixed>  $data
+ * @param  array<string, string>  $headers
+ */
+function tokenWithSessionCall(object $test, User $as, string $token, string $method, string $uri, array $data = [], array $headers = []): TestResponse
+{
+    $test->flushSession();
+    $test->flushHeaders();
+    app('auth')->forgetGuards();
+    $test->actingAs($as);
+
+    $response = $test->withToken($token)->json($method, $uri, $data, frontend($headers));
+
+    $test->flushHeaders();
+
+    return $response;
+}
+
+/**
  * The text of a new API token of a person (the part that goes after "Bearer ").
  *
  * @param  list<string>  $abilities  What the token may do: `read`, `write`, `manage`, or `*` for all of it.

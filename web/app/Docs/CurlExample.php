@@ -108,7 +108,8 @@ final class CurlExample
 
             $resolved = $this->api->resolve($property);
             $value = ($resolved['format'] ?? null) === 'binary' ? '@FILE' : $this->text($this->sample($property, 1));
-            $arguments[] = '-F "'.$name.'='.$value.'"';
+            // One word for the shell, whatever the value holds (a quote, a `$`...), as `-d` is above.
+            $arguments[] = '-F '.escapeshellarg($name.'='.$value);
         }
 
         return $arguments;

@@ -502,6 +502,7 @@
     "Send": "Envoyer",
     "Send a new code": "Envoyer un nouveau code",
     "Send at least one setting.": "Envoyez au moins un réglage.",
+    "Send either a session cookie or an API token, not both.": "Envoyez soit un cookie de session, soit un jeton d'API, pas les deux.",
     "Send me a code": "Envoyez-moi un code",
     "Send the code": "Envoyer le code",
     "Sender address": "Adresse d'expédition",

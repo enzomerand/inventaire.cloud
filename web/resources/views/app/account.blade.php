@@ -96,7 +96,7 @@
                     <div class="card-body">
                         <p>{{ __('An API token lets a script or another application use your inventories without your password. It acts with your rights in your workspaces, never beyond them, and stops working when it expires or when you revoke it.') }}</p>
                         <p class="mb-0">
-                            <a href="{{ url('/docs/api') }}">{{ __('API documentation') }}</a>
+                            <a href="{{ route('docs.api', absolute: false) }}">{{ __('API documentation') }}</a>
                         </p>
                     </div>
 
