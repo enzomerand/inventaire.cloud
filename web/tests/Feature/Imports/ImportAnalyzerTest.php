@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Inventories\Exceptions\ImportFileException;
 use App\Inventories\Imports\ImportAnalyzer;
 use App\Inventories\Imports\ImportFormat;
+use App\Inventories\Imports\ImportRows;
 use App\Models\InventoryField;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -33,6 +34,29 @@ function importGuess(array $values, string $locale = 'en'): string
 
     return $analysis->columns[0]['guess'];
 }
+
+describe('how far into the file it looks', function (): void {
+    it('looks at the first thousand lines for the rows, the empty ones counted', function (): void {
+        $blank = fn (int $lines): string => str_repeat("\r\n", $lines);
+        $samples = fn (int $lines): array => array_column(importAnalyze(importFile($blank($lines)."Name\r\nDrill\r\n"), options: ['has_header' => false])->columns, 'samples');
+
+        // The two rows are the 999th and the 1 000th line.
+        expect($samples(998))->toBe([['Name', 'Drill']])
+            // The second is the 1 001st: not seen.
+            ->and($samples(999))->toBe([['Name']]);
+
+        // A file with nothing in its first thousand lines holds no row, as far as the analysis can tell.
+        expect(fn () => importAnalyze(importFile($blank(1000)."Name\r\nDrill\r\n")))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::EMPTY));
+    });
+
+    it('does not read the rest of a spreadsheet whose rows hold nothing, though it has more than a sheet has lines', function (): void {
+        // The library takes time to build every row, whatever it holds: a million of them, each with cells in it, is not read to the end.
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['Name'], ['Drill']]), 2, '<table:table-row table:number-rows-repeated="'.ImportRows::MAX_LINES.'"><table:table-cell/></table:table-row>');
+
+        expect(array_column(importAnalyze($path, ImportFormat::Ods)->columns, 'header'))->toBe(['Name']);
+    });
+});
 
 describe('the type of a column', function (): void {
     it('is guessed from its values', function (array $values, string $expected): void {

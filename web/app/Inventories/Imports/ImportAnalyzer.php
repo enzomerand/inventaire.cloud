@@ -20,7 +20,7 @@ use Illuminate\Support\Collection;
  *
  * A column has a header (the first row of the file, when the options say it is a header; else `Column A`, `Column B`..., and a first
  * row that is empty is no header: the data begin on the second row), three samples, and the type
- * of field its values look like, judged on the first {@see self::SAMPLE_ROWS} rows: yes/no when every value is, a date or a date and
+ * of field its values look like, judged on the first {@see self::SAMPLE_ROWS} rows (within the first {@see self::SAMPLE_LINES} lines): yes/no when every value is, a date or a date and
  * time, a time of the day, a number (an amount when every value has a currency, a percentage when every value has a percent sign),
  * an email address, an address of a web page, a long text when a value has a line break or is long, else a text. A column with nothing
  * in it is a text. A number that a spreadsheet would show with its leading zeros (`007`, a phone number), or that is as long as a
@@ -40,6 +40,12 @@ final class ImportAnalyzer
 {
     /** Rows read to judge the type of a column. */
     public const SAMPLE_ROWS = 50;
+
+    /**
+     * Lines of the file, the empty ones counted, that are looked at to find those rows: a file whose first lines are rows that hold
+     * nothing is not read for as long as it lasts (the library takes time to build each of them, empty or not).
+     */
+    public const SAMPLE_LINES = 1000;
 
     /** Samples shown for a column. */
     public const SAMPLES = 3;
@@ -68,7 +74,7 @@ final class ImportAnalyzer
         $data = [];
         $width = 0;
 
-        foreach ($rows->rows() as $number => $cells) {
+        foreach ($rows->rows(self::SAMPLE_LINES) as $number => $cells) {
             $width = max($width, count($cells));
 
             // The header is the first row of the file, and only that: when it is empty, the columns are named by their letters and the

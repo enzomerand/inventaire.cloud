@@ -93,11 +93,14 @@ final class ImportRows
     /**
      * The rows that have something in them, by their number in the file.
      *
+     * @param  int|null  $lines  Stop after this many lines of the file, the empty ones counted, whatever they held: the analysis looks at
+     *                           the beginning of the file, and a file of rows that look full and hold nothing would keep it for as long
+     *                           as the file lasts.
      * @return Generator<int, list<ImportCell>>
      *
      * @throws ImportFileException When the file cannot be read, has more lines than {@see self::MAX_LINES}, or a row uses too many columns.
      */
-    public function rows(): Generator
+    public function rows(?int $lines = null): Generator
     {
         if ($this->closed) {
             throw new ImportFileException(ImportFileException::UNREADABLE);
@@ -112,7 +115,13 @@ final class ImportRows
             $number = 0;
 
             foreach ($sheet->getRowIterator() as $row) {
-                if (++$number > self::MAX_LINES) {
+                $number++;
+
+                if ($lines !== null && $number > $lines) {
+                    break;
+                }
+
+                if ($number > self::MAX_LINES) {
                     throw new ImportFileException(ImportFileException::TOO_MANY_LINES);
                 }
 
