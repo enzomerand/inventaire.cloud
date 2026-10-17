@@ -81,7 +81,7 @@ const CODES = {
  * @property {{ name: string }} author
  * @property {number} items_count
  * @property {number} fields_count
- * @property {{ sha256: string, size: number, download_url: string }} snapshot
+ * @property {{ sha256: string, size: number, download_url: string | null }} snapshot The frozen data; its address is null until the version is completed.
  * @property {null | { sha256: string, size: number, pages: number, download_url: string }} pdf
  * @property {null | {
  *     status: 'requested' | 'sending' | 'awaiting' | 'completed' | 'rejected' | 'cancelled' | 'failed',

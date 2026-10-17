@@ -166,6 +166,33 @@ describe('administration settings page', () => {
             expect(component.copyLabel).toBe('Copy');
         });
 
+        it('stops the timer of the button when the page is taken apart, so that nothing fires on a component that is gone', async () => {
+            Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText: vi.fn().mockResolvedValue(undefined) },
+                configurable: true,
+            });
+
+            await component.copyWebhook();
+
+            expect(component.copiedTimer).not.toBeNull();
+            expect(vi.getTimerCount()).toBe(1);
+
+            component.destroy();
+
+            expect(vi.getTimerCount()).toBe(0);
+            expect(component.copiedTimer).toBeNull();
+
+            vi.advanceTimersByTime(5000);
+
+            // The timer never fired: the button still says what it said when the component went.
+            expect(component.copied).toBe(true);
+        });
+
+        it('has nothing to stop when nothing was copied', () => {
+            expect(() => component.destroy()).not.toThrow();
+            expect(component.copiedTimer).toBeNull();
+        });
+
         it('selects the address and copies the selection when the page may not write to the clipboard', async () => {
             Object.defineProperty(navigator, 'clipboard', {
                 value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },

@@ -75,6 +75,18 @@ export default function adminSettings() {
         },
 
         /**
+         * Stops the timer that makes the button forget it copied, when the page is taken apart (Alpine calls `destroy()` when the
+         * element of the component is removed from the page, as it calls `init()` when it is set up): it would otherwise fire on a
+         * component nobody reads any more.
+         *
+         * @returns {void}
+         */
+        destroy() {
+            clearTimeout(this.copiedTimer);
+            this.copiedTimer = null;
+        },
+
+        /**
          * Copies the address of the webhook. Where the browser does not allow it (a page that is not served over https, a
          * refused permission), the address is selected instead, so that the keyboard can copy it.
          *

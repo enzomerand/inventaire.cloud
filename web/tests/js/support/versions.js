@@ -36,6 +36,7 @@ export function signature(status = 'awaiting', extra = {}) {
 /** An official version: completed, with its PDF, and nobody asked to sign, unless the test says otherwise. */
 export function version(id, extra = {}) {
     const number = extra.number ?? 3;
+    const completed = (extra.status ?? 'completed') === 'completed';
 
     return {
         id,
@@ -48,7 +49,8 @@ export function version(id, extra = {}) {
         author: { name: 'Ada Lovelace' },
         items_count: 12,
         fields_count: 4,
-        snapshot: { sha256: hash('a'), size: 4096, download_url: `${VERSIONS_URL}/${id}/snapshot` },
+        // As the API gives it: the address of the data only once the version is completed.
+        snapshot: { sha256: hash('a'), size: 4096, download_url: completed ? `${VERSIONS_URL}/${id}/snapshot` : null },
         pdf: { sha256: hash('b'), size: 2048, pages: 3, download_url: `${VERSIONS_URL}/${id}/pdf` },
         signature: null,
         abilities: { delete: true, cancel_signature: false, retry_signature: false },

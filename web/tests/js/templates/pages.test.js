@@ -6556,6 +6556,21 @@ describe('the pages under the real Alpine CSP build', () => {
                 }
             });
 
+            it('hides the button of the data when the record gives no address for them, and keeps the PDF', async () => {
+                await open([
+                    version('a', { number: 4, snapshot: { sha256: 'a'.repeat(64), size: 10, download_url: null } }),
+                ]);
+
+                const links = [...cards()[0].querySelectorAll('a.btn')].filter(visible);
+
+                expect(links.map((link) => link.textContent.trim())).toEqual(['PDF']);
+                expect(
+                    [...cards()[0].querySelectorAll('a.btn')]
+                        .filter((link) => link.textContent.trim() === 'Data (JSON)')
+                        .every((link) => link.hasAttribute('hidden')),
+                ).toBe(true);
+            });
+
             it('offers no file while the PDF is being written', async () => {
                 await open([onItsWay('a', 'pending')]);
 

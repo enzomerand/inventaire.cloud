@@ -5379,8 +5379,12 @@ components:
               type: integer
               description: Bytes.
             download_url:
-              type: string
-              description: The path of the file, relative to the host. It answers `409` (`version_not_ready`) until the version is completed.
+              type:
+                - string
+                - 'null'
+              description: >-
+                The path of the file, relative to the host. Null until the version is completed (`status` is `completed`), as the
+                download answers `409` (`version_not_ready`) before that.
         pdf:
           description: The official PDF. Null until the version is completed.
           oneOf:

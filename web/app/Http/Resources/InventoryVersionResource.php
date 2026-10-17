@@ -21,7 +21,7 @@ use Illuminate\Support\Carbon;
  *
  * ```
  * {"id", "number", "label", "status", "error", "frozen_at", "created_at", "author": {"name"}, "items_count", "fields_count",
- *  "snapshot": {"sha256", "size", "download_url"},
+ *  "snapshot": {"sha256", "size", "download_url": null | string},
  *  "pdf": null | {"sha256", "size", "pages", "download_url"},
  *  "signature": null | {"status", "error", "requested_at", "completed_at",
  *                       "signers": [{"name", "email", "status", "signed_at", "rejection_reason"}],
@@ -31,7 +31,8 @@ use Illuminate\Support\Carbon;
  *
  * `status` is `pending`, `running`, `completed` or `failed`; `error` is the message to show for a failed version, in the language of the
  * request, and null otherwise. `snapshot` describes the canonical JSON that was frozen (its SHA-256 is what the PDF and the signatures
- * vouch for); `pdf` is null until the PDF is written. `signature` is null for a version that no signature was asked for; its
+ * vouch for); its `download_url` is null until the version is completed, as the download answers `409` before that. `pdf` is null
+ * until the PDF is written. `signature` is null for a version that no signature was asked for; its
  * `status` is a {@see SignatureStatus}, its `error` the message for a request that failed or was lost, and `signed_pdf` is null until
  * the signed document is stored. The addresses (`download_url`) are paths of the application, to be followed with the session or the
  * token of the reader; the downloads answer `409` until the version is completed.
@@ -79,7 +80,8 @@ final class InventoryVersionResource extends JsonResource
             'snapshot' => [
                 'sha256' => $version->snapshot_sha256,
                 'size' => $version->snapshot_size,
-                'download_url' => $this->address('snapshot'),
+                // Like the download itself, which answers 409 until the version is completed: no address to follow before.
+                'download_url' => $completed ? $this->address('snapshot') : null,
             ],
             'pdf' => $completed && $version->pdf_sha256 !== null ? [
                 'sha256' => $version->pdf_sha256,

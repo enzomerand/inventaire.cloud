@@ -108,7 +108,8 @@ describe('freezing an inventory', function (): void {
                 'snapshot' => [
                     'sha256' => $version->snapshot_sha256,
                     'size' => $version->snapshot_size,
-                    'download_url' => versionApiUri($case['inventory'], $version, '/snapshot'),
+                    // Not before the version is completed: the download answers 409 until then.
+                    'download_url' => null,
                 ],
                 'pdf' => null,
                 'signature' => null,
@@ -382,6 +383,46 @@ describe('the limits', function (): void {
         tokenCall($this, tokenFor($owner, ['write']), 'POST', versionApiUri($case['inventory']))->assertStatus(202);
         tokenCall($this, tokenFor($owner, ['write']), 'POST', versionApiUri($case['inventory']))->assertStatus(429);
         versionApiPost($this, $owner, $case['inventory'])->assertStatus(429);
+    });
+});
+
+describe('the address of the data', function (): void {
+    beforeEach(function (): void {
+        Queue::fake();
+    });
+
+    it('is given only once the version is completed, as the download itself is: null while it is pending, running or failed', function (VersionStatus $status, bool $given): void {
+        $case = versionTableCase();
+        $version = InventoryVersion::factory()->create(['inventory_id' => $case['inventory']->id, 'status' => $status, 'snapshot_path' => 'versions/snapshot.json']);
+
+        $shown = inventoryCall($this, $case['team']['viewer'], 'GET', versionApiUri($case['inventory'], $version))->assertOk();
+        $listed = inventoryCall($this, $case['team']['viewer'], 'GET', versionApiUri($case['inventory']))->assertOk();
+        $address = versionApiUri($case['inventory'], $version, '/snapshot');
+
+        expect($shown->json('data.snapshot.download_url'))->toBe($given ? $address : null)
+            ->and($listed->json('data.0.snapshot.download_url'))->toBe($given ? $address : null)
+            // The size and the SHA-256 are the freeze's, and are given whatever the state.
+            ->and($shown->json('data.snapshot.sha256'))->toBe($version->snapshot_sha256)
+            ->and($shown->json('data.snapshot.size'))->toBe($version->snapshot_size);
+
+        if (! $given) {
+            inventoryCall($this, $case['team']['viewer'], 'GET', $address)->assertStatus(409)->assertJsonPath('code', 'version_not_ready');
+        }
+    })->with([
+        'pending' => [VersionStatus::Pending, false],
+        'running' => [VersionStatus::Running, false],
+        'failed' => [VersionStatus::Failed, false],
+        'completed' => [VersionStatus::Completed, true],
+    ]);
+
+    it('is an address that works once the version is completed', function (): void {
+        $case = versionTableCase();
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
+
+        $shown = inventoryCall($this, $case['team']['viewer'], 'GET', versionApiUri($case['inventory'], $version))->assertOk();
+
+        expect($shown->json('data.snapshot.download_url'))->toBe(versionApiUri($case['inventory'], $version, '/snapshot'));
+        attachmentGet($this, $case['team']['viewer'], $shown->json('data.snapshot.download_url'))->assertOk();
     });
 });
 

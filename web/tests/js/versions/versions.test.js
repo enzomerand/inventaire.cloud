@@ -134,6 +134,35 @@ describe('a version told for its card', () => {
         expect(row.error).toBe('');
     });
 
+    it('offers no data when the record gives no address for them: a completed version with none, whatever else it holds', () => {
+        const row = rowOf(version('v1', { snapshot: { sha256: 'a'.repeat(64), size: 10, download_url: null } }));
+
+        expect(row.dataUrl).toBeNull();
+        // The rest of the card is as it was.
+        expect(row.pdfUrl).toBe('/api/v1/inventories/tools/versions/v1/pdf');
+        expect(row.sha256).toBe('a'.repeat(64));
+    });
+
+    it('takes a record that has no snapshot at all for one with no data to download', () => {
+        const record = version('v1');
+
+        delete record.snapshot;
+
+        const row = rowOf(record);
+
+        expect(row.dataUrl).toBeNull();
+        expect(row.sha256).toBe('');
+    });
+
+    it('gets from the API no address for the data of a version that is not completed, and shows none', () => {
+        for (const status of ['pending', 'running', 'failed']) {
+            const record = version('v1', { status, pdf: null });
+
+            expect(record.snapshot.download_url).toBeNull();
+            expect(rowOf(record).dataUrl).toBeNull();
+        }
+    });
+
     it.each([
         ['pending', 'Waiting', 'bg-secondary-lt'],
         ['running', 'In progress', 'bg-blue-lt'],
