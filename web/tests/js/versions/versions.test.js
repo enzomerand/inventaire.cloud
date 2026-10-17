@@ -337,6 +337,15 @@ describe('a signer told for a card', () => {
         });
     });
 
+    it('says that a pending signer did not sign once the request is over', () => {
+        expect(signerRowOf(signer('Ada Lovelace'), 0, true)).toMatchObject({
+            statusLabel: 'Not signed',
+            badgeClass: 'bg-secondary-lt',
+        });
+        expect(signerRowOf(signer('Ada', { status: 'signed' }), 0, true).statusLabel).toBe('Signed');
+        expect(signerRowOf(signer('Ada', { status: 'rejected' }), 0, true).statusLabel).toBe('Refused');
+    });
+
     it('says when they signed', () => {
         const row = signerRowOf(signer('Ada Lovelace', { status: 'signed', signed_at: '2026-10-16T09:00:00Z' }), 0);
 

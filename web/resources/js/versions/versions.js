@@ -40,9 +40,13 @@ const SIGNATURE_BADGE_CLASSES = {
 /** The badge colors of the statuses of a signer. */
 const SIGNER_BADGE_CLASSES = {
     pending: 'bg-secondary-lt',
+    unsigned: 'bg-secondary-lt',
     signed: 'bg-green-lt',
     rejected: 'bg-red-lt',
 };
+
+/** The statuses of a request that is over without every signature: its pending signers will never sign it. */
+const CLOSED_SIGNATURE_STATUSES = ['rejected', 'cancelled', 'failed'];
 
 /** The codes the API gives to the refusals the page words itself (the answer carries a code, never a wording to trust). */
 const CODES = {
@@ -195,10 +199,12 @@ export function versionTitle(number) {
  *
  * @param {SignerRecord} signer
  * @param {number} index Their place in the list of the signers of the version.
+ * @param {boolean} [closed] Whether the request is over (refused, cancelled or failed): a signer still pending then reads "not signed", not "pending".
  * @returns {SignerRow}
  */
-export function signerRowOf(signer, index) {
-    const status = signer.status in SIGNER_BADGE_CLASSES ? signer.status : 'pending';
+export function signerRowOf(signer, index, closed = false) {
+    const known = ['pending', 'signed', 'rejected'].includes(signer.status) ? signer.status : 'pending';
+    const status = closed && known === 'pending' ? 'unsigned' : known;
     let detail = '';
 
     if (status === 'signed' && signer.signed_at) {
@@ -281,7 +287,7 @@ function signatureOf(version) {
             .filter((part) => part !== '')
             .join(DETAIL_SEPARATOR),
         signatureError: status === 'failed' ? (signature.error ?? '') : '',
-        signers: signers.map(signerRowOf),
+        signers: signers.map((signer, index) => signerRowOf(signer, index, CLOSED_SIGNATURE_STATUSES.includes(status))),
     };
 }
 

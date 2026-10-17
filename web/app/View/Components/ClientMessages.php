@@ -330,6 +330,7 @@ class ClientMessages extends Component
             'versions.signature.requested_on' => __('Requested on :date'),
             'versions.signature.completed_on' => __('Completed on :date'),
             'versions.signer.status.pending' => __('Pending'),
+            'versions.signer.status.unsigned' => __('Not signed'),
             'versions.signer.status.signed' => __('Signed'),
             'versions.signer.status.rejected' => __('Refused'),
             'versions.signer.signed_on' => __('Signed on :date'),

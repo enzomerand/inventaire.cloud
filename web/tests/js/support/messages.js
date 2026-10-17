@@ -238,6 +238,7 @@ export const MESSAGES = {
     'versions.signature.requested_on': 'Requested on :date',
     'versions.signature.completed_on': 'Completed on :date',
     'versions.signer.status.pending': 'Pending',
+    'versions.signer.status.unsigned': 'Not signed',
     'versions.signer.status.signed': 'Signed',
     'versions.signer.status.rejected': 'Refused',
     'versions.signer.signed_on': 'Signed on :date',
