@@ -1,0 +1,3613 @@
+openapi: 3.1.0
+info:
+  title: inventaire.cloud API
+  version: '1'
+  summary: The public JSON API of inventaire.cloud.
+  description: |
+    The public API of inventaire.cloud: workspaces, inventories, fields, items and their files, exports and imports.
+    Most of what the web application does with your data can be done here, with a personal access token.
+
+    ## Authentication
+
+    Create a personal access token from the account page of the web application (card "API tokens"): choose a name,
+    the abilities it carries and an expiry (7, 30, 90 or 365 days, or never). The value starts with `inv_` and is shown
+    once, when the token is created: copy it then. Send it with every request:
+
+        Authorization: Bearer inv_…
+
+    A missing, malformed, expired or revoked token is answered with `401`. Signing out everywhere from the account page
+    revokes every token of the account. Sign-in, the account itself, the administration and the management of tokens
+    belong to the web application and are not part of this API: they refuse a request made with a token (`403`,
+    `session_required`).
+
+    ## Abilities
+
+    A token carries one or more abilities, and every operation of this document names the one it needs in `x-ability`:
+
+    - `read`: every `GET` operation;
+    - `write`: the content of an inventory, that is items, attachments, exports and imports (create, change, delete);
+    - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete).
+
+    The abilities are independent: `write` does not include `read`. A request made with a token that lacks the ability is
+    answered with `403` and the code `token_ability_missing`.
+
+    A token never goes beyond its owner. Whatever its abilities, it can do only what the owner may do in each workspace
+    with their role: `owner`, `editor` or `viewer`. A resource of a workspace the owner does not belong to is answered
+    with `404`, as if it did not exist; a member whose role does not allow the operation is answered with `403`
+    (without `code`).
+
+    ## Rate limits
+
+    Each token may make 120 requests per minute by default (the administrator of the instance can change it). Every
+    answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`. Beyond the limit the answer is `429` with the code
+    `too_many_requests` and a `Retry-After` header, the number of seconds to wait.
+
+    Some operations have a stricter limit of their own, counted per user: creating a workspace, uploading a file,
+    asking for an export, sending or re-reading a file to import. They are `429` too, with the same headers. The public
+    template catalogue has its own limit, per network address.
+
+    ## Errors
+
+    An error always has a JSON body, whatever the `Accept` header:
+
+    - `{"message": "…"}` for `401`, `403` and `404`; the message is for people and may change. `403` has a `code` when a
+      machine-readable reason exists (`token_ability_missing`, `session_required`), `404` has one for the few cases that
+      are not a plain "not found";
+    - `{"message": "…", "code": "…"}` for `409`, `429` and `503`, where `code` is the reason to switch on. A `409` that
+      comes from a quota also has a `limit`, the number that was crossed;
+    - `{"message": "…", "errors": {"<field>": ["…"]}}` for `422`, with the keys of the request body (`values.<field id>`,
+      `options.max`, `query.filter.<field id>.min`…); a few refusals add a `code` and the facts that explain it.
+
+    Each error response of an operation lists, in `x-codes`, the `code` values it can carry.
+
+    ## Identifiers and dates
+
+    Resources are identified by lowercase ULIDs (26 characters, digits and letters), in paths and in bodies. The numeric
+    keys of the database are never exposed; the only exception is the `id` of the account in `GET /me`. Dates are ISO 8601
+    in UTC (`2026-10-15T12:30:00+00:00`).
+
+    ## Items and their values
+
+    The `values` of an item are a JSON object keyed by the id of the field. A field that holds no value is absent. The
+    JSON type depends on the type of the field (`GET /field-types`): text, long text, URL, email, phone, color, barcode,
+    date (`YYYY-MM-DD`), date and time (UTC, `2026-10-15T12:30:00Z`), time (`HH:MM`) and single choice (the id of the
+    choice) are strings; number, amount and percentage are **decimal strings** (`"12.50"`, never a JSON number, so that
+    nothing is lost); yes/no is a boolean; rating is an integer; multiple choice and tags are arrays of strings; file
+    and photo are arrays of attachment ids, written by uploading files, never by sending values.
+
+    To write, send the same shapes (numbers may also be sent as JSON numbers, but send them as text when they have
+    many digits). Sending `null`, an empty text or an empty list for a field clears it.
+
+    ## Pagination
+
+    Lists that can be long are paginated with the `page` query parameter (1 by default): 50 items or 25 revisions per
+    page. The answer is `{"data": […], "links": {"first", "last", "prev", "next"}, "meta": {"current_page", "last_page",
+    "per_page", "total", "from", "to", "path", "links"}}`; the links of the pages keep your other query parameters.
+    The other lists (workspaces, inventories, field types, templates) are answered in one piece, in `data`; the lists of
+    exports and imports hold the 20 newest.
+
+    ## Language
+
+    Messages and labels (the name of a field type, the error of a failed export) are in the language of the
+    `Accept-Language` header (`fr` or `en`); the instance default applies without it. Identifiers, codes and the data
+    you stored are never translated.
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: /api/v1
+    description: This instance. Paths below are relative to it.
+security:
+  - bearer: []
+tags:
+  - name: Account
+    description: The user a token belongs to.
+  - name: Field types
+    description: The types a field can have, with their names in the language of the request.
+  - name: Workspaces
+    description: The workspaces the user belongs to, with their role in each.
+  - name: Inventories
+    description: The inventories of a workspace, with their fields and what the user may do with them.
+  - name: Fields
+    description: The typed columns of an inventory (add, change, order, delete).
+  - name: Items
+    description: The rows of an inventory, with sorting, filtering, search and totals.
+  - name: Revisions
+    description: The history of an item, latest change first.
+  - name: Attachments
+    description: Files attached to an item, or filling one of its file or photo fields.
+  - name: Exports
+    description: Files of the items of an inventory (XLSX, ODS, CSV, JSON, PDF, zip), written in the background.
+  - name: Imports
+    description: Spreadsheets and CSV files brought into an inventory, with a mapping of their columns, run in the background.
+  - name: Templates
+    description: The public catalogue of inventory templates. No token needed.
+paths:
+  /me:
+    get:
+      tags:
+        - Account
+      operationId: getCurrentUser
+      summary: Get the user of the token
+      description: Who the token belongs to. Handy to check that a token works.
+      x-ability: read
+      responses:
+        '200':
+          description: The user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /field-types:
+    get:
+      tags:
+        - Field types
+      operationId: listFieldTypes
+      summary: List the field types
+      description: >-
+        Every type a field can have, in the order the web application offers them. `type` is the word to send when
+        adding a field.
+      x-ability: read
+      responses:
+        '200':
+          description: The types.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FieldType'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /workspaces:
+    get:
+      tags:
+        - Workspaces
+      operationId: listWorkspaces
+      summary: List the workspaces
+      description: Every workspace the owner of the token belongs to, oldest membership first, with their role in each.
+      x-ability: read
+      responses:
+        '200':
+          description: The workspaces.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Workspaces
+      operationId: createWorkspace
+      summary: Create a workspace
+      description: >-
+        Creates a workspace owned by the user. Anybody can, within the number of workspaces an account may belong to
+        (50 by default) and a pace of 20 creations an hour by default.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: The name. Spaces around it are removed.
+      responses:
+        '201':
+          description: The workspace that was created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: workspace_limit_reached
+              description: The account already belongs to as many workspaces as allowed. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, or the creations an hour of the user, is reached.
+  /workspaces/{workspace}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    patch:
+      tags:
+        - Workspaces
+      operationId: updateWorkspace
+      summary: Rename a workspace
+      description: Owners only.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: The new name. Spaces around it are removed.
+      responses:
+        '200':
+          description: The workspace.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Workspaces
+      operationId: deleteWorkspace
+      summary: Delete a workspace
+      description: >-
+        Deletes the workspace and everything in it: inventories, items, files. Owners only. The last workspace of a
+        user cannot be deleted. If it was the one the user was working in, another takes its place.
+      x-ability: manage
+      responses:
+        '204':
+          description: The workspace is deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: last_workspace
+              description: It is the last workspace of the user. Create another one first.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /workspaces/{workspace}/inventories:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags:
+        - Inventories
+      operationId: listInventories
+      summary: List the inventories of a workspace
+      description: >-
+        Every inventory of the workspace, by name, with the number of its fields and items. The fields themselves are
+        not listed: read an inventory for them.
+      x-ability: read
+      responses:
+        '200':
+          description: The inventories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Inventory'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Inventories
+      operationId: createInventory
+      summary: Create an inventory
+      description: >-
+        Adds an inventory to the workspace. Editors and owners only. With `template` (a slug of `GET /templates`) the
+        inventory gets the fields of the template, named in the language of the request. A workspace holds 100
+        inventories by default.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  description: One line.
+                description:
+                  type:
+                    - string
+                    - 'null'
+                  maxLength: 2000
+                template:
+                  type:
+                    - string
+                    - 'null'
+                  maxLength: 60
+                  description: The slug of a template. Unknown slugs are a `422`.
+      responses:
+        '201':
+          description: The inventory that was created. `fields` is not given, read the inventory for them.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Inventory'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: inventory_limit_reached
+              description: The workspace already holds as many inventories as allowed. `limit` says how many.
+            - code: field_limit_reached
+              description: The template has more fields than an inventory may have. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    get:
+      tags:
+        - Inventories
+      operationId: getInventory
+      summary: Get an inventory
+      description: The inventory with its fields in order and what the user may do with it.
+      x-ability: read
+      responses:
+        '200':
+          description: The inventory.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/Inventory'
+                      - type: object
+                        required:
+                          - fields
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    patch:
+      tags:
+        - Inventories
+      operationId: updateInventory
+      summary: Change an inventory
+      description: >-
+        Changes the name and/or the description; what is not sent stays. Editors and owners only. `null` or an empty
+        text clears the description.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  description: One line.
+                description:
+                  type:
+                    - string
+                    - 'null'
+                  maxLength: 2000
+      responses:
+        '200':
+          description: The inventory, with its fields.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/Inventory'
+                      - type: object
+                        required:
+                          - fields
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Inventories
+      operationId: deleteInventory
+      summary: Delete an inventory
+      description: Deletes the inventory with its fields, items and files. Owners of the workspace only.
+      x-ability: manage
+      responses:
+        '204':
+          description: The inventory is deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/fields:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    post:
+      tags:
+        - Fields
+      operationId: createField
+      summary: Add a field
+      description: >-
+        Adds a field at the end of the inventory. Editors and owners only. The type cannot be changed afterwards. A name
+        cannot be used twice in an inventory (case and the way accents are written are ignored). An inventory has 100
+        fields at most by default. A `file` or `photo` field cannot be required.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - name
+              properties:
+                type:
+                  $ref: '#/components/schemas/FieldTypeKey'
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  description: One line.
+                required:
+                  type: boolean
+                  default: false
+                options:
+                  oneOf:
+                    - $ref: '#/components/schemas/FieldOptions'
+                    - type: 'null'
+                  description: The options of the type. Each type fills in its defaults.
+      responses:
+        '201':
+          description: The field that was created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Field'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: field_limit_reached
+              description: The inventory already has as many fields as allowed. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/fields/order:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    put:
+      tags:
+        - Fields
+      operationId: reorderFields
+      summary: Order the fields
+      description: >-
+        Puts the fields in the order given. `fields` must be exactly the ids of the fields the inventory has, each
+        once, otherwise it is a `422` on `fields`. Editors and owners only.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fields
+              properties:
+                fields:
+                  type: array
+                  maxItems: 1000
+                  description: The ids of all the fields, in the order they are to be shown.
+                  items:
+                    $ref: '#/components/schemas/Ulid'
+      responses:
+        '200':
+          description: The fields in their new order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Field'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/fields/{field}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/FieldId'
+    patch:
+      tags:
+        - Fields
+      operationId: updateField
+      summary: Change a field
+      description: >-
+        Changes the name, whether the field is required and/or its options; what is not sent stays. The options you send
+        are merged over the existing ones (an option sent as `null` goes back to its default), except `choices`, which
+        is replaced as a whole. Removing a choice, or lowering the maximum of a rating, removes the values that no longer
+        fit from the items. Other changes leave the stored values as they are. Sending another `type` is a `422`.
+        Editors and owners only.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  $ref: '#/components/schemas/FieldTypeKey'
+                  description: Accepted only if it is the type the field already has.
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  description: One line.
+                required:
+                  type: boolean
+                options:
+                  oneOf:
+                    - $ref: '#/components/schemas/FieldOptions'
+                    - type: 'null'
+      responses:
+        '200':
+          description: The field.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Field'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Fields
+      operationId: deleteField
+      summary: Delete a field
+      description: >-
+        Deletes the field and its values from every item of the inventory. The files of a `file` or `photo` field go
+        with it. Editors and owners only.
+      x-ability: manage
+      responses:
+        '204':
+          description: The field is deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/items:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    get:
+      tags:
+        - Items
+      operationId: listItems
+      summary: List the items of an inventory
+      description: |-
+        A page of 50 items, newest first unless `sort` says otherwise.
+
+        - `q` keeps the items that hold every word, whatever the case and the accents.
+        - `filter[<field id>][<operator>]` keeps the items that meet every condition. `empty` (`true` or `false`) works
+          on every field. A number, rating or date field takes `min` and `max` (both included, written the way the
+          value is stored), a yes/no field `is`, a single or multiple choice field `in` (ids of choices, any of them
+          matches: `filter[<field id>][in][]=<choice id>`). Text and tags are searched with `q`, not filtered.
+        - `sort` is `created_at`, `updated_at` or the id of a field, with `direction`. Items without a value come last.
+          Multiple choice, tags, file and photo fields cannot be sorted. The kinds are in `query_kind` of each field.
+        - `totals[]` adds up number and amount fields over **all** the items that match, not only the page. It is
+          opt-in because it costs a pass over the values: without it `meta.totals` is absent.
+
+        The query string is checked as a whole: every fault is reported at once in a `422`, under keys such as `sort`,
+        `direction`, `filter.<field id>.<operator>` and `totals.<position>`.
+      x-ability: read
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: q
+          in: query
+          description: The words to search for. At most 200 characters; spaces only is no search.
+          schema:
+            type: string
+            maxLength: 200
+        - name: sort
+          in: query
+          description: What to sort by. Without it, the newest item comes first and `direction` changes nothing.
+          schema:
+            type: string
+            maxLength: 64
+            examples:
+              - created_at
+        - name: direction
+          in: query
+          description: The direction of the sort, in any case.
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: asc
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          description: >-
+            Conditions on fields: `filter[<field id>][<operator>]=<value>`, for instance `filter[01k8…][min]=10` or
+            `filter[01k8…][empty]=false`. The operators a field takes depend on its `query_kind`.
+          schema:
+            type: object
+            propertyNames:
+              pattern: ^[0-9a-zA-Z]{26}$
+            additionalProperties:
+              type: object
+              additionalProperties: false
+              properties:
+                empty:
+                  type: boolean
+                  description: Whether the field holds no value. Every kind of field.
+                min:
+                  type: string
+                  description: Smallest value, included. `number` and `temporal` kinds.
+                max:
+                  type: string
+                  description: Largest value, included. `number` and `temporal` kinds.
+                is:
+                  type: boolean
+                  description: The yes or no to find. `boolean` kind.
+                in:
+                  type: array
+                  description: Ids of choices, any of which matches. `choice` and `choices` kinds.
+                  items:
+                    type: string
+        - name: totals[]
+          in: query
+          style: form
+          explode: true
+          description: >-
+            The ids of the number and amount fields to add up: `totals[]=<field id>`, repeated for each field. A field
+            that does not exist or cannot be added up is a `422` on `totals.<position>`.
+          schema:
+            type: array
+            items:
+              type: string
+              maxLength: 64
+      responses:
+        '200':
+          description: A page of items.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - links
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Item'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    allOf:
+                      - $ref: '#/components/schemas/PaginationMeta'
+                      - type: object
+                        required:
+                          - limits
+                        properties:
+                          limits:
+                            type: object
+                            description: The limits of attachments, so that a client can check a file before sending it.
+                            required:
+                              - attachment_size
+                              - attachments_per_item
+                            properties:
+                              attachment_size:
+                                type: integer
+                                description: The largest file, in bytes (20 MB by default).
+                              attachments_per_item:
+                                type: integer
+                                description: The most files one item may hold (20 by default).
+                          totals:
+                            type: object
+                            description: >-
+                              The sum of each field asked for in `totals[]`, over all the matching items, keyed by the
+                              id of the field, as decimal strings. Zero (`"0.00"`) when no item holds a value.
+                            additionalProperties:
+                              type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Items
+      operationId: createItem
+      summary: Add an item
+      description: >-
+        Adds an item. Editors and owners only. `values` is keyed by the id of the field. A key that is no field of the
+        inventory, a value the field refuses and a required field without a value are `422`s on `values.<field id>`;
+        every fault is reported at once. A `file` or `photo` field is filled by uploading files, not by sending
+        values. An inventory holds 10000 items by default.
+      x-ability: write
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                values:
+                  oneOf:
+                    - $ref: '#/components/schemas/ItemValuesInput'
+                    - type: 'null'
+      responses:
+        '201':
+          description: The item that was created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: item_limit_reached
+              description: The inventory already holds as many items as allowed. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/items/{item}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ItemId'
+    get:
+      tags:
+        - Items
+      operationId: getItem
+      summary: Get an item
+      x-ability: read
+      responses:
+        '200':
+          description: The item.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    patch:
+      tags:
+        - Items
+      operationId: updateItem
+      summary: Change an item
+      description: >-
+        Only the keys of `values` that are sent change; the rest of the item is kept. An empty value clears its field
+        (a `422` for a required one). `values` must be present, even if it is empty. Editors and owners only. Every
+        change writes a revision.
+      x-ability: write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - values
+              properties:
+                values:
+                  $ref: '#/components/schemas/ItemValuesInput'
+      responses:
+        '200':
+          description: The item.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Items
+      operationId: deleteItem
+      summary: Delete an item
+      description: Deletes the item, its history and its files. Editors and owners only.
+      x-ability: write
+      responses:
+        '204':
+          description: The item is deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/items/{item}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ItemId'
+    get:
+      tags:
+        - Revisions
+      operationId: listItemRevisions
+      summary: List the history of an item
+      description: >-
+        Who changed what and when, latest first, 25 per page. An item keeps its last 100 revisions by default. The values
+        are shown the way the item shows them now.
+      x-ability: read
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: A page of revisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - links
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Revision'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/items/{item}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ItemId'
+    post:
+      tags:
+        - Attachments
+      operationId: uploadAttachment
+      summary: Upload a file to an item
+      description: >-
+        Attaches the `file` part to the item. With `field` (the id of a `file` or `photo` field of the inventory) the
+        file fills that field and its id is added to the value of the field; without it the file is a plain attachment.
+        The type of the file is detected from its content. A `photo` field only takes JPEG, PNG, WebP and GIF images.
+        A file weighs 20 MB at most by default (`meta.limits` of the list of items tells), an item holds 20 files by
+        default, a workspace 1 GB of files by default, and a user uploads 30 files a minute by default. Editors and
+        owners only.
+      x-ability: write
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file.
+                field:
+                  type:
+                    - string
+                    - 'null'
+                  maxLength: 26
+                  description: The id of the `file` or `photo` field the file fills.
+      responses:
+        '201':
+          description: The item as it is now, with the file in `attachments`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: attachment_limit_reached
+              description: The item already holds as many files as allowed. `limit` says how many.
+            - code: field_file_limit_reached
+              description: The field already holds as many files as its `max_files`. `limit` says how many.
+            - code: storage_limit_reached
+              description: The files of the workspace would weigh more than allowed. `limit` is in bytes.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, or the uploads a minute of the user, is reached.
+  /inventories/{inventory}/items/{item}/attachments/{attachment}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ItemId'
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      tags:
+        - Attachments
+      operationId: downloadAttachment
+      summary: Download a file
+      description: >-
+        The file as a download. With `inline=1` an image (JPEG, PNG, WebP, GIF) or a PDF is shown in the page instead.
+        The `ETag` is the id of the file: send it back in `If-None-Match` to get a `304`.
+      x-ability: read
+      parameters:
+        - name: inline
+          in: query
+          description: Set to `1` to show an image or a PDF instead of downloading it. Ignored for other types.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: The content of the file, with the type detected when it was uploaded.
+          headers:
+            Content-Disposition:
+              description: '`attachment` (or `inline`) with the name of the file.'
+              schema:
+                type: string
+            Content-Length:
+              description: Bytes.
+              schema:
+                type: integer
+            ETag:
+              description: The id of the file, quoted.
+              schema:
+                type: string
+            Cache-Control:
+              description: Always `private, no-cache`.
+              schema:
+                type: string
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              description: Any other type of file, with its own `Content-Type`.
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: The reader has this file already (`If-None-Match`).
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          x-codes:
+            - code: file_not_found
+              description: The record exists but its file is no longer on the storage.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+    delete:
+      tags:
+        - Attachments
+      operationId: deleteAttachment
+      summary: Remove a file from an item
+      description: >-
+        Deletes the file; if it filled a `file` or `photo` field, its id leaves the value of the field. Editors and
+        owners only.
+      x-ability: write
+      responses:
+        '200':
+          description: The item as it is now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/items/{item}/attachments/{attachment}/thumbnail:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ItemId'
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      tags:
+        - Attachments
+      operationId: getAttachmentThumbnail
+      summary: Get the thumbnail of a file
+      description: The thumbnail of an image, a JPEG. `has_thumbnail` of the attachment tells whether there is one.
+      x-ability: read
+      responses:
+        '200':
+          description: The thumbnail.
+          headers:
+            Cache-Control:
+              description: Always `private, max-age=3600`.
+              schema:
+                type: string
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          x-codes:
+            - code: thumbnail_not_found
+              description: The file has no thumbnail.
+            - code: file_not_found
+              description: The record exists but its file is no longer on the storage.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+  /inventories/{inventory}/exports:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    get:
+      tags:
+        - Exports
+      operationId: listExports
+      summary: List your exports of an inventory
+      description: >-
+        The exports of the owner of the token for this inventory that did not expire, newest first, 20 at most. An export
+        is its author's alone: nobody else sees it, whatever their role.
+      x-ability: read
+      responses:
+        '200':
+          description: The exports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Export'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Exports
+      operationId: createExport
+      summary: Ask for an export
+      description: >-
+        Queues the writing of a file of the items. Every member of the workspace may export, viewers included. The answer
+        is the export, `pending`; poll `GET /inventories/{inventory}/exports/{export}` until its `status` is `completed`
+        (or `failed`), then download it. The file is kept 24 hours by default.
+
+        A PDF holds 500 items at most by default (`pdf_too_large`). A zip needs at least one file to put in it
+        (`zip_without_files`). A user can have 10 exports of an inventory at a time and their exports together weigh
+        2 GB at most by default.
+      x-ability: write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - format
+              properties:
+                format:
+                  $ref: '#/components/schemas/ExportFormat'
+                scope:
+                  allOf:
+                    - $ref: '#/components/schemas/ExportScope'
+                  default: all
+                  description: With `view`, the items the `query` selects; `query` is refused with `all`.
+                query:
+                  type: object
+                  description: The view to export, for the scope `view`. The same parameters as the list of items, as a JSON object.
+                  properties:
+                    q:
+                      type:
+                        - string
+                        - 'null'
+                      maxLength: 200
+                    sort:
+                      type:
+                        - string
+                        - 'null'
+                      maxLength: 64
+                    direction:
+                      type:
+                        - string
+                        - 'null'
+                      maxLength: 64
+                      description: '`asc` or `desc`.'
+                    filter:
+                      type:
+                        - object
+                        - 'null'
+                      description: 'By id of field, then operator: `{"<field id>": {"min": "10"}}`. See the list of items for the operators.'
+                      additionalProperties:
+                        type: object
+                delimiter:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - comma
+                    - semicolon
+                    - tab
+                    - null
+                  description: >-
+                    `csv` only. The separator, which also sets the decimal sign (a comma with the semicolon, a point with the
+                    others). By default a semicolon when the language of the request is French, else a comma.
+                files:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - photos
+                    - all
+                    - null
+                  description: '`zip` only. `photos` (default) or `all` the files of the items.'
+      responses:
+        '202':
+          description: The export, `pending`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Export'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: export_limit_reached
+              description: The user already has as many exports of this inventory as allowed. `limit` says how many.
+            - code: export_storage_full
+              description: Their exports, this one included, would weigh more than allowed. `limit` is in bytes.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          x-codes:
+            - code: pdf_too_large
+              description: A PDF cannot hold that many items (on `format`). `limit` says how many it can.
+            - code: zip_without_files
+              description: None of the items has a file to put in the zip (on `format`).
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, or the exports a minute of the user, is reached.
+  /inventories/{inventory}/exports/{export}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ExportId'
+    get:
+      tags:
+        - Exports
+      operationId: getExport
+      summary: Get an export
+      description: Where an export is up to. Another person's export is a `404`.
+      x-ability: read
+      responses:
+        '200':
+          description: The export.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Export'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Exports
+      operationId: deleteExport
+      summary: Delete an export
+      description: Deletes the export and its file. One that is being written is deleted all the same.
+      x-ability: write
+      responses:
+        '204':
+          description: The export is deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/exports/{export}/download:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ExportId'
+    get:
+      tags:
+        - Exports
+      operationId: downloadExport
+      summary: Download an export
+      description: The file of a completed export, always as a download. It is never kept by a cache.
+      x-ability: read
+      responses:
+        '200':
+          description: The file, with the type of its format.
+          headers:
+            Content-Disposition:
+              description: '`attachment` with the name of the file.'
+              schema:
+                type: string
+            Content-Length:
+              description: Bytes.
+              schema:
+                type: integer
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              description: '`xlsx`.'
+              schema:
+                type: string
+                format: binary
+            application/vnd.oasis.opendocument.spreadsheet:
+              description: '`ods`.'
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              description: '`csv`, in UTF-8.'
+              schema:
+                type: string
+                format: binary
+            application/json:
+              description: '`json`.'
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              description: '`pdf`.'
+              schema:
+                type: string
+                format: binary
+            application/zip:
+              description: '`zip`.'
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          x-codes:
+            - code: export_expired
+              description: The export expired and its file is deleted or about to be.
+            - code: file_not_found
+              description: The export exists but its file is no longer on the storage.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: export_not_ready
+              description: The export is still being written, or it failed. Check its `status`.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+  /inventories/{inventory}/imports:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    get:
+      tags:
+        - Imports
+      operationId: listImports
+      summary: List your imports of an inventory
+      description: >-
+        The imports of the owner of the token for this inventory whose time is not up, newest first, 20 at most. Importing
+        changes the items, so viewers cannot see imports. An import is its author's alone.
+      x-ability: read
+      responses:
+        '200':
+          description: The imports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Import'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Imports
+      operationId: createImport
+      summary: Send a file to import
+      description: >-
+        Sends a spreadsheet (XLSX, ODS) or a text file (CSV, TSV, TXT) of 10 MB at most by default. It is read at once:
+        the answer lists the columns, a guess of the type of field each looks like and a proposed `mapping`. Nothing is
+        added to the inventory until you start the import. Editors and owners only. A user can have 3 unfinished imports
+        of an inventory at a time by default, and sends 10 files a minute by default.
+      x-ability: write
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file.
+                has_header:
+                  type: boolean
+                  default: true
+                  description: Whether the first row holds the names of the columns.
+                delimiter:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - comma
+                    - semicolon
+                    - tab
+                    - null
+                  description: The separator of a text file. Found out when not given.
+                encoding:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - utf-8
+                    - windows-1252
+                    - utf-16
+                    - null
+                  description: The encoding of a text file. Found out when not given.
+      responses:
+        '201':
+          description: The import, `uploaded`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Import'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: import_limit_reached
+              description: The user already has as many unfinished imports of this inventory as allowed. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          x-codes:
+            - code: unrecognized_format
+              description: The file is neither a spreadsheet nor a text file the import reads (on `file`).
+            - code: unreadable_file
+              description: The file cannot be read (on `file`).
+            - code: empty_file
+              description: The file holds nothing (on `file`).
+            - code: unpacked_too_large
+              description: The spreadsheet is too large once unpacked (on `file`).
+            - code: too_many_columns
+              description: The file uses more columns than allowed (on `file`).
+            - code: too_many_lines
+              description: The file has more lines than allowed (on `file`).
+            - code: too_many_cells
+              description: The sheet has more cells than allowed (on `file`).
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, or the files a minute of the user, is reached.
+  /inventories/{inventory}/imports/{import}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ImportId'
+    get:
+      tags:
+        - Imports
+      operationId: getImport
+      summary: Get an import
+      description: >-
+        Where an import is up to, and its report once it ended. Poll it after starting the import until `status` is
+        `completed` or `failed`. Another person's import is a `404`.
+      x-ability: read
+      responses:
+        '200':
+          description: The import.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Import'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `read` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    patch:
+      tags:
+        - Imports
+      operationId: updateImport
+      summary: Read the file again with other options
+      description: >-
+        Changes how the file is read (`has_header`, `delimiter`, `encoding`): the columns and the proposed mapping come
+        back made anew. The options that are not sent are kept. `decimal`, `date_order` and `on_error` are kept with the
+        import for when it starts. Only while the import is `uploaded`. Editors and owners only.
+      x-ability: write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                has_header:
+                  type: boolean
+                delimiter:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - comma
+                    - semicolon
+                    - tab
+                    - null
+                encoding:
+                  type:
+                    - string
+                    - 'null'
+                  enum:
+                    - utf-8
+                    - windows-1252
+                    - utf-16
+                    - null
+                decimal:
+                  type: string
+                  enum:
+                    - comma
+                    - point
+                date_order:
+                  type: string
+                  enum:
+                    - dmy
+                    - mdy
+                    - ymd
+                on_error:
+                  type: string
+                  enum:
+                    - abort
+                    - skip
+      responses:
+        '200':
+          description: The import, with its columns and mapping made anew.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Import'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          x-codes:
+            - code: import_expired
+              description: The time of the import is up and its file is gone. Send the file again.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: import_not_editable
+              description: The import was started and can no longer be changed.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          x-codes:
+            - code: unrecognized_format
+              description: The file cannot be read that way (on `file`).
+            - code: unreadable_file
+              description: The file cannot be read (on `file`).
+            - code: empty_file
+              description: The file holds nothing (on `file`).
+            - code: unpacked_too_large
+              description: The spreadsheet is too large once unpacked (on `file`).
+            - code: too_many_columns
+              description: The file uses more columns than allowed (on `file`).
+            - code: too_many_lines
+              description: The file has more lines than allowed (on `file`).
+            - code: too_many_cells
+              description: The sheet has more cells than allowed (on `file`).
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, or the files a minute of the user, is reached.
+    delete:
+      tags:
+        - Imports
+      operationId: deleteImport
+      summary: Cancel an import
+      description: Cancels an import or clears its report, and deletes its file. Not while a worker is running it.
+      x-ability: write
+      responses:
+        '204':
+          description: The import is deleted (or was already gone).
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: import_running
+              description: A worker is adding the rows. Wait for it to end.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/imports/{import}/start:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ImportId'
+    post:
+      tags:
+        - Imports
+      operationId: startImport
+      summary: Start an import
+      description: >-
+        Says where each column goes and starts the import: a worker converts, checks and adds the rows in one
+        transaction, and creates the new fields. `mapping` has one entry per column to use; a column left out is
+        ignored. A required field of the inventory must be mapped. Creating fields (`target: new`) needs the right to
+        change the fields (editors and owners). The answer is the import, `pending`; poll it. An inventory holds 10000
+        items by default and a file 10000 rows.
+      x-ability: write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mapping
+              properties:
+                mapping:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required:
+                      - column
+                      - target
+                    properties:
+                      column:
+                        type: integer
+                        minimum: 0
+                        description: The `index` of a column.
+                      target:
+                        type: string
+                        enum:
+                          - ignore
+                          - field
+                          - new
+                      field:
+                        type:
+                          - string
+                          - 'null'
+                        maxLength: 26
+                        description: The id of the field. Required for the target `field`.
+                      type:
+                        type:
+                          - string
+                          - 'null'
+                        maxLength: 32
+                        description: The type of the new field. Required for the target `new`.
+                      name:
+                        type:
+                          - string
+                          - 'null'
+                        maxLength: 500
+                        description: The name of the new field. Required for the target `new`.
+                decimal:
+                  type: string
+                  enum:
+                    - comma
+                    - point
+                  description: Kept from the import when not sent.
+                date_order:
+                  type: string
+                  enum:
+                    - dmy
+                    - mdy
+                    - ymd
+                  description: Kept from the import when not sent.
+                on_error:
+                  type: string
+                  enum:
+                    - abort
+                    - skip
+                  description: Kept from the import when not sent.
+      responses:
+        '202':
+          description: The import, `pending`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Import'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+          x-codes:
+            - code: import_expired
+              description: The time of the import is up and its file is gone. Send the file again.
+        '409':
+          $ref: '#/components/responses/Conflict'
+          x-codes:
+            - code: import_not_editable
+              description: The import was started already.
+            - code: field_limit_reached
+              description: The new fields would take the inventory past the number of fields it may have. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          x-codes:
+            - code: unknown_column
+              description: The file has no such column (on `mapping`, with `column`).
+            - code: duplicate_column
+              description: A column is given twice (with `column`).
+            - code: unknown_field
+              description: The field does not exist in this inventory (with `column`).
+            - code: field_not_importable
+              description: The field is filled by uploading files (with `column` and `field`).
+            - code: duplicate_field
+              description: Two columns go to the same field (with `column` and `field`).
+            - code: invalid_field_type
+              description: A field of this type cannot be created by an import (with `column`).
+            - code: invalid_field_name
+              description: The name of a new field is empty, too long or on several lines (with `column`).
+            - code: duplicate_field_name
+              description: Two new fields have the same name (with `column`).
+            - code: field_name_taken
+              description: The inventory already has a field with this name (with `column`).
+            - code: cannot_manage_fields
+              description: The user may not create fields (with `column`).
+            - code: required_field_unmapped
+              description: A required field has no column (with `field`).
+            - code: nothing_mapped
+              description: Not one column is mapped.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /templates:
+    get:
+      tags:
+        - Templates
+      operationId: listTemplates
+      summary: List the inventory templates
+      description: >-
+        The public catalogue, by category then by name, in the language of the request. No token is needed. To make an
+        inventory from a template, send its `slug` as `template` to `POST /workspaces/{workspace}/inventories`. Limited
+        to 60 requests a minute by default, counted per user when signed in, else per network address.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/AcceptLanguage'
+      responses:
+        '200':
+          description: The templates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TemplateSummary'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the catalogue is reached.
+  /templates/{slug}:
+    parameters:
+      - $ref: '#/components/parameters/TemplateSlug'
+    get:
+      tags:
+        - Templates
+      operationId: getTemplate
+      summary: Get an inventory template
+      description: >-
+        One template with its description, the fields it would create and example rows, in the language of the request.
+        No token is needed.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/AcceptLanguage'
+      responses:
+        '200':
+          description: The template.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          x-codes:
+            - code: template_not_found
+              description: There is no template with this slug.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the catalogue is reached.
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: inv_ personal access token
+      description: >-
+        A personal access token created from the account page of the web application. It starts with `inv_`.
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: The page to read, from 1.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000000
+        default: 1
+    WorkspaceId:
+      name: workspace
+      in: path
+      required: true
+      description: The id of the workspace.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    InventoryId:
+      name: inventory
+      in: path
+      required: true
+      description: The id of the inventory.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    FieldId:
+      name: field
+      in: path
+      required: true
+      description: The id of the field. It must belong to the inventory of the path.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ItemId:
+      name: item
+      in: path
+      required: true
+      description: The id of the item. It must belong to the inventory of the path.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    AttachmentId:
+      name: attachment
+      in: path
+      required: true
+      description: The id of the attachment. It must belong to the item of the path.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ExportId:
+      name: export
+      in: path
+      required: true
+      description: The id of the export. Only the person who asked for it can see it.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ImportId:
+      name: import
+      in: path
+      required: true
+      description: The id of the import. Only the person who sent the file can see it.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    TemplateSlug:
+      name: slug
+      in: path
+      required: true
+      description: The slug of the template, as listed by `GET /templates`.
+      schema:
+        type: string
+        maxLength: 60
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+        examples:
+          - wine-cellar
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      description: The language of the names and summaries (`fr` or `en`). The instance default applies without it.
+      schema:
+        type: string
+        examples:
+          - en
+  responses:
+    Unauthenticated:
+      description: The token is missing, malformed, expired or revoked.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Unauthenticated.
+    Forbidden:
+      description: >-
+        The token lacks the ability the operation needs, or the role of its owner in the workspace does not allow it.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: This API token lacks the write permission.
+            code: token_ability_missing
+    NotFound:
+      description: >-
+        There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+        not told apart).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Not Found
+    Conflict:
+      description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - type: object
+                required:
+                  - code
+                properties:
+                  limit:
+                    type: integer
+                    description: The quota that was reached, when the conflict is a quota.
+          example:
+            message: An inventory cannot hold more than 10000 items.
+            code: item_limit_reached
+            limit: 10000
+    ValidationFailed:
+      description: The body or the query string is refused. `errors` names each fault under the key it is about.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+          example:
+            message: The name field is required.
+            errors:
+              name:
+                - The name field is required.
+    TooManyRequests:
+      description: Too many requests. Wait `Retry-After` seconds.
+      headers:
+        Retry-After:
+          description: Seconds to wait before trying again.
+          schema:
+            type: integer
+        X-RateLimit-Limit:
+          description: Requests allowed in the window of the limit that was hit.
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          description: Requests left in the window (0).
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Unix timestamp at which the window ends.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - type: object
+                required:
+                  - code
+          example:
+            message: Too Many Attempts.
+            code: too_many_requests
+    ServiceUnavailable:
+      description: The file cannot be read right now (the storage is down). Try again in a moment.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - type: object
+                required:
+                  - code
+          example:
+            message: This file cannot be read right now. Try again in a moment.
+            code: file_unavailable
+  schemas:
+    Ulid:
+      type: string
+      description: The identifier of a resource, a lowercase ULID.
+      pattern: ^[0-9a-z]{26}$
+      examples:
+        - 01k8gv2d9m3x5r7qn4p6t8w0ya
+    Error:
+      type: object
+      description: The envelope of an error.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: What happened, for a person, in the language of the request. It may change.
+        code:
+          type: string
+          description: Why, for a program. Not on every error, see `x-codes` of each operation.
+    ValidationError:
+      type: object
+      description: A refused request (`422`).
+      required:
+        - message
+        - errors
+      properties:
+        message:
+          type: string
+          description: The first message, with the number of other faults when there are more.
+        errors:
+          type: object
+          description: The messages of each fault, by the key of the request they are about.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        code:
+          type: string
+          description: A reason to switch on, for the faults that have one. See `x-codes` of the operation.
+      additionalProperties: true
+    PaginationLinks:
+      type: object
+      description: The addresses of the pages. They keep the query parameters of the request.
+      required:
+        - first
+        - last
+        - prev
+        - next
+      properties:
+        first:
+          type:
+            - string
+            - 'null'
+          format: uri
+        last:
+          type:
+            - string
+            - 'null'
+          format: uri
+        prev:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: Null on the first page.
+        next:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: Null on the last page.
+    PaginationMeta:
+      type: object
+      description: Where the page stands in the list.
+      required:
+        - current_page
+        - from
+        - last_page
+        - links
+        - path
+        - per_page
+        - to
+        - total
+      properties:
+        current_page:
+          type: integer
+          minimum: 1
+        from:
+          type:
+            - integer
+            - 'null'
+          description: The rank of the first entry of the page, null when the page is empty.
+        to:
+          type:
+            - integer
+            - 'null'
+          description: The rank of the last entry of the page, null when the page is empty.
+        last_page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+          description: The number of entries in the whole list.
+        path:
+          type: string
+          format: uri
+          description: The address of the list, without the page.
+        links:
+          type: array
+          description: The pager of the web application, ready to draw. Prefer `links` of the envelope.
+          items:
+            type: object
+            required:
+              - url
+              - label
+              - active
+            properties:
+              url:
+                type:
+                  - string
+                  - 'null'
+                format: uri
+              label:
+                type: string
+              page:
+                type:
+                  - integer
+                  - 'null'
+              active:
+                type: boolean
+    Timestamp:
+      type: string
+      format: date-time
+      description: A moment, ISO 8601 in UTC.
+      examples:
+        - '2026-10-15T12:30:00+00:00'
+    User:
+      type: object
+      description: The user a token belongs to.
+      required:
+        - id
+        - name
+        - email
+        - locale
+        - is_admin
+      properties:
+        id:
+          type: integer
+          description: The number of the account. The only numeric key the API gives out.
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        locale:
+          type:
+            - string
+            - 'null'
+          description: The language the account follows (`fr`, `en`), null until it is known.
+        is_admin:
+          type: boolean
+          description: Whether the user administers the instance.
+    FieldType:
+      type: object
+      description: A type a field can have.
+      required:
+        - type
+        - label
+      properties:
+        type:
+          $ref: '#/components/schemas/FieldTypeKey'
+        label:
+          type: string
+          description: The name of the type in the language of the request.
+    FieldTypeKey:
+      type: string
+      description: The word that identifies a type of field.
+      enum:
+        - text
+        - textarea
+        - number
+        - money
+        - percentage
+        - boolean
+        - date
+        - datetime
+        - time
+        - select
+        - multiselect
+        - tags
+        - url
+        - email
+        - phone
+        - rating
+        - color
+        - barcode
+        - file
+        - photo
+    Role:
+      type: string
+      description: What a user may do in a workspace. Viewers read, editors also change items, fields and inventories, owners also delete inventories and manage the workspace.
+      enum:
+        - owner
+        - editor
+        - viewer
+    Workspace:
+      type: object
+      description: A workspace, as seen by one of its members.
+      required:
+        - id
+        - name
+        - role
+        - is_current
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+          maxLength: 100
+        role:
+          $ref: '#/components/schemas/Role'
+        is_current:
+          type: boolean
+          description: Whether it is the workspace the user is working in in the web application.
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    InventoryAbilities:
+      type: object
+      description: What the user may do with the inventory, from their role in its workspace.
+      required:
+        - update
+        - delete
+        - manage_fields
+        - edit_items
+      properties:
+        update:
+          type: boolean
+          description: Change the name and the description.
+        delete:
+          type: boolean
+          description: Delete the inventory and everything in it.
+        manage_fields:
+          type: boolean
+          description: Add, change, order and delete fields.
+        edit_items:
+          type: boolean
+          description: Add, change and delete items, upload files, import.
+    Inventory:
+      type: object
+      description: An inventory. `fields` is only given when a single inventory is read or changed.
+      required:
+        - id
+        - workspace_id
+        - name
+        - description
+        - fields_count
+        - items_count
+        - abilities
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        workspace_id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        fields_count:
+          type: integer
+          minimum: 0
+        items_count:
+          type: integer
+          minimum: 0
+        fields:
+          type: array
+          description: The fields in order.
+          items:
+            $ref: '#/components/schemas/Field'
+        abilities:
+          $ref: '#/components/schemas/InventoryAbilities'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    Choice:
+      type: object
+      description: A choice of a single or multiple choice field. Values hold the `id`, so a choice can be renamed without touching the items.
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          pattern: ^[a-z0-9]{8}$
+          description: >-
+            Made by the server and kept while the choice stays. When you send the choices of a field, give the `id` of
+            the ones that already exist and leave it out for new ones: an id the field never had is replaced.
+        label:
+          type: string
+          maxLength: 100
+          description: One line. Two choices cannot have the same label (case and accents are ignored).
+        color:
+          type: string
+          enum:
+            - gray
+            - red
+            - orange
+            - yellow
+            - green
+            - teal
+            - blue
+            - indigo
+            - purple
+            - pink
+    FieldOptions:
+      type: object
+      description: >-
+        The options of a field. Which ones exist depends on its type; a type without options has an empty object, and an
+        option the type does not have is refused with `422`. When you change a field, the options you send are merged
+        over the existing ones and an option sent as `null` goes back to its default.
+      additionalProperties: false
+      properties:
+        max_length:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 1000
+          description: '`text`: the longest value, in characters. 255 by default.'
+        decimals:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          maximum: 6
+          description: >-
+            `number`: the decimals a value may have (0 to 6, none by default). `percentage`: 0 to 4, 2 by default. For
+            `money` it is given by the currency and cannot be sent.
+        min:
+          type:
+            - string
+            - number
+            - 'null'
+          description: '`number`: the smallest value, a decimal string.'
+        max:
+          type:
+            - string
+            - number
+            - 'null'
+          description: >-
+            `number`: the largest value, a decimal string. `rating`: the top grade, an integer from 3 to 10 (5 by
+            default).
+        unit:
+          type:
+            - string
+            - 'null'
+          maxLength: 16
+          description: '`number`: a unit shown next to the value, such as `kg`.'
+        currency:
+          type:
+            - string
+            - 'null'
+          description: '`money`: an ISO 4217 code such as `EUR` (the default) or `USD`.'
+        format:
+          type:
+            - string
+            - 'null'
+          enum:
+            - any
+            - ean13
+            - ean8
+            - upca
+            - isbn10
+            - isbn13
+            - null
+          description: '`barcode`: the code a value must be (`any`: up to 64 letters, digits, dashes and dots; the others check the check digit).'
+        max_files:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 10
+          description: '`file` and `photo`: how many files the field takes (1 by default).'
+        choices:
+          type:
+            - array
+            - 'null'
+          maxItems: 200
+          description: '`select` and `multiselect`: the choices, at least one. The list you send replaces the existing one.'
+          items:
+            $ref: '#/components/schemas/Choice'
+    Field:
+      type: object
+      description: A typed column of an inventory.
+      required:
+        - id
+        - name
+        - type
+        - options
+        - required
+        - position
+        - query_kind
+        - summable
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+          maxLength: 120
+        type:
+          type: string
+          description: One of `FieldTypeKey`. It cannot be changed. A type this version does not know is given as stored.
+          examples:
+            - number
+        options:
+          $ref: '#/components/schemas/FieldOptions'
+        required:
+          type: boolean
+          description: Whether an item must have a value for the field. Never true for `file` and `photo`.
+        position:
+          type: integer
+          minimum: 0
+          description: Where the field stands in the inventory, from 0.
+        query_kind:
+          type:
+            - string
+            - 'null'
+          enum:
+            - text
+            - number
+            - temporal
+            - boolean
+            - choice
+            - choices
+            - tags
+            - files
+            - null
+          description: >-
+            How the list of items sorts and filters the field. `text`, `number`, `temporal` (date, moment, time),
+            `boolean` and `choice` can be sorted. Every kind can be filtered with `empty`; `number` and `temporal` also
+            take `min` and `max`, `boolean` takes `is`, `choice` and `choices` take `in`. Null for a type this version
+            does not know.
+        summable:
+          type: boolean
+          description: Whether the totals of the list of items can add the values up (`number` and `money`).
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    ItemValue:
+      description: >-
+        The value of one field. A string for text, long text, URL, email, phone, color, barcode, date, date and time,
+        time and single choice; a decimal string for number, amount and percentage; a boolean for yes/no; an integer
+        for rating; an array of strings for multiple choice, tags and the attachment ids of file and photo.
+      oneOf:
+        - type: string
+        - type: boolean
+        - type: integer
+        - type: array
+          items:
+            type: string
+    ItemValues:
+      type: object
+      description: The values of an item, keyed by the id of the field. A field without a value is absent.
+      propertyNames:
+        pattern: ^[0-9a-z]{26}$
+      additionalProperties:
+        $ref: '#/components/schemas/ItemValue'
+    ItemValuesInput:
+      type: object
+      description: >-
+        The values to write, keyed by the id of the field. A key that is not a field of the inventory, and a `file` or
+        `photo` field, are refused. `null`, an empty text or an empty list clears a field (refused for a required one).
+      propertyNames:
+        pattern: ^[0-9a-zA-Z]{26}$
+      additionalProperties:
+        anyOf:
+          - type: 'null'
+          - type: string
+          - type: number
+          - type: boolean
+          - type: array
+            items:
+              type: string
+    Item:
+      type: object
+      description: A row of an inventory.
+      required:
+        - id
+        - values
+        - attachments
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        values:
+          $ref: '#/components/schemas/ItemValues'
+        attachments:
+          type: array
+          description: Every file of the item, the ones of its file and photo fields included.
+          items:
+            $ref: '#/components/schemas/Attachment'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        updated_at:
+          $ref: '#/components/schemas/Timestamp'
+    FieldRef:
+      type: object
+      description: A field, as the history names it.
+      required:
+        - id
+        - name
+        - type
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+        type:
+          type: string
+    RevisionChange:
+      description: >-
+        What changed. For `created` and `updated` it is one entry per field, with the values the way the item shows them
+        now. For `attachment_added` and `attachment_removed` it is one entry naming the file.
+      oneOf:
+        - type: object
+          title: Value change
+          required:
+            - field
+            - before
+            - after
+          properties:
+            field:
+              $ref: '#/components/schemas/FieldRef'
+            before:
+              description: The value before, null when there was none.
+              oneOf:
+                - $ref: '#/components/schemas/ItemValue'
+                - type: 'null'
+            after:
+              description: The value after, null when the field was cleared.
+              oneOf:
+                - $ref: '#/components/schemas/ItemValue'
+                - type: 'null'
+        - type: object
+          title: File change
+          required:
+            - attachment
+            - field
+          properties:
+            attachment:
+              type: object
+              required:
+                - id
+                - name
+              properties:
+                id:
+                  type:
+                    - string
+                    - 'null'
+                name:
+                  type:
+                    - string
+                    - 'null'
+            field:
+              description: The file or photo field the file belonged to, null for a plain attachment or if the field was deleted since.
+              oneOf:
+                - $ref: '#/components/schemas/FieldRef'
+                - type: 'null'
+    Revision:
+      type: object
+      description: One line of the history of an item.
+      required:
+        - id
+        - action
+        - user
+        - created_at
+        - changes
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        action:
+          type: string
+          enum:
+            - created
+            - updated
+            - attachment_added
+            - attachment_removed
+        user:
+          description: Who did it, null when their account was deleted since.
+          oneOf:
+            - type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+            - type: 'null'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionChange'
+    Attachment:
+      type: object
+      description: A file attached to an item.
+      required:
+        - id
+        - field
+        - name
+        - mime
+        - size
+        - width
+        - height
+        - has_thumbnail
+        - uploaded_at
+        - uploaded_by
+        - url
+        - thumbnail_url
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        field:
+          description: The file or photo field the file fills, null for a plain attachment.
+          oneOf:
+            - $ref: '#/components/schemas/Ulid'
+            - type: 'null'
+        name:
+          type: string
+          maxLength: 255
+        mime:
+          type: string
+          description: The type detected from the content when the file was uploaded.
+        size:
+          type: integer
+          description: Bytes.
+        width:
+          type:
+            - integer
+            - 'null'
+          description: Pixels, for an image.
+        height:
+          type:
+            - integer
+            - 'null'
+          description: Pixels, for an image.
+        has_thumbnail:
+          type: boolean
+        uploaded_at:
+          $ref: '#/components/schemas/Timestamp'
+        uploaded_by:
+          description: Null when the account of the uploader was deleted since.
+          oneOf:
+            - type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+            - type: 'null'
+        url:
+          type: string
+          description: The path of the file, relative to the host (it already starts with `/api/v1`). Call it with your token.
+        thumbnail_url:
+          type:
+            - string
+            - 'null'
+          description: The path of the thumbnail, a JPEG. Null when the file has none.
+    ExportFormat:
+      type: string
+      enum:
+        - xlsx
+        - ods
+        - csv
+        - json
+        - pdf
+        - zip
+    ExportScope:
+      type: string
+      description: '`all`: every item. `view`: the items a list with the given `query` would show.'
+      enum:
+        - all
+        - view
+    ExportStatus:
+      type: string
+      enum:
+        - pending
+        - running
+        - completed
+        - failed
+    Export:
+      type: object
+      description: A file of the items of an inventory, written in the background for the person who asked.
+      required:
+        - id
+        - format
+        - scope
+        - status
+        - error
+        - file_name
+        - size
+        - items_count
+        - created_at
+        - completed_at
+        - expires_at
+        - download_url
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        format:
+          $ref: '#/components/schemas/ExportFormat'
+        scope:
+          $ref: '#/components/schemas/ExportScope'
+        status:
+          $ref: '#/components/schemas/ExportStatus'
+        error:
+          type:
+            - string
+            - 'null'
+          description: For a failed export, what went wrong, in the language of the request. Null otherwise.
+        file_name:
+          type:
+            - string
+            - 'null'
+          description: Null until the export is completed.
+        size:
+          type:
+            - integer
+            - 'null'
+          description: Bytes. Null until the export is completed.
+        items_count:
+          type:
+            - integer
+            - 'null'
+          description: The number of items in the file. Null until the export is completed.
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        completed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        expires_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the file is deleted (24 hours after the export ended by default). Null until it ends.
+        download_url:
+          type:
+            - string
+            - 'null'
+          description: The path of the file, relative to the host. Null until the export is completed and after it expired.
+    ImportStatus:
+      type: string
+      description: >-
+        `uploaded`: the file was read and waits for you to start it. `pending`: started, waiting for a worker. `running`.
+        `completed` or `failed`: the report is kept for 24 hours by default.
+      enum:
+        - uploaded
+        - pending
+        - running
+        - completed
+        - failed
+    ImportOptions:
+      type: object
+      description: How the file is read and how its cells are understood.
+      required:
+        - has_header
+        - delimiter
+        - encoding
+        - decimal
+        - date_order
+        - on_error
+      properties:
+        has_header:
+          type: boolean
+          description: Whether the first row holds the names of the columns.
+        delimiter:
+          type:
+            - string
+            - 'null'
+          enum:
+            - comma
+            - semicolon
+            - tab
+            - null
+          description: The separator of a text file. Null for a spreadsheet.
+        encoding:
+          type:
+            - string
+            - 'null'
+          enum:
+            - utf-8
+            - windows-1252
+            - utf-16
+            - null
+          description: The encoding of a text file. Null for a spreadsheet.
+        decimal:
+          type: string
+          enum:
+            - comma
+            - point
+          description: The decimal sign of the numbers in the file.
+        date_order:
+          type: string
+          enum:
+            - dmy
+            - mdy
+            - ymd
+          description: The order of day, month and year in the dates written with digits.
+        on_error:
+          type: string
+          enum:
+            - abort
+            - skip
+          description: '`abort`: nothing is imported if a row is refused. `skip`: the rows that are refused are left out and reported.'
+    ImportColumn:
+      type: object
+      description: A column of the file.
+      required:
+        - index
+        - header
+        - samples
+        - guess
+        - fraction_like
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: The position of the column, from 0.
+        header:
+          type: string
+          description: The name of the column, or a letter when it has none.
+        samples:
+          type: array
+          description: A few values of the column.
+          items:
+            type: string
+        guess:
+          $ref: '#/components/schemas/FieldTypeKey'
+        fraction_like:
+          type: boolean
+          description: >-
+            Whether the values are numbers between -1 and 1 that are not all whole, as a spreadsheet stores percentages
+            (12.5 % is 0.125): check before mapping the column to a percentage field.
+    ImportMappingEntry:
+      type: object
+      description: Where a column goes.
+      required:
+        - column
+        - target
+        - field
+        - type
+        - name
+      properties:
+        column:
+          type: integer
+          minimum: 0
+          description: The `index` of the column.
+        target:
+          type: string
+          enum:
+            - ignore
+            - field
+            - new
+          description: '`ignore`: the column is left out. `field`: it fills the existing field `field`. `new`: a field of type `type` called `name` is created for it (needs the right to change the fields).'
+        field:
+          oneOf:
+            - $ref: '#/components/schemas/Ulid'
+            - type: 'null'
+          description: The id of the field, for the target `field`.
+        type:
+          oneOf:
+            - $ref: '#/components/schemas/FieldTypeKey'
+            - type: 'null'
+          description: The type of the new field, for the target `new`. Not `file`, `photo` or `multiselect`.
+        name:
+          type:
+            - string
+            - 'null'
+          description: The name of the new field, for the target `new`.
+    ImportRowError:
+      type: object
+      description: A row that was refused.
+      required:
+        - row
+        - column
+        - message
+      properties:
+        row:
+          type: integer
+          description: The number of the row in the file.
+        column:
+          type:
+            - string
+            - 'null'
+          description: The name of the column the fault is about, null when it is about the row.
+        message:
+          type: string
+    Import:
+      type: object
+      description: >-
+        A file brought into an inventory. It is read when sent (columns, a guess of their types and a proposed mapping),
+        then you start it and a worker adds the items.
+      required:
+        - id
+        - format
+        - status
+        - error
+        - file_name
+        - size
+        - options
+        - columns
+        - mapping
+        - rows_total
+        - rows_imported
+        - rows_failed
+        - fields_created
+        - errors
+        - created_at
+        - completed_at
+        - expires_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        format:
+          type: string
+          enum:
+            - csv
+            - xlsx
+            - ods
+        status:
+          $ref: '#/components/schemas/ImportStatus'
+        error:
+          type:
+            - string
+            - 'null'
+          description: For a failed import, what went wrong, in the language of the request. Null otherwise.
+        file_name:
+          type: string
+        size:
+          type: integer
+          description: Bytes.
+        options:
+          $ref: '#/components/schemas/ImportOptions'
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportColumn'
+        mapping:
+          type: array
+          description: The proposal while the import is `uploaded`, what was started afterwards.
+          items:
+            $ref: '#/components/schemas/ImportMappingEntry'
+        rows_total:
+          type:
+            - integer
+            - 'null'
+          description: Rows with something in them. Null until the import ends.
+        rows_imported:
+          type:
+            - integer
+            - 'null'
+          description: Null until the import ends.
+        rows_failed:
+          type:
+            - integer
+            - 'null'
+          description: Null until the import ends.
+        fields_created:
+          type:
+            - integer
+            - 'null'
+          description: Null until the import ends.
+        errors:
+          type:
+            - array
+            - 'null'
+          description: The first 100 refused rows. Null until the import ends.
+          items:
+            $ref: '#/components/schemas/ImportRowError'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        completed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        expires_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: >-
+            When the report, or a file that was sent and never started, is deleted. Null while the import is started and
+            has not ended.
+    TemplateBase:
+      type: object
+      description: What a template is called and where to read about it. The list and the detail share it.
+      required:
+        - slug
+        - category
+        - category_label
+        - icon
+        - name
+        - summary
+        - url
+      properties:
+        slug:
+          type: string
+          maxLength: 60
+          pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+        category:
+          type: string
+          enum:
+            - home
+            - business
+            - it
+            - collection
+            - hobby
+            - food
+            - association
+        category_label:
+          type: string
+          description: The name of the category in the language of the request.
+        icon:
+          type: string
+          description: The name of a Tabler icon.
+        name:
+          type: string
+          description: The name of the inventory the template makes.
+        summary:
+          type: string
+          description: One sentence.
+        url:
+          type: string
+          format: uri
+          description: The public page of the template, in the language of the request.
+    TemplateSummary:
+      description: A template, enough to draw a card.
+      allOf:
+        - $ref: '#/components/schemas/TemplateBase'
+        - type: object
+          required:
+            - fields_count
+          properties:
+            fields_count:
+              type: integer
+              minimum: 0
+    TemplateChoice:
+      type: object
+      description: A choice of a template field. The `key` is what the examples name it by; the ids are made when an inventory is created.
+      required:
+        - key
+        - label
+        - color
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        color:
+          type:
+            - string
+            - 'null'
+    TemplateField:
+      type: object
+      description: A field the template would create.
+      required:
+        - key
+        - name
+        - type
+        - type_label
+        - required
+        - options
+      properties:
+        key:
+          type: string
+          pattern: ^[a-z0-9_]+$
+          description: What the examples are keyed by.
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/FieldTypeKey'
+        type_label:
+          type: string
+          description: The name of the type in the language of the request.
+        required:
+          type: boolean
+        options:
+          type: object
+          description: The options of the field as the template file gives them (see `FieldOptions`); `choices` list `TemplateChoice`.
+          properties:
+            choices:
+              type: array
+              items:
+                $ref: '#/components/schemas/TemplateChoice'
+    Template:
+      description: A template with its description, its fields and its example rows.
+      allOf:
+        - $ref: '#/components/schemas/TemplateBase'
+        - type: object
+          required:
+            - description
+            - fields
+            - examples
+          properties:
+            description:
+              type: array
+              description: The paragraphs of the description.
+              items:
+                type: string
+            fields:
+              type: array
+              items:
+                $ref: '#/components/schemas/TemplateField'
+            examples:
+              type: array
+              description: Example rows, keyed by the `key` of the fields, with values written the way the API writes them. They are never stored in an inventory.
+              items:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ItemValue'
