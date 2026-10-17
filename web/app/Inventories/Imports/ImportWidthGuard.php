@@ -8,64 +8,98 @@ use App\Inventories\Exceptions\ImportFileException;
 use XMLReader;
 
 /**
- * Refuses a file with a row so wide that reading it would exhaust the memory, before the library that reads the file builds that row.
+ * Refuses a file that the library that reads it would take too much memory or time to build, before it builds anything.
  *
  * The library expands a row to its full width before giving it: a cell of an OpenDocument sheet that says it is repeated fifty million
  * times becomes fifty million cells, a worksheet whose dimension or whose `spans` claim as many columns is filled with as many, a cell
  * of a worksheet whose reference is `ZZZZZZ1` is padded with every column before it, and a text file of ten megabytes of separators is
- * ten million fields. The width the import accepts ({@see ImportRows}) is judged on the row once it is built, which is too late, so each
- * format is read here first, as a stream and without building anything, and a file is refused as soon as a row would be wider than
- * {@see self::limit()}.
+ * ten million fields. It also builds a row of an Excel sheet one cell at a time, copying the cells it already has each time, so that the
+ * time a row takes grows with the square of its width (a row of 16 384 cells takes 2.6 seconds, one of 1 024 cells 10 milliseconds).
+ * The width the import accepts ({@see ImportRows}) is judged on the row once it is built, which is too late, so each format is read here
+ * first, as a stream and without building anything, and a file is refused as soon as it would take more cells than it may.
  *
- * That limit is the number of columns of a spreadsheet application, or the import's own if it is larger: spreadsheets pad their rows
- * with a trailing empty cell that is repeated up to the width of the sheet (1 024 columns in older versions of LibreOffice, 16 384 in
- * Excel and recent ones), and a text file may end its rows with separators, so a row is only refused here for what it would take to
- * hold it, not for the columns that hold something (that is judged later, once the empty cells at the end of the row are cut off).
+ * Two things are bounded, counting what the library builds, the empty cells it fills a row with included:
+ *
+ * - **A row**: at most {@see self::limit()} cells, which is {@see self::MATERIALISED_COLUMNS} unless the import is allowed more columns
+ *   than that (`inventories.import_max_columns`). That is the width of the rows a spreadsheet application writes, padded with a trailing
+ *   empty cell that is repeated up to 1 024 columns (older versions of LibreOffice); the 16 384 columns of Excel and recent versions are
+ *   not built, as the library leaves such a cell out. What the row holds is judged later, once its empty cells are cut off
+ *   ({@see ImportRows}).
+ * - **A sheet**: at most {@see self::budget()} cells in all, twice what an import can take at most (its rows by its columns), with room
+ *   for the empty cells of the formatting. A row that is repeated counts as many times as it is repeated, as the import goes through
+ *   each time.
  *
  * The guard does not follow the library case by case: it bounds what the library can be made to build, and refuses what it cannot bound.
  *
  * - An Excel sheet is whatever the workbook says is one (its relationships, followed as the library follows them: a sheet may be named
  *   anything, in any folder of `xl/`), and no other part: the list of the formulas of a workbook holds a `<c>` for each of them, and is no
- *   sheet. In a sheet, two things are bounded between one `<row>` and the next: how many `<c>` there are, and the highest column any of
- *   them is at, a cell with no reference being the one after the last. The dimension and the `spans` a sheet announces are bounded too.
+ *   sheet. In a sheet, three things are bounded between one `<row>` and the next: how many `<c>` there are, the highest column any of
+ *   them is at (a cell with no reference being the one after the last), and the width the sheet announces with its dimension or the
+ *   `spans` of the row; the widest of the three is the cells the row costs.
  * - An OpenDocument sheet is refused unless it is built the way a sheet is: rows hold the cells, and cells hold no row. The library keeps
  *   what it gathered across a row that opens in the middle of another, and cells that are in no row, and a guard that tried to follow
  *   that would have to be as wrong as the library is. The cells of a row are counted down to the shortcuts the library takes: a row
  *   with nothing in it gets one cell however many it repeats, and a trailing cell that completes the width of an Excel sheet is not
  *   expanded.
+ * - A text file costs the fields of its records, counted as the library splits them.
  */
 final class ImportWidthGuard
 {
-    /** The columns of a sheet in Excel and in LibreOffice (`XFD`): no real row is wider. */
+    /** The columns of a sheet in Excel and in LibreOffice (`XFD`): the width of a row padded by an application that is not built. */
     public const SPREADSHEET_COLUMNS = 16384;
+
+    /** The most cells a row is let to be built with: the width of the rows that older versions of LibreOffice pad, and no more. */
+    public const MATERIALISED_COLUMNS = 1024;
 
     /** The most letters of a column in a cell reference: `XFD` is the last column, `ZZZ` the last that three letters can name. */
     private const MAX_LETTERS = 3;
 
     /**
-     * The widest row, in cells, that is let through.
+     * The most cells a row is let to be built with: {@see self::MATERIALISED_COLUMNS}, or the columns the import is allowed if more.
      */
     public static function limit(): int
     {
-        return max(config()->integer('inventories.import_max_columns'), self::SPREADSHEET_COLUMNS);
+        return max(config()->integer('inventories.import_max_columns'), self::MATERIALISED_COLUMNS);
+    }
+
+    /**
+     * The most cells a sheet is let to be built with: twice what an import can take at most (`inventories.import_max_rows` rows of
+     * `inventories.import_max_columns` columns), and never fewer than the lines of a sheet with one cell each (a spreadsheet often ends
+     * with a million rows of one empty cell).
+     */
+    public static function budget(): int
+    {
+        return max(2 * config()->integer('inventories.import_max_rows') * config()->integer('inventories.import_max_columns'), ImportRows::MAX_LINES);
     }
 
     /**
      * Checks the sheets of an OpenDocument spreadsheet.
      *
-     * @throws ImportFileException When a row would be wider than the limit, or the rows and the cells are not built as those of a sheet.
+     * @throws ImportFileException When a row would be wider than the limit, a sheet would take more cells than its budget, or the rows
+     *                             and the cells are not built as those of a sheet.
      */
     public static function ods(string $path): void
     {
         $limit = self::limit();
+        $budget = self::budget();
         // Whether a row is open, the cells counted in it so far, how many times the last one seen is repeated (it is counted once the
-        // next one comes, or at the end of the row, whose rules differ), and whether any cell holds something.
+        // next one comes, or at the end of the row, whose rules differ), whether any cell holds something, how many times the row is
+        // repeated, and the cells of the sheet so far.
         $inRow = false;
         $before = 0;
         $last = null;
         $filled = false;
+        $rowRepeats = 1;
+        $total = 0;
 
-        self::read('zip://'.$path.'#content.xml', function (XMLReader $xml) use (&$inRow, &$before, &$last, &$filled, $limit): void {
+        self::read('zip://'.$path.'#content.xml', function (XMLReader $xml) use (&$inRow, &$before, &$last, &$filled, &$rowRepeats, &$total, $limit, $budget): void {
+            if ($xml->nodeType === XMLReader::ELEMENT && $xml->name === 'table:table') {
+                // Each sheet has its budget.
+                $total = 0;
+
+                return;
+            }
+
             if ($xml->nodeType === XMLReader::ELEMENT && $xml->name === 'table:table-row') {
                 // A row with no content (`<table:table-row table:number-rows-repeated="3"/>`) has no end to wait for. A row that starts in
                 // another one ends the first: the end of the other, or a cell before it, finds no row open.
@@ -73,6 +107,8 @@ final class ImportWidthGuard
                 $before = 0;
                 $last = null;
                 $filled = false;
+                // More than the lines of a sheet is refused anyway, and the product below stays a whole number.
+                $rowRepeats = min(max(1, (int) ($xml->getAttribute('table:number-rows-repeated') ?? 1)), ImportRows::MAX_LINES + 1);
 
                 return;
             }
@@ -104,6 +140,8 @@ final class ImportWidthGuard
                     throw new ImportFileException(ImportFileException::UNREADABLE);
                 }
 
+                $final = 0;
+
                 if ($last !== null) {
                     // As the library builds the last cell: once for a row with nothing in it, not at all when it completes the width of
                     // an Excel sheet (such a row is padded with it by the application, and stays as wide as the cells that hold something).
@@ -114,6 +152,9 @@ final class ImportWidthGuard
                     }
                 }
 
+                // The row is built once and given as many times as it is repeated, each time converted cell by cell.
+                $total += max(1, $before + $final) * $rowRepeats;
+                self::assertCells($total, $budget);
                 $inRow = false;
             }
         });
@@ -121,20 +162,31 @@ final class ImportWidthGuard
 
     /**
      * Checks the worksheets of an Excel workbook: the dimension a sheet announces, the width its rows announce, and the cells of each row,
-     * counted and placed as the library places them.
+     * counted and placed as the library places them, then the cells of the sheet.
      *
-     * @throws ImportFileException When a sheet would be filled to a width beyond the limit.
+     * @throws ImportFileException When a row would be built wider than the limit, or a sheet with more cells than its budget.
      */
     public static function xlsx(string $path): void
     {
         $limit = self::limit();
+        $budget = self::budget();
 
         foreach (self::sheets($path) as $part) {
-            // The cells of the row being read, and the column of the last one: a cell with no reference is put after it.
+            // The row being read: its cells, the column of the last one (a cell with no reference is put after it) and of the highest,
+            // the width the library fills it with up front; and what the dimension of the sheet announces, and the cells of the sheet so far.
             $cells = 0;
             $last = -1;
+            $top = -1;
+            $fill = 0;
+            $dimension = 0;
+            $total = 0;
+            // What the row costs: the widest of those, which is how many cells the library ends up building for it.
+            $settle = function () use (&$cells, &$top, &$fill, &$total, $budget): void {
+                $total += max($fill, $cells, $top + 1);
+                self::assertCells($total, $budget);
+            };
 
-            self::read('zip://'.$path.'#'.$part, function (XMLReader $xml) use (&$cells, &$last, $limit): void {
+            self::read('zip://'.$path.'#'.$part, function (XMLReader $xml) use (&$cells, &$last, &$top, &$fill, &$dimension, $settle, $limit): void {
                 if ($xml->nodeType !== XMLReader::ELEMENT) {
                     return;
                 }
@@ -143,16 +195,21 @@ final class ImportWidthGuard
                     case 'dimension':
                         // `A1:M13`: the library fills every row with as many cells as the last column.
                         if (preg_match('/[A-Z]+\d+:([A-Z]+)\d+/', (string) $xml->getAttribute('ref'), $found) === 1) {
-                            self::assertColumns(self::columnsOf($found[1]), $limit);
+                            $dimension = self::columnsOf($found[1]);
+                            self::assertColumns($dimension, $limit);
                         }
 
                         break;
                     case 'row':
+                        $settle();
                         // The library starts a list of cells again, and counts the columns from the first.
                         $cells = 0;
                         $last = -1;
+                        $top = -1;
                         // `1:5`, when the sheet gives no dimension: the library takes what follows the first colon, whatever else there is.
-                        self::assertColumns((int) (explode(':', (string) $xml->getAttribute('spans'))[1] ?? 0), $limit);
+                        $spans = (int) (explode(':', (string) $xml->getAttribute('spans'))[1] ?? 0);
+                        self::assertColumns($spans, $limit);
+                        $fill = $dimension > 0 ? $dimension : $spans;
 
                         break;
                     case 'c':
@@ -161,6 +218,7 @@ final class ImportWidthGuard
                         // A reference the library cannot read stops it; one it reads puts the cell at its column, none puts it after the last.
                         $column = preg_match('/^([A-Za-z]+)\d*$/', $reference, $found) === 1 ? self::columnsOf($found[1]) - 1 : $last + 1;
                         $last = $column;
+                        $top = max($top, $column);
 
                         self::assertColumns($cells, $limit);
                         self::assertColumns($column + 1, $limit);
@@ -168,6 +226,8 @@ final class ImportWidthGuard
                         break;
                 }
             });
+
+            $settle();
         }
     }
 
@@ -192,6 +252,9 @@ final class ImportWidthGuard
         }
 
         $limit = self::limit();
+        $budget = self::budget();
+        // The fields of the file so far, a record's first one apart (the records themselves are counted by the lines of the file).
+        $total = 0;
         // Where the next character is: at the start of a field, in a field that is not quoted, inside quotes (`$quote`: the last character
         // read was a quote, and the next tells whether it closes the field), or after the closing quote.
         $state = 'start';
@@ -261,6 +324,8 @@ final class ImportWidthGuard
                             $fields++;
                             $position++;
                         } elseif ($character === "\n") {
+                            $total += $fields - 1;
+                            self::assertCells($total, $budget);
                             $fields = 1;
                             $position++;
                         } else {
@@ -274,7 +339,14 @@ final class ImportWidthGuard
                             break;
                         }
 
-                        $fields = $chunk[$position] === "\n" ? 1 : $fields + 1;
+                        if ($chunk[$position] === "\n") {
+                            $total += $fields - 1;
+                            self::assertCells($total, $budget);
+                            $fields = 1;
+                        } else {
+                            $fields++;
+                        }
+
                         $state = 'start';
                         $position++;
                     }
@@ -284,6 +356,8 @@ final class ImportWidthGuard
                     }
                 }
             }
+
+            self::assertCells($total + $fields - 1, $budget);
         } finally {
             fclose($handle);
         }
@@ -318,6 +392,16 @@ final class ImportWidthGuard
         });
 
         return array_map(strval(...), array_keys($parts));
+    }
+
+    /**
+     * @throws ImportFileException When a sheet would be built with more cells than its budget.
+     */
+    private static function assertCells(int $cells, int $budget): void
+    {
+        if ($cells > $budget) {
+            throw new ImportFileException(ImportFileException::TOO_MANY_CELLS);
+        }
     }
 
     /**

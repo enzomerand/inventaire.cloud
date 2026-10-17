@@ -69,7 +69,7 @@ final class ImportController extends Controller
      * Sends a file (`201`, with the import `uploaded`: the columns, a type guessed for each and a proposal of where each goes).
      *
      * `422` for a file that is not one the import reads (`file`, with a `code`: `unrecognized_format`, `unreadable_file`, `empty_file`,
-     * `unpacked_too_large`, `too_many_columns`, `too_many_lines`) and for a mistake in the request; `409` when the person already has as many unfinished
+     * `unpacked_too_large`, `too_many_columns`, `too_many_cells`, `too_many_lines`) and for a mistake in the request; `409` when the person already has as many unfinished
      * imports of this inventory as they may (`import_limit_reached`, with the `limit`); `429` beyond the pace of files.
      */
     public function store(StoreImportRequest $request, Inventory $inventory): JsonResponse

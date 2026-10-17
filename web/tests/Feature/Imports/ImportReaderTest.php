@@ -134,20 +134,20 @@ describe('a CSV', function (): void {
                 ->and($failure->getMessage())->toBe('This file has more than 1,100,000 lines, the empty ones included. Delete the empty lines at the end of the file.'));
     });
 
-    it('is refused when a record has more fields than a spreadsheet has columns, before the record is built', function (string $text): void {
+    it('is refused when a record has more fields than a row may be built with, before the record is built', function (string $text): void {
         expect(fn () => importRead(importFile($text), ImportFormat::Csv))
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
     })->with([
-        'separators' => ['a'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
-        'a quote that does not open a field does not hide the separators' => ['a"b'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
-        'a field closed by its quote, and the separators after it' => ['"a"'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
-        'a doubled quote inside quotes does not close the field' => ['"a""b",'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)."\r\n"],
-        'after lines that are not wide' => ["a,b\nc,d\n".str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)],
-        'spaces before the quote' => ['  "a"'.str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS)],
+        'separators' => ['a'.str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS)."\r\n"],
+        'a quote that does not open a field does not hide the separators' => ['a"b'.str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS)."\r\n"],
+        'a field closed by its quote, and the separators after it' => ['"a"'.str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS)."\r\n"],
+        'a doubled quote inside quotes does not close the field' => ['"a""b",'.str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS)."\r\n"],
+        'after lines that are not wide' => ["a,b\nc,d\n".str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS)],
+        'spaces before the quote' => ['  "a"'.str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS)],
     ]);
 
     it('lets through a record that holds its separators in quotes, and rows that end with a few empty fields', function (): void {
-        $commas = str_repeat(',', ImportWidthGuard::SPREADSHEET_COLUMNS + 10);
+        $commas = str_repeat(',', ImportWidthGuard::MATERIALISED_COLUMNS + 10);
         $path = importFile("Name,Notes\r\n\"{$commas}\",x\r\n\"a\"\"{$commas}\",y\r\nz,w".str_repeat(',', 300)."\r\n");
 
         $rows = importRead($path, ImportFormat::Csv)['rows'];
@@ -171,14 +171,14 @@ describe('a CSV', function (): void {
         }
     });
 
-    it('counts the fields of a record with the separator it is given, and judges the width against the limit of the application', function (): void {
+    it('counts the fields of a record with the separator it is given, and judges the width against the limit of the guard', function (): void {
         $line = fn (int $fields, string $separator): string => implode($separator, array_fill(0, $fields, 'x'))."\n";
 
         foreach ([',', ';', "\t"] as $separator) {
-            expect(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::SPREADSHEET_COLUMNS, $separator)), $separator))->not->toThrow(ImportFileException::class)
-                ->and(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::SPREADSHEET_COLUMNS + 1, $separator)), $separator))->toThrow(ImportFileException::class)
+            expect(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::MATERIALISED_COLUMNS, $separator)), $separator))->not->toThrow(ImportFileException::class)
+                ->and(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::MATERIALISED_COLUMNS + 1, $separator)), $separator))->toThrow(ImportFileException::class)
                 // The other characters are text.
-                ->and(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::SPREADSHEET_COLUMNS + 1, $separator === ',' ? ';' : ',')), $separator))->not->toThrow(ImportFileException::class);
+                ->and(fn () => ImportWidthGuard::csv(importFile($line(ImportWidthGuard::MATERIALISED_COLUMNS + 1, $separator === ',' ? ';' : ',')), $separator))->not->toThrow(ImportFileException::class);
         }
 
         // A larger limit of the import widens the one of the guard.
@@ -354,14 +354,37 @@ describe('a worksheet of a workbook that announces a width no sheet has', functi
         'a cell past the last column' => ['<c r="B1"', '<c r="XFE1"'],
     ]);
 
-    it('is read when it is as wide as a sheet can be', function (): void {
-        config(['inventories.import_max_columns' => 20000]);
-        $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace(['<dimension ref="A1:B1"/>', 'spans="1:2"', '<c r="B1"'], ['<dimension ref="A1:XFD1"/>', 'spans="1:16384"', '<c r="XFD1"'], $xml));
+    it('is read when it is as wide as a row may be built', function (): void {
+        // The import takes as many columns as the guard does: 1 024, which is `AMJ`.
+        config(['inventories.import_max_columns' => ImportWidthGuard::MATERIALISED_COLUMNS]);
+        $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace(['<dimension ref="A1:B1"/>', 'spans="1:2"', '<c r="B1"'], ['<dimension ref="A1:AMJ1"/>', 'spans="1:1024"', '<c r="AMJ1"'], $xml));
 
         $row = importRead($path, ImportFormat::Xlsx)['rows'][1];
 
         expect($row[0])->toBe('a')
-            ->and($row[16383])->toBe('b');
+            ->and($row[1023])->toBe('b');
+    });
+
+    it('is refused when it is one column wider than that', function (string|array $from, string|array $to): void {
+        config(['inventories.import_max_columns' => ImportWidthGuard::MATERIALISED_COLUMNS]);
+        $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace($from, $to, $xml));
+
+        expect(fn () => importRead($path, ImportFormat::Xlsx))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        'by its dimension' => ['<dimension ref="A1:B1"/>', '<dimension ref="A1:AMK1"/>'],
+        'by the spans of its rows' => [['<dimension ref="A1:B1"/>', 'spans="1:2"'], ['', 'spans="1:1025"']],
+        'by a cell' => ['<c r="B1"', '<c r="AMK1"'],
+    ]);
+
+    it('lets through a sheet written by Excel: styled empty cells, the width of its data, and 10 000 rows', function (): void {
+        $cells = fn (int $row): string => implode('', array_map(fn (int $column): string => '<c r="'.chr(64 + $column).$row.'" s="1"><v>'.$row.'</v></c>', range(1, 13))).'<c r="N'.$row.'" s="2"/>';
+        $rows = implode('', array_map(fn (int $row): string => '<row r="'.$row.'" spans="1:14">'.$cells($row).'</row>', range(1, 10000)));
+        $path = importPatch(importXlsxRows($rows), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace('<sheetData>', '<dimension ref="A1:N10000"/><cols><col min="1" max="14" width="12" customWidth="1"/></cols><sheetData>', $xml));
+
+        ImportWidthGuard::xlsx($path);
+
+        expect(true)->toBeTrue();
     });
 });
 
@@ -371,26 +394,27 @@ describe('a worksheet whose cells are placed one after the other, or by a refere
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
     })->with([
         // The library puts a cell with no reference after the last one it placed, and builds all of them.
-        'cells with no reference' => [str_repeat('<c/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1)],
-        'cells whose reference is none' => [str_repeat('<c r="?"/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1)],
-        'the same cell again and again' => [str_repeat('<c r="A1"/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1)],
-        'a cell with no reference after the last column' => ['<c r="XFD1"/><c/>'],
-        'cells with no reference after one far to the right' => ['<c r="XFC1"/><c/><c/>'],
-        'one cell, then cells that go back' => ['<c r="XFD1"/>'.str_repeat('<c r="A1"/>', ImportWidthGuard::SPREADSHEET_COLUMNS)],
+        'cells with no reference' => [str_repeat('<c/>', ImportWidthGuard::MATERIALISED_COLUMNS + 1)],
+        'cells whose reference is none' => [str_repeat('<c r="?"/>', ImportWidthGuard::MATERIALISED_COLUMNS + 1)],
+        'the same cell again and again' => [str_repeat('<c r="A1"/>', ImportWidthGuard::MATERIALISED_COLUMNS + 1)],
+        // `AMJ` is the 1 024th column.
+        'a cell with no reference after the last column' => ['<c r="AMJ1"/><c/>'],
+        'cells with no reference after one far to the right' => ['<c r="AMI1"/><c/><c/>'],
+        'one cell, then cells that go back' => ['<c r="AMJ1"/>'.str_repeat('<c r="A1"/>', ImportWidthGuard::MATERIALISED_COLUMNS)],
     ]);
 
     it('counts the cells of each row, not of the sheet', function (): void {
-        config(['inventories.import_max_columns' => 20000]);
-        $columns = ImportWidthGuard::SPREADSHEET_COLUMNS;
+        config(['inventories.import_max_columns' => ImportWidthGuard::MATERIALISED_COLUMNS]);
+        $columns = ImportWidthGuard::MATERIALISED_COLUMNS;
         $row = fn (int $number): string => '<row r="'.$number.'">'.str_repeat('<c t="inlineStr"><is><t>x</t></is></c>', $columns / 2).'</row>';
         $rows = importRead(importXlsxRows($row(1).$row(2).$row(3)), ImportFormat::Xlsx)['rows'];
 
         expect($rows)->toHaveCount(3)->and(count($rows[3]))->toBe($columns / 2);
     });
 
-    it('is read when its cells have no reference, up to the width of a sheet', function (): void {
-        $columns = ImportWidthGuard::SPREADSHEET_COLUMNS;
-        // A sheet of recent versions of Excel has 16 384 columns: the empty cells at the end of the row are cut off, the others are read.
+    it('is read when its cells have no reference, up to the width a row may be built with', function (): void {
+        $columns = ImportWidthGuard::MATERIALISED_COLUMNS;
+        // The empty cells at the end of the row are cut off, the others are read.
         $cells = '<c t="inlineStr"><is><t>x</t></is></c><c t="inlineStr"><is><t>y</t></is></c>'.str_repeat('<c/>', $columns - 2);
 
         expect(importRead(importXlsxRows('<row r="1">'.$cells.'</row>'), ImportFormat::Xlsx)['rows'])->toBe([1 => ['x', 'y']]);
@@ -417,13 +441,13 @@ describe('a worksheet the workbook points to by a name that is not the usual one
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
     })->with([
         'a dimension, with no extension' => ['xl/worksheets/data', null, '<dimension ref="A1:B1"/>', '<dimension ref="A1:ZZZZZZ1"/>'],
-        'cells with no reference, with another extension' => ['xl/worksheets/data.bin', null, '<c r="B1"', '<c r="B1"/>'.str_repeat('<c/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1).'<c r="C1"'],
+        'cells with no reference, with another extension' => ['xl/worksheets/data.bin', null, '<c r="B1"', '<c r="B1"/>'.str_repeat('<c/>', ImportWidthGuard::MATERIALISED_COLUMNS + 1).'<c r="C1"'],
         'a far cell, by an absolute name' => ['xl/worksheets/data.dat', '/xl/worksheets/data.dat', '<c r="B1"', '<c r="ZZZZZZ1"'],
     ]);
 
     it('is the only kind of part whose cells are counted', function (): void {
         // The list of the formulas of a workbook holds one `<c>` for each of them, in no row: far more than a row may hold.
-        $calculations = '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'.str_repeat('<c r="A1" i="1"/>', ImportWidthGuard::SPREADSHEET_COLUMNS * 2).'</calcChain>';
+        $calculations = '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'.str_repeat('<c r="A1" i="1"/>', ImportWidthGuard::MATERIALISED_COLUMNS * 2).'</calcChain>';
         $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/calcChain.xml', fn (): string => $calculations);
         $path = importPatch($path, 'xl/_rels/workbook.xml.rels', fn (string $xml): string => str_replace('</Relationships>', '<Relationship Id="rIdCalc" Target="calcChain.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"/></Relationships>', $xml));
 
@@ -446,14 +470,23 @@ describe('an OpenDocument sheet whose cells are repeated', function (): void {
 
     it('is read when a spreadsheet application pads its rows, as it does', function (int $padding, int $columns): void {
         // `a` is the first cell; the padding is a cell repeated up to the width of the sheet, as LibreOffice (1 024 columns, or 16 384 in
-        // recent versions) and Excel write it.
+        // recent versions) and Excel write it. The first is built as it is (1 024 cells), the second is not built at all.
         $path = importPatch(importSpreadsheet('ods', [['a', 'b'], ['c', 'd']]), 'content.xml', fn (string $xml): string => str_replace('</table:table-row>', '<table:table-cell table:number-columns-repeated="'.$padding.'"/></table:table-row>', $xml));
 
         expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['a', 'b'], 2 => ['c', 'd']]);
     })->with([
         'a sheet of 1 024 columns' => [1022, 1024],
         'a sheet of 16 384 columns' => [16382, 16384],
-        'a little less' => [16000, 16002],
+    ]);
+
+    it('is refused when the padding makes a row wider than one may be built, and is not the width of an Excel sheet', function (int $padding): void {
+        $path = importPatch(importSpreadsheet('ods', [['a', 'b'], ['c', 'd']]), 'content.xml', fn (string $xml): string => str_replace('</table:table-row>', '<table:table-cell table:number-columns-repeated="'.$padding.'"/></table:table-row>', $xml));
+
+        expect(fn () => importRead($path, ImportFormat::Ods))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        'one column more than 1 024' => [1023],
+        'a little less than 16 384' => [16000],
     ]);
 
     it('gives a row with nothing in it one empty cell, however many it repeats', function (): void {
@@ -502,6 +535,93 @@ describe('an OpenDocument sheet whose rows and cells are not where a sheet has t
         $path = importPatch(importSpreadsheet('ods', [['a'], ['b']]), 'content.xml', fn (string $content): string => str_replace('</table:table-row></table:table>', '</table:table-row></table:table-header-rows></table:table>', (string) preg_replace('~<table:table-row ~', '<table:table-header-rows><table:table-row ', $content, 1)));
 
         expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['a'], 2 => ['b']]);
+    });
+});
+
+describe('a sheet with more cells than an import can build', function (): void {
+    it('has a budget of twice the rows by the columns an import takes, and of the lines of a sheet at least', function (): void {
+        expect(ImportWidthGuard::budget())->toBe(4000000);
+
+        config(['inventories.import_max_rows' => 100, 'inventories.import_max_columns' => 50]);
+        expect(ImportWidthGuard::budget())->toBe(ImportRows::MAX_LINES);
+
+        config(['inventories.import_max_rows' => 50000, 'inventories.import_max_columns' => 200]);
+        expect(ImportWidthGuard::budget())->toBe(20000000);
+    });
+
+    it('is refused as soon as an Excel sheet has more cells than that, the empty ones counted', function (): void {
+        config(['inventories.import_max_rows' => 1, 'inventories.import_max_columns' => 1]);
+        $row = fn (int $number): string => '<row r="'.$number.'">'.str_repeat('<c/>', ImportWidthGuard::MATERIALISED_COLUMNS).'</row>';
+        $rows = fn (int $count): string => implode('', array_map($row, range(1, $count)));
+        $budget = ImportWidthGuard::budget();
+        $fits = intdiv($budget, ImportWidthGuard::MATERIALISED_COLUMNS);
+
+        // The cells of the last row are counted too, though no row starts after it.
+        ImportWidthGuard::xlsx(importXlsxRows($rows($fits)));
+
+        expect(fn () => ImportWidthGuard::xlsx(importXlsxRows($rows($fits + 1))))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_CELLS));
+    });
+
+    it('counts a row of an Excel sheet by the width the sheet announces for it, whatever its cells are', function (): void {
+        config(['inventories.import_max_rows' => 1, 'inventories.import_max_columns' => 1]);
+        // 1 100 rows with no cell at all, in a sheet whose dimension says 1 024 columns: the library fills each of them with that many.
+        $rows = implode('', array_map(fn (int $number): string => '<row r="'.$number.'"/>', range(1, 1100)));
+        $path = importPatch(importXlsxRows($rows), 'xl/worksheets/sheet1.xml', fn (string $xml): string => str_replace('<sheetData>', '<dimension ref="A1:AMJ1100"/><sheetData>', $xml));
+
+        expect(fn () => ImportWidthGuard::xlsx($path))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_CELLS));
+    });
+
+    it('is refused when an OpenDocument sheet has more cells than that, a row counting as many times as it is repeated', function (string $row, bool $refused): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['a'], ['b']]), 1, $row);
+        $attempt = fn () => ImportWidthGuard::ods($path);
+
+        if ($refused) {
+            expect($attempt)->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_CELLS));
+        } else {
+            $attempt();
+            expect(true)->toBeTrue();
+        }
+    })->with([
+        // 1 000 cells (the library builds all of them) given 3 999 times, and the two rows of one cell around them, fit in the budget; 4 000 times do not.
+        'a row of a thousand cells, repeated up to the budget' => ['<table:table-row table:number-rows-repeated="3999"><table:table-cell office:value-type="string" table:number-columns-repeated="1000"><text:p>x</text:p></table:table-cell></table:table-row>', false],
+        'a row of a thousand cells, repeated beyond it' => ['<table:table-row table:number-rows-repeated="4000"><table:table-cell office:value-type="string" table:number-columns-repeated="1000"><text:p>x</text:p></table:table-cell></table:table-row>', true],
+        // Nothing in it, but the library builds the cells that come before the last one, and gives the row as often as it repeats.
+        'a row that looks empty, of many cells, repeated' => ['<table:table-row table:number-rows-repeated="9000"><table:table-cell table:number-columns-repeated="500"/><table:table-cell table:number-columns-repeated="500"/></table:table-row>', true],
+    ]);
+
+    it('is judged for each sheet of an OpenDocument spreadsheet, not for all of them', function (): void {
+        $row = '<table:table-row table:number-rows-repeated="2400"><table:table-cell office:value-type="string" table:number-columns-repeated="1000"><text:p>x</text:p></table:table-cell></table:table-row>';
+        $path = importPatch(importSpreadsheet('ods', [['a']]), 'content.xml', fn (string $xml): string => str_replace('</table:table>', $row.'</table:table><table:table table:name="Second">'.$row.'</table:table>', $xml));
+
+        // 2.4 million cells in each, 4.8 million in all: more than the budget of one.
+        ImportWidthGuard::ods($path);
+
+        expect(true)->toBeTrue();
+    });
+
+    it('is refused when a text file has more fields than that', function (string $ending, string $tail): void {
+        config(['inventories.import_max_rows' => 1, 'inventories.import_max_columns' => 1]);
+        $line = implode(',', array_fill(0, 1000, 'x')).$tail;
+        $lines = fn (int $count): string => implode("\n", array_fill(0, $count, $line));
+        // The separators of a line, the first field of the record apart.
+        $fits = intdiv(ImportWidthGuard::budget(), 999 + strlen($tail));
+
+        ImportWidthGuard::csv(importFile($lines($fits).$ending), ',');
+
+        expect(fn () => ImportWidthGuard::csv(importFile($lines($fits + 1).$ending), ','))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_CELLS));
+    })->with([
+        'with a line feed at the end' => ["\n", ''],
+        'with none, the last record being the one that goes over' => ['', ''],
+        'with lines that end with a separator' => ["\n", ','],
+    ]);
+
+    it('says how many cells it may hold', function (): void {
+        $failure = new ImportFileException(ImportFileException::TOO_MANY_CELLS);
+
+        expect($failure->getMessage())->toBe('This file holds more than 4,000,000 cells, counting the empty ones that a spreadsheet keeps for its formatting. Delete the rows and columns you do not use, then send it again.');
     });
 });
 

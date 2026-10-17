@@ -738,6 +738,27 @@ describe('the job', function (): void {
         'a row too wide' => ['csv', 'too_many_columns', 'A row of the file uses more than 200 columns'],
     ]);
 
+    it('says why when the sheet turns out to hold more cells than an import can build, as the limits of the instance changed meanwhile', function (): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        // Rows of a cell and 900 empty ones that the formatting leaves, 1 500 times: 1.35 million cells, under the budget of an instance.
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['Name'], ['Drill']]), 1, '<table:table-row table:number-rows-repeated="1500"><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell><table:table-cell table:number-columns-repeated="900"/></table:table-row>');
+        $import = importAsked($this, $case, $path, [runToField(0, $name->ulid)]);
+        // Rows and columns an import takes, lowered: the budget falls to the lines of a sheet, 1.1 million.
+        config(['inventories.import_max_rows' => 1, 'inventories.import_max_columns' => 1]);
+
+        $import = importDone($import);
+
+        expect($import->status)->toBe(ImportStatus::Failed)
+            ->and($import->error)->toBe('too_many_cells')
+            ->and($import->path)->toBeNull()
+            ->and(Item::query()->count())->toBe(0)
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toBe([]);
+
+        inventoryCall($this, $case['team']['owner'], 'GET', importUri($case['inventory'], $import))->assertOk()
+            ->assertJsonPath('data.error', fn (string $message): bool => str_contains($message, 'The file holds more than 1,100,000 cells'));
+    });
+
     it('is dropped without a fuss when its import was deleted while it waited', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');

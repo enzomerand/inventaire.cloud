@@ -187,6 +187,19 @@ describe('sending a file', function (): void {
         importPost($this, $case['team']['owner'], $case['inventory'], $sheet)->assertStatus(422)->assertJsonPath('code', 'unpacked_too_large');
     });
 
+    it('answers 422 when a sheet holds more cells than an import can build, the empty ones of its formatting counted', function (): void {
+        $case = importFixture();
+        // A thousand cells in a row, given 5 000 times: 5 million, in a file of a few kilobytes.
+        $sheet = importOdsAfterRow(importSpreadsheet('ods', [['a', 'b']]), 1, '<table:table-row table:number-rows-repeated="5000"><table:table-cell office:value-type="string" table:number-columns-repeated="1000"><text:p>x</text:p></table:table-cell></table:table-row>');
+
+        importPost($this, $case['team']['owner'], $case['inventory'], $sheet)
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'too_many_cells')
+            ->assertJsonPath('errors.file.0', 'This file holds more than 4,000,000 cells, counting the empty ones that a spreadsheet keeps for its formatting. Delete the rows and columns you do not use, then send it again.');
+
+        expect(Import::query()->count())->toBe(0);
+    });
+
     it('is read as it is told: without a header, in another encoding, with another separator', function (): void {
         $case = importFixture();
         $csv = importFile(mb_convert_encoding(importCsv([['Prénom', 'Ville'], ['Élodie', 'Besançon']], ';'), 'Windows-1252', 'UTF-8'));

@@ -170,8 +170,14 @@ return [
     | - `import_max_columns`: columns the file may use
     |   (`INVENTORIES_IMPORT_MAX_COLUMNS`, 200): `422` beyond. It counts the
     |   columns that hold something; a row that would be built with more than
-    |   this or 16384 cells (the width of a sheet), whichever is larger, is
-    |   refused before it is built, whatever it holds.
+    |   this or 1024 cells, whichever is larger, is refused before it is built,
+    |   whatever it holds (`too_many_columns`: the width of the rows that an
+    |   application pads, and the time a row takes to build grows with the
+    |   square of its width). A sheet that would be built with more than twice
+    |   `import_max_rows` times this many cells, the empty ones of its
+    |   formatting and the repeated rows counted (1100000 at least), is refused
+    |   too (`too_many_cells`). The analysis of a file looks at its first 1000
+    |   lines.
     | - `import_max_unpacked_size`: bytes all the parts of a spreadsheet may
     |   weigh once unpacked (`INVENTORIES_IMPORT_MAX_UNPACKED_SIZE_MB`,
     |   megabytes, 100): a spreadsheet is a zip archive, and a small one can
