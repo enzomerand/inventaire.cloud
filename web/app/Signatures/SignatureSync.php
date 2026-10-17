@@ -239,10 +239,16 @@ final class SignatureSync
      */
     private function pending(InventoryVersion $version, array $signers): void
     {
-        InventoryVersion::query()
-            ->whereKey($version->getKey())
-            ->whereIn('signature_status', [SignatureStatus::Requested->value, SignatureStatus::Sending->value, SignatureStatus::Failed->value])
-            ->update(['signature_status' => SignatureStatus::Awaiting->value, 'signature_error' => null, 'signature_requested_at' => now()]);
+        // Only while the request still has the envelope that was read: the schedule may have given up on it meanwhile (`failed`, its
+        // envelope forgotten and let go of at Documenso), and a request must not be awaiting an envelope it no longer has. A request
+        // read without an envelope is not matched at all (`where(..., null)` would match the ones with none).
+        if ($version->documenso_envelope_id !== null) {
+            InventoryVersion::query()
+                ->whereKey($version->getKey())
+                ->whereIn('signature_status', [SignatureStatus::Requested->value, SignatureStatus::Sending->value, SignatureStatus::Failed->value])
+                ->where('documenso_envelope_id', $version->documenso_envelope_id)
+                ->update(['signature_status' => SignatureStatus::Awaiting->value, 'signature_error' => null, 'signature_requested_at' => now()]);
+        }
 
         $this->record($version, $signers);
     }
@@ -278,17 +284,24 @@ final class SignatureSync
      * Records the signed PDF and counts it against the storage of the workspace, in one decision under the lock of the workspace.
      *
      * @param  string  $signers  The signers, as JSON.
-     * @return bool Whether the request was completed: false when it has ended meanwhile (deleted, cancelled, or completed by another worker).
+     * @return bool Whether the request was completed: false when it has ended meanwhile (deleted, cancelled, or completed by another worker),
+     *              or no longer has the envelope the signed PDF was downloaded from (the schedule gave up on it and forgot it).
      */
     private function complete(InventoryVersion $version, string $path, int $size, string $sha256, string $signers): bool
     {
+        $envelope = $version->documenso_envelope_id;
+
+        if ($envelope === null) {
+            return false;
+        }
+
         $workspaceId = Inventory::query()->whereKey($version->inventory_id)->value('workspace_id');
 
         if ($workspaceId === null) {
             return false;
         }
 
-        return DeadlockRetries::run(fn (): bool => $this->db->transaction(function () use ($version, $workspaceId, $path, $size, $sha256, $signers): bool {
+        return DeadlockRetries::run(fn (): bool => $this->db->transaction(function () use ($version, $envelope, $workspaceId, $path, $size, $sha256, $signers): bool {
             $workspace = $this->locks->workspaces([$workspaceId])->first();
 
             if ($workspace === null) {
@@ -305,6 +318,7 @@ final class SignatureSync
             $completed = InventoryVersion::query()
                 ->whereKey($version->getKey())
                 ->whereIn('signature_status', SignatureStatus::unfinishedValues())
+                ->where('documenso_envelope_id', $envelope)
                 ->update([
                     'signature_status' => SignatureStatus::Completed->value,
                     'signature_error' => null,

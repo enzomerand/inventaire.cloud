@@ -28,9 +28,10 @@ use Throwable;
  * pending (`400`, `404`, `409`, `422`): the application is not doing what it should, and somebody has to be told. The token is never
  * written.
  *
- * The envelopes come a few at a time ({@see EnvelopeCleanup::PER_JOB}), so that the job, which waits for each call for 20 seconds at
- * the longest, ends within its {@see self::$timeout} seconds. With `$deleteDrafts`, an envelope that is still a draft (nobody was
- * emailed, and Documenso cannot cancel it) is deleted instead.
+ * The envelopes come a few at a time ({@see EnvelopeCleanup::perJob()}: ten, or five with `$deleteDrafts`, which reads each envelope
+ * before it cancels or deletes it: two calls), so that the job, which waits for each call for 20 seconds at the longest, ends within
+ * its {@see self::$timeout} seconds (200 seconds in the worst case, either way). With `$deleteDrafts`, an envelope that is still a
+ * draft (nobody was emailed, and Documenso cannot cancel it) is deleted instead.
  */
 final class CancelDocumensoEnvelopes implements ShouldQueue
 {
@@ -42,13 +43,13 @@ final class CancelDocumensoEnvelopes implements ShouldQueue
     /** How many times the job is tried. */
     public int $tries = 3;
 
-    /** The seconds the job may run: ten envelopes ({@see EnvelopeCleanup::PER_JOB}) and a call of 20 seconds at the longest for each, with room. */
+    /** The seconds the job may run: 200 seconds of calls at the longest ({@see EnvelopeCleanup::perJob()} envelopes, 20 seconds a call), with room. */
     public int $timeout = 300;
 
     /**
      * Remembers what to cancel.
      *
-     * @param  list<string>  $envelopeIds  The ids of the envelopes at Documenso, at most {@see EnvelopeCleanup::PER_JOB}.
+     * @param  list<string>  $envelopeIds  The ids of the envelopes at Documenso, at most {@see EnvelopeCleanup::perJob()}.
      * @param  string|null  $reason  What the signers are told; a general sentence when none is given.
      * @param  bool  $deleteDrafts  Whether an envelope that is a draft is deleted (it cannot be cancelled), after it is read to know.
      */

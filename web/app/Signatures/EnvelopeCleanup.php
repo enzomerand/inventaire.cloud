@@ -27,13 +27,16 @@ use WeakMap;
  * is over is refused and left alone. The ids are read before the deletion removes the rows (the database
  * cascades those of an inventory and of a workspace without firing an event), in the `deleting` event of the model, like the folders
  * to purge ({@see AttachmentCleanup}, which calls this class), and the jobs are queued only in its `deleted` event: a deletion that
- * fails cancels nothing. The ids go to the jobs {@see self::PER_JOB} at a time: a job that holds ten envelopes runs for a few minutes
- * at the longest, whatever the instance is doing.
+ * fails cancels nothing. The ids go to the jobs {@see self::perJob()} at a time: a job runs for three minutes at the longest, whatever
+ * the instance is doing.
  */
 final class EnvelopeCleanup
 {
-    /** The envelopes one job takes care of: each is one call of 20 seconds at the longest (two when a draft is to be deleted). */
+    /** The envelopes one job takes care of: each is one call, of 20 seconds at the longest. */
     public const PER_JOB = 10;
+
+    /** The envelopes one job takes care of when it also deletes drafts: each is two calls (it is read, then deleted or cancelled). */
+    public const PER_JOB_DELETING_DRAFTS = 5;
 
     /**
      * The envelopes to cancel for each inventory and workspace that is being deleted, between its `deleting` and its `deleted` event.
@@ -47,6 +50,17 @@ final class EnvelopeCleanup
      * Gets the database.
      */
     public function __construct(private readonly DatabaseManager $db) {}
+
+    /**
+     * How many envelopes one job takes care of, so that its calls, which wait 20 seconds each at the longest, end within its timeout.
+     *
+     * @param  bool  $deleteDrafts  Whether the job reads each envelope first, to delete it when it is a draft: two calls instead of one.
+     * @return int<1, max>
+     */
+    public static function perJob(bool $deleteDrafts): int
+    {
+        return $deleteDrafts ? self::PER_JOB_DELETING_DRAFTS : self::PER_JOB;
+    }
 
     /**
      * Remembers the open envelopes of the versions of an inventory that is being deleted.
@@ -82,7 +96,7 @@ final class EnvelopeCleanup
     /**
      * Queues the cancellation of envelopes once the transaction in progress is committed (at once when there is none): one that is
      * rolled back, or retried after a deadlock, cancels nothing. A queue that cannot be reached is written in the log: the signers
-     * keep a document to sign, and an operator can cancel it in Documenso. The envelopes go to the jobs {@see self::PER_JOB} at a time.
+     * keep a document to sign, and an operator can cancel it in Documenso. The envelopes go to the jobs {@see self::perJob()} at a time.
      *
      * @param  list<string>  $envelopeIds
      * @param  bool  $deleteDrafts  Whether an envelope that is still a draft is deleted at Documenso (it cannot be cancelled, and
@@ -97,7 +111,7 @@ final class EnvelopeCleanup
         }
 
         $this->db->connection()->afterCommit(function () use ($envelopeIds, $deleteDrafts): void {
-            foreach (array_chunk($envelopeIds, self::PER_JOB) as $chunk) {
+            foreach (array_chunk($envelopeIds, self::perJob($deleteDrafts)) as $chunk) {
                 try {
                     CancelDocumensoEnvelopes::dispatch($chunk, null, $deleteDrafts);
                 } catch (Throwable $exception) {

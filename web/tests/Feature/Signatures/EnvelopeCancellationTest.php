@@ -11,6 +11,7 @@ use App\Models\InventoryVersion;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Signatures\DocumensoClient;
+use App\Signatures\EnvelopeCleanup;
 use App\Workspaces\Workspaces;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -294,6 +295,18 @@ describe('the envelopes of many versions', function (): void {
             ->and(cancelQueued())->toHaveCount(25);
     })->with(['the inventory', 'the workspace']);
 
+    it('go to the jobs five at a time when the drafts are deleted too: each envelope is read first, which is a second call', function (): void {
+        $ids = array_map(fn (int $number): string => sprintf('envelope_%02d', $number), range(1, 12));
+
+        app(EnvelopeCleanup::class)->cancelAfterCommit($ids, deleteDrafts: true);
+
+        $jobs = Queue::pushed(CancelDocumensoEnvelopes::class);
+
+        expect($jobs->map(fn (CancelDocumensoEnvelopes $job): int => count($job->envelopeIds))->all())->toBe([5, 5, 2])
+            ->and($jobs->every(fn (CancelDocumensoEnvelopes $job): bool => $job->deleteDrafts))->toBeTrue()
+            ->and(cancelQueued())->toBe($ids);
+    });
+
     it('go to a job of their own when one version goes, however many it is', function (): void {
         $case = versionTableCase();
         $version = cancelRow($case['inventory'], 1, SignatureStatus::Awaiting, 'envelope_a');
@@ -307,7 +320,7 @@ describe('the envelopes of many versions', function (): void {
         $source = (string) file_get_contents(app_path('Signatures/EnvelopeCleanup.php'));
 
         expect(substr_count($source, 'CancelDocumensoEnvelopes::dispatch('))->toBe(1)
-            ->and($source)->toContain('array_chunk($envelopeIds, self::PER_JOB)');
+            ->and($source)->toContain('array_chunk($envelopeIds, self::perJob($deleteDrafts))');
     });
 });
 
@@ -318,10 +331,30 @@ describe('the job', function (): void {
         expect($job->tries)->toBe(3)->and($job->backoff())->toBe([60, 300])->and($job->queue)->toBeNull();
     });
 
-    it('may run as long as ten envelopes of calls that wait 20 seconds each take, with room', function (): void {
-        $job = new CancelDocumensoEnvelopes(['envelope_a']);
+    it('may run as long as the calls of its envelopes take at the longest, with room: ten of one call, or five of two when drafts are deleted', function (bool $deleteDrafts, int $calls): void {
+        $job = new CancelDocumensoEnvelopes(['envelope_a'], null, $deleteDrafts);
+        $worst = EnvelopeCleanup::perJob($deleteDrafts) * $calls * DocumensoClient::TIMEOUT;
 
-        expect($job->timeout)->toBe(300)->and($job->timeout)->toBeGreaterThan(10 * 20);
+        expect(EnvelopeCleanup::perJob($deleteDrafts))->toBe($deleteDrafts ? 5 : 10)
+            ->and(DocumensoClient::TIMEOUT)->toBe(20)
+            ->and($worst)->toBe(200)
+            ->and($job->timeout)->toBe(300)
+            ->and($job->timeout)->toBeGreaterThan($worst);
+    })->with([[false, 1], [true, 2]]);
+
+    it('makes at most two calls for an envelope, so that the bound above holds', function (): void {
+        $fake = FakeDocumenso::install();
+        $fake->envelopeId = 'envelope_a';
+        $fake->exists = true;
+
+        foreach (['DRAFT', 'PENDING'] as $status) {
+            $fake->status = $status;
+            $before = count($fake->calls);
+
+            (new CancelDocumensoEnvelopes(['envelope_a'], null, true))->handle(app(DocumensoClient::class));
+
+            expect(count($fake->calls) - $before)->toBeLessThanOrEqual(2);
+        }
     });
 
     it('cancels each envelope with the reason it was given, or a general one', function (): void {

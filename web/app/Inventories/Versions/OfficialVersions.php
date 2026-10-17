@@ -57,8 +57,9 @@ use Throwable;
  * must differ from one another: a `ValidationException` under `signers.N.`), a PDF with more items than a PDF may hold, as for the
  * exports ({@see ExportRefusedException}), a workspace whose files already weigh its quota ({@see StorageLimitReachedException}), and
  * signatures asked for when the instance has no Documenso ({@see SignatureUnavailableException}); then, when signers are given, the
- * requests for signatures the workspace may make in a day ({@see SignatureQuota}, a `ThrottleRequestsException`, counted once the
- * version is frozen).
+ * requests for signatures the workspace may make in a day ({@see SignatureQuota}, a `ThrottleRequestsException`): one is reserved
+ * there and then, in one atomic step, before anything is frozen, so that requests made at the same time cannot all pass; a freeze
+ * that fails after the reservation (the inventory holds as many versions as it may, say) has spent it all the same.
  *
  * **Deleting** a version takes the lock of the workspace, then the one of the inventory, gives its `counted_bytes` back to the storage
  * counter, deletes the row and purges its folder once that is committed. A request for signatures that is still open at Documenso
@@ -117,19 +118,16 @@ final class OfficialVersions
         [$label, $signers] = $this->validated($label, $signers);
         $this->check($inventory, $signers);
 
-        // Asking for signatures has Documenso email people: the workspace may only do it so many times a day.
+        // Asking for signatures has Documenso email people: the workspace may only do it so many times a day. Reserved here, in one step
+        // (a check and a count made apart would let requests made together all pass); not given back if the freeze fails.
         if ($signers !== []) {
-            $this->quota->ensure($inventory->workspace_id);
+            $this->quota->reserve($inventory->workspace_id);
         }
 
         $scratch = ExportTemp::file('versions', 'snapshot-');
 
         try {
             $version = DeadlockRetries::run(fn (): InventoryVersion => $this->db->transaction(fn (): InventoryVersion => $this->freeze($inventory, $author, $label, $signers, $scratch)));
-
-            if ($signers !== []) {
-                $this->quota->spend($inventory->workspace_id);
-            }
 
             return $this->store($version, $scratch);
         } finally {

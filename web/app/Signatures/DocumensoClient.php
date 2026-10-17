@@ -28,7 +28,7 @@ use Throwable;
 final class DocumensoClient
 {
     /** Seconds Documenso may take to answer. */
-    private const TIMEOUT = 20;
+    public const TIMEOUT = 20;
 
     /** Seconds it may take for the calls that move a whole PDF: the creation of an envelope and the download of the signed document. */
     private const FILE_TIMEOUT = 120;

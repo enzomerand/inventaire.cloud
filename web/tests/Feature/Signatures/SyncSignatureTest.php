@@ -8,6 +8,7 @@ use App\Inventories\Versions\OfficialVersions;
 use App\Inventories\Versions\SignatureError;
 use App\Inventories\Versions\SignatureStatus;
 use App\Inventories\Versions\SignerStatus;
+use App\Inventories\Versions\VersionMaintenance;
 use App\Jobs\PurgeStoredFiles;
 use App\Jobs\RequestSignatures;
 use App\Jobs\SyncSignature;
@@ -67,6 +68,19 @@ function signatureSyncedAgo(InventoryVersion $version, int $minutes): InventoryV
     return $version->refresh();
 }
 
+/**
+ * What `inventaire:sync-versions` does to a request that did not move for two hours ({@see VersionMaintenance::giveUpOnStuckRequests()}),
+ * done by hand: `failed`, with its envelope forgotten. A test runs it while a read of the envelope is under way.
+ */
+function signatureGivenUp(InventoryVersion $version): void
+{
+    DB::table('inventory_versions')->where('id', $version->id)->update([
+        'signature_status' => SignatureStatus::Failed->value,
+        'signature_error' => SignatureError::Stale->value,
+        'documenso_envelope_id' => null,
+    ]);
+}
+
 describe('the job', function (): void {
     it('is unique per version, so that a burst of events costs one read, and the lock goes when the job starts', function (): void {
         $job = new SyncSignature(42);
@@ -76,7 +90,9 @@ describe('the job', function (): void {
             ->and($job->uniqueId())->toBe('42')
             ->and((new SyncSignature(42, 'envelope_x'))->uniqueId())->toBe('42:envelope_x')
             ->and($job->uniqueFor)->toBe(60)
-            ->and($job->tries)->toBe(3)
+            // A release for the overlap is a try for the queue: the job is bounded by time and by exceptions, see SyncSignatureQueueTest.
+            ->and($job->tries)->toBe(0)
+            ->and($job->maxExceptions)->toBe(3)
             ->and($job->backoff())->toBe([30, 120])
             ->and($job->queue)->toBeNull();
 
@@ -556,6 +572,30 @@ describe('a pending envelope', function (): void {
             ->and($synced->signature_requested_at)->not->toBeNull();
     });
 
+    it('does not take a request to awaiting when the schedule gave up on it, and forgot its envelope, while the envelope was being read', function (): void {
+        $made = versionAwaiting(2);
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Sending, 'signature_requested_at' => null])->save();
+        $made['fake']->onCall('GET /envelope/{id}', fn () => signatureGivenUp($made['version']));
+
+        $synced = versionSync($made['version']);
+
+        expect($synced->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($synced->signature_error)->toBe(SignatureError::Stale)
+            ->and($synced->documenso_envelope_id)->toBeNull()
+            ->and($synced->signature_requested_at)->toBeNull();
+    });
+
+    it('does not take a request that has no envelope to awaiting, whatever envelope it is applied', function (): void {
+        $made = versionAwaiting(2);
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Failed, 'signature_error' => SignatureError::Stale, 'documenso_envelope_id' => null, 'signature_requested_at' => null])->save();
+        $envelope = ['id' => 'envelope_test1', 'status' => 'PENDING', 'externalId' => $made['version']->ulid, 'recipients' => []];
+
+        app(SignatureSync::class)->apply($made['version']->refresh(), $envelope);
+
+        expect($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($made['version']->fresh()->signature_requested_at)->toBeNull();
+    });
+
     it('leaves a request that is being sent alone while its envelope is still a draft', function (): void {
         $made = versionAwaiting(2);
         $made['version']->forceFill(['signature_status' => SignatureStatus::Sending, 'signature_requested_at' => null])->save();
@@ -668,6 +708,24 @@ describe('a completed envelope', function (): void {
         $row = versionSync($made['version']);
 
         expect($row->signature_status)->toBe(SignatureStatus::Cancelled)
+            ->and($row->signed_pdf_path)->toBeNull()
+            ->and($row->counted_bytes)->toBe($made['version']->counted_bytes)
+            ->and(signatureStorageUsed($row))->toBe($before);
+        Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->paths === [$path]);
+    });
+
+    it('is thrown away when the schedule gave up on the request, and forgot its envelope, while the PDF is being downloaded', function (): void {
+        $made = versionAwaiting(1);
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Sending])->save();
+        $made['fake']->complete();
+        $before = signatureStorageUsed($made['version']);
+        $made['fake']->onCall('GET /envelope/item/{id}/download', fn () => signatureGivenUp($made['version']));
+        $path = $made['version']->directory().'/signed.pdf';
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($row->documenso_envelope_id)->toBeNull()
             ->and($row->signed_pdf_path)->toBeNull()
             ->and($row->counted_bytes)->toBe($made['version']->counted_bytes)
             ->and(signatureStorageUsed($row))->toBe($before);

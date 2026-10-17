@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Signatures\SignatureSync;
+use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -23,8 +24,13 @@ use Illuminate\Queue\Middleware\WithoutOverlapping;
  * That one that comes while it runs must not run at the same time, though: two reads of one request could both download the signed
  * PDF, or write over one another. A job of the same version that finds another running is put back in the queue for half a minute
  * ({@see WithoutOverlapping}; the lock lives on the cache, which every store the application may use can hold, and is forgotten after
- * {@see self::LOCK_EXPIRES} seconds if the worker that held it was killed, which is more than the job may run). It is tried three
- * times, the pauses of the overlap counted.
+ * {@see self::LOCK_EXPIRES} seconds if the worker that held it was killed, which is more than the job may run).
+ *
+ * Putting a job back in the queue counts as a try for Laravel, so the job is not bounded by its tries (`$tries = 0`: a duplicate that waits
+ * behind a long read, or every job of a version during the five minutes a killed worker's lock lasts, must not be failed for having
+ * been put back; the event would be lost until the schedule). It is bounded in two other ways: by time, {@see self::retryUntil()} (the
+ * pauses of the overlap included), and in failures, {@see self::$maxExceptions} real exceptions (Documenso failing, the disk), each
+ * followed by a pause ({@see self::backoff()}), after which the job fails and the schedule picks the request up again later.
  */
 final class SyncSignature implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
@@ -39,8 +45,14 @@ final class SyncSignature implements ShouldBeUniqueUntilProcessing, ShouldQueue
     /** The seconds a job that finds another of the same version running waits before it tries again. */
     public const OVERLAP_RELEASE = 30;
 
-    /** How many times the job is tried. */
-    public int $tries = 3;
+    /** The minutes the job may be kept waiting or tried again, from the moment it is queued: the overlap releases are not limited otherwise. */
+    public const RETRY_FOR_MINUTES = 30;
+
+    /** How many times the job is tried: not limited (0), since a release for the overlap is a try; see {@see self::retryUntil()}. */
+    public int $tries = 0;
+
+    /** How many real exceptions (not a release for the overlap) the job may throw before it fails. */
+    public int $maxExceptions = 3;
 
     /** The seconds the job may run. */
     public int $timeout = self::TIMEOUT;
@@ -75,7 +87,15 @@ final class SyncSignature implements ShouldBeUniqueUntilProcessing, ShouldQueue
     }
 
     /**
-     * The seconds to wait before each new try.
+     * When the job stops being tried: it is failed when it comes back after that, whatever released it.
+     */
+    public function retryUntil(): DateTimeInterface
+    {
+        return now()->addMinutes(self::RETRY_FOR_MINUTES);
+    }
+
+    /**
+     * The seconds to wait before each new try after an exception (the last one is kept for the following ones).
      *
      * @return list<int>
      */

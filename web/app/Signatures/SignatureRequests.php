@@ -16,6 +16,7 @@ use App\Jobs\RequestSignatures;
 use App\Jobs\SyncSignature;
 use App\Models\Inventory;
 use App\Models\InventoryVersion;
+use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Facades\Log;
@@ -43,12 +44,14 @@ use Throwable;
  *
  * **Cancelling** and **sending again** are what the API offers a person on a request: the first asks Documenso at once (and tells the
  * person when it cannot), the second puts a failed request back to `requested` and queues the job. Sending again is a request for
- * signatures like the first one: it counts against the daily limit of the workspace ({@see SignatureQuota}).
+ * signatures like the first one: it counts against the daily limit of the workspace ({@see SignatureQuota}), once the request is known to
+ * be failed.
  */
 final class SignatureRequests
 {
     /**
-     * Gets the client, the part that follows an envelope, the storage the PDF is read from, what cancels envelopes and the daily limit.
+     * Gets the client, the part that follows an envelope, the storage the PDF is read from, what cancels envelopes, the daily limit and
+     * the database.
      */
     public function __construct(
         private readonly DocumensoClient $client,
@@ -56,6 +59,7 @@ final class SignatureRequests
         private readonly AttachmentStorage $storage,
         private readonly EnvelopeCleanup $envelopes,
         private readonly SignatureQuota $quota,
+        private readonly DatabaseManager $db,
     ) {}
 
     /**
@@ -147,6 +151,10 @@ final class SignatureRequests
      * Sends a request that failed again: it is `requested` and the job is queued. It resumes where it stopped (an envelope that
      * exists is not created again).
      *
+     * The request is taken first, by an update that holds only while it is still `failed`, and the place in the daily limit of the
+     * workspace is reserved only then, in the same transaction: a request that is not (or no longer) failed is refused with `409`
+     * whatever the count, and costs nothing; one that is refused by the limit stays `failed`, as it was.
+     *
      * @return InventoryVersion The version as it is now.
      *
      * @throws SignatureNotFailedException When the request did not fail, or its version is not completed.
@@ -171,20 +179,21 @@ final class SignatureRequests
             throw (new ModelNotFoundException)->setModel(Inventory::class, [$current->inventory_id]);
         }
 
-        $this->quota->ensure((int) $workspaceId);
+        $this->db->transaction(function () use ($current, $workspaceId): void {
+            $moved = InventoryVersion::query()
+                ->whereKey($current->getKey())
+                ->where('signature_status', SignatureStatus::Failed->value)
+                ->where('status', VersionStatus::Completed->value)
+                ->update(['signature_status' => SignatureStatus::Requested->value, 'signature_error' => null]);
 
-        $moved = InventoryVersion::query()
-            ->whereKey($current->getKey())
-            ->where('signature_status', SignatureStatus::Failed->value)
-            ->where('status', VersionStatus::Completed->value)
-            ->update(['signature_status' => SignatureStatus::Requested->value, 'signature_error' => null]);
+            // Another call took it first: the request is no longer failed, and nothing is counted.
+            if ($moved !== 1) {
+                throw new SignatureNotFailedException;
+            }
 
-        // Another call took it first: the request is no longer failed.
-        if ($moved !== 1) {
-            throw new SignatureNotFailedException;
-        }
-
-        $this->quota->spend((int) $workspaceId);
+            // Past the limit this throws, and the request goes back to what it was with the rollback.
+            $this->quota->reserve((int) $workspaceId);
+        });
 
         $current->refresh();
 

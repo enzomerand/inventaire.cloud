@@ -2,15 +2,20 @@
 
 declare(strict_types=1);
 
+use App\Inventories\Exceptions\SignatureNotFailedException;
 use App\Inventories\Versions\OfficialVersions;
+use App\Inventories\Versions\SignatureError;
 use App\Inventories\Versions\SignatureStatus;
 use App\Jobs\RequestSignatures;
 use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use App\Models\User;
 use App\Signatures\SignatureQuota;
+use App\Signatures\SignatureRequests;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Testing\TestResponse;
@@ -117,18 +122,62 @@ describe('the limit', function (): void {
         inventoryCall($this, $case['team']['owner'], 'POST', "/api/v1/inventories/{$case['inventory']->ulid}/versions")->assertStatus(202);
     });
 
-    it('does not count a request that was refused for another reason', function (): void {
+    it('does not count a request that was refused before it was reserved: a signer who is no address, an instance without Documenso, a full storage', function (): void {
+        config(['inventories.signature_requests_per_workspace_per_day' => 1]);
+        $case = versionTableCase();
+
+        // The signer is no address (422), the instance has no Documenso (409): neither sent anything.
+        inventoryCall($this, $case['team']['owner'], 'POST', "/api/v1/inventories/{$case['inventory']->ulid}/versions", ['signers' => [['name' => 'Ada', 'email' => 'nope']]])->assertStatus(422);
+        config(['services.documenso.url' => null]);
+        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(409)->assertJsonPath('code', 'signature_unavailable');
+        versionDocumensoConfig();
+
+        expect(RateLimiter::attempts('signature-requests:'.$case['inventory']->workspace_id))->toBe(0);
+
+        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(202);
+    });
+
+    it('keeps the place of a request that fails once it is reserved: the inventory turned out to be full', function (): void {
         config(['inventories.signature_requests_per_workspace_per_day' => 1, 'inventories.max_versions_per_inventory' => 1]);
         $case = versionTableCase();
         inventoryCall($this, $case['team']['owner'], 'POST', "/api/v1/inventories/{$case['inventory']->ulid}/versions")->assertStatus(202);
 
-        // The inventory is full (409), the signer is no address (422): neither sent anything.
-        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(409);
-        inventoryCall($this, $case['team']['owner'], 'POST', "/api/v1/inventories/{$case['inventory']->ulid}/versions", ['signers' => [['name' => 'Ada', 'email' => 'nope']]])->assertStatus(422);
-
+        // Reserved, then refused by the freeze (409): the place is not given back, which is the price of reserving before the freeze.
+        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(409)->assertJsonPath('code', 'version_limit_reached');
         config(['inventories.max_versions_per_inventory' => 5]);
 
-        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(202);
+        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(429);
+    });
+
+    it('is reserved before anything is frozen, so that a request made meanwhile finds the place taken', function (): void {
+        config(['inventories.signature_requests_per_workspace_per_day' => 1]);
+        $case = versionTableCase();
+        $key = 'signature-requests:'.$case['inventory']->workspace_id;
+        $seen = null;
+        $refused = null;
+        $nested = false;
+
+        // While the first request is frozen (its row is being inserted), a second one comes, as it would from another worker.
+        InventoryVersion::creating(function () use (&$seen, &$refused, &$nested, $case, $key): void {
+            if ($nested) {
+                return;
+            }
+
+            $nested = true;
+            $seen = RateLimiter::attempts($key);
+
+            try {
+                app(OfficialVersions::class)->create($case['inventory'], $case['team']['editor'], null, versionSigners(1));
+            } catch (ThrottleRequestsException $exception) {
+                $refused = $exception;
+            }
+        });
+
+        app(OfficialVersions::class)->create($case['inventory'], $case['team']['owner'], null, versionSigners(1));
+
+        expect($seen)->toBe(1)
+            ->and($refused)->toBeInstanceOf(ThrottleRequestsException::class)
+            ->and(InventoryVersion::query()->count())->toBe(1);
     });
 
     it('is told before the freeze, so that nothing is frozen, stored or queued when it is reached', function (): void {
@@ -165,12 +214,24 @@ describe('the limit', function (): void {
         config(['inventories.signature_requests_per_workspace_per_day' => 5]);
         $quota = app(SignatureQuota::class);
 
-        $quota->spend(7);
-        $quota->spend(7);
+        $quota->reserve(7);
+        $quota->reserve(7);
 
         expect(RateLimiter::attempts('signature-requests:7'))->toBe(2)
             ->and(RateLimiter::attempts('signature-requests:8'))->toBe(0)
             ->and(RateLimiter::availableIn('signature-requests:7'))->toBeBetween(86300, 86400);
+    });
+
+    it('accepts as many reservations as the limit and refuses the next one, in one step', function (): void {
+        config(['inventories.signature_requests_per_workspace_per_day' => 3]);
+        $quota = app(SignatureQuota::class);
+
+        foreach (range(1, 3) as $ignored) {
+            $quota->reserve(9);
+        }
+
+        expect(fn () => $quota->reserve(9))->toThrow(ThrottleRequestsException::class)
+            ->and(fn () => $quota->reserve(10))->not->toThrow(ThrottleRequestsException::class);
     });
 });
 
@@ -220,6 +281,62 @@ describe('sending a request again', function (): void {
         versionDocumensoConfig();
 
         inventoryCall($this, $case['team']['owner'], 'POST', $uri($failed))->assertStatus(202);
+    });
+
+    it('is told that the request did not fail (409), not that the limit is reached (429), and costs nothing, when the limit is used up', function (): void {
+        config(['inventories.signature_requests_per_workspace_per_day' => 1]);
+        $case = versionTableCase();
+        $fine = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
+        quotaFreeze($this, $case['team']['owner'], $case['inventory'])->assertStatus(202);
+        Queue::fake();
+        $key = 'signature-requests:'.$case['inventory']->workspace_id;
+
+        inventoryCall($this, $case['team']['owner'], 'POST', "/api/v1/inventories/{$case['inventory']->ulid}/versions/{$fine->ulid}/signature/retry")
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'signature_not_failed');
+
+        expect(RateLimiter::attempts($key))->toBe(1);
+        Queue::assertNothingPushed();
+    });
+
+    it('is told that the request did not fail (409) when another call took it between the read and the update, whatever the count', function (): void {
+        config(['inventories.signature_requests_per_workspace_per_day' => 1]);
+        $case = versionTableCase();
+        $failed = quotaFailed($case['inventory'], $case['team']['owner']);
+        $key = 'signature-requests:'.$case['inventory']->workspace_id;
+        // The limit is used up, as it is when the call that took the request first made it count.
+        app(SignatureQuota::class)->reserve($case['inventory']->workspace_id);
+        $taken = false;
+
+        // The request is read as failed; another call sends it again right after the workspace is looked up.
+        DB::listen(function (QueryExecuted $query) use (&$taken, $failed): void {
+            if ($taken || ! str_contains($query->sql, 'workspace_id') || ! str_contains($query->sql, 'inventories')) {
+                return;
+            }
+
+            $taken = true;
+            DB::table('inventory_versions')->where('id', $failed->id)->update(['signature_status' => SignatureStatus::Requested->value]);
+        });
+
+        expect(fn () => app(SignatureRequests::class)->retry($failed))->toThrow(SignatureNotFailedException::class)
+            ->and($taken)->toBeTrue()
+            ->and(RateLimiter::attempts($key))->toBe(1);
+    });
+
+    it('leaves the request as it was, failed with its error, when the limit refuses it', function (): void {
+        config(['inventories.signature_requests_per_workspace_per_day' => 1]);
+        $case = versionTableCase();
+        $failed = quotaFailed($case['inventory'], $case['team']['owner']);
+        $failed->forceFill(['signature_error' => SignatureError::DocumensoUnavailable])->save();
+        app(SignatureQuota::class)->reserve($case['inventory']->workspace_id);
+        Queue::fake();
+
+        expect(fn () => app(SignatureRequests::class)->retry($failed))->toThrow(ThrottleRequestsException::class);
+
+        $row = $failed->fresh();
+
+        expect($row->signature_status)->toBe(SignatureStatus::Failed)->and($row->signature_error)->toBe(SignatureError::DocumensoUnavailable);
+        Queue::assertNothingPushed();
     });
 
     it('is refused for a viewer as before, whatever the count', function (): void {
