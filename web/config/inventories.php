@@ -237,4 +237,30 @@ return [
 
     'public_pages_per_minute' => (int) env('INVENTORIES_PUBLIC_PAGES_PER_MINUTE', 300),
 
+    /*
+    |--------------------------------------------------------------------------
+    | API tokens
+    |--------------------------------------------------------------------------
+    |
+    | A person makes tokens on their account page, for the scripts and the
+    | applications that call the API (see App\Auth\ApiTokens).
+    |
+    | - `api_token_requests_per_minute`: requests per minute one token may make
+    |   (`API_TOKEN_REQUESTS_PER_MINUTE`, 120), whatever it asks for, `429`
+    |   beyond. Counted for each token apart, on top of the limits of the
+    |   endpoints; the web front, which has no token, is not counted.
+    | - `max_api_tokens`: tokens one person may have at once, not counting the
+    |   ones that expired (`MAX_API_TOKENS`, 20): the API answers 409
+    |   (`token_limit_reached`) beyond, until one is revoked or expires.
+    |   Counted under the lock of the person's row.
+    | - `api_token_creations_per_hour`: tokens one person may make in an hour,
+    |   the ones they revoke straight away included (10), `429` beyond.
+    |
+    */
+    'api_token_requests_per_minute' => (int) env('API_TOKEN_REQUESTS_PER_MINUTE', 120),
+
+    'max_api_tokens' => (int) env('MAX_API_TOKENS', 20),
+
+    'api_token_creations_per_hour' => 10,
+
 ];

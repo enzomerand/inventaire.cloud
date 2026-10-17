@@ -55,7 +55,7 @@ function tokenSessionOnlyRoutes(): array
     return array_map(fn (string $name): string => 'api.v1.'.$name, [
         'auth.code', 'auth.verify', 'auth.logout', 'me.update', 'me.export', 'me.current-workspace', 'me.sign-out-everywhere',
         'me.deletion-code', 'me.destroy', 'admin.users.index', 'admin.users.store', 'admin.users.update', 'admin.users.destroy',
-        'admin.settings.show', 'admin.settings.update',
+        'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy',
     ]);
 }
 
@@ -126,7 +126,12 @@ function tokenCall(object $test, string $token, string $method, string $uri, arr
     $test->flushHeaders();
     app('auth')->forgetGuards();
 
-    return $test->withToken($token)->json($method, $uri, $data, $headers);
+    $response = $test->withToken($token)->json($method, $uri, $data, $headers);
+
+    // The token stays out of the next call, which may be a person's at their browser.
+    $test->flushHeaders();
+
+    return $response;
 }
 
 /**

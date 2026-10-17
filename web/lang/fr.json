@@ -1078,5 +1078,6 @@
     "Read": "Lecture",
     "Write": "Écriture",
     "Manage": "Administration",
-    "This API token lacks the :ability permission.": "Ce jeton d'API n'a pas la permission « :ability »."
+    "This API token lacks the :ability permission.": "Ce jeton d'API n'a pas la permission « :ability ».",
+    "You can have :count API token at a time: revoke one, or wait for one to expire.|You can have :count API tokens at a time: revoke one, or wait for one to expire.": "Vous pouvez avoir :count jeton d'API à la fois : révoquez-en un, ou attendez qu'un expire.|Vous pouvez avoir :count jetons d'API à la fois : révoquez-en un, ou attendez qu'un expire."
 }

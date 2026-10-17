@@ -8,8 +8,8 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Laravel\Sanctum\Sanctum;
 
 /*
- * Only what differs from the package's own configuration is set here: the rest (guard, token expiry and prefix)
- * is merged from vendor/laravel/sanctum/config/sanctum.php.
+ * Only what differs from the package's own configuration is set here: the rest (the guard) is merged from
+ * vendor/laravel/sanctum/config/sanctum.php.
  */
 
 return [
@@ -29,6 +29,25 @@ return [
         'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1',
         Sanctum::currentApplicationUrlWithPort(),
     ))),
+
+    /*
+    |--------------------------------------------------------------------------
+    | API tokens
+    |--------------------------------------------------------------------------
+    |
+    | - `token_prefix`: what every API token starts with (`SANCTUM_TOKEN_PREFIX`,
+    |   `inv_`). It makes a token recognisable at a glance, and by the secret
+    |   scanners of code hosts, if one is pushed by mistake.
+    | - `expiration`: minutes after which any token stops working, whatever
+    |   its own date; null (the default): each token has its own date, or none
+    |   (`expires_at`, chosen when it is created: see App\Auth\ApiTokens).
+    |   Expired tokens are deleted a day after by `sanctum:prune-expired`.
+    |
+    */
+
+    'token_prefix' => (string) env('SANCTUM_TOKEN_PREFIX', 'inv_'),
+
+    'expiration' => null,
 
     /*
     |--------------------------------------------------------------------------

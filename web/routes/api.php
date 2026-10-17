@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\AccountDeletionController;
 use App\Http\Controllers\Api\V1\AccountExportController;
 use App\Http\Controllers\Api\V1\Admin\SettingsController as AdminSettingsController;
 use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Api\V1\ApiTokenController;
 use App\Http\Controllers\Api\V1\AttachmentController;
 use App\Http\Controllers\Api\V1\Auth\LogoutController;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
@@ -66,6 +67,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 Route::post('/me/sign-out-everywhere', SignOutEverywhereController::class)->name('me.sign-out-everywhere');
                 Route::post('/me/deletion-code', [AccountDeletionController::class, 'code'])->middleware('throttle:account-deletion-code')->name('me.deletion-code');
                 Route::delete('/me', [AccountDeletionController::class, 'destroy'])->middleware('throttle:account-deletion')->name('me.destroy');
+
+                // The API tokens of the account: a token cannot make others, nor revoke itself. The id of a token is digits only,
+                // and few enough for any database to read.
+                Route::get('/me/tokens', [ApiTokenController::class, 'index'])->name('me.tokens.index');
+                Route::post('/me/tokens', [ApiTokenController::class, 'store'])->middleware('throttle:api-token-creation')->name('me.tokens.store');
+                Route::delete('/me/tokens/{token}', [ApiTokenController::class, 'destroy'])->where('token', '[0-9]{1,18}')->name('me.tokens.destroy');
             });
         });
 

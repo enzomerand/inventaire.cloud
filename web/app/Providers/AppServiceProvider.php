@@ -70,6 +70,7 @@ class AppServiceProvider extends ServiceProvider
         $this->registerWorkspaceLimiters();
         $this->registerInventoryLimiters();
         $this->registerAdminLimiters();
+        $this->registerApiTokenLimiters();
     }
 
     /**
@@ -103,6 +104,16 @@ class AppServiceProvider extends ServiceProvider
         // Sending a file to import, or reading it again with other options, reads a whole file (`imports_per_minute`), keyed on the user.
         RateLimiter::for('imports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.imports_per_minute'))
             ->by('imports:'.$this->signedInKey($request)));
+    }
+
+    /**
+     * The rate limiter of the endpoint that makes an API token (limit in config/inventories.php, `api_token_creations_per_hour`),
+     * keyed on the user: a token is a secret that the person copies, and none is worth making in a loop.
+     */
+    private function registerApiTokenLimiters(): void
+    {
+        RateLimiter::for('api-token-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.api_token_creations_per_hour'))
+            ->by('api-token-creation:'.$this->signedInKey($request)));
     }
 
     /**

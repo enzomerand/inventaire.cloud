@@ -18,6 +18,7 @@
 //        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload> [<ULID of the file or photo field>]
 //        php concurrent-action.php <go file> remove-attachment <user id> <inventory id> <item id> <attachment id>
 //        php concurrent-action.php <go file> run-import <import id>
+//        php concurrent-action.php <go file> create-token <user id> <name>
 //
 // The files of the attachments are written to the local disk, whose folder the test gives with TEST_STORAGE_ROOT (the
 // folder its own process writes to), so that a child never writes to the real storage of the application.
@@ -42,7 +43,9 @@ declare(strict_types=1);
 
 use App\Admin\Exceptions\UserAdministrationRefused;
 use App\Admin\UserAdministration;
+use App\Auth\ApiTokens;
 use App\Auth\Exceptions\AccountDeletionRefused;
+use App\Auth\Exceptions\ApiTokenLimitReachedException;
 use App\Inventories\Attachments\Attachments;
 use App\Inventories\Exceptions\AttachmentLimitReachedException;
 use App\Inventories\Exceptions\FieldFileLimitReachedException;
@@ -183,6 +186,19 @@ function postInventory(Application $app, array $arguments): array
 }
 
 /**
+ * Makes an API token for a person the way the application does (`{"result": "created"}`; the quota answers like the others).
+ *
+ * @param  list<string>  $arguments  The id of the person, the name of the token.
+ * @return array{result: string}
+ */
+function createToken(Application $app, array $arguments): array
+{
+    $app->make(ApiTokens::class)->create(User::query()->findOrFail((int) $arguments[0]), $arguments[1], ['read'], 30);
+
+    return ['result' => 'created'];
+}
+
+/**
  * Deletes or demotes accounts the way the application does.
  *
  * @param  list<string>  $arguments
@@ -268,6 +284,7 @@ try {
         'hold-admin-lock' => holdAdministratorLock($app->make(Locks::class), $go, (int) $arguments[0]),
         'insert-user' => insertUserWhileLocked($go),
         'post-inventory' => postInventory($app, $arguments),
+        'create-token' => createToken($app, $arguments),
         'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment', 'run-import' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
@@ -277,7 +294,7 @@ try {
     $outcome = ['result' => 'refused', 'reason' => $refusal->reason];
 } catch (LastWorkspaceException) {
     $outcome = ['result' => 'refused', 'reason' => LastWorkspaceException::CODE];
-} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException $limit) {
+} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException|ApiTokenLimitReachedException $limit) {
     $outcome = ['result' => 'refused', 'reason' => $limit::CODE];
 } catch (ModelNotFoundException) {
     // Something the action needed was deleted by the other process first (the account that writes, the inventory...).
