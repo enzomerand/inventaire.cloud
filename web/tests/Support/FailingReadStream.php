@@ -9,21 +9,31 @@ namespace Tests\Support;
  * when a file cannot be read to its end.
  *
  * Register it with `stream_wrapper_register('name', FailingReadStream::class)` and set `$bytes` before the file is opened: it gives that
- * many bytes (of `x`), then every read fails, and the end of the file is never reached.
+ * many bytes (of `x`), then every read fails, and the end of the file is never reached. With `$stall` the reads after those bytes do not
+ * fail but give nothing, which is not the end of the file either.
  */
 final class FailingReadStream
 {
     /** How many bytes are given before the reads fail. */
     public static int $bytes = 0;
 
+    /** Whether the reads after those bytes give an empty string, instead of failing. */
+    public static bool $stall = false;
+
+    /** How many empty reads in a row are given before the test is failed: a reader that asks again for ever would hang it. */
+    private const MAX_EMPTY_READS = 1000;
+
     /** @var resource|null */
     public $context;
 
     private int $given = 0;
 
+    private int $empty = 0;
+
     public function stream_open(string $path, string $mode, int $options, ?string &$openedPath): bool
     {
         $this->given = 0;
+        $this->empty = 0;
 
         return true;
     }
@@ -31,7 +41,15 @@ final class FailingReadStream
     public function stream_read(int $count): string|false
     {
         if ($this->given >= self::$bytes) {
-            return false;
+            if (! self::$stall) {
+                return false;
+            }
+
+            if (++$this->empty > self::MAX_EMPTY_READS) {
+                throw new \RuntimeException('The stream was read again and again though it gives nothing.');
+            }
+
+            return '';
         }
 
         $length = min($count, self::$bytes - $this->given);

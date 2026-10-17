@@ -27,6 +27,7 @@ beforeEach(function (): void {
     FailingWriteStream::$failAllWrites = false;
     FailingWriteStream::$failNextWrite = false;
     FailingReadStream::$bytes = 5000;
+    FailingReadStream::$stall = false;
 });
 
 afterEach(function (): void {
@@ -34,6 +35,7 @@ afterEach(function (): void {
     stream_wrapper_unregister('importread');
     FailingWriteStream::$failAllWrites = false;
     FailingWriteStream::$failNextWrite = false;
+    FailingReadStream::$stall = false;
 });
 
 /**
@@ -68,6 +70,19 @@ describe('converting a text to UTF-8', function (): void {
         'UTF-16 with its byte order mark' => ['utf-16', "\xFF\xFE".mb_convert_encoding("Né\r\n", 'UTF-16LE', 'UTF-8'), "Né\r\n"],
     ]);
 
+    it('converts a file that ends exactly where a block of its reading does', function (): void {
+        // 16 bytes a line, and 2 MiB: two blocks of 1 MiB, the second one the last, and nothing after it.
+        $path = importFile(str_repeat("Pr\xE9nom;Ville-a\r\n", 131072), 'csv');
+        expect(filesize($path))->toBe(2097152);
+        $source = fopen($path, 'rb');
+        $target = fopen('php://memory', 'w+b');
+
+        ImportCsv::transcode($source, $target, 'windows-1252');
+        rewind($target);
+
+        expect(stream_get_contents($target))->toBe(str_repeat("Prénom;Ville-a\r\n", 131072));
+    });
+
     it('fails when the copy cannot be written whole (a disk that is full)', function (string $encoding): void {
         $source = fopen('importwrite://source', 'rb');
         $target = fopen('importwrite://target', 'wb');
@@ -77,6 +92,14 @@ describe('converting a text to UTF-8', function (): void {
     })->with(['windows-1252', 'utf-16']);
 
     it('fails, and does not loop for ever, when the text cannot be read to its end', function (string $encoding): void {
+        $source = fopen('importread://source', 'rb');
+        $target = fopen('php://memory', 'w+b');
+
+        importUnreadable(fn () => ImportCsv::transcode($source, $target, $encoding));
+    })->with(['windows-1252', 'utf-16']);
+
+    it('fails, and does not loop for ever, when a read gives nothing and the end of the text is not reached', function (string $encoding): void {
+        FailingReadStream::$stall = true;
         $source = fopen('importread://source', 'rb');
         $target = fopen('php://memory', 'w+b');
 

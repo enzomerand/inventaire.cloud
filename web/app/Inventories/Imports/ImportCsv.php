@@ -310,8 +310,9 @@ final class ImportCsv
         while (! feof($source)) {
             $chunk = fread($source, self::CHUNK_BYTES);
 
-            // A read that fails does not end the file: the loop would never stop.
-            if ($chunk === false) {
+            // A read that fails does not end the file, and neither does one that gives nothing before the end is reached: the loop would
+            // never stop.
+            if ($chunk === false || ($chunk === '' && ! feof($source))) {
                 throw new ImportFileException(ImportFileException::UNREADABLE);
             }
 
