@@ -5,15 +5,11 @@ declare(strict_types=1);
 namespace App\Inventories\Exports;
 
 use App\Inventories\Exceptions\PdfTooLargeException;
-use App\Inventories\Fields\ExportKind;
-use App\Inventories\Fields\ExportValue;
-use App\Inventories\Fields\QueryKind;
-use App\Inventories\Fields\UploadedFilesType;
+use App\Inventories\Fields\FieldTypes;
 use App\Models\InventoryField;
-use App\Models\Item;
 use App\Support\DisplayTime;
 use Dompdf\Dompdf;
-use Dompdf\Options;
+use Illuminate\Support\Collection;
 use RuntimeException;
 
 /**
@@ -26,35 +22,25 @@ use RuntimeException;
  *
  * **The header is written once and repeated by the library on every page**: a block with `position: fixed`, which holds the name
  * of the inventory, the line about the export and, for a table, the header of the columns ({@see PdfColumns}). The table itself is
- * many fragments of {@see self::TABLE_ROWS} rows without any header of their own, all with the same widths, so that the
+ * many fragments of {@see PdfBody::TABLE_ROWS} rows without any header of their own, all with the same widths, so that the
  * header is on every page and only once. The block has a known height, which the top margin of the page is made of.
  *
  * The library lays the whole document out in memory, and there is no streaming it: that is why a PDF has two limits. One is on the
  * number of items (`inventories.pdf_max_items`, checked when the export is asked for and again here); the other is on the size of
  * the HTML the library is given ({@see self::MAX_TABLE_HTML_BYTES}, {@see self::MAX_CARDS_HTML_BYTES}), which is what its memory
- * really goes with: texts cut at {@see self::TABLE_TEXT} and {@see self::CARD_TEXT} characters, at the most items, stay under it.
+ * really goes with: texts cut at 120 and 800 characters ({@see PdfBody}), at the most items, stay under it.
  * Both are refused with {@see PdfTooLargeException}, which tells the person to filter the view. The library is set not to read
  * anything outside the document (no remote file, no PHP, no script) and its font cache lives under `storage/framework`, never in
  * `vendor/`. The text is in DejaVu Sans, which the library ships and embeds, so that every accent of the languages of the
  * application is drawn.
+ *
+ * What lays the items out ({@see PdfBody}), the header ({@see PdfHead}) and the library ({@see PdfLibrary}) is shared with the PDF of
+ * an official version.
  */
 final class PdfWriter implements ExportWriter
 {
     /** Most fields a table holds: above, an item is a card. */
     public const TABLE_FIELDS = 8;
-
-    /** Rows of a table before another one starts: the library's memory grows faster than a table does. */
-    private const TABLE_ROWS = 25;
-
-    /**
-     * Most characters of a value in a table cell, and in a card. The library's memory goes with the number of lines it lays out, and
-     * a cell of a table is a narrow column: a text that is 4 lines in a cell costs as much as one 4 times as long in a card, which
-     * is as wide as the page. A table of 500 items of 8 texts that all reach the limit takes 148 MB with 120 characters (293 MB with
-     * 300); the same number of values as cards (4000) takes 143 to 156 MB with 800 characters (242 MB with 2000).
-     */
-    private const TABLE_TEXT = 120;
-
-    private const CARD_TEXT = 800;
 
     /**
      * The most bytes of HTML the library is given, for a table and for cards: the library's peak memory goes with the size of the
@@ -72,32 +58,6 @@ final class PdfWriter implements ExportWriter
 
     public const MAX_CARDS_HTML_BYTES = 4194304;
 
-    /** The font of the whole document. */
-    private const FONT = 'DejaVu Sans';
-
-    /** The width of a table, in points: A4 on its side (842) less the two side margins of 24. A hair less, to be safe. */
-    private const TABLE_WIDTH_PT = 793.0;
-
-    /** The size of the font of the header of the columns, in points. */
-    private const HEADER_SIZE_PT = 8.0;
-
-    /**
-     * What the repeated header takes, in CSS pixels (the library draws 96 pixels to the inch and 72 points: a pixel is 0.75 of a
-     * point): the empty margin above it, the line of the title, the line about the export, a gap and the row of the columns.
-     */
-    private const HEAD_MARGIN = 26;
-
-    private const HEAD_TITLE = 24;
-
-    private const HEAD_SUMMARY = 16;
-
-    private const HEAD_GAP = 6;
-
-    private const HEAD_COLUMNS = 24;
-
-    /** What stands between the repeated header and the first line of the page. */
-    private const BODY_GAP = 3;
-
     private ?Dompdf $library = null;
 
     /**
@@ -110,6 +70,17 @@ final class PdfWriter implements ExportWriter
         $limit = config()->integer('inventories.pdf_max_items');
 
         return $fields <= self::TABLE_FIELDS ? $limit : max(1, intdiv($limit * self::TABLE_FIELDS, $fields));
+    }
+
+    /**
+     * The most items a PDF of an inventory may hold: {@see self::maxItems()} for the fields this version knows the type of (the others
+     * are left out of the document). What both the request for an export and the freezing of an official version judge a PDF by.
+     *
+     * @param  Collection<int, InventoryField>  $fields  The fields of the inventory.
+     */
+    public static function limitFor(Collection $fields, FieldTypes $types): int
+    {
+        return self::maxItems($fields->filter(fn (InventoryField $field): bool => $types->of($field) !== null)->count());
     }
 
     /**
@@ -171,125 +142,26 @@ final class PdfWriter implements ExportWriter
         }
 
         $formatter = new ExportFormatter($context->export->locale, DisplayTime::zone());
-        $asTable = $context->fields->count() <= self::TABLE_FIELDS;
-        $rows = [];
-
-        foreach ($context->items() as $item) {
-            $rows[] = $asTable ? $this->cells($context, $formatter, $item) : $this->card($context, $formatter, $item);
-        }
-
-        $count = count($rows);
+        $library = $this->library();
+        $body = PdfBody::make($library, $context->table, $formatter, $context->items());
+        $count = $body->count;
         $inventory = $context->inventory;
-        $metrics = $this->library()->getFontMetrics();
-        $columns = [];
-
-        if ($asTable && $count > 0) {
-            $headers = array_values($context->table->fields()->keys()->map(fn (int $position): string => $context->table->header($position))->all());
-            /** @var list<list<string>> $rows */
-            $columns = PdfColumns::plan($headers, $rows, $this->numericColumns($context), $metrics, $metrics->getFont(self::FONT, 'bold') ?? self::FONT, self::TABLE_WIDTH_PT, self::HEADER_SIZE_PT);
-        }
-
-        $head = self::HEAD_TITLE + self::HEAD_SUMMARY + ($columns === [] ? 0 : self::HEAD_GAP + self::HEAD_COLUMNS);
-        // A table is right under its header; cards, which have a border of their own, get some air.
-        $gap = $columns === [] ? self::BODY_GAP + 5 : self::BODY_GAP;
+        $metrics = $library->getFontMetrics();
+        $head = PdfHead::of(1, $body->columns !== []);
 
         return view('exports.pdf', [
             'locale' => $context->export->locale,
             'title' => $inventory->name,
-            'headTitle' => PdfColumns::fit($inventory->name, self::TABLE_WIDTH_PT, $metrics, $metrics->getFont(self::FONT, 'bold') ?? self::FONT, 15.0),
+            'headTitle' => PdfColumns::fit($inventory->name, PdfBody::TABLE_WIDTH_PT, $metrics, $metrics->getFont(PdfLibrary::FONT, 'bold') ?? PdfLibrary::FONT, 15.0),
             'description' => $inventory->description,
             'exportedAt' => $formatter->moment(now()->toDateTimeImmutable()),
             'count' => $count,
             'filtered' => $context->export->scope === ExportScope::View,
-            'asTable' => $asTable,
-            'columns' => $columns,
-            'rows' => $rows,
-            'tableRows' => self::TABLE_ROWS,
-            // The header is fixed in the top margin of every page: the margin is as high as it is, with what is above and below.
-            'headHeight' => $head,
-            'headTop' => $head + $gap,
-            'headMargin' => self::HEAD_MARGIN,
-            'marginTop' => self::HEAD_MARGIN + $head + $gap,
-            'titleLine' => self::HEAD_TITLE,
-            'summaryLine' => self::HEAD_SUMMARY,
-            'columnsLine' => self::HEAD_COLUMNS,
-            'headGap' => self::HEAD_GAP,
-        ])->render();
-    }
-
-    /**
-     * The cells of an item for a table: the value of each field, as text.
-     *
-     * @return list<string>
-     */
-    private function cells(ExportContext $context, ExportFormatter $formatter, Item $item): array
-    {
-        $cells = [];
-
-        foreach ($context->table->row($item) as $position => $value) {
-            $cells[] = $this->text($context, $formatter, $item, $position, $value, self::TABLE_TEXT);
-        }
-
-        return $cells;
-    }
-
-    /**
-     * An item as a card: its title, and the label and value of each field that has one.
-     *
-     * @return array{title: string, lines: list<array{0: string, 1: string}>, updated: string}
-     */
-    private function card(ExportContext $context, ExportFormatter $formatter, Item $item): array
-    {
-        $title = '';
-        $lines = [];
-
-        foreach ($context->table->row($item) as $position => $value) {
-            $text = $this->text($context, $formatter, $item, $position, $value, self::CARD_TEXT);
-
-            if ($title === '' && $value->kind === ExportKind::Text && $context->table->field($position)->type === 'text') {
-                $title = $text;
-            }
-
-            if ($text !== '') {
-                $lines[] = [$context->table->field($position)->name, $text];
-            }
-        }
-
-        return [
-            'title' => $title === '' ? __('Item') : $title,
-            'lines' => $lines,
-            'updated' => $item->updated_at === null ? '' : $formatter->moment(DisplayTime::of($item->updated_at)->toDateTimeImmutable()),
-        ];
-    }
-
-    /**
-     * A value as the text a printed page shows: formatted, cut short when it is very long, "2 photos" for the files of a field.
-     */
-    private function text(ExportContext $context, ExportFormatter $formatter, Item $item, int $position, ExportValue $value, int $max): string
-    {
-        $type = $context->table->typeAt($position);
-
-        if ($type instanceof UploadedFilesType) {
-            $count = $context->table->fileCount($item, $position);
-
-            return $count === 0 ? '' : ($type->imagesOnly()
-                ? trans_choice(':count photo|:count photos', $count)
-                : trans_choice(':count file|:count files', $count));
-        }
-
-        $text = $formatter->format($value);
-
-        return mb_strlen($text) > $max ? rtrim(mb_substr($text, 0, $max - 1)).'…' : $text;
-    }
-
-    /**
-     * Which columns of a table hold numbers (aligned to the right).
-     *
-     * @return list<bool>
-     */
-    private function numericColumns(ExportContext $context): array
-    {
-        return array_values($context->table->fields()->map(fn (InventoryField $field, int $position): bool => $context->table->typeAt($position)->queryKind() === QueryKind::Number)->all());
+            'asTable' => $body->asTable,
+            'columns' => $body->columns,
+            'rows' => $body->rows,
+            'tableRows' => PdfBody::TABLE_ROWS,
+        ] + $head->view())->render();
     }
 
     /**
@@ -298,22 +170,7 @@ final class PdfWriter implements ExportWriter
      */
     private function library(): Dompdf
     {
-        if ($this->library !== null) {
-            return $this->library;
-        }
-
-        $directory = ExportTemp::directory('dompdf');
-        $options = new Options;
-        $options->setIsRemoteEnabled(false);
-        $options->setIsPhpEnabled(false);
-        $options->setIsJavascriptEnabled(false);
-        $options->setChroot([$directory]);
-        $options->setFontDir($directory);
-        $options->setFontCache($directory);
-        $options->setTempDir($directory);
-        $options->setDefaultFont(self::FONT);
-
-        return $this->library = new Dompdf($options);
+        return $this->library ??= PdfLibrary::make();
     }
 
     /**
@@ -323,7 +180,7 @@ final class PdfWriter implements ExportWriter
     {
         $canvas = $dompdf->getCanvas();
         $metrics = $dompdf->getFontMetrics();
-        $font = $metrics->getFont(self::FONT) ?? self::FONT;
+        $font = $metrics->getFont(PdfLibrary::FONT) ?? PdfLibrary::FONT;
         $size = 7.0;
         $page = __('Page :page / :pages', ['page' => '{PAGE_NUM}', 'pages' => '{PAGE_COUNT}']);
         $width = $metrics->getTextWidth(__('Page :page / :pages', ['page' => '00', 'pages' => '00']), $font, $size);
