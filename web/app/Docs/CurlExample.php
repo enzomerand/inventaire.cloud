@@ -20,9 +20,9 @@ final class CurlExample
     private const TOKEN = 'inv_…';
 
     /**
-     * Gets the document, to follow the references.
+     * Gets the document, to follow the references, and the describer that lists the properties of an object schema.
      */
-    public function __construct(private readonly OpenApi $api) {}
+    public function __construct(private readonly OpenApi $api, private readonly SchemaDescriber $schemas) {}
 
     /**
      * The command for an operation as {@see OpenApi::operations()} describes it.
@@ -99,7 +99,7 @@ final class CurlExample
         }
 
         $arguments = [];
-        $flat = $this->properties($schema);
+        $flat = $this->schemas->flatten($schema, false);
 
         foreach ($flat['properties'] as $name => $property) {
             if (! in_array((string) $name, $flat['required'], true) || ! is_array($property)) {
@@ -170,7 +170,7 @@ final class CurlExample
      */
     private function object(array $schema, int $depth): object
     {
-        $flat = $this->properties($schema);
+        $flat = $this->schemas->flatten($schema, false);
         $names = array_values(array_filter(array_keys($flat['properties']), fn (int|string $name): bool => in_array((string) $name, $flat['required'], true)));
 
         if ($names === [] && $flat['properties'] !== []) {
@@ -188,37 +188,6 @@ final class CurlExample
         }
 
         return (object) $object;
-    }
-
-    /**
-     * The properties and the required names of an object schema, the parts of its `allOf` merged.
-     *
-     * @param  array<string, mixed>  $schema
-     * @return array{properties: array<string, mixed>, required: list<string>}
-     */
-    private function properties(array $schema): array
-    {
-        $schema = $this->api->resolve($schema);
-        $properties = [];
-        $required = [];
-
-        foreach (is_array($schema['allOf'] ?? null) ? $schema['allOf'] : [] as $member) {
-            if (is_array($member)) {
-                $part = $this->properties($member);
-                $properties = array_merge($properties, $part['properties']);
-                $required = array_merge($required, $part['required']);
-            }
-        }
-
-        if (is_array($schema['properties'] ?? null)) {
-            $properties = array_merge($properties, $schema['properties']);
-        }
-
-        if (is_array($schema['required'] ?? null)) {
-            $required = array_merge($required, array_map('strval', $schema['required']));
-        }
-
-        return ['properties' => $properties, 'required' => array_values($required)];
     }
 
     /**

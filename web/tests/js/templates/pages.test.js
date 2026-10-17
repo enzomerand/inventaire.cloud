@@ -604,6 +604,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
     describe('the account page', () => {
         beforeEach(async () => {
+            // The card of the tokens reads its list as the API gives it, whatever an earlier test left for `http.get` to answer.
+            http.get.mockResolvedValue({ data: [] });
             await mount('app/account.blade.php');
         });
 

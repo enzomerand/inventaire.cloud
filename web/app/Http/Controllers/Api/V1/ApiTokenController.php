@@ -35,6 +35,7 @@ final class ApiTokenController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
+        // Mapped here, one resource at a time: `collection()` would pass each key as the second argument, which is the value of a token.
         return ApiTokenResource::collection($this->tokens->active($this->user($request))->map(
             fn (PersonalAccessToken $token): ApiTokenResource => new ApiTokenResource($token),
         ));

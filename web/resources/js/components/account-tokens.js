@@ -17,9 +17,6 @@ import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
 import { reloadPage } from '../lib/page.js';
 
-/** The permissions a token can have, in the order the form lists them (the names the API takes). */
-export const ABILITIES = ['read', 'write', 'manage'];
-
 /** The lifetime the form offers first, in days: the value of the option of the select. */
 const DEFAULT_EXPIRY = '90';
 
@@ -145,7 +142,7 @@ export default function accountTokens() {
             try {
                 const answer = await http.get(this.url);
 
-                this.tokens = Array.isArray(answer?.data) ? answer.data : [];
+                this.tokens = answer.data;
             } catch (error) {
                 // Anything else than an HttpError is a cancelled request: nothing to tell.
                 if (!(error instanceof HttpError)) {
@@ -198,7 +195,7 @@ export default function accountTokens() {
                     this.url,
                     {
                         name: this.form.name.trim(),
-                        abilities: ABILITIES.filter((ability) => this.form.abilities.includes(ability)),
+                        abilities: this.form.abilities,
                         expires_in_days: this.form.expires === '' ? null : Number(this.form.expires),
                     },
                     { silent: true },
@@ -237,10 +234,6 @@ export default function accountTokens() {
          * @returns {Promise<void>}
          */
         async copy() {
-            if (!this.hasRevealed) {
-                return;
-            }
-
             let done;
 
             try {
@@ -389,7 +382,7 @@ export default function accountTokens() {
          * @returns {string}
          */
         abilityLabel(ability) {
-            return ABILITIES.includes(ability) ? t(`tokens.ability.${ability}`) : ability;
+            return t(`tokens.ability.${ability}`);
         },
 
         /**
@@ -399,7 +392,7 @@ export default function accountTokens() {
          * @returns {string}
          */
         abilityClass(ability) {
-            return BADGE_CLASSES[ability] ?? 'bg-secondary-lt';
+            return BADGE_CLASSES[ability];
         },
 
         /**

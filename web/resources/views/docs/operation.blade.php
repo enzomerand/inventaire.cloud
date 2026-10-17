@@ -108,7 +108,7 @@
                     <div class="small text-secondary mb-1">
                         {{ __('Headers:') }}
                         @foreach ($response['headers'] as $header)
-                            <code>{{ $header['name'] }}</code>@unless ($loop->last), @endunless
+                            <code>{{ $header }}</code>@unless ($loop->last), @endunless
                         @endforeach
                     </div>
                 @endif

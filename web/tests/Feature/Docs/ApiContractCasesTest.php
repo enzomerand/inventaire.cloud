@@ -191,15 +191,13 @@ describe('the answers that hold every kind of value', function (): void {
     it('fit the schemas when the items are changed and a file is attached to one', function (): void {
         $world = contractWorld();
         $item = $world['item'];
-        $attachment = contractAttachment($world);
+        contractAttachment($world);
 
         contractCall($this, $world['owner'], 'updateItem', 'PATCH', contractUri($world['inventory'], "/items/{$item->ulid}"), ['values' => [$world['name']->ulid => null, $world['price']->ulid => '1']])->assertOk();
 
         contractCheck(contractCall($this, $world['owner'], 'getItem', 'GET', contractUri($world['inventory'], "/items/{$item->ulid}")), 'getItem', 200);
         contractCheck(contractCall($this, $world['owner'], 'listItemRevisions', 'GET', contractUri($world['inventory'], "/items/{$item->ulid}/revisions")), 'listItemRevisions', 200);
         contractCheck(contractCall($this, $world['owner'], 'listItems', 'GET', contractUri($world['inventory'], '/items')), 'listItems', 200);
-
-        expect($attachment->ulid)->not->toBe('');
     });
 
     it('fit the schemas for an export in every state', function (): void {

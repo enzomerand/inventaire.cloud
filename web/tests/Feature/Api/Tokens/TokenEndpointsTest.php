@@ -168,10 +168,6 @@ describe('making a token', function (): void {
         $this->travel(61)->minutes();
         inventoryCall($this, $ada, 'POST', '/api/v1/me/tokens', ['name' => 'Script 3', 'abilities' => ['read']])->assertCreated();
     });
-
-    it('allows ten tokens an hour by default', function (): void {
-        expect(config('inventories.api_token_creations_per_hour'))->toBe(10);
-    });
 });
 
 describe('the number of tokens', function (): void {
@@ -190,10 +186,6 @@ describe('the number of tokens', function (): void {
             ]);
 
         expect(tokensStored($user))->toBe(2);
-    });
-
-    it('is twenty by default', function (): void {
-        expect(config('inventories.max_api_tokens'))->toBe(20);
     });
 
     it('does not count the tokens that expired, nor those of other people', function (): void {

@@ -17,9 +17,6 @@ use Illuminate\Http\JsonResponse;
  */
 final class OpenApiController extends Controller
 {
-    /** How long a browser may keep the document, in seconds. */
-    private const MAX_AGE = 3600;
-
     /**
      * Gets the specification.
      */
@@ -32,6 +29,6 @@ final class OpenApiController extends Controller
     {
         return response()
             ->json($this->openApi->document(), 200, [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
-            ->header('Cache-Control', 'private, max-age='.self::MAX_AGE);
+            ->header('Cache-Control', 'private, max-age=3600');
     }
 }

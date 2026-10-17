@@ -22,6 +22,18 @@ function contractSpec(): array
 }
 
 /**
+ * Writes a document to a scratch file and gives its path; the file is deleted when the process ends.
+ */
+function contractScratchSpec(string $yaml): string
+{
+    $path = (string) tempnam(sys_get_temp_dir(), 'openapi-test-');
+    file_put_contents($path, $yaml);
+    register_shutdown_function(fn () => @unlink($path));
+
+    return $path;
+}
+
+/**
  * The operations of the document, by `operationId`.
  *
  * @return array<string, array{method: string, path: string, operationId: string, tag: string, ability: string|null, summary: string, operation: array<string, mixed>, parameters: list<array<string, mixed>>}>

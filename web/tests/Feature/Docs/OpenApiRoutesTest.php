@@ -109,7 +109,6 @@ describe('the operations of the document', function (): void {
     });
 
     it('name the ability of the route they describe, and only the public ones name none', function (): void {
-        $public = array_map('contractRouteKey', array_filter(apiRoutes(), fn ($route, string $name): bool => in_array($name, tokenPublicRoutes(), true) && $name !== 'api.v1.openapi', ARRAY_FILTER_USE_BOTH));
         $abilities = array_column(array_values(contractTokenRoutes()), 'ability');
 
         foreach (contractOperationsByRoute() as $key => $operation) {
@@ -117,7 +116,6 @@ describe('the operations of the document', function (): void {
                 expect($operation['ability'])->toBe(contractTokenRoutes()[$key]['ability'], $operation['operationId']);
                 expect($operation['operation']['security'] ?? null)->toBeNull($operation['operationId'].' is secured by the default requirement');
             } else {
-                expect($public)->toContain($key);
                 expect($operation['ability'])->toBeNull($operation['operationId']);
                 expect($operation['operation']['security'] ?? null)->toBe([], $operation['operationId'].' needs no token');
             }

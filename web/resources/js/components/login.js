@@ -17,6 +17,7 @@
  * stale page (419, the CSRF token could not be renewed): the message says the
  * page is about to reload, so it does.
  */
+import { throttledMessage } from '../lib/forms.js';
 import { HttpError, http, scheduleNavigation } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
@@ -24,9 +25,6 @@ import { redirectTo, reloadPage } from '../lib/page.js';
 
 /** Server codes meaning the code can no longer be used: a new one must be requested. */
 const DEAD_CODES = ['login_code_expired', 'login_code_exhausted'];
-
-/** Past this wait (two minutes), the time to wait is told in minutes rather than seconds. */
-const LONG_WAIT_SECONDS = 120;
 
 /** Options shared by every request: the failures are handled here. */
 const QUIET = { silent: true };
@@ -220,29 +218,13 @@ export default function login() {
                 this.error = error.message;
                 scheduleNavigation(reloadPage);
             } else if (error.status === 429) {
-                this.error = this.throttledMessage(error.retryAfter);
+                this.error = throttledMessage(error.retryAfter);
             } else if (error.status === 422) {
                 this.error =
                     error.errors.email?.[0] ?? error.errors.code?.[0] ?? error.errors.name?.[0] ?? error.message;
             } else {
                 this.error = error.message;
             }
-        },
-
-        /**
-         * Tells how long to wait, in minutes when it is long (an hour of waiting is not "3540 seconds").
-         *
-         * @param {number | null} seconds The server's Retry-After, if it gave one.
-         * @returns {string}
-         */
-        throttledMessage(seconds) {
-            if (!seconds) {
-                return t('error.too_many_requests');
-            }
-
-            return seconds > LONG_WAIT_SECONDS
-                ? t('login.error.throttled_minutes', { minutes: Math.ceil(seconds / 60) })
-                : t('login.error.throttled', { seconds });
         },
 
         /**

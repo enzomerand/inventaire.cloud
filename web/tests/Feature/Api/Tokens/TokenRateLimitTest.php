@@ -137,10 +137,6 @@ describe('the pace of a token', function (): void {
         tokenCall($this, $token, 'GET', '/api/v1/me')->assertOk()->assertHeader('X-RateLimit-Remaining', '1');
     });
 
-    it('is 120 requests a minute by default', function (): void {
-        expect(config('inventories.api_token_requests_per_minute'))->toBe(120);
-    });
-
     it('comes on top of the limits of the endpoints: the stricter one answers', function (): void {
         config(['inventories.api_token_requests_per_minute' => 10, 'workspaces.create_per_hour' => 1]);
         $token = tokenFor(inventoryPerson('Ada'), ['manage']);

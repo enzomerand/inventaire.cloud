@@ -188,7 +188,7 @@ describe('the command of an operation', function (): void {
      */
     function docsCurlFor(string $operationId): string
     {
-        return (new CurlExample(app(OpenApi::class)))->for(contractOperations()[$operationId]);
+        return app(CurlExample::class)->for(contractOperations()[$operationId]);
     }
 
     it('is one line for a call with nothing to send', function (): void {
@@ -203,7 +203,7 @@ describe('the command of an operation', function (): void {
 
     it('has the identifiers of the path as placeholders without braces, which curl would read as a list', function (): void {
         foreach (contractOperations() as $id => $operation) {
-            $command = (new CurlExample(app(OpenApi::class)))->for($operation);
+            $command = app(CurlExample::class)->for($operation);
             $address = trim((string) preg_replace('/^.*\s/s', '', $command));
 
             expect($command)->toStartWith('curl')
@@ -235,14 +235,14 @@ describe('the command of an operation', function (): void {
             ]]]]],
         ];
 
-        $command = (new CurlExample(app(OpenApi::class)))->for($operation);
+        $command = app(CurlExample::class)->for($operation);
 
         expect($command)->toContain("-F 'note=say \"hi\" \$HOME `id` it'\\''s'");
     });
 
     it('is a command the shell reads as one: no quote is left open', function (): void {
         foreach (contractOperations() as $id => $operation) {
-            $command = (new CurlExample(app(OpenApi::class)))->for($operation);
+            $command = app(CurlExample::class)->for($operation);
 
             expect(substr_count($command, '"') % 2)->toBe(0, $id)->and(substr_count($command, "'") % 2)->toBe(0, $id);
         }

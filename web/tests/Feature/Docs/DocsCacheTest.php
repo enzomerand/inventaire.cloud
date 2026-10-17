@@ -75,14 +75,12 @@ describe('the reference of the page', function (): void {
         docsCachedPage($this)->assertOk();
         $before = Cache::get('docs:api-reference:fr');
 
-        $copy = tempnam(sys_get_temp_dir(), 'openapi-edit-');
-        file_put_contents($copy, str_replace('The public API of inventaire.cloud', 'The edited API of inventaire.cloud', (string) file_get_contents(app(OpenApi::class)->path())));
+        $copy = contractScratchSpec(str_replace('The public API of inventaire.cloud', 'The edited API of inventaire.cloud', (string) file_get_contents(app(OpenApi::class)->path())));
         app()->instance(OpenApi::class, new OpenApi($copy));
 
         // What a request does, with the document the container now holds (the router keeps the controller it built for the first one).
         $html = app(RenderedReference::class)->html('fr')->toHtml();
         $after = Cache::get('docs:api-reference:fr');
-        @unlink($copy);
 
         expect($after['version'])->not->toBe($before['version'])
             ->and($after['html'])->toBe($html)->not->toBe($before['html'])

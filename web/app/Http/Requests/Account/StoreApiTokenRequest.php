@@ -46,15 +46,13 @@ final class StoreApiTokenRequest extends FormRequest
     }
 
     /**
-     * The abilities asked for, each once, in the order of {@see TokenAbility}.
+     * The validated abilities, each once ({@see ApiTokens::create()} keeps them in the order of {@see TokenAbility}).
      *
      * @return list<string>
      */
     public function abilities(): array
     {
-        $asked = array_map('strval', array_values((array) $this->input('abilities')));
-
-        return array_values(array_intersect(TokenAbility::values(), $asked));
+        return array_values($this->validated('abilities'));
     }
 
     /**

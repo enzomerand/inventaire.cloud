@@ -35,19 +35,13 @@ return [
     | API tokens
     |--------------------------------------------------------------------------
     |
-    | - `token_prefix`: what every API token starts with (`SANCTUM_TOKEN_PREFIX`,
-    |   `inv_`). It makes a token recognisable at a glance, and by the secret
-    |   scanners of code hosts, if one is pushed by mistake.
-    | - `expiration`: minutes after which any token stops working, whatever
-    |   its own date; null (the default): each token has its own date, or none
-    |   (`expires_at`, chosen when it is created: see App\Auth\ApiTokens).
-    |   Expired tokens are deleted a day after by `sanctum:prune-expired`.
+    | `token_prefix`: what every API token starts with (`SANCTUM_TOKEN_PREFIX`,
+    | `inv_`). It makes a token recognisable at a glance, and by the secret
+    | scanners of code hosts, if one is pushed by mistake.
     |
     */
 
     'token_prefix' => (string) env('SANCTUM_TOKEN_PREFIX', 'inv_'),
-
-    'expiration' => null,
 
     /*
     |--------------------------------------------------------------------------

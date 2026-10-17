@@ -48,21 +48,17 @@ describe('GET /api/v1/openapi.json', function (): void {
             ->and($response->getContent())->not->toContain('evil.example');
     });
 
-    it('may be kept by a browser for an hour, and says so', function (): void {
-        $response = $this->getJson('/api/v1/openapi.json');
+    it('is never public, and may be kept by a browser for an hour, not even for a request of the web front, whose answer carries the session cookie', function (): void {
+        $anonymous = $this->getJson('/api/v1/openapi.json');
+        $front = $this->actingAs(inventoryPerson())->getJson('/api/v1/openapi.json', frontend());
 
-        expect($response->headers->hasCacheControlDirective('private'))->toBeTrue()
-            ->and($response->headers->getCacheControlDirective('max-age'))->toBe('3600')
-            ->and($response->headers->hasCacheControlDirective('public'))->toBeFalse()
-            ->and($response->headers->getCookies())->toBe([]);
-    });
+        foreach ([$anonymous, $front] as $response) {
+            expect($response->headers->hasCacheControlDirective('private'))->toBeTrue()
+                ->and($response->headers->hasCacheControlDirective('public'))->toBeFalse()
+                ->and($response->headers->getCacheControlDirective('max-age'))->toBe('3600');
+        }
 
-    it('is never public, not even for a request of the web front, whose answer carries the session cookie', function (): void {
-        $response = $this->actingAs(inventoryPerson())->getJson('/api/v1/openapi.json', frontend());
-
-        expect($response->headers->hasCacheControlDirective('private'))->toBeTrue()
-            ->and($response->headers->hasCacheControlDirective('public'))->toBeFalse()
-            ->and($response->headers->getCacheControlDirective('max-age'))->toBe('3600');
+        expect($anonymous->headers->getCookies())->toBe([]);
     });
 
     it('needs no account, no token, and ignores one that is wrong', function (): void {

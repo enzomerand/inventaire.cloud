@@ -50,7 +50,6 @@ final class ApiReference
      * The whole page.
      *
      * @return array{
-     *     title: string,
      *     version: string,
      *     baseUrl: string,
      *     intro: HtmlString,
@@ -94,7 +93,6 @@ final class ApiReference
         }
 
         return [
-            'title' => (string) ($info['title'] ?? ''),
             'version' => (string) ($info['version'] ?? ''),
             'baseUrl' => $this->api->baseUrl(),
             'intro' => $intro,
@@ -180,23 +178,17 @@ final class ApiReference
     }
 
     /**
-     * The answers of an operation, each with its description, its headers, its body and the codes it can carry.
+     * The answers of an operation, each with its description, the names of its headers, its body and the codes it can carry.
      *
      * @param  array<string, mixed>  $operation
-     * @return list<array{status: string, description: HtmlString, headers: list<array{name: string, description: HtmlString}>, contents: list<Body>, codes: list<array{code: string, description: HtmlString}>}>
+     * @return list<array{status: string, description: HtmlString, headers: list<string>, contents: list<Body>, codes: list<array{code: string, description: HtmlString}>}>
      */
     private function responses(array $operation): array
     {
         $responses = [];
 
         foreach ($this->api->responses($operation) as [$status, $response]) {
-            $headers = [];
-
-            foreach (is_array($response['headers'] ?? null) ? $response['headers'] : [] as $name => $header) {
-                $header = is_array($header) ? $this->api->resolve($header) : [];
-                $headers[] = ['name' => (string) $name, 'description' => $this->inline((string) ($header['description'] ?? ''))];
-            }
-
+            $headers = array_map(strval(...), array_keys(is_array($response['headers'] ?? null) ? $response['headers'] : []));
             $codes = [];
 
             foreach (is_array($response['x-codes'] ?? null) ? $response['x-codes'] : [] as $code) {
@@ -269,17 +261,19 @@ final class ApiReference
             $headings[] = ['id' => $id, 'text' => $text];
 
             return '<h2 id="'.e($id).'">'.$match[1].'</h2>';
-        }, $this->convertBlocks($markdown));
+        }, $this->markdown($markdown)->toHtml());
 
         return [new HtmlString($html), $headings];
     }
 
     /**
-     * A text of the document with its Markdown rendered.
+     * A text of the document with its Markdown rendered as blocks, the way {@see Str::markdown()} writes it.
      */
     private function markdown(string $text): HtmlString
     {
-        return new HtmlString($this->convertBlocks($text));
+        $this->blocks ??= new GithubFlavoredMarkdownConverter(self::MARKDOWN);
+
+        return new HtmlString((string) $this->blocks->convert($text));
     }
 
     /**
@@ -295,15 +289,5 @@ final class ApiReference
         }
 
         return new HtmlString((string) $this->inlines->convert($text));
-    }
-
-    /**
-     * Whole Markdown text as HTML, the way {@see Str::markdown()} writes it.
-     */
-    private function convertBlocks(string $text): string
-    {
-        $this->blocks ??= new GithubFlavoredMarkdownConverter(self::MARKDOWN);
-
-        return (string) $this->blocks->convert($text);
     }
 }

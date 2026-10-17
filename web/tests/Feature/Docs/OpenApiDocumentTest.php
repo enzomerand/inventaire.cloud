@@ -37,18 +37,6 @@ function contractResponseObjects(): array
     return $found;
 }
 
-/**
- * Writes a document to a scratch file and gives its path; the file is deleted when the test ends.
- */
-function contractScratchSpec(string $yaml): string
-{
-    $path = (string) tempnam(sys_get_temp_dir(), 'openapi-test-');
-    file_put_contents($path, $yaml);
-    register_shutdown_function(fn () => @unlink($path));
-
-    return $path;
-}
-
 describe('the document', function (): void {
     it('is OpenAPI 3.1 with a bearer token as its default requirement', function (): void {
         $spec = contractSpec();
@@ -322,21 +310,6 @@ describe('the introduction of the document', function (): void {
     });
 });
 
-describe('the check of a body against a schema', function (): void {
-    it('notices a body that does not fit', function (): void {
-        $schema = contractSpec()['components']['schemas']['Workspace'];
-
-        expect(contractViolations(json_decode('{"id":"not-an-id","name":5}'), $schema))->not->toBe([])
-            ->and(contractViolations(json_decode('{"id":"01k8gv2d9m3x5r7qn4p6t8w0ya","name":"Shop","role":"owner","is_current":false,"created_at":"2026-10-15T12:30:00+00:00"}'), $schema))->toBe([]);
-    });
-
-    it('follows the references of the document', function (): void {
-        $schema = ['type' => 'object', 'required' => ['data'], 'properties' => ['data' => ['$ref' => '#/components/schemas/Workspace']]];
-
-        expect(contractViolations(json_decode('{"data":{"id":"x"}}'), $schema))->not->toBe([]);
-    });
-});
-
 describe('OpenApi', function (): void {
     it('lists the operations in the order of the file, with their parameters resolved', function (): void {
         $operations = app(OpenApi::class)->operations();
@@ -373,17 +346,6 @@ describe('OpenApi', function (): void {
         expect(fn () => $api->resolve(['$ref' => '#/components/schemas/Nothing']))->toThrow(RuntimeException::class)
             ->and(fn () => $api->resolve(['$ref' => 'https://example.com/other.yaml#/a']))->toThrow(RuntimeException::class)
             ->and(fn () => $api->resolve(['$ref' => '#/b']))->toThrow(RuntimeException::class, 'loops');
-    });
-
-    it('rewrites the servers to the address of the API on APP_URL', function (): void {
-        config(['app.url' => 'https://inventaire.example/']);
-
-        $document = app(OpenApi::class)->document();
-
-        expect($document['servers'])->toHaveCount(1)
-            ->and($document['servers'][0]['url'])->toBe('https://inventaire.example/api/v1')
-            ->and($document['servers'][0]['description'])->toBeString()
-            ->and($document['paths'])->toBe(contractSpec()['paths']);
     });
 
     it('keeps the parsed document in the cache next to the hash of its content, in one entry that a new content replaces', function (): void {

@@ -23,11 +23,9 @@ require_once __DIR__.'/../../Support/contract.php';
  */
 function contractUseDocument(array $paths, array $schemas = []): void
 {
-    $path = tempnam(sys_get_temp_dir(), 'openapi-test-');
-    file_put_contents($path, json_encode(['openapi' => '3.1.0', 'info' => ['title' => 'Test', 'version' => '1'], 'paths' => $paths, 'components' => ['schemas' => $schemas]]));
+    $document = json_encode(['openapi' => '3.1.0', 'info' => ['title' => 'Test', 'version' => '1'], 'paths' => $paths, 'components' => ['schemas' => $schemas]]);
 
-    app()->instance(OpenApi::class, new OpenApi($path));
-    register_shutdown_function(static fn (): bool => @unlink($path));
+    app()->instance(OpenApi::class, new OpenApi(contractScratchSpec((string) $document)));
 }
 
 /**

@@ -68,7 +68,7 @@ final class SitemapController extends Controller
         }
 
         // The documentation of the API exists once, so it has no alternates.
-        $this->entry($xml, $this->meta->apiDocs($locale)->canonical, []);
+        $this->entry($xml, PublicUrls::apiDocs(), []);
 
         $xml->endElement();
         $xml->endDocument();

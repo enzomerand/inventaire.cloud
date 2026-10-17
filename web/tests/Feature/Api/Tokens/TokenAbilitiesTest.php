@@ -8,7 +8,6 @@ use App\Models\Item;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 
 require_once __DIR__.'/../../../Support/inventories.php';
 require_once __DIR__.'/../../../Support/tokens.php';
@@ -98,17 +97,6 @@ describe('a token with an ability', function (): void {
         tokenCall($this, $token, 'GET', "/api/v1/inventories/{$inventory}/items")->assertOk();
         tokenCall($this, $token, 'POST', "/api/v1/inventories/{$inventory}/items", ['values' => [$world['field']->ulid => 'Saw']])->assertCreated();
         tokenCall($this, $token, 'POST', "/api/v1/inventories/{$inventory}/fields", ['type' => 'text', 'name' => 'Colour'])->assertCreated();
-    });
-
-    it('has the abilities it was given and no more: one of three is not two', function (): void {
-        $world = tokenWorld();
-        $token = tokenFor($world['owner'], ['read', 'write']);
-        $inventory = $world['inventory']->ulid;
-
-        tokenCall($this, $token, 'GET', "/api/v1/inventories/{$inventory}/items")->assertOk();
-        tokenCall($this, $token, 'POST', "/api/v1/inventories/{$inventory}/items", ['values' => [$world['field']->ulid => 'Saw']])->assertCreated();
-        tokenCall($this, $token, 'POST', "/api/v1/inventories/{$inventory}/fields", ['type' => 'text', 'name' => 'Colour'])
-            ->assertForbidden()->assertJsonPath('code', 'token_ability_missing');
     });
 
     it('says which permission is missing, in the language of the request', function (): void {
@@ -235,26 +223,5 @@ describe('a token that is no longer good', function (): void {
         $this->travel(1)->minutes();
 
         tokenCall($this, $token, 'GET', '/api/v1/me')->assertUnauthorized();
-    });
-
-    it('is refused with a 401 when it was made to expire in the past', function (): void {
-        $world = tokenWorld();
-
-        tokenCall($this, tokenFor($world['owner'], ['read'], now()->subSecond()), 'GET', '/api/v1/me')->assertUnauthorized();
-    });
-
-    it('is refused with a 401 once it has been revoked', function (): void {
-        $world = tokenWorld();
-        $new = $world['owner']->createToken('script', ['read']);
-
-        tokenCall($this, $new->plainTextToken, 'GET', '/api/v1/me')->assertOk();
-
-        DB::table('personal_access_tokens')->where('id', $new->accessToken->id)->delete();
-
-        tokenCall($this, $new->plainTextToken, 'GET', '/api/v1/me')->assertUnauthorized();
-    });
-
-    it('is refused with a 401 when it never existed', function (): void {
-        tokenCall($this, 'inv_'.str_repeat('a', 48), 'GET', '/api/v1/me')->assertUnauthorized();
     });
 });

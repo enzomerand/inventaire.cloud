@@ -253,9 +253,10 @@ final class SchemaDescriber
      * The properties and the required names of an object schema, the parts of `allOf` merged (the first part first).
      *
      * @param  array<string, mixed>  $schema
+     * @param  bool  $inlineOnly  Whether to leave out the schemas that are named (a link tells where they are).
      * @return array{properties: array<string, mixed>, required: list<string>}
      */
-    private function flatten(array $schema, bool $inlineOnly): array
+    public function flatten(array $schema, bool $inlineOnly): array
     {
         if ($inlineOnly && $this->api->schemaName($schema) !== null) {
             return ['properties' => [], 'required' => []];

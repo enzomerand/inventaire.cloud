@@ -61,16 +61,6 @@ function tokenSessionOnlyRoutes(): array
 }
 
 /**
- * The routes of the API that need no account.
- *
- * @return list<string>
- */
-function tokenPublicRoutes(): array
-{
-    return ['api.v1.openapi', 'api.v1.templates.index', 'api.v1.templates.show'];
-}
-
-/**
  * The routes under `api/` whose name does not start with `api.v1.` (none at all, or another one), each as "METHOD uri". The tests that
  * classify and document the routes work by name: a route they cannot name escapes them, and so would escape the guard-rails.
  *

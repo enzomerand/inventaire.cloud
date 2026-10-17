@@ -311,13 +311,11 @@ describe('the texts of the document', function (): void {
      */
     function docsReferenceOf(string $yaml): array
     {
-        $path = (string) tempnam(sys_get_temp_dir(), 'openapi-test-');
-        file_put_contents($path, $yaml);
-        register_shutdown_function(fn () => @unlink($path));
+        $api = new OpenApi(contractScratchSpec($yaml));
 
-        $api = new OpenApi($path);
+        $schemas = new SchemaDescriber($api);
 
-        return (new ApiReference($api, new SchemaDescriber($api), new CurlExample($api)))->page();
+        return (new ApiReference($api, $schemas, new CurlExample($api, $schemas)))->page();
     }
 
     it('are rendered as Markdown with the HTML in them removed and the unsafe links refused', function (): void {
