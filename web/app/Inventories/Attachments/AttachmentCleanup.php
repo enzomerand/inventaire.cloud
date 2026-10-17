@@ -83,15 +83,19 @@ final class AttachmentCleanup
     }
 
     /**
-     * Counts the files of an inventory that is about to be deleted out of the storage of its workspace. Their rows go with
-     * the inventory (the foreign key cascades) and their deletion from the disk is queued by {@see self::purgeCollected()}
-     * (the `deleted` event of the inventory), after {@see self::collectForInventory()} (its `deleting` event) worked it out.
+     * Counts the files of an inventory that is about to be deleted out of the storage of its workspace: those of its items, and
+     * what its official versions count (`counted_bytes`: their snapshots and PDFs). Their rows go with the inventory (the foreign key
+     * cascades) and their deletion from the disk is queued by {@see self::purgeCollected()} (the `deleted` event of the inventory),
+     * after {@see self::collectForInventory()} (its `deleting` event) worked it out.
      *
      * @param  Workspace  $workspace  The workspace of the inventory, locked.
      */
     public function releaseInventory(Workspace $workspace, Inventory $inventory): void
     {
-        $this->usage->move($workspace, -(int) $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->sum('size'));
+        $files = (int) $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->sum('size');
+        $versions = (int) $this->db->table('inventory_versions')->where('inventory_id', $inventory->getKey())->sum('counted_bytes');
+
+        $this->usage->move($workspace, -($files + $versions));
     }
 
     /**
@@ -102,12 +106,13 @@ final class AttachmentCleanup
      */
     public function collectForInventory(Inventory $inventory): void
     {
-        // The exports and the imports of the inventory are stored under its folder too (see AttachmentStorage::exportDirectory()
-        // and AttachmentStorage::importDirectory()).
+        // The exports, the imports and the official versions of the inventory are stored under its folder too (see
+        // AttachmentStorage::exportDirectory(), AttachmentStorage::importDirectory() and AttachmentStorage::versionDirectory()).
         $disks = [
             ...$this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('exports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('imports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
+            ...$this->db->table('inventory_versions')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
         ];
 
         if ($disks === []) {
@@ -140,7 +145,7 @@ final class AttachmentCleanup
                 ->distinct()
                 ->pluck('attachments.disk')
                 ->all(),
-            // The exports and the imports are stored under the folder of their inventory too.
+            // The exports, the imports and the official versions are stored under the folder of their inventory too.
             ...$this->db->table('exports')
                 ->join('inventories', 'inventories.id', '=', 'exports.inventory_id')
                 ->where('inventories.workspace_id', $workspace->getKey())
@@ -152,6 +157,12 @@ final class AttachmentCleanup
                 ->where('inventories.workspace_id', $workspace->getKey())
                 ->distinct()
                 ->pluck('imports.disk')
+                ->all(),
+            ...$this->db->table('inventory_versions')
+                ->join('inventories', 'inventories.id', '=', 'inventory_versions.inventory_id')
+                ->where('inventories.workspace_id', $workspace->getKey())
+                ->distinct()
+                ->pluck('inventory_versions.disk')
                 ->all(),
         ];
 

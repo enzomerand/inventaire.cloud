@@ -124,8 +124,9 @@ final class DerivedData
     }
 
     /**
-     * Adds up the sizes of the files of every workspace and corrects the storage counter of those where it differs, saying
-     * so in the log (a counter is only moved with the files, so a difference is a fault to know about, not a routine).
+     * Adds up the sizes of the files of every workspace (those of its items, and the snapshots and PDFs its official versions count)
+     * and corrects the storage counter of those where it differs, saying so in the log (a counter is only moved with the files, so a
+     * difference is a fault to know about, not a routine).
      *
      * Each workspace is one transaction under the lock of its row, which every upload and every removal of a file takes
      * before anything else, so that neither the counter nor the files can change meanwhile. Only the rows that differ are
@@ -146,10 +147,15 @@ final class DerivedData
                     return null;
                 }
 
+                // The files of the items, and what the official versions count (`counted_bytes`: their snapshots and PDFs).
                 $counted = (int) $this->db->table('attachments')
                     ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
                     ->where('inventories.workspace_id', $id)
-                    ->sum('attachments.size');
+                    ->sum('attachments.size')
+                    + (int) $this->db->table('inventory_versions')
+                        ->join('inventories', 'inventories.id', '=', 'inventory_versions.inventory_id')
+                        ->where('inventories.workspace_id', $id)
+                        ->sum('inventory_versions.counted_bytes');
 
                 if ($workspace->storage_used === $counted) {
                     return null;
