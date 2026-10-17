@@ -6,7 +6,6 @@ namespace App\Inventories\Imports;
 
 use App\Inventories\Exceptions\ImportFileException;
 use XMLReader;
-use ZipArchive;
 
 /**
  * Refuses a file with a row so wide that reading it would exhaust the memory, before the library that reads the file builds that row.
@@ -22,8 +21,18 @@ use ZipArchive;
  * with a trailing empty cell that is repeated up to the width of the sheet (1 024 columns in older versions of LibreOffice, 16 384 in
  * Excel and recent ones), and a text file may end its rows with separators, so a row is only refused here for what it would take to
  * hold it, not for the columns that hold something (that is judged later, once the empty cells at the end of the row are cut off).
- * Each scan counts what the library would build, down to its shortcuts: in an OpenDocument sheet a row with nothing in it gets one
- * cell however many it repeats, and a trailing cell that completes the width of an Excel sheet is not expanded.
+ *
+ * The guard does not follow the library case by case: it bounds what the library can be made to build, and refuses what it cannot bound.
+ *
+ * - An Excel sheet is whatever the workbook says is one (its relationships, followed as the library follows them: a sheet may be named
+ *   anything, in any folder of `xl/`), and no other part: the list of the formulas of a workbook holds a `<c>` for each of them, and is no
+ *   sheet. In a sheet, two things are bounded between one `<row>` and the next: how many `<c>` there are, and the highest column any of
+ *   them is at, a cell with no reference being the one after the last. The dimension and the `spans` a sheet announces are bounded too.
+ * - An OpenDocument sheet is refused unless it is built the way a sheet is: rows hold the cells, and cells hold no row. The library keeps
+ *   what it gathered across a row that opens in the middle of another, and cells that are in no row, and a guard that tried to follow
+ *   that would have to be as wrong as the library is. The cells of a row are counted down to the shortcuts the library takes: a row
+ *   with nothing in it gets one cell however many it repeats, and a trailing cell that completes the width of an Excel sheet is not
+ *   expanded.
  */
 final class ImportWidthGuard
 {
@@ -44,106 +53,119 @@ final class ImportWidthGuard
     /**
      * Checks the sheets of an OpenDocument spreadsheet.
      *
-     * @throws ImportFileException When a row would be wider than the limit.
+     * @throws ImportFileException When a row would be wider than the limit, or the rows and the cells are not built as those of a sheet.
      */
     public static function ods(string $path): void
     {
         $limit = self::limit();
-        $row = null;
+        // Whether a row is open, the cells counted in it so far, how many times the last one seen is repeated (it is counted once the
+        // next one comes, or at the end of the row, whose rules differ), and whether any cell holds something.
+        $inRow = false;
+        $before = 0;
+        $last = null;
+        $filled = false;
 
-        self::read('zip://'.$path.'#content.xml', function (XMLReader $xml) use (&$row, $limit): void {
+        self::read('zip://'.$path.'#content.xml', function (XMLReader $xml) use (&$inRow, &$before, &$last, &$filled, $limit): void {
             if ($xml->nodeType === XMLReader::ELEMENT && $xml->name === 'table:table-row') {
-                // Cells before the last one, the last one (repeats and whether it holds something), and whether any holds something.
-                $row = $xml->isEmptyElement ? null : ['before' => 0, 'last' => null, 'filled' => false];
+                // A row with no content (`<table:table-row table:number-rows-repeated="3"/>`) has no end to wait for. A row that starts in
+                // another one ends the first: the end of the other, or a cell before it, finds no row open.
+                $inRow = ! $xml->isEmptyElement;
+                $before = 0;
+                $last = null;
+                $filled = false;
 
-                return;
-            }
-
-            if ($row === null) {
                 return;
             }
 
             if ($xml->nodeType === XMLReader::ELEMENT && $xml->name === 'table:table-cell') {
+                if (! $inRow) {
+                    throw new ImportFileException(ImportFileException::UNREADABLE);
+                }
+
                 $repeats = max(0, (int) ($xml->getAttribute('table:number-columns-repeated') ?? 1));
-                $filled = $xml->getAttribute('office:value-type') !== null || ! $xml->isEmptyElement;
+                $holds = $xml->getAttribute('office:value-type') !== null || ! $xml->isEmptyElement;
 
-                if ($row['last'] !== null) {
-                    $row['before'] += $row['last']['repeats'];
+                if ($last !== null) {
+                    $before += $last;
 
-                    if ($row['before'] > $limit) {
+                    if ($before > $limit) {
                         throw new ImportFileException(ImportFileException::TOO_MANY_COLUMNS);
                     }
                 }
 
-                $row['last'] = ['repeats' => $repeats, 'filled' => $filled];
-                $row['filled'] = $row['filled'] || $filled;
+                $last = $repeats;
+                $filled = $filled || $holds;
 
                 return;
             }
 
             if ($xml->nodeType === XMLReader::END_ELEMENT && $xml->name === 'table:table-row') {
-                if ($row['last'] !== null) {
+                if (! $inRow) {
+                    throw new ImportFileException(ImportFileException::UNREADABLE);
+                }
+
+                if ($last !== null) {
                     // As the library builds the last cell: once for a row with nothing in it, not at all when it completes the width of
                     // an Excel sheet (such a row is padded with it by the application, and stays as wide as the cells that hold something).
-                    $last = ! $row['filled'] ? 1 : ($row['before'] + $row['last']['repeats'] === self::SPREADSHEET_COLUMNS ? 0 : $row['last']['repeats']);
+                    $final = ! $filled ? 1 : ($before + $last === self::SPREADSHEET_COLUMNS ? 0 : $last);
 
-                    if ($limit < $row['before'] + $last) {
+                    if ($limit < $before + $final) {
                         throw new ImportFileException(ImportFileException::TOO_MANY_COLUMNS);
                     }
                 }
 
-                $row = null;
+                $inRow = false;
             }
         });
     }
 
     /**
-     * Checks the worksheets of an Excel workbook: the dimension a sheet announces, the width its rows announce, and the column of each cell.
+     * Checks the worksheets of an Excel workbook: the dimension a sheet announces, the width its rows announce, and the cells of each row,
+     * counted and placed as the library places them.
      *
      * @throws ImportFileException When a sheet would be filled to a width beyond the limit.
      */
     public static function xlsx(string $path): void
     {
-        $zip = new ZipArchive;
-
-        if ($zip->open($path, ZipArchive::RDONLY) !== true) {
-            throw new ImportFileException(ImportFileException::UNRECOGNIZED);
-        }
-
-        $parts = [];
-
-        try {
-            for ($index = 0; $index < $zip->numFiles; $index++) {
-                $name = (string) $zip->getNameIndex($index);
-
-                // The library reads the sheets under `xl/`, wherever the workbook says they are there.
-                if (str_starts_with($name, 'xl/') && str_ends_with(strtolower($name), '.xml')) {
-                    $parts[] = $name;
-                }
-            }
-        } finally {
-            $zip->close();
-        }
-
         $limit = self::limit();
 
-        foreach ($parts as $part) {
-            self::read('zip://'.$path.'#'.$part, function (XMLReader $xml) use ($limit): void {
+        foreach (self::sheets($path) as $part) {
+            // The cells of the row being read, and the column of the last one: a cell with no reference is put after it.
+            $cells = 0;
+            $last = -1;
+
+            self::read('zip://'.$path.'#'.$part, function (XMLReader $xml) use (&$cells, &$last, $limit): void {
                 if ($xml->nodeType !== XMLReader::ELEMENT) {
                     return;
                 }
 
-                $reference = match ($xml->localName) {
-                    // `A1:M13`: the library fills every row with as many cells as the last column.
-                    'dimension' => preg_match('/[A-Z]+\d+:([A-Z]+)\d+/', (string) $xml->getAttribute('ref'), $found) === 1 ? $found[1] : null,
-                    // `1:5`, when the sheet gives no dimension.
-                    'row' => preg_match('/:(\d+)$/', (string) $xml->getAttribute('spans'), $found) === 1 ? (int) $found[1] : null,
-                    'c' => preg_match('/^([A-Za-z]+)\d*$/', (string) $xml->getAttribute('r'), $found) === 1 ? $found[1] : null,
-                    default => null,
-                };
+                switch ($xml->localName) {
+                    case 'dimension':
+                        // `A1:M13`: the library fills every row with as many cells as the last column.
+                        if (preg_match('/[A-Z]+\d+:([A-Z]+)\d+/', (string) $xml->getAttribute('ref'), $found) === 1) {
+                            self::assertColumns(self::columnsOf($found[1]), $limit);
+                        }
 
-                if (is_int($reference) ? $reference > $limit : ($reference !== null && self::columnsOf($reference) > $limit)) {
-                    throw new ImportFileException(ImportFileException::TOO_MANY_COLUMNS);
+                        break;
+                    case 'row':
+                        // The library starts a list of cells again, and counts the columns from the first.
+                        $cells = 0;
+                        $last = -1;
+                        // `1:5`, when the sheet gives no dimension: the library takes what follows the first colon, whatever else there is.
+                        self::assertColumns((int) (explode(':', (string) $xml->getAttribute('spans'))[1] ?? 0), $limit);
+
+                        break;
+                    case 'c':
+                        $cells++;
+                        $reference = (string) $xml->getAttribute('r');
+                        // A reference the library cannot read stops it; one it reads puts the cell at its column, none puts it after the last.
+                        $column = preg_match('/^([A-Za-z]+)\d*$/', $reference, $found) === 1 ? self::columnsOf($found[1]) - 1 : $last + 1;
+                        $last = $column;
+
+                        self::assertColumns($cells, $limit);
+                        self::assertColumns($column + 1, $limit);
+
+                        break;
                 }
             });
         }
@@ -264,6 +286,47 @@ final class ImportWidthGuard
             }
         } finally {
             fclose($handle);
+        }
+    }
+
+    /**
+     * The parts of an Excel workbook the library reads as sheets: the targets of the relationships the sheets of the workbook point to,
+     * named as the library names them (relative to `xl/`, unless the target already starts there; the leading slash is dropped).
+     *
+     * Every relationship with the identifier of a sheet is taken, not only the one the library ends up with, so that a workbook that
+     * lists an identifier twice cannot have one of the two read unseen.
+     *
+     * @return list<string>
+     */
+    private static function sheets(string $path): array
+    {
+        $identifiers = [];
+
+        self::read('zip://'.$path.'#xl/workbook.xml', function (XMLReader $xml) use (&$identifiers): void {
+            if ($xml->nodeType === XMLReader::ELEMENT && $xml->localName === 'sheet') {
+                $identifiers[(string) $xml->getAttribute('r:id')] = true;
+            }
+        });
+
+        $parts = [];
+
+        self::read('zip://'.$path.'#xl/_rels/workbook.xml.rels', function (XMLReader $xml) use ($identifiers, &$parts): void {
+            if ($xml->nodeType === XMLReader::ELEMENT && $xml->localName === 'Relationship' && isset($identifiers[(string) $xml->getAttribute('Id')])) {
+                $target = (string) $xml->getAttribute('Target');
+                $parts[ltrim(str_starts_with($target, '/xl/') ? $target : '/xl/'.$target, '/')] = true;
+            }
+        });
+
+        return array_map(strval(...), array_keys($parts));
+    }
+
+    /**
+     * @throws ImportFileException When a width is beyond the limit.
+     */
+    private static function assertColumns(int $columns, int $limit): void
+    {
+        if ($columns > $limit) {
+            throw new ImportFileException(ImportFileException::TOO_MANY_COLUMNS);
         }
     }
 

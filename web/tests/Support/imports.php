@@ -132,6 +132,31 @@ function importPatch(string $path, string $part, callable $change): string
 }
 
 /**
+ * An Excel workbook whose one sheet has these rows (the XML of the rows, and no dimension): the way to give a file what the library that
+ * writes spreadsheets never writes.
+ */
+function importXlsxRows(string $rows): string
+{
+    return importPatch(importSpreadsheet('xlsx', [['a']]), 'xl/worksheets/sheet1.xml', fn (string $xml): string => (string) preg_replace(['~<dimension [^>]*/>~', '~<sheetData>.*</sheetData>~s'], ['', '<sheetData>'.$rows.'</sheetData>'], $xml));
+}
+
+/**
+ * Gives a part of an Excel workbook another name, in the archive and in the relationships of the workbook that point to it: the library
+ * follows the relationships, not the names, so the sheet is still the sheet.
+ *
+ * @param  string|null  $target  What the relationship says, when it is not the name relative to `xl/`.
+ */
+function importRenamePart(string $path, string $from, string $to, ?string $target = null): string
+{
+    $zip = new ZipArchive;
+    $zip->open($path);
+    $zip->renameName($from, $to);
+    $zip->close();
+
+    return importPatch($path, 'xl/_rels/workbook.xml.rels', fn (string $xml): string => str_replace('Target="'.substr($from, strlen('xl/')).'"', 'Target="'.($target ?? substr($to, strlen('xl/'))).'"', $xml));
+}
+
+/**
  * Puts some XML of an OpenDocument sheet after the n-th row of the first sheet (the first row is 1).
  */
 function importOdsAfterRow(string $path, int $row, string $xml): string

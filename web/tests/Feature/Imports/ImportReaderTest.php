@@ -365,6 +365,72 @@ describe('a worksheet of a workbook that announces a width no sheet has', functi
     });
 });
 
+describe('a worksheet whose cells are placed one after the other, or by a reference', function (): void {
+    it('is refused when a row holds more cells than a sheet has columns, however they say where they are', function (string $cells): void {
+        expect(fn () => importRead(importXlsxRows('<row r="1">'.$cells.'</row>'), ImportFormat::Xlsx))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        // The library puts a cell with no reference after the last one it placed, and builds all of them.
+        'cells with no reference' => [str_repeat('<c/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1)],
+        'cells whose reference is none' => [str_repeat('<c r="?"/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1)],
+        'the same cell again and again' => [str_repeat('<c r="A1"/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1)],
+        'a cell with no reference after the last column' => ['<c r="XFD1"/><c/>'],
+        'cells with no reference after one far to the right' => ['<c r="XFC1"/><c/><c/>'],
+        'one cell, then cells that go back' => ['<c r="XFD1"/>'.str_repeat('<c r="A1"/>', ImportWidthGuard::SPREADSHEET_COLUMNS)],
+    ]);
+
+    it('counts the cells of each row, not of the sheet', function (): void {
+        config(['inventories.import_max_columns' => 20000]);
+        $columns = ImportWidthGuard::SPREADSHEET_COLUMNS;
+        $row = fn (int $number): string => '<row r="'.$number.'">'.str_repeat('<c t="inlineStr"><is><t>x</t></is></c>', $columns / 2).'</row>';
+        $rows = importRead(importXlsxRows($row(1).$row(2).$row(3)), ImportFormat::Xlsx)['rows'];
+
+        expect($rows)->toHaveCount(3)->and(count($rows[3]))->toBe($columns / 2);
+    });
+
+    it('is read when its cells have no reference, up to the width of a sheet', function (): void {
+        $columns = ImportWidthGuard::SPREADSHEET_COLUMNS;
+        // A sheet of recent versions of Excel has 16 384 columns: the empty cells at the end of the row are cut off, the others are read.
+        $cells = '<c t="inlineStr"><is><t>x</t></is></c><c t="inlineStr"><is><t>y</t></is></c>'.str_repeat('<c/>', $columns - 2);
+
+        expect(importRead(importXlsxRows('<row r="1">'.$cells.'</row>'), ImportFormat::Xlsx)['rows'])->toBe([1 => ['x', 'y']]);
+    });
+});
+
+describe('a worksheet the workbook points to by a name that is not the usual one', function (): void {
+    it('is read as any sheet is', function (string $to, ?string $target): void {
+        $path = importRenamePart(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', $to, $target);
+
+        expect(importRead($path, ImportFormat::Xlsx)['rows'])->toBe([1 => ['a', 'b']]);
+    })->with([
+        'with no extension' => ['xl/worksheets/data', null],
+        'with another extension' => ['xl/worksheets/data.bin', null],
+        'in another folder' => ['xl/other/sheet1.xml', null],
+        'by an absolute name' => ['xl/worksheets/data.dat', '/xl/worksheets/data.dat'],
+    ]);
+
+    it('is checked as any sheet is', function (string $to, ?string $target, string|array $from, string|array $replacement): void {
+        $path = importRenamePart(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/worksheets/sheet1.xml', $to, $target);
+        $path = importPatch($path, $to, fn (string $xml): string => str_replace($from, $replacement, $xml));
+
+        expect(fn () => importRead($path, ImportFormat::Xlsx))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_COLUMNS));
+    })->with([
+        'a dimension, with no extension' => ['xl/worksheets/data', null, '<dimension ref="A1:B1"/>', '<dimension ref="A1:ZZZZZZ1"/>'],
+        'cells with no reference, with another extension' => ['xl/worksheets/data.bin', null, '<c r="B1"', '<c r="B1"/>'.str_repeat('<c/>', ImportWidthGuard::SPREADSHEET_COLUMNS + 1).'<c r="C1"'],
+        'a far cell, by an absolute name' => ['xl/worksheets/data.dat', '/xl/worksheets/data.dat', '<c r="B1"', '<c r="ZZZZZZ1"'],
+    ]);
+
+    it('is the only kind of part whose cells are counted', function (): void {
+        // The list of the formulas of a workbook holds one `<c>` for each of them, in no row: far more than a row may hold.
+        $calculations = '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'.str_repeat('<c r="A1" i="1"/>', ImportWidthGuard::SPREADSHEET_COLUMNS * 2).'</calcChain>';
+        $path = importPatch(importSpreadsheet('xlsx', [['a', 'b']]), 'xl/calcChain.xml', fn (): string => $calculations);
+        $path = importPatch($path, 'xl/_rels/workbook.xml.rels', fn (string $xml): string => str_replace('</Relationships>', '<Relationship Id="rIdCalc" Target="calcChain.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"/></Relationships>', $xml));
+
+        expect(importRead($path, ImportFormat::Xlsx)['rows'])->toBe([1 => ['a', 'b']]);
+    });
+});
+
 describe('an OpenDocument sheet whose cells are repeated', function (): void {
     it('is refused when a row would be built wider than a sheet can be', function (string $cells): void {
         $path = importPatch(importSpreadsheet('ods', [['a'], ['b']]), 'content.xml', fn (string $xml): string => preg_replace('~</table:table-row>~', $cells.'</table:table-row>', $xml, 1) ?? $xml);
@@ -407,6 +473,35 @@ describe('an OpenDocument sheet whose cells are repeated', function (): void {
 
         expect(fn () => importRead($path, ImportFormat::Ods))
             ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::TOO_MANY_LINES));
+    });
+});
+
+describe('an OpenDocument sheet whose rows and cells are not where a sheet has them', function (): void {
+    it('is refused as unreadable, and does not fail on the way', function (string $xml): void {
+        $path = importPatch(importSpreadsheet('ods', [['a'], ['b']]), 'content.xml', fn (string $content): string => (string) preg_replace('~</table:table-cell></table:table-row>~', '</table:table-cell>'.$xml.'</table:table-row>', $content, 1));
+
+        expect(fn () => importRead($path, ImportFormat::Ods))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNREADABLE));
+    })->with([
+        'a row that repeats, inside a row' => ['<table:table-row table:number-rows-repeated="2"/>'],
+        'a row inside a row' => ['<table:table-row><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell></table:table-row>'],
+        'a row inside a row, and nothing in it' => ['<table:table-row></table:table-row>'],
+        // What the library builds across them: the guard once forgot the cells of the row it left, and skipped those that came after.
+        'a row that repeats inside a row, and a cell repeated many times after it' => ['<table:table-row table:number-rows-repeated="2"/><table:table-cell table:number-columns-repeated="300000" office:value-type="string"><text:p>x</text:p></table:table-cell>'],
+        'a row inside a row, and a cell repeated many times after it' => ['<table:table-row><table:table-cell office:value-type="string"><text:p>y</text:p></table:table-cell></table:table-row><table:table-cell table:number-columns-repeated="300000" office:value-type="string"><text:p>x</text:p></table:table-cell>'],
+    ]);
+
+    it('is refused as unreadable when a cell is in no row', function (): void {
+        $path = importOdsAfterRow(importSpreadsheet('ods', [['a'], ['b']]), 1, '<table:table-cell table:number-columns-repeated="50000000" office:value-type="string"><text:p>x</text:p></table:table-cell>');
+
+        expect(fn () => importRead($path, ImportFormat::Ods))
+            ->toThrow(fn (ImportFileException $failure) => expect($failure->reason)->toBe(ImportFileException::UNREADABLE));
+    });
+
+    it('is read when its rows are in the groups a sheet has them in', function (): void {
+        $path = importPatch(importSpreadsheet('ods', [['a'], ['b']]), 'content.xml', fn (string $content): string => str_replace('</table:table-row></table:table>', '</table:table-row></table:table-header-rows></table:table>', (string) preg_replace('~<table:table-row ~', '<table:table-header-rows><table:table-row ', $content, 1)));
+
+        expect(importRead($path, ImportFormat::Ods)['rows'])->toBe([1 => ['a'], 2 => ['b']]);
     });
 });
 
