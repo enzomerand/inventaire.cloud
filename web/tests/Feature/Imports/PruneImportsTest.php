@@ -79,20 +79,38 @@ describe('the imports that expired', function (): void {
             ->and(collect(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->contains($case['fresh']->path))->toBeTrue();
     });
 
-    it('queue the deletion of a folder only for the imports that may still have a file', function (): void {
+    it('queue the deletion of the folder of every import they delete, whether or not the row still says where its file is', function (): void {
         Queue::fake([PurgeStoredFiles::class]);
         $case = importCase();
-        $withFile = pruneImport($case, ['expires_at' => now()->subMinute()]);
-        pruneImport($case, ['status' => ImportStatus::Completed, 'expires_at' => now()->subMinute()])->forceFill(['path' => null])->save();
-        pruneImport($case, ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subMinute()])->forceFill(['path' => null])->save();
+        $upload = pruneImport($case, ['expires_at' => now()->subMinute()]);
+        $report = pruneImport($case, ['status' => ImportStatus::Completed, 'expires_at' => now()->subMinute()]);
+        $failure = pruneImport($case, ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subMinute()]);
+        $directories = collect([$upload, $report, $failure])->map(fn (Import $import): string => dirname((string) $import->path))->all();
+        $report->forceFill(['path' => null])->save();
+        $failure->forceFill(['path' => null])->save();
 
         $result = app(ImportPruner::class)->prune();
 
         expect($result['expired'])->toBe(3);
-        // Only the upload that was never started: the reports kept no file, they have nothing to purge.
-        Queue::assertPushed(PurgeStoredFiles::class, 1);
-        Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->directories === [dirname((string) $withFile->path)]);
+        Queue::assertPushed(PurgeStoredFiles::class, 3);
+
+        foreach ($directories as $directory) {
+            Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->directories === [$directory]);
+        }
     });
+
+    it('purge the file that a worker left when it stopped after recording that the import ended and before deleting it', function (ImportStatus $status): void {
+        $case = importCase();
+        $import = pruneImport($case, ['status' => $status, 'error' => $status === ImportStatus::Failed ? 'invalid_rows' : null, 'expires_at' => now()->subMinute()]);
+        // The transaction that ended the import emptied `path`; the file was still to be deleted.
+        $import->forceFill(['path' => null])->save();
+        expect(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toHaveCount(1);
+
+        app(ImportPruner::class)->prune();
+
+        expect(Import::query()->whereKey($import->id)->exists())->toBeFalse()
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toBe([]);
+    })->with([ImportStatus::Completed, ImportStatus::Failed]);
 
     it('purge the folder of an upload whose row never got its path, found by the identifier of the import', function (): void {
         $case = importCase();

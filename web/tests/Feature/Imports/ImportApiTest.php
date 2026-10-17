@@ -600,7 +600,7 @@ describe('deleting an import', function (): void {
         expect(Import::query()->sole()->status)->toBe(ImportStatus::Running);
     });
 
-    it('does not queue the deletion of a folder for a report that has no file any more', function (): void {
+    it('queues the deletion of the folder of a report that says it has no file, which a worker may have left when it stopped', function (): void {
         Queue::fake([PurgeStoredFiles::class]);
         $case = importFixture();
         $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'status' => ImportStatus::Completed, 'path' => null]);
@@ -608,7 +608,7 @@ describe('deleting an import', function (): void {
         inventoryCall($this, $case['team']['owner'], 'DELETE', importUri($case['inventory'], $import))->assertNoContent();
 
         expect(Import::query()->count())->toBe(0);
-        Queue::assertNotPushed(PurgeStoredFiles::class);
+        Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => count($job->directories) === 1 && str_ends_with($job->directories[0], "/imports/{$import->ulid}"));
     });
 
     it('takes the file off the disk', function (): void {
