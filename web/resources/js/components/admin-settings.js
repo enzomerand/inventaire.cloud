@@ -14,12 +14,10 @@
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * as a toast.
  */
+import { copyValue } from '../lib/feedback.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
-
-/** How long the button that copies the address says it did, in milliseconds. */
-const COPIED_MS = 2000;
 
 /**
  * @returns {Record<string, any>}
@@ -92,43 +90,12 @@ export default function adminSettings() {
          *
          * @returns {Promise<void>}
          */
-        async copyWebhook() {
-            let done;
-
-            try {
-                await navigator.clipboard.writeText(this.webhookUrl);
-                done = true;
-            } catch {
-                done = this.copySelected();
-            }
-
-            if (!done) {
-                this.announce(t('admin.settings.select_hint'));
-
-                return;
-            }
-
-            this.copied = true;
-            this.announce(t('tokens.copied'));
-            clearTimeout(this.copiedTimer);
-            this.copiedTimer = setTimeout(() => {
-                this.copied = false;
-            }, COPIED_MS);
-        },
-
-        /**
-         * Selects the address in its box, and copies the selection when the browser still lets a page do it.
-         *
-         * @returns {boolean} Whether the selection was copied.
-         */
-        copySelected() {
-            this.select();
-
-            try {
-                return document.execCommand('copy') === true;
-            } catch {
-                return false;
-            }
+        copyWebhook() {
+            return copyValue(this, this.webhookUrl, {
+                select: () => this.select(),
+                copied: t('tokens.copied'),
+                hint: t('admin.settings.select_hint'),
+            });
         },
 
         /**
@@ -138,19 +105,6 @@ export default function adminSettings() {
          */
         select() {
             this.$refs.webhook?.select();
-        },
-
-        /**
-         * Says something in the live region. It is emptied first, so that the same sentence said twice in a row is announced twice.
-         *
-         * @param {string} message
-         * @returns {void}
-         */
-        announce(message) {
-            this.announcement = '';
-            this.$nextTick(() => {
-                this.announcement = message;
-            });
         },
 
         /**

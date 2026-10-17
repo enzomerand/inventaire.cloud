@@ -20,6 +20,7 @@
  * the markup (`data-*` attributes on the root), because the CSP build of Alpine does not allow Blade to inject values into
  * expressions. In the address of one version, `__id__` stands for its ULID.
  */
+import { announce } from '../lib/feedback.js';
 import { fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
@@ -37,7 +38,6 @@ import {
     isActive,
     requestBody,
     rowOf,
-    signerError,
     withVersion,
 } from '../versions/versions.js';
 
@@ -437,7 +437,7 @@ export default function inventoryVersions() {
             const notices = changeNotices(before, next);
 
             if (notices.length > 0) {
-                this.announce(notices.join(' '));
+                announce(this, notices.join(' '), 'status');
             }
         },
 
@@ -543,14 +543,15 @@ export default function inventoryVersions() {
         },
 
         /**
-         * The message under an input of a line of signers.
+         * The message under an input of a line of signers: the one the API gave for that line and that input, "" when the input was
+         * not refused.
          *
-         * @param {number} index
+         * @param {number} index The place of the signer in the list sent.
          * @param {'name' | 'email'} input
          * @returns {string}
          */
         signerError(index, input) {
-            return signerError(this.errors, index, input);
+            return this.errors[`signers.${index}.${input}`] ?? '';
         },
 
         /**
@@ -580,28 +581,17 @@ export default function inventoryVersions() {
                 notify('success', t('versions.notice.started', { number: answer.data.number }));
                 this.planPoll();
             } catch (error) {
-                this.refuse(error);
+                // Said under the inputs the refusal is about, or under the buttons. Anything else than an HttpError is a cancelled
+                // request: nothing to tell.
+                if (error instanceof HttpError) {
+                    const failure = creationFailure(error);
+
+                    this.errors = failure.fieldErrors;
+                    this.formError = failure.message;
+                }
             } finally {
                 this.busy = false;
             }
-        },
-
-        /**
-         * Says why the inventory was not frozen: under the inputs the refusal is about, or under the buttons.
-         *
-         * @param {unknown} error
-         * @returns {void}
-         */
-        refuse(error) {
-            // Anything else than an HttpError is a cancelled request: nothing to tell.
-            if (!(error instanceof HttpError)) {
-                return;
-            }
-
-            const failure = creationFailure(error);
-
-            this.errors = failure.fieldErrors;
-            this.formError = failure.message;
         },
 
         /**
@@ -824,23 +814,10 @@ export default function inventoryVersions() {
         async copyHash(row) {
             try {
                 await navigator.clipboard.writeText(row.sha256);
-                this.announce(t('versions.hash.copied'));
+                announce(this, t('versions.hash.copied'), 'status');
             } catch {
                 notify('warning', t('versions.hash.copy_failed', { hash: row.sha256 }), { timeout: 0 });
             }
-        },
-
-        /**
-         * Says something in the live region. It is emptied first, so that the same sentence said twice in a row is announced twice.
-         *
-         * @param {string} message
-         * @returns {void}
-         */
-        announce(message) {
-            this.status = '';
-            this.$nextTick(() => {
-                this.status = message;
-            });
         },
     };
 }

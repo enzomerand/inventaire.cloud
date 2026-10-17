@@ -11,6 +11,7 @@
  * root), because the CSP build of Alpine does not allow Blade to inject values into expressions.
  */
 import { momentText } from '../grid/rows.js';
+import { announce, copyValue } from '../lib/feedback.js';
 import { firstMessages, throttledMessage } from '../lib/forms.js';
 import { HttpError, http, scheduleNavigation } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
@@ -19,9 +20,6 @@ import { reloadPage } from '../lib/page.js';
 
 /** The lifetime the form offers first, in days: the value of the option of the select. */
 const DEFAULT_EXPIRY = '90';
-
-/** How long the button says "Copied", in milliseconds. */
-const COPIED_MS = 2000;
 
 /** The badge colors of the permissions (Tabler's light variants; a badge always says the permission in words as well). */
 const BADGE_CLASSES = {
@@ -233,43 +231,12 @@ export default function accountTokens() {
          *
          * @returns {Promise<void>}
          */
-        async copy() {
-            let done;
-
-            try {
-                await navigator.clipboard.writeText(this.revealed);
-                done = true;
-            } catch {
-                done = this.copySelected();
-            }
-
-            if (!done) {
-                this.announce(t('tokens.select_hint'));
-
-                return;
-            }
-
-            this.copied = true;
-            this.announce(t('tokens.copied'));
-            clearTimeout(this.copiedTimer);
-            this.copiedTimer = setTimeout(() => {
-                this.copied = false;
-            }, COPIED_MS);
-        },
-
-        /**
-         * Selects the value of the token in its box, and copies the selection when the browser still lets a page do it.
-         *
-         * @returns {boolean} Whether the selection was copied.
-         */
-        copySelected() {
-            this.select();
-
-            try {
-                return document.execCommand('copy') === true;
-            } catch {
-                return false;
-            }
+        copy() {
+            return copyValue(this, this.revealed, {
+                select: () => this.select(),
+                copied: t('tokens.copied'),
+                hint: t('tokens.select_hint'),
+            });
         },
 
         /**
@@ -321,7 +288,7 @@ export default function accountTokens() {
                 await http.delete(`${this.url}/${encodeURIComponent(String(token.id))}`);
 
                 this.remove(token.id);
-                this.announce(t('tokens.notice.revoked'));
+                announce(this, t('tokens.notice.revoked'));
                 this.focus('heading');
             } catch (error) {
                 // Anything else than an HttpError is a cancelled request: nothing to tell.
@@ -513,20 +480,6 @@ export default function accountTokens() {
             this.form = { name: '', abilities: ['read'], expires: DEFAULT_EXPIRY };
             this.errors = {};
             this.formError = '';
-        },
-
-        /**
-         * Says something to assistive technology, in the card's polite live region. The region is emptied first, so that
-         * a message said twice in a row is read twice.
-         *
-         * @param {string} message
-         * @returns {void}
-         */
-        announce(message) {
-            this.announcement = '';
-            this.$nextTick(() => {
-                this.announcement = message;
-            });
         },
 
         /**

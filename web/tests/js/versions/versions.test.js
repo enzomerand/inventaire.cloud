@@ -21,7 +21,6 @@ import {
     requestBody,
     rowOf,
     shortHash,
-    signerError,
     signerRowOf,
     versionTitle,
     withVersion,
@@ -414,16 +413,6 @@ describe('the request that freezes the inventory', () => {
                 { name: '', email: '' },
             ],
         });
-    });
-});
-
-describe('the message under an input of a line of signers', () => {
-    it('is the one the API gave for that line and that input', () => {
-        const errors = { 'signers.1.email': 'Not valid', label: 'Too long' };
-
-        expect(signerError(errors, 1, 'email')).toBe('Not valid');
-        expect(signerError(errors, 1, 'name')).toBe('');
-        expect(signerError(errors, 0, 'email')).toBe('');
     });
 });
 

@@ -884,24 +884,6 @@ describe('the page of the official versions', () => {
         });
     });
 
-    describe('the live region', () => {
-        it('says a sentence twice when it is said twice in a row', async () => {
-            await mount();
-            const seen = [];
-
-            component.$nextTick = (callback) => {
-                seen.push(component.status);
-                callback();
-            };
-
-            component.announce('Done.');
-            component.announce('Done.');
-
-            expect(seen).toEqual(['', '']);
-            expect(component.status).toBe('Done.');
-        });
-    });
-
     describe('the signers of the cards', () => {
         it('shows every signer with where they stand', async () => {
             await mount(

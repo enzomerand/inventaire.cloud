@@ -20,7 +20,7 @@ export const FORMAT_IDS = ['xlsx', 'ods', 'csv', 'json', 'pdf', 'zip'];
 const ACTIVE_STATUSES = ['pending', 'running'];
 
 /** The badge colors of the statuses (Tabler's light variants; the badge always says the status in words as well). */
-const BADGE_CLASSES = {
+export const BADGE_CLASSES = {
     pending: 'bg-secondary-lt',
     running: 'bg-blue-lt',
     completed: 'bg-green-lt',
@@ -28,7 +28,7 @@ const BADGE_CLASSES = {
 };
 
 /** What stands between the parts of what a row says of an export. */
-const DETAIL_SEPARATOR = ' · ';
+export const DETAIL_SEPARATOR = ' · ';
 
 /**
  * @typedef {object} ExportRecord An export, as `ExportResource` describes it.

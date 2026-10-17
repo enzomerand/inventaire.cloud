@@ -5,13 +5,14 @@
  *
  * Nothing here talks to the server or to the page, so it is all plain functions of their arguments.
  */
+import { BADGE_CLASSES, DETAIL_SEPARATOR } from '../export/exports.js';
 import { formatSize } from '../fields/files.js';
 import { momentText } from '../grid/rows.js';
 import { firstMessages, throttledMessage } from '../lib/forms.js';
 import { t, tn } from '../lib/i18n.js';
 
-/** How long the page waits before it asks again while a version is on its way, in milliseconds. */
-export const POLL_INTERVAL_MS = 2000;
+/** How long the page waits before it asks again while a version is on its way, in milliseconds: as for the exports. */
+export { POLL_INTERVAL_MS } from '../export/exports.js';
 
 /** The longest label a version takes (the API refuses more). */
 export const MAX_LABEL_LENGTH = 120;
@@ -19,22 +20,11 @@ export const MAX_LABEL_LENGTH = 120;
 /** How many characters of the SHA-256 a card shows (the whole value is in the title and is what the copy button copies). */
 const SHORT_HASH_LENGTH = 12;
 
-/** What stands between the parts of what a card says of a version. */
-const DETAIL_SEPARATOR = ' · ';
-
 /** The statuses of a version whose PDF is not written yet. */
 const GENERATING_STATUSES = ['pending', 'running'];
 
 /** The statuses of a request for signatures that is not with the signers yet (it is queued, or being sent). */
 const SIGNING_STATUSES = ['requested', 'sending'];
-
-/** The badge colors of the statuses of a version (Tabler's light variants; a badge always says the status in words as well). */
-const BADGE_CLASSES = {
-    pending: 'bg-secondary-lt',
-    running: 'bg-blue-lt',
-    completed: 'bg-green-lt',
-    failed: 'bg-red-lt',
-};
 
 /** The badge colors of the statuses of a request for signatures. */
 const SIGNATURE_BADGE_CLASSES = {
@@ -374,18 +364,6 @@ export function requestBody({ label, sign, signers }) {
     }
 
     return body;
-}
-
-/**
- * The message the form of a signer shows for one of its inputs.
- *
- * @param {Record<string, string>} errors The messages of a refused form, by name of the input in the API.
- * @param {number} index The place of the signer in the list sent.
- * @param {'name' | 'email'} input
- * @returns {string} "" when the input was not refused.
- */
-export function signerError(errors, index, input) {
-    return errors[`signers.${index}.${input}`] ?? '';
 }
 
 /**
