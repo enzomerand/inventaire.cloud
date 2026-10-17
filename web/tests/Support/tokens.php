@@ -6,6 +6,7 @@ declare(strict_types=1);
 // names all start with "token" or "apiToken" so that they never collide with the helpers of tests/Pest.php or of other test files.
 
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Route as Router;
 use Illuminate\Testing\TestResponse;
@@ -70,12 +71,40 @@ function tokenPublicRoutes(): array
 }
 
 /**
- * The routes of the API (`api/v1/...`), by name.
+ * The routes under `api/` whose name does not start with `api.v1.` (none at all, or another one), each as "METHOD uri". The tests that
+ * classify and document the routes work by name: a route they cannot name escapes them, and so would escape the guard-rails.
+ *
+ * @return list<string>
+ */
+function apiStrayRoutes(): array
+{
+    $stray = [];
+
+    foreach (Router::getRoutes()->getRoutes() as $route) {
+        $name = $route->getName();
+
+        if (str_starts_with($route->uri(), 'api/') && ($name === null || ! str_starts_with($name, 'api.v1.'))) {
+            $stray[] = implode('|', array_diff($route->methods(), ['HEAD'])).' '.$route->uri();
+        }
+    }
+
+    sort($stray);
+
+    return $stray;
+}
+
+/**
+ * The routes of the API (`api/v1/...`), by name. Fails the test that asks when a route under `api/` has no name or one outside
+ * `api.v1.` (see {@see apiStrayRoutes()}): it would be neither classified nor documented by the tests that go through this list.
  *
  * @return array<string, Route>
  */
 function apiRoutes(): array
 {
+    $stray = apiStrayRoutes();
+
+    expect($stray)->toBe([], 'Name these routes under api/ "api.v1.<name>", so that they are classified and documented (they escape the tests otherwise): '.implode(', ', $stray));
+
     $routes = [];
 
     foreach (Router::getRoutes()->getRoutes() as $route) {
@@ -129,6 +158,25 @@ function tokenCall(object $test, string $token, string $method, string $uri, arr
     $response = $test->withToken($token)->json($method, $uri, $data, $headers);
 
     // The token stays out of the next call, which may be a person's at their browser.
+    $test->flushHeaders();
+
+    return $response;
+}
+
+/**
+ * Sends a file to the API the way a script does: a multipart form with nothing but the token (no cookie, no session, no Origin).
+ *
+ * @param  array<string, mixed>  $data  More parts of the form.
+ * @param  array<string, string>  $headers
+ */
+function tokenUpload(object $test, string $token, string $uri, UploadedFile $file, array $data = [], array $headers = []): TestResponse
+{
+    $test->flushSession();
+    $test->flushHeaders();
+    app('auth')->forgetGuards();
+
+    $response = $test->withToken($token)->post($uri, ['file' => $file] + $data, $headers + ['Accept' => 'application/json']);
+
     $test->flushHeaders();
 
     return $response;

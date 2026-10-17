@@ -8,13 +8,16 @@ use App\Auth\ApiTokens;
 use App\Auth\TokenAbility;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * What a person gives to make an API token: a name, the abilities it has and how long it works.
  *
  * - `name`: required, trimmed, at most 80 characters;
  * - `abilities`: one to three different values of {@see TokenAbility};
- * - `expires_in_days`: 7, 30, 90 or 365; null for a token that never expires; 90 when it is left out.
+ * - `expires_in_days`: 7, 30, 90 or 365; JSON `null` for a token that never expires; 90 when it is left out. An empty text is not `null`: the
+ *   framework turns every empty text into `null` before the request is read (`ConvertEmptyStringsToNull`), so the body as it was sent is
+ *   looked at, and `""` is refused instead of making a token that never expires.
  */
 final class StoreApiTokenRequest extends FormRequest
 {
@@ -55,7 +58,7 @@ final class StoreApiTokenRequest extends FormRequest
     }
 
     /**
-     * Days the token works for: the number asked for, null for ever (`null` sent), or the usual 90 when the field is left out.
+     * Days the token works for: the number asked for, null for ever (JSON `null` sent), or the usual 90 when the field is left out.
      */
     public function lifetimeDays(): ?int
     {
@@ -66,6 +69,34 @@ final class StoreApiTokenRequest extends FormRequest
         $days = $this->input('expires_in_days');
 
         return $days === null ? null : (int) $days;
+    }
+
+    /**
+     * Refuses a lifetime that is an empty text, which the framework has turned into `null`: only a `null` the body says in JSON means
+     * "for ever". A form cannot say it at all (it has no `null`), so an empty field there is refused as well.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if ($this->exists('expires_in_days') && $this->input('expires_in_days') === null && ! $this->sendsJsonNull()) {
+                // The same failure, with the same message, as a lifetime that is not one of those offered.
+                $validator->addFailure('expires_in_days', 'In');
+            }
+        });
+    }
+
+    /**
+     * Whether the body, as it was sent, has `"expires_in_days": null` in JSON.
+     */
+    private function sendsJsonNull(): bool
+    {
+        if (! $this->isJson()) {
+            return false;
+        }
+
+        $body = json_decode($this->getContent(), true);
+
+        return is_array($body) && array_key_exists('expires_in_days', $body) && $body['expires_in_days'] === null;
     }
 
     /**

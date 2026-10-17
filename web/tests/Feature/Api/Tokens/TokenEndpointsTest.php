@@ -96,6 +96,30 @@ describe('making a token', function (): void {
             ->assertCreated()->assertJsonPath('data.expires_at', now()->addDays(90)->toIso8601String());
     });
 
+    it('does not make a token that never expires out of an empty lifetime: only a JSON null says "for ever"', function (mixed $empty): void {
+        $user = inventoryPerson('Ada');
+
+        inventoryCall($this, $user, 'POST', '/api/v1/me/tokens', ['name' => 'Script', 'abilities' => ['read'], 'expires_in_days' => $empty])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['expires_in_days']);
+
+        expect(tokensStored())->toBe(0);
+    })->with(['an empty text' => [''], 'spaces' => ['   ']]);
+
+    it('does not make a token that never expires from a form either, which has no null to say it with', function (): void {
+        $user = inventoryPerson('Ada');
+        $this->actingAs($user);
+
+        $this->post('/api/v1/me/tokens', ['name' => 'Script', 'abilities' => ['read'], 'expires_in_days' => ''], frontend(['Accept' => 'application/json']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['expires_in_days']);
+
+        expect(tokensStored())->toBe(0);
+
+        // Left out of the form, the usual 90 days apply.
+        $this->post('/api/v1/me/tokens', ['name' => 'Script', 'abilities' => ['read']], frontend(['Accept' => 'application/json']))->assertCreated();
+    });
+
     it('refuses what is not a token', function (array $data, string $field): void {
         $user = inventoryPerson('Ada');
 

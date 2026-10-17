@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\PaceApiTokens;
 use App\Http\Middleware\RedirectIfNotInstalled;
+use App\Http\Middleware\RefuseApiTokens;
+use App\Http\Middleware\RequireStatefulRequest;
 use App\Http\Middleware\RequireTokenAbility;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\SetReferrerPolicy;
@@ -17,7 +20,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 // Before anything reads .env: the installer must know which variables the process really started with.
@@ -44,9 +47,18 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // `token:read`, `token:write` and `token:manage` on the routes an API token may reach (see routes/api.php).
         $middleware->alias(['token' => RequireTokenAbility::class]);
 
-        // The ability of a token is judged before the models of the route are looked up: a token that may not write is told so
-        // for any inventory, whether it exists, belongs to somebody else or is made up, instead of a 404 that tells them apart.
-        $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: RequireTokenAbility::class);
+        // What a request has to pass, in this order: the authentication; the pace of its token (every request a token makes is
+        // counted, the ones that are refused as well); the refusals (a token on a route for the web front, a token that lacks the
+        // ability); then the limits of the endpoints; then the models of the route are looked up. The limits of the endpoints (an
+        // export, a workspace, a token to make...) are a person's own: a request that is refused before it does anything must not use
+        // them up, or a leaked token that can only read would lock its owner out of their own account. The ability is judged before the
+        // models are looked up too: a token that may not write is told so for any inventory, whether it exists, belongs to somebody
+        // else or is made up, instead of a 404 that tells them apart. Each call puts the class right before the throttles, so they
+        // end up in the order of the calls.
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: PaceApiTokens::class);
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: RefuseApiTokens::class);
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: RequireStatefulRequest::class);
+        $middleware->prependToPriorityList(before: ThrottleRequests::class, prepend: RequireTokenAbility::class);
 
         // A signed-out visitor of a page goes to the login page; an API client has nowhere to be redirected to
         // and gets a 401 in JSON (the default would also fail while no "login" route exists).

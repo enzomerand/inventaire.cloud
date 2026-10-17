@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Tests\Support\CommitsDatabaseChanges;
+use Tests\Support\ConcurrentChildren;
 
 require_once __DIR__.'/../../../Support/inventories.php';
 
@@ -64,5 +65,33 @@ describe('tokens made at the same moment', function (): void {
             ->and(DB::table('personal_access_tokens')->where('tokenable_id', $ada->id)->count())->toBe(1)
             ->and(DB::table('personal_access_tokens')->where('tokenable_id', $grace->id)->count())->toBe(1)
             ->and(User::query()->count())->toBe(2);
+    });
+});
+
+describe('the tokens of an account that is being deleted', function (): void {
+    it('do not make the token of another person wait while the deletion is under way', function (): void {
+        $ada = inventoryPerson('Ada');
+        $ada->createToken('one', ['read']);
+        $ada->createToken('two', ['write']);
+        // The next account: its token goes right after hers in the index on the owner of a token.
+        $grace = inventoryPerson('Grace');
+
+        // One process revokes the tokens of an account the way its deletion does and keeps its transaction open, as that one is long
+        // (workspaces, files); another inserts a token for the next account meanwhile. A lock on the range of the index that the
+        // revocation scanned, and on the gap after it (MySQL and MariaDB), would make that insert wait for the first to finish, which
+        // it never does: it gives up when its lock wait times out. On PostgreSQL nothing is locked beyond the rows either way.
+        $signals = [$this->sandbox->root.'/go.locked', $this->sandbox->root.'/go.released'];
+        array_map(fn (string $signal): bool => @unlink($signal), $signals);
+
+        try {
+            $answers = ConcurrentChildren::run($this->sandbox->root, base_path('tests/Support/concurrent-action.php'), [['hold-token-revocation', $ada->id], ['insert-token', $grace->id]]);
+        } finally {
+            array_map(fn (string $signal): bool => @unlink($signal), $signals);
+        }
+
+        expect($answers[0]['result'])->toBe('held')
+            ->and($answers[1]['result'])->toBe('inserted')
+            ->and(DB::table('personal_access_tokens')->where('tokenable_id', $ada->id)->count())->toBe(0)
+            ->and(DB::table('personal_access_tokens')->where('tokenable_id', $grace->id)->count())->toBe(1);
     });
 });

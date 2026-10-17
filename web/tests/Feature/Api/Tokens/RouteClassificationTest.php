@@ -6,6 +6,8 @@ use App\Http\Middleware\RefuseApiTokens;
 use App\Http\Middleware\RequireTokenAbility;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
+use PHPUnit\Framework\ExpectationFailedException;
 
 require_once __DIR__.'/../../../Support/tokens.php';
 
@@ -99,5 +101,23 @@ describe('the routes of the API', function (): void {
         expect(array_diff($authenticated, $listed))->toBe([])
             ->and(array_diff($listed, [...$authenticated, 'api.v1.auth.code', 'api.v1.auth.verify']))->toBe([])
             ->and($listed)->toHaveCount(count(array_unique($listed)));
+    });
+});
+
+describe('a route under api/', function (): void {
+    it('without a name escapes no test: the lists of the routes fail for it', function (): void {
+        Route::get('api/v1/stray', fn (): string => 'x')->middleware('auth:sanctum');
+
+        expect(fn (): array => apiRoutes())->toThrow(ExpectationFailedException::class, 'GET api/v1/stray');
+    });
+
+    it('with a name outside api.v1. escapes no test either', function (): void {
+        Route::get('api/v2/stray', fn (): string => 'x')->name('other.stray')->middleware('auth:sanctum');
+
+        expect(fn (): array => apiRoutes())->toThrow(ExpectationFailedException::class, 'GET api/v2/stray');
+    });
+
+    it('is named api.v1.<something> for every route of the application', function (): void {
+        expect(apiStrayRoutes())->toBe([]);
     });
 });

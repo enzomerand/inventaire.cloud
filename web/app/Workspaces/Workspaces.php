@@ -97,12 +97,14 @@ final class Workspaces
      * transaction, that one is retried instead.
      *
      * @param  string  $name  Already validated and trimmed.
+     * @param  bool  $startWorking  Whether it becomes the workspace the user is working in. Not for what a script does with an API token: the
+     *                              choice of the workspace is the person's, made at their browser (`me.current-workspace`, which no token reaches).
      *
      * @throws WorkspaceLimitReachedException When the user already belongs to as many workspaces as allowed.
      */
-    public function create(User $user, string $name): Workspace
+    public function create(User $user, string $name, bool $startWorking = true): Workspace
     {
-        return $this->db->transaction(function () use ($user, $name): Workspace {
+        return $this->db->transaction(function () use ($user, $name, $startWorking): Workspace {
             // The account's row, locked: two requests of the same person count their workspaces one after the other
             // (the limit cannot be crossed by going fast), and an account deleted meanwhile fails here, not on a key.
             if ($this->locks->users([$user->getKey()])->isEmpty()) {
@@ -115,22 +117,24 @@ final class Workspaces
                 throw new WorkspaceLimitReachedException($limit);
             }
 
-            return $this->place($user, $name);
+            return $this->place($user, $name, $startWorking);
         }, 3);
     }
 
     /**
-     * Inserts a workspace, the owner membership of the user in it, and makes it their current one. Checks and locks
+     * Inserts a workspace, the owner membership of the user in it, and (unless told not to) makes it their current one. Checks and locks
      * nothing: that is up to the caller, inside its transaction.
      */
-    private function place(User $user, string $name): Workspace
+    private function place(User $user, string $name, bool $startWorking = true): Workspace
     {
         $workspace = new Workspace(['name' => $name]);
         $workspace->save();
 
         $workspace->members()->attach($user->getKey(), ['role' => WorkspaceRole::Owner->value]);
 
-        $this->makeCurrent($user, $workspace);
+        if ($startWorking) {
+            $this->makeCurrent($user, $workspace);
+        }
 
         return $workspace;
     }
@@ -173,13 +177,17 @@ final class Workspaces
      * "another one is left" and take them both. The workspace goes through its own `delete()`, so that its model
      * events fire (what is stored for a workspace is purged there).
      *
+     * @param  bool  $chooseAnother  Whether the user is given another current workspace if this one was it. Not for what a script does with an
+     *                               API token, which does not choose for the person: the database forgets the deleted one (`null`) and the
+     *                               first workspace they joined is the one they work in until they choose, as for any account with none chosen.
+     *
      * @throws LastWorkspaceException When it is the only workspace of the user.
      * @throws ModelNotFoundException When the workspace was deleted in the meantime.
      * @throws AuthorizationException When the user is no longer an owner of it.
      */
-    public function delete(User $user, Workspace $workspace): void
+    public function delete(User $user, Workspace $workspace, bool $chooseAnother = true): void
     {
-        $this->db->transaction(function () use ($user, $workspace): void {
+        $this->db->transaction(function () use ($user, $workspace, $chooseAnother): void {
             // The accounts first: the user and the members as far as they can be told before any lock; the ones
             // who joined while this waited are locked below, after the workspace (one of the two exceptions to the
             // order of Locks).
@@ -223,8 +231,14 @@ final class Workspaces
             $actor = $accounts->get((int) $user->getKey()) ?? $user;
 
             if ($actor->current_workspace_id === $workspace->getKey()) {
-                $actor->current_workspace_id = (int) $others->firstOrFail()->workspace_id;
-                $actor->save();
+                if ($chooseAnother) {
+                    $actor->current_workspace_id = (int) $others->firstOrFail()->workspace_id;
+                    $actor->save();
+                } else {
+                    // What the database does when the workspace goes (`nullOnDelete`), told to the copies of the account in memory now.
+                    $actor->setAttribute('current_workspace_id', null);
+                    $actor->syncOriginalAttribute('current_workspace_id');
+                }
             }
 
             $locked->delete();

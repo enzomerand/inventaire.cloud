@@ -102,6 +102,24 @@ final class ApiTokens
     }
 
     /**
+     * Revokes every token of a person, for the deletion of their account (inside the transaction that deletes it).
+     *
+     * The ids are read first and the rows deleted by key. `DELETE ... WHERE tokenable_type = ? AND tokenable_id = ?` scans a range of the
+     * index on those two columns, and at the default isolation level of MySQL and MariaDB it locks what it scans and the gap after it until
+     * the transaction ends: the deletion of an account is long (workspaces, files), and during all of it another person's token could not
+     * be inserted if it falls in that gap. Deleting by primary key locks the rows themselves and nothing around them. The account's row is
+     * locked by the caller, and a token is only made under that lock ({@see self::create()}), so none can be added meanwhile.
+     *
+     * @return int How many tokens were revoked.
+     */
+    public function revokeAll(User $user): int
+    {
+        $ids = $user->tokens()->pluck('id')->all();
+
+        return $ids === [] ? 0 : PersonalAccessToken::query()->whereKey($ids)->delete();
+    }
+
+    /**
      * The tokens of a person that did not expire.
      *
      * @return Builder<PersonalAccessToken>

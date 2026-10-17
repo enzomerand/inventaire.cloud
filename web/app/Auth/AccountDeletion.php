@@ -47,7 +47,7 @@ use Illuminate\Support\Facades\DB;
  */
 final class AccountDeletion
 {
-    public function __construct(private readonly Locks $locks) {}
+    public function __construct(private readonly Locks $locks, private readonly ApiTokens $tokens) {}
 
     /**
      * Tells what would stop the account from being deleted, without changing anything.
@@ -108,7 +108,7 @@ final class AccountDeletion
         }
 
         LoginCode::query()->where('email', $locked->email)->delete();
-        $locked->tokens()->delete();
+        $this->tokens->revokeAll($locked);
         $this->forgetSessions($locked);
     }
 

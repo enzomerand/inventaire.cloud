@@ -8,6 +8,7 @@ use App\Auth\EmailAddress;
 use App\Auth\StoreSessionFingerprint;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
+use App\Http\Middleware\PaceApiTokens;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Jobs\GenerateExport;
@@ -22,7 +23,6 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
-use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * Registers and boots application-wide services.
@@ -108,37 +108,14 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * The rate limiters of API tokens (limits in config/inventories.php).
+     * The rate limiter of the endpoint that makes an API token (`api_token_creations_per_hour`, config/inventories.php), keyed on the
+     * user: a token is a secret that the person copies, and none is worth making in a loop.
      *
-     * `api-tokens` is the pace of a token (`api_token_requests_per_minute`), whatever it asks for: it is counted for each token
-     * apart, on top of the limits of the endpoints, and by the token rather than the person, so that the script of one of their
-     * tokens cannot use up what another one is for. A request that has no token (the web front's session) is not counted. A
-     * request that sends a token and a session is signed in by the session (Sanctum looks at it first) and is refused later by
-     * `token:<ability>`: it is counted all the same, by the hash of what it sends as a token, so that sending both is no way
-     * around the pace. It is applied to every route behind `auth:sanctum`, and runs after the authentication, which is what
-     * tells it the token.
-     *
-     * `api-token-creation` is the one of the endpoint that makes a token (`api_token_creations_per_hour`), keyed on the user: a
-     * token is a secret that the person copies, and none is worth making in a loop.
+     * The pace of a token itself (`api_token_requests_per_minute`) is not a named limiter: it is counted for the token the request is
+     * made with, which only the authentication tells, by {@see PaceApiTokens}.
      */
     private function registerApiTokenLimiters(): void
     {
-        RateLimiter::for('api-tokens', function (Request $request): Limit {
-            $user = $request->user();
-            $token = $user instanceof User ? $user->currentAccessToken() : null;
-            $bearer = $request->bearerToken();
-            $perMinute = config()->integer('inventories.api_token_requests_per_minute');
-
-            if ($token instanceof PersonalAccessToken) {
-                return Limit::perMinute($perMinute)->by('api-token:'.$token->getKey());
-            }
-
-            // A bearer the session outranks: the token is not the one that signed the request in, so the text itself is the key.
-            return $bearer !== null
-                ? Limit::perMinute($perMinute)->by('api-token-bearer:'.hash('sha256', $bearer))
-                : Limit::none();
-        });
-
         RateLimiter::for('api-token-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.api_token_creations_per_hour'))
             ->by('api-token-creation:'.$this->signedInKey($request)));
     }
