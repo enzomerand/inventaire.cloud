@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Versions;
 
+use App\Inventories\Exceptions\SnapshotTooLargeException;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\InventoryVersion;
@@ -36,7 +37,9 @@ use stdClass;
  * in it, only who they belong to, their name, type and size.
  *
  * The document is written as a stream, a chunk of {@see self::CHUNK} rows at a time: memory does not grow with the number of items.
- * The caller holds the lock of the inventory, so that what is read is one state of it.
+ * The caller holds the lock of the inventory, so that what is read is one state of it. The job that writes the PDF reads the whole file
+ * into memory, so the writing stops as soon as the file would weigh more than `inventories.max_snapshot_bytes`
+ * ({@see SnapshotTooLargeException}): the lock is not held for longer than it takes to reach the limit, and nothing is kept.
  */
 final class SnapshotWriter
 {
@@ -48,6 +51,9 @@ final class SnapshotWriter
 
     /** Rows read at a time. */
     private const CHUNK = 500;
+
+    /** Bytes written so far to the file being written, to hold it to `inventories.max_snapshot_bytes`. */
+    private int $written = 0;
 
     /** Readable and short: the text is not escaped. A character that is not valid UTF-8 fails the writing, since the data would not be what was held. */
     private const FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
@@ -68,9 +74,11 @@ final class SnapshotWriter
      * @return int The number of items written.
      *
      * @throws RuntimeException When the file cannot be written.
+     * @throws SnapshotTooLargeException When the document would weigh more than `inventories.max_snapshot_bytes`.
      */
     public function write(string $path, InventoryVersion $version, Workspace $workspace, Inventory $inventory, Collection $fields): int
     {
+        $this->written = 0;
         $stream = fopen($path, 'wb');
 
         if ($stream === false) {
@@ -199,9 +207,16 @@ final class SnapshotWriter
      * @param  resource  $stream
      *
      * @throws RuntimeException When the file cannot be written.
+     * @throws SnapshotTooLargeException When the file would weigh more than the limit.
      */
     private function put($stream, string $text): void
     {
+        $this->written += strlen($text);
+
+        if ($this->written > config()->integer('inventories.max_snapshot_bytes')) {
+            throw new SnapshotTooLargeException(config()->integer('inventories.max_snapshot_bytes'));
+        }
+
         if (fwrite($stream, $text) === false) {
             throw new RuntimeException('The file of the version could not be written.');
         }

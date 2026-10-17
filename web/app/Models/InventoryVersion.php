@@ -133,14 +133,4 @@ final class InventoryVersion extends Model
     {
         return $this->belongsTo(Inventory::class);
     }
-
-    /**
-     * The person who froze the inventory, unless their account was deleted since.
-     *
-     * @return BelongsTo<User, $this>
-     */
-    public function author(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'user_id');
-    }
 }

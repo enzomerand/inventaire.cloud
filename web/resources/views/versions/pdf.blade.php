@@ -7,8 +7,12 @@
     of the columns of a table is not part of it: the writer draws it on every page but the last when there is a page of signatures, which
     must not show the columns of the items above its boxes.
 
+    The description of the inventory, when it has one, comes first under the header (the writer cuts it to a length that does not take
+    the page). On a table, the row of the columns of the first page is drawn under it, in the room `$descriptionGap` keeps.
+
     The page of signatures comes last, after a page break: a box for each signer, with an empty area (`#signer-N`) the signature is
     drawn in. The writer reads the position of each area from the laid-out page, to tell the signature service where to put the field.
+    The notice above the boxes is a block of two lines whatever it says, so that the boxes are always at the same place.
 --}}
 <!DOCTYPE html>
 <html lang="{{ $locale }}">
@@ -21,7 +25,8 @@
         .head .hash { color: #1f2933; }
         .signatures { page-break-before: always; }
         .signatures h2 { font-size: 13pt; line-height: 22px; height: 22px; margin: 0 0 4px 0; padding: 0; }
-        .signatures .notice { color: #52606d; line-height: 13px; margin: 0 0 8px 0; }
+        .description { margin-bottom: {{ $descriptionGap }}px; }
+        .signatures .notice { color: #52606d; line-height: 13px; height: 26px; overflow: hidden; margin: 0 0 8px 0; }
         table.signers { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
         table.signers td { border: 0; padding: 0 6px 6px 0; vertical-align: top; background-color: #ffffff; }
         .signer { border: 1px solid #b8c1ca; padding: 4px 6px; }
@@ -39,7 +44,12 @@
         <p class="line hash">{{ $headLines[2] }}</p>
     </div>
 
-    @include('exports.partials.pdf-body')
+    {{-- The description is laid out here, not by the partial: the writer needs to know where it ends (`#description`) to draw the row of the columns under it on the first page. --}}
+    @if ($description !== null)
+        <p class="description" id="description">{{ $description }}</p>
+    @endif
+
+    @include('exports.partials.pdf-body', ['description' => null])
 
     @if ($signers !== [])
         <div class="signatures">

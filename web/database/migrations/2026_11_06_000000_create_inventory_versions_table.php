@@ -41,7 +41,10 @@ return new class extends Migration
             $table->string('label', 120)->nullable();
             $table->string('author_name', 255);
             $table->string('locale', 8);
-            $table->timestamp('frozen_at');
+            // With a default of its own, so that MySQL < 8 and MariaDB < 10.10 (`explicit_defaults_for_timestamp` off) do not give the first
+            // `NOT NULL` timestamp of a table `ON UPDATE CURRENT_TIMESTAMP`: the date of the freeze must never move. It is the only
+            // `NOT NULL` timestamp here; `timestamps()` and the others are nullable.
+            $table->timestamp('frozen_at')->useCurrent();
             $table->unsignedInteger('items_count');
             $table->unsignedInteger('fields_count');
 

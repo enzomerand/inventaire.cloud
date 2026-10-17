@@ -1275,5 +1275,6 @@
     "Signers": "Signataires",
     "Remove": "Retirer",
     "Add a signer": "Ajouter un signataire",
-    "Create the version": "Créer la version"
+    "Create the version": "Créer la version",
+    "The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.": "Les données de cet inventaire sont trop volumineuses pour être figées en version officielle : elles ne peuvent pas peser plus de :size."
 }

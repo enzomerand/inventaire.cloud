@@ -7,9 +7,11 @@ use App\Inventories\Versions\SignatureStatus;
 use App\Inventories\Versions\SnapshotReader;
 use App\Inventories\Versions\VersionError;
 use App\Inventories\Versions\VersionGenerator;
+use App\Inventories\Versions\VersionMaintenance;
 use App\Inventories\Versions\VersionStatus;
 use App\Jobs\GenerateOfficialVersion;
 use App\Jobs\PurgeStoredFiles;
+use App\Jobs\RequestSignatures;
 use App\Models\InventoryVersion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -323,6 +325,150 @@ describe('the page of signatures', function (): void {
     });
 });
 
+describe('the page of signatures, whatever the names', function (): void {
+    it('holds ten signers on the one last page when every name is as long and as wide as it may be', function (string $locale): void {
+        app()->setLocale($locale);
+        versionDocumenso();
+        $case = versionTableCase();
+        $wide = str_repeat('W', 120);
+        $cyrillic = str_repeat('Ж', 120);
+        $case['inventory']->forceFill(['name' => $wide])->save();
+        $case['team']['workspace']->forceFill(['name' => $cyrillic])->save();
+        $signers = array_map(fn (int $i): array => ['name' => str_repeat($i % 2 === 0 ? 'W' : 'Ж', 120), 'email' => str_repeat('w', 60)."{$i}@example.test"], range(1, 10));
+
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], $cyrillic, $signers));
+        $fields = array_column($version->signers ?? [], 'field');
+        $drawn = versionDrawnAreas(versionFile($version, (string) $version->pdf_path));
+
+        expect($version->status)->toBe(VersionStatus::Completed, (string) $version->error?->value)
+            ->and($fields)->toHaveCount(10)
+            ->and($drawn)->toHaveCount(10)
+            ->and(array_unique(array_column($fields, 'page')))->toBe([$version->pdf_pages])
+            ->and(max(array_map(fn (array $field): float => $field['y'] + $field['height'], $fields)))->toBeLessThan(100 - 48 * 0.75 / 595.28 * 100);
+
+        foreach ($fields as $index => $field) {
+            expect($field['x'])->toEqualWithDelta($drawn[$index]['x'] / 841.89 * 100, 0.01)
+                ->and($field['y'])->toEqualWithDelta($drawn[$index]['y'] / 595.28 * 100, 0.01);
+        }
+    })->with(['en', 'fr']);
+
+    it('puts the boxes at the same place whatever the notice says: it is a block of two lines', function (): void {
+        versionDocumenso();
+        $short = versionTableCase();
+        $long = versionTableCase();
+        $long['inventory']->forceFill(['name' => str_repeat('W', 120)])->save();
+
+        $first = versionRun(versionFreeze($short['inventory'], $short['team']['owner'], null, versionSigners(10)));
+        $second = versionRun(versionFreeze($long['inventory'], $long['team']['owner'], null, versionSigners(10)));
+
+        expect(array_column($second->signers ?? [], 'field'))->toBe(array_column($first->signers ?? [], 'field'));
+    });
+
+    it('cuts the name of the inventory in the notice, and keeps the real one in the data', function (): void {
+        versionDocumenso();
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['name' => str_repeat('W', 120)])->save();
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(1)));
+
+        expect(versionHtml($version))->not->toContain(str_repeat('W', 120))->toContain('“WWW')
+            ->and(versionSnapshot($version)['inventory']['name'])->toBe(str_repeat('W', 120));
+    });
+});
+
+describe('the description of the inventory', function (): void {
+    it('is the first thing under the header, escaped, before the items', function (): void {
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['description' => 'Spare <b>parts</b> & "tools"'])->save();
+        $html = versionHtml(versionFreeze($case['inventory'], $case['team']['owner']));
+
+        expect($html)->toContain('<p class="description" id="description">Spare &lt;b&gt;parts&lt;/b&gt; &amp; &quot;tools&quot;</p>')
+            ->and(substr_count($html, 'class="description"'))->toBe(1)
+            ->and(strpos($html, 'id="description"'))->toBeLessThan(strpos($html, 'Tool 1'));
+    });
+
+    it('is cut to 500 characters at most, ellipsis included, on one line', function (): void {
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['description' => 'First line
+
+'.str_repeat('word ', 400)])->save();
+        $html = versionHtml(versionFreeze($case['inventory'], $case['team']['owner']));
+
+        preg_match('/<p class="description" id="description">(.*?)<\/p>/s', $html, $found);
+
+        expect(mb_strlen($found[1]))->toBeLessThanOrEqual(500)->toBeGreaterThan(490)
+            ->and($found[1])->toStartWith('First line word word')->toEndWith('…')->not->toContain("\n");
+    });
+
+    it('is not written when the inventory has none, or only blanks', function (?string $description): void {
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['description' => $description])->save();
+        $html = versionHtml(versionFreeze($case['inventory'], $case['team']['owner']));
+
+        expect($html)->not->toContain('<p class="description"');
+    })->with([null, '', "  \n \t "]);
+
+    it('has the row of the columns right above the first row of the items, under the description', function (): void {
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['description' => str_repeat('A fairly long description of the tools. ', 20)])->save();
+        $without = versionTableCase();
+        $described = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
+        $plain = versionRun(versionFreeze($without['inventory'], $without['team']['owner']));
+        $rowOf = function (InventoryVersion $version): float {
+            // The row of the columns is the first grey rectangle (0.894 0.914 0.933) of the first page, 18 points high.
+            foreach (versionPdfStreams(versionFile($version, (string) $version->pdf_path)) as $raw) {
+                $content = @gzuncompress($raw);
+
+                if ($content !== false && preg_match('/0\.894 0\.914 0\.933 rg\n([\d.]+) ([\d.]+) ([\d.]+) 18\.000 re f/', $content, $found) === 1) {
+                    return 595.28 - ((float) $found[2] + 18.0);
+                }
+            }
+
+            return -1.0;
+        };
+
+        // Lower by the room the description takes, and the PDF is still written with the same number of pages.
+        expect($rowOf($plain))->toBeGreaterThan(0)
+            ->and($rowOf($described))->toBeGreaterThan($rowOf($plain) + 20)
+            ->and($described->pdf_pages)->toBe($plain->pdf_pages);
+    });
+
+    it('is written in the PDF of a version with signers too, and the areas are still the ones drawn', function (): void {
+        versionDocumenso();
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['description' => str_repeat('Long ', 200)])->save();
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(10)));
+        $drawn = versionDrawnAreas(versionFile($version, (string) $version->pdf_path));
+
+        expect($version->status)->toBe(VersionStatus::Completed, (string) $version->error?->value)
+            ->and($drawn)->toHaveCount(10);
+    });
+});
+
+describe('reading a PDF back', function (): void {
+    it('finds a stream whose last byte is a carriage return, which a cut at the line break would lose', function (): void {
+        $content = "0.322 0.376 0.427 RG\n0.75 w 0 J [  ] 0 d\n100.000 200.000 330.000 48.000 re S";
+        $raw = null;
+
+        // One compressed stream in 256 ends with 0x0D: pad the content until one does.
+        for ($i = 0; $i < 5000; $i++) {
+            $candidate = gzcompress($content."\n% {$i}");
+
+            if (str_ends_with($candidate, "\r")) {
+                $raw = $candidate;
+
+                break;
+            }
+        }
+
+        expect($raw)->not->toBeNull();
+
+        $pdf = "%PDF-1.7\n1 0 obj\n<< /Length ".strlen((string) $raw)." >>\nstream\n{$raw}\nendstream\nendobj\n";
+
+        expect(versionPdfStreams($pdf))->toBe([$raw])
+            ->and(versionDrawnAreas($pdf))->toHaveCount(1);
+    });
+});
+
 describe('a version that cannot be written', function (): void {
     it('fails when the snapshot on the disk is not the one that was frozen, and leaves nothing behind', function (): void {
         $case = versionTableCase();
@@ -389,6 +535,83 @@ describe('a version that cannot be written', function (): void {
             ->and($version->status)->toBe(VersionStatus::Failed)
             ->and($version->error)->toBe(VersionError::PdfTooLarge)
             ->and($version->counted_bytes)->toBe(0);
+    });
+
+    it('forgets its request for signatures when it fails: nothing will ever send it, and its signers stay with the version', function (): void {
+        versionDocumenso();
+        $case = versionTableCase();
+        $version = versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(2));
+        Storage::disk(ATTACHMENT_TEST_DISK)->delete($version->snapshot_path);
+        Log::spy();
+
+        expect($version->signature_status)->toBe(SignatureStatus::Requested);
+
+        $version = versionRun($version);
+
+        expect($version->status)->toBe(VersionStatus::Failed)
+            ->and($version->error)->toBe(VersionError::GenerationFailed)
+            ->and($version->signature_status)->toBeNull()
+            ->and($version->signature_error)->toBeNull()
+            ->and(array_column($version->signers ?? [], 'email'))->toBe(['signer1@example.test', 'signer2@example.test']);
+        Queue::assertNotPushed(RequestSignatures::class);
+    });
+
+    it('forgets its request for signatures when the schedule gives up on it as well', function (): void {
+        versionDocumenso();
+        $case = versionTableCase();
+        $version = versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(1));
+        $this->travel(2)->hours();
+
+        app(VersionMaintenance::class)->giveUpOnUnfinishedVersions();
+
+        expect($version->fresh()->status)->toBe(VersionStatus::Failed)
+            ->and($version->fresh()->error)->toBe(VersionError::Stale)
+            ->and($version->fresh()->signature_status)->toBeNull();
+    });
+
+    it('leaves the request of a version that is completed alone when a late failure is reported', function (): void {
+        versionDocumenso();
+        $case = versionTableCase();
+        $done = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(1)));
+
+        app(VersionGenerator::class)->fail($done, VersionError::GenerationFailed);
+
+        expect($done->fresh()->status)->toBe(VersionStatus::Completed)
+            ->and($done->fresh()->signature_status)->toBe(SignatureStatus::Requested);
+    });
+
+    it('fails with pdf_too_large, before the snapshot is read into memory, when it is over the limit', function (): void {
+        $case = versionTableCase();
+        $version = versionFreeze($case['inventory'], $case['team']['owner']);
+        config(['inventories.max_snapshot_bytes' => $version->snapshot_size - 1]);
+        $proxy = attachmentDiskProxy();
+        $proxy->shouldReceive('get')->never();
+        Log::spy();
+
+        $version = versionRun($version);
+
+        expect($version->status)->toBe(VersionStatus::Failed)
+            ->and($version->error)->toBe(VersionError::PdfTooLarge)
+            ->and($version->counted_bytes)->toBe(0);
+        Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->directories === [$version->directory()]);
+    });
+
+    it('fails with pdf_too_large when the file on the disk is bigger than the limit although the record says otherwise', function (): void {
+        $case = versionTableCase();
+        $version = versionFreeze($case['inventory'], $case['team']['owner']);
+        config(['inventories.max_snapshot_bytes' => $version->snapshot_size + 10]);
+        Storage::disk(ATTACHMENT_TEST_DISK)->put($version->snapshot_path, str_repeat(' ', 100).versionFile($version, $version->snapshot_path));
+        Log::spy();
+
+        expect(versionRun($version)->error)->toBe(VersionError::PdfTooLarge);
+    });
+
+    it('is written when it is exactly at the limit', function (): void {
+        $case = versionTableCase();
+        $version = versionFreeze($case['inventory'], $case['team']['owner']);
+        config(['inventories.max_snapshot_bytes' => $version->snapshot_size]);
+
+        expect(versionRun($version)->status)->toBe(VersionStatus::Completed);
     });
 
     it('fails when the PDF cannot be stored, and counts nothing', function (): void {

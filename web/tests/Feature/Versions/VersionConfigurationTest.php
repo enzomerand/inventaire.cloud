@@ -66,10 +66,11 @@ describe('Documenso', function (): void {
 });
 
 describe('the quotas of the versions', function (): void {
-    it('are 200 versions to an inventory, 10 signers, and 10 versions an hour', function (): void {
+    it('are 200 versions to an inventory, 10 signers, 10 versions an hour, and 64 MB of data to a snapshot', function (): void {
         expect(config('inventories.max_versions_per_inventory'))->toBe(200)
             ->and(config('inventories.max_signers'))->toBe(10)
-            ->and(config('inventories.versions_per_hour'))->toBe(10);
+            ->and(config('inventories.versions_per_hour'))->toBe(10)
+            ->and(config('inventories.max_snapshot_bytes'))->toBe(64 * 1048576);
     });
 
     it('never give more signers than the page of signatures holds, and at least one', function (): void {
@@ -89,7 +90,7 @@ describe('the quotas of the versions', function (): void {
     it('are written in the environment variables the configuration names', function (): void {
         $config = (string) file_get_contents(config_path('inventories.php'));
 
-        expect($config)->toContain('INVENTORIES_MAX_VERSIONS')->toContain('INVENTORIES_MAX_SIGNERS')->toContain('INVENTORIES_VERSIONS_PER_HOUR');
+        expect($config)->toContain('INVENTORIES_MAX_VERSIONS')->toContain('INVENTORIES_MAX_SIGNERS')->toContain('INVENTORIES_VERSIONS_PER_HOUR')->toContain('INVENTORIES_MAX_SNAPSHOT_MB');
     });
 });
 

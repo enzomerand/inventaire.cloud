@@ -258,6 +258,13 @@ return [
     | - `versions_per_hour`: versions one person may create in an hour
     |   (`INVENTORIES_VERSIONS_PER_HOUR`, 10), `429` beyond: every one locks an
     |   inventory while it reads all its items.
+    | - `max_snapshot_bytes`: bytes the `snapshot.json` of a version may weigh
+    |   (`INVENTORIES_MAX_SNAPSHOT_MB`, megabytes, 64). The file is written while
+    |   the inventory is locked and stops being written past the limit (the API
+    |   answers 422, `pdf_too_large`, and nothing is kept); the job that writes the
+    |   PDF reads the whole file into the memory of a worker, so it refuses (the
+    |   version fails with `pdf_too_large`) a file that is over the limit when it
+    |   is read, whatever it was when it was written.
     |
     | The PDF holds as many items as `pdf_max_items` allows, as the PDF of an
     | export does; the API answers 422 (`pdf_too_large`) beyond.
@@ -268,6 +275,8 @@ return [
     'max_signers' => min(10, (int) env('INVENTORIES_MAX_SIGNERS', 10)),
 
     'versions_per_hour' => (int) env('INVENTORIES_VERSIONS_PER_HOUR', 10),
+
+    'max_snapshot_bytes' => (int) round((float) env('INVENTORIES_MAX_SNAPSHOT_MB', 64) * 1048576),
 
     /*
     |--------------------------------------------------------------------------

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Inventories\Exceptions\ExportRefusedException;
 use App\Inventories\Exceptions\SignatureUnavailableException;
+use App\Inventories\Exceptions\SnapshotTooLargeException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Inventories\Exceptions\VersionLimitReachedException;
 use App\Inventories\Versions\SignatureStatus;
@@ -16,7 +17,9 @@ use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -181,6 +184,44 @@ describe('the number and the row', function (): void {
         $first->delete();
 
         expect(versionFreeze($case['inventory'], $case['team']['owner'])->number)->toBe(3);
+    });
+
+    it('never gives a number twice: after the last version is deleted its number is not issued again', function (): void {
+        $case = exportFixture();
+        versionFreeze($case['inventory'], $case['team']['owner']);
+        $last = versionFreeze($case['inventory'], $case['team']['owner']);
+        $last->delete();
+
+        $next = versionFreeze($case['inventory'], $case['team']['owner']);
+
+        expect($next->number)->toBe(3);
+
+        // Even when none is left.
+        InventoryVersion::query()->delete();
+
+        expect(versionFreeze($case['inventory'], $case['team']['owner'])->number)->toBe(4)
+            ->and($case['inventory']->fresh()->last_version_number)->toBe(4);
+    });
+
+    it('counts the numbers on the inventory, and does not count a refused freeze', function (): void {
+        config(['inventories.max_versions_per_inventory' => 1]);
+        $case = exportFixture();
+
+        expect($case['inventory']->fresh()->last_version_number)->toBe(0);
+
+        versionFreeze($case['inventory'], $case['team']['owner']);
+
+        expect(fn () => versionFreeze($case['inventory'], $case['team']['owner']))->toThrow(VersionLimitReachedException::class)
+            ->and($case['inventory']->fresh()->last_version_number)->toBe(1);
+    });
+
+    it('does not change the date of the inventory by numbering a version', function (): void {
+        $case = exportFixture();
+        DB::table('inventories')->where('id', $case['inventory']->id)->update(['updated_at' => '2026-01-01 00:00:00']);
+
+        versionFreeze($case['inventory'], $case['team']['owner']);
+
+        expect((string) DB::table('inventories')->where('id', $case['inventory']->id)->value('updated_at'))->toStartWith('2026-01-01 00:00:00');
     });
 
     it('keeps the language of the person and a date to the second, in UTC', function (): void {
@@ -426,6 +467,86 @@ describe('the label', function (): void {
     });
 });
 
+describe('the column of the date of the freeze', function (): void {
+    it('has a default of its own, which keeps MySQL and MariaDB from giving it ON UPDATE CURRENT_TIMESTAMP', function (): void {
+        $column = collect(Schema::getColumns('inventory_versions'))->firstWhere('name', 'frozen_at');
+
+        expect($column['default'])->not->toBeNull()
+            ->and($column['nullable'])->toBeFalse();
+
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            $extra = (string) DB::table('information_schema.columns')
+                ->whereRaw('table_schema = database()')
+                ->where('table_name', 'inventory_versions')
+                ->where('column_name', 'frozen_at')
+                ->value('extra');
+
+            expect(strtolower($extra))->not->toContain('on update');
+        }
+    });
+
+    it('does not move when the row changes', function (): void {
+        $case = exportFixture();
+        $version = versionFreeze($case['inventory'], $case['team']['owner']);
+        $frozen = (string) DB::table('inventory_versions')->where('id', $version->id)->value('frozen_at');
+        $this->travel(2)->hours();
+
+        DB::table('inventory_versions')->where('id', $version->id)->update(['label' => 'Renamed', 'updated_at' => now()]);
+
+        expect((string) DB::table('inventory_versions')->where('id', $version->id)->value('frozen_at'))->toBe($frozen);
+    });
+});
+
+describe('the weight of the snapshot', function (): void {
+    it('is refused past the limit while it is written: nothing is kept, and no number is used', function (): void {
+        $case = exportFixture();
+        $size = versionFreeze($case['inventory'], $case['team']['owner'])->snapshot_size;
+        InventoryVersion::query()->delete();
+        DB::table('inventories')->where('id', $case['inventory']->id)->update(['last_version_number' => 0]);
+        config(['inventories.max_snapshot_bytes' => $size - 1]);
+        $files = storedFiles();
+        Queue::fake();
+
+        try {
+            versionFreeze($case['inventory'], $case['team']['owner']);
+            $this->fail('The limit was not enforced.');
+        } catch (SnapshotTooLargeException $large) {
+            expect($large->limit)->toBe($size - 1);
+        }
+
+        expect(InventoryVersion::query()->count())->toBe(0)
+            ->and($case['inventory']->fresh()->last_version_number)->toBe(0)
+            ->and(storedFiles())->toBe($files);
+        Queue::assertNothingPushed();
+    });
+
+    it('is accepted at the limit, to the byte', function (): void {
+        $case = exportFixture();
+        $size = versionFreeze($case['inventory'], $case['team']['owner'])->snapshot_size;
+        config(['inventories.max_snapshot_bytes' => $size]);
+
+        expect(versionFreeze($case['inventory'], $case['team']['owner'])->snapshot_size)->toBe($size);
+    });
+
+    it('stops writing at the limit, and does not read the rest of the items', function (): void {
+        $case = exportFixture();
+        config(['inventories.max_snapshot_bytes' => 600]);
+        $statements = statementsOf(function () use ($case): void {
+            try {
+                versionFreeze($case['inventory'], $case['team']['owner']);
+            } catch (SnapshotTooLargeException) {
+                // Expected.
+            }
+        });
+
+        expect(array_filter($statements, fn (string $sql): bool => str_contains($sql, 'limit 500') && str_contains($sql, 'items')))->toBe([]);
+    });
+
+    it('is 64 MB by default', function (): void {
+        expect(config('inventories.max_snapshot_bytes'))->toBe(64 * 1048576);
+    });
+});
+
 describe('a disk that refuses the file', function (): void {
     it('leaves a failed version with nothing stored, and no job', function (): void {
         $case = exportFixture();
@@ -441,6 +562,36 @@ describe('a disk that refuses the file', function (): void {
         // Nothing is written, and what may have been is purged by the folder of the version.
         Queue::assertNotPushed(GenerateOfficialVersion::class);
         Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->directories === [$version->directory()]);
+    });
+});
+
+describe('a version deleted while its snapshot is copied to the disk', function (): void {
+    it('has its folder purged, and no job queued: nobody will ever ask for what was written', function (): void {
+        $case = exportFixture();
+        $real = Storage::disk(ATTACHMENT_TEST_DISK);
+        $proxy = attachmentDiskProxy();
+        $proxy->shouldReceive('put')->andReturnUsing(function (string $path, mixed $contents) use ($real): bool {
+            // The owner deletes the version (the row goes, and the folder it purges is still empty) just before the file lands.
+            DB::table('inventory_versions')->delete();
+
+            return (bool) $real->put($path, $contents);
+        });
+        Queue::fake();
+
+        $version = versionFreeze($case['inventory'], $case['team']['owner']);
+
+        expect(InventoryVersion::query()->count())->toBe(0);
+        Queue::assertNotPushed(GenerateOfficialVersion::class);
+        Queue::assertPushed(PurgeStoredFiles::class, fn (PurgeStoredFiles $job): bool => $job->directories === [$version->directory()]);
+    });
+
+    it('does not purge anything when it is still there', function (): void {
+        $case = exportFixture();
+        Queue::fake();
+
+        versionFreeze($case['inventory'], $case['team']['owner']);
+
+        Queue::assertNotPushed(PurgeStoredFiles::class);
     });
 });
 

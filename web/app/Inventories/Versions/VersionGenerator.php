@@ -17,6 +17,7 @@ use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -105,15 +106,23 @@ final class VersionGenerator
      * completed in the meantime is left as it is, files included: a late call (a job reported failed after it ended, the schedule
      * acting on a row it read before it completed) must never delete a file somebody can download. For a version that is gone, or
      * already failed, the folder is purged all the same: nothing of a failed attempt may stay.
+     *
+     * A request for signatures that was still waiting for the PDF (`requested`) goes with it, in the very same update: there is no PDF
+     * to send, so nothing will ever send it, and a request left `requested` would have the pages poll for ever and the schedule give
+     * up on it two hours later with an error that is not the one of the PDF. The people it named stay with the version (`signers`).
      */
     public function fail(InventoryVersion $version, VersionError $error): void
     {
+        // A CASE, not a second update: the version is judged `pending` or `running` and loses its request in one decision.
+        $request = "CASE WHEN signature_status = '".SignatureStatus::Requested->value."' THEN NULL ELSE signature_status END";
+
         InventoryVersion::query()
             ->whereKey($version->getKey())
             ->whereIn('status', [VersionStatus::Pending->value, VersionStatus::Running->value])
             ->update([
                 'status' => VersionStatus::Failed->value,
                 'error' => $error->value,
+                'signature_status' => DB::raw($request),
                 'updated_at' => now(),
             ]);
 
@@ -128,13 +137,20 @@ final class VersionGenerator
     /**
      * Reads the snapshot, writes the PDF in `$scratch`, stores it and completes the version.
      *
-     * @throws PdfTooLargeException When the PDF would be too big for the library.
+     * @throws PdfTooLargeException When the snapshot is over `inventories.max_snapshot_bytes`, or the PDF would be too big for the library.
      * @throws ModelNotFoundException When the version was deleted meanwhile.
      * @throws RuntimeException When the snapshot is not the one that was frozen, or a file cannot be read or stored.
      */
     private function generate(InventoryVersion $version, string $scratch): void
     {
         $directory = $version->directory() ?? throw new RuntimeException('The snapshot of the version is not where a version keeps it.');
+        $limit = config()->integer('inventories.max_snapshot_bytes');
+
+        // Before a byte of it is read into memory: the size that was recorded when it was frozen, and the one the disk says it has now.
+        if ($version->snapshot_size > $limit || $this->storage->disk($version->disk)->size($version->snapshot_path) > $limit) {
+            throw new PdfTooLargeException("The snapshot of the version weighs more than {$limit} bytes, which is all a PDF is written from.");
+        }
+
         $contents = $this->storage->disk($version->disk)->get($version->snapshot_path);
 
         if (! is_string($contents)) {

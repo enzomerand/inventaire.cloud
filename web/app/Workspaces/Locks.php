@@ -75,6 +75,11 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * transaction (an inventory at its quota of items makes it a long one: accepted, since deleting a workspace is rare and
  * the writers it waits for are waiting for the same inventory rows).
  *
+ * The official versions follow the same order. Freezing an inventory takes the author's account (2), then the inventory (5), and
+ * inserts the row under them (nothing counts against the storage yet). Writing the PDF and storing the signed PDF take the workspace
+ * (3), then update the version row, which moves `counted_bytes` and the storage counter in one decision. Deleting a version takes the
+ * workspace (3), then the inventory (5).
+ *
  * Three paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
  *

@@ -15,6 +15,7 @@ use App\Inventories\Exceptions\ExportRefusedException;
 use App\Inventories\Exceptions\SignatureNotFailedException;
 use App\Inventories\Exceptions\SignatureNotPendingException;
 use App\Inventories\Exceptions\SignatureUnavailableException;
+use App\Inventories\Exceptions\SnapshotTooLargeException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Inventories\Exceptions\VersionLimitReachedException;
 use App\Inventories\Versions\OfficialVersions;
@@ -77,7 +78,8 @@ final class InventoryVersionController extends Controller
      * Freezes the inventory as the next version (`202`, with the version `pending`: the PDF is written in the background).
      *
      * `422` for a mistake in the request (`label`, `signers`, `signers.N.name`, `signers.N.email`) and for an inventory with more items
-     * than a PDF may hold (`inventory`, with the code `pdf_too_large` and the `limit`); `409` when the inventory already holds as many
+     * than a PDF may hold, or whose data weighs more than a snapshot may (`inventory`, with the code `pdf_too_large`; the `limit` of items
+     * only for the first); `409` when the inventory already holds as many
      * versions as it may (`version_limit_reached`, with the `limit`), when the files of the workspace already weigh its quota
      * (`storage_limit_reached`, with the `limit`) and when signatures are asked for on an instance that has no signature service
      * (`signature_unavailable`); `429` beyond the pace of versions.
@@ -109,6 +111,12 @@ final class InventoryVersionController extends Controller
                 'inventory',
                 $refused->reason,
                 ['limit' => $refused->limit],
+            );
+        } catch (SnapshotTooLargeException $large) {
+            return ApiError::invalid(
+                __('The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.', ['size' => Number::fileSize($large->limit, maxPrecision: 1)]),
+                'inventory',
+                ExportRefusedException::PDF_TOO_LARGE,
             );
         }
 

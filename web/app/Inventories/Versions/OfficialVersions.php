@@ -10,6 +10,7 @@ use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Attachments\WorkspaceStorage;
 use App\Inventories\Exceptions\ExportRefusedException;
 use App\Inventories\Exceptions\SignatureUnavailableException;
+use App\Inventories\Exceptions\SnapshotTooLargeException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Inventories\Exceptions\VersionLimitReachedException;
 use App\Inventories\Exports\ExportTemp;
@@ -40,7 +41,8 @@ use Throwable;
  * **Freezing is synchronous and consistent**, because "frozen" must mean "the state at the click". After the checks that need no lock
  * (below), one transaction locks the account of the author, then the inventory ({@see Locks}: every writer of the items, the fields and
  * the files of an inventory takes the same lock), counts the versions the inventory holds against the quota, numbers the new one (the
- * highest number plus one), writes the canonical `snapshot.json` to a scratch file ({@see SnapshotWriter}) and inserts the row
+ * counter of the inventory, `last_version_number`, plus one: it only ever goes up, so a number is never given twice, even after the
+ * version that had it was deleted), writes the canonical `snapshot.json` to a scratch file ({@see SnapshotWriter}) and inserts the row
  * `pending`. Nothing can write to the inventory in between, so the file is one state of it, and its SHA-256 (of the bytes of the file)
  * is recorded. That takes the time of reading the items, a second or two for ten thousand, during which the inventory is read-only;
  * the job that writes the PDF runs later, from the file, and does not hold anything. Once the transaction is committed the file is copied
@@ -97,6 +99,7 @@ final class OfficialVersions
      *
      * @throws ValidationException When the label or a signer is not valid (`label`, `signers`, `signers.N.name`, `signers.N.email`).
      * @throws ExportRefusedException With `PDF_TOO_LARGE` when the inventory holds more items than a PDF may.
+     * @throws SnapshotTooLargeException When the data of the inventory weighs more than a snapshot may (`inventories.max_snapshot_bytes`).
      * @throws StorageLimitReachedException When the files of the workspace already weigh its quota.
      * @throws SignatureUnavailableException When signers are given and the instance has no Documenso.
      * @throws VersionLimitReachedException When the inventory already holds as many versions as it may.
@@ -236,6 +239,7 @@ final class OfficialVersions
      *
      * @throws VersionLimitReachedException
      * @throws ExportRefusedException
+     * @throws SnapshotTooLargeException
      * @throws ModelNotFoundException
      */
     private function freeze(Inventory $inventory, User $author, ?string $label, array $signers, string $scratch): InventoryVersion
@@ -262,12 +266,17 @@ final class OfficialVersions
 
         $ulid = strtolower((string) Str::ulid());
 
+        // The counter of the inventory, not the highest number of the versions that are left: deleting the last version must not give
+        // its number to the next one. Written with the query builder: the inventory itself has not changed (no `updated_at`).
+        $number = $locked->last_version_number + 1;
+        $this->db->table('inventories')->where('id', $locked->getKey())->update(['last_version_number' => $number]);
+
         $version = new InventoryVersion;
         $version->forceFill([
             'ulid' => $ulid,
             'inventory_id' => $locked->getKey(),
             'user_id' => $author->getKey(),
-            'number' => 1 + (int) (clone $versions)->max('number'),
+            'number' => $number,
             'label' => $label,
             'author_name' => $author->name,
             'locale' => mb_substr(app()->getLocale(), 0, 8),
@@ -311,6 +320,18 @@ final class OfficialVersions
             $this->generator->fail($version, VersionError::StorageFailed);
 
             return $version->refresh();
+        }
+
+        // Deleted (with its inventory or its workspace, maybe) while the file was being copied: nobody will ever ask for what was just
+        // written, and the delete purged a folder that did not hold it yet. Purged by the folder, not through the row, which is gone.
+        if (! InventoryVersion::query()->whereKey($version->getKey())->exists()) {
+            $directory = $version->directory();
+
+            if ($directory !== null) {
+                $this->storage->purgeAfterCommit($version->disk, [], [$directory]);
+            }
+
+            return $version;
         }
 
         try {

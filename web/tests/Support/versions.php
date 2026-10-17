@@ -167,6 +167,26 @@ function versionPdfPages(string $pdf): int
 }
 
 /**
+ * The streams of a PDF, as they are stored (compressed): each one is as long as the `/Length` of its object says. Cutting a stream at
+ * the first line break before `endstream` would drop its last byte whenever that is a carriage return (one stream in 256, as the
+ * last byte of a compressed stream is anything), and the area drawn on it would silently not be found.
+ *
+ * @return list<string>
+ */
+function versionPdfStreams(string $pdf): array
+{
+    $streams = [];
+
+    preg_match_all('/\/Length (\d+)\s*>>\s*stream\n/', $pdf, $found, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+
+    foreach ($found as $match) {
+        $streams[] = substr($pdf, $match[0][1] + strlen($match[0][0]), (int) $match[1][0]);
+    }
+
+    return $streams;
+}
+
+/**
  * The signature areas a PDF draws, read back from its pages: the inside of the border of each empty area, in points, the origin at the
  * top left of the page (the file counts from the bottom: the rectangle of a stroke is the middle of its line, 0.75 points wide).
  *
@@ -178,9 +198,7 @@ function versionDrawnAreas(string $pdf, float $pageHeight = 595.28): array
 {
     $areas = [];
 
-    preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $pdf, $streams);
-
-    foreach ($streams[1] as $raw) {
+    foreach (versionPdfStreams($pdf) as $raw) {
         $content = @gzuncompress($raw);
 
         if ($content === false) {

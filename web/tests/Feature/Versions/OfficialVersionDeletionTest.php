@@ -264,7 +264,7 @@ describe('the table', function (): void {
             ->toThrow(UniqueConstraintViolationException::class)
             ->and($case['inventory']->versions()->pluck('id')->all())->toBe([$version->id])
             ->and($version->inventory->is($case['inventory']))->toBeTrue()
-            ->and($version->author->is($case['team']['owner']))->toBeTrue()
+            ->and($version->user_id)->toBe($case['team']['owner']->id)
             ->and($version->getRouteKeyName())->toBe('ulid')
             ->and($case['inventory']->versions()->first()?->is($version))->toBeTrue();
     });

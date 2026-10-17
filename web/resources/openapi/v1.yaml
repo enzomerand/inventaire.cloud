@@ -3332,7 +3332,9 @@ paths:
                     - The signers.0.email field must be a valid email address.
           x-codes:
             - code: pdf_too_large
-              description: A PDF cannot hold that many items (on `inventory`). `limit` says how many it can.
+              description: >-
+                A PDF cannot hold that many items, or the data of the inventory is too heavy to be frozen (on `inventory`, 64 MB by
+                default). `limit` says how many items a PDF can hold; it is absent when the data is what is too heavy.
         '429':
           description: Too many requests. Wait `Retry-After` seconds.
           headers:

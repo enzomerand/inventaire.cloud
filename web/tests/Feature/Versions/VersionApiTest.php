@@ -336,6 +336,21 @@ describe('the limits', function (): void {
             ->and(InventoryVersion::query()->count())->toBe(0);
     });
 
+    it('answers 422 pdf_too_large, with no limit of items, for an inventory whose data is too heavy for a snapshot, and keeps nothing', function (): void {
+        $case = versionTableCase(3);
+        config(['inventories.max_snapshot_bytes' => 700]);
+        $files = storedFiles();
+
+        $refused = versionApiPost($this, $case['team']['owner'], $case['inventory'])->assertStatus(422);
+
+        expect($refused->json('code'))->toBe('pdf_too_large')
+            ->and($refused->json())->not->toHaveKey('limit')
+            ->and($refused->json('message'))->toBe('The data of this inventory is too large to be frozen as an official version: it cannot weigh more than 700 B.')
+            ->and($refused->json('errors'))->toBe(['inventory' => [$refused->json('message')]])
+            ->and(InventoryVersion::query()->count())->toBe(0)
+            ->and(storedFiles())->toBe($files);
+    });
+
     it('answers 429 beyond the versions a person may freeze in an hour, for that person only, and starts again an hour later', function (): void {
         config(['inventories.versions_per_hour' => 2]);
         $case = versionTableCase();

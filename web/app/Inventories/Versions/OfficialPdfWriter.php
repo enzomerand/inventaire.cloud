@@ -21,6 +21,7 @@ use Dompdf\Canvas;
 use Dompdf\Dompdf;
 use Dompdf\FontMetrics;
 use Dompdf\Frame;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -31,13 +32,17 @@ use RuntimeException;
  * the moment it was frozen in the timezone of the instance and in UTC, the name of the inventory, the author, the number of items and the
  * full SHA-256 of the snapshot; and a footer with the version, the first characters of that SHA-256 and "Page x / y". The row of the
  * columns of a table is drawn on the pages of the items, not on the page of signatures, which is why the library does not repeat it
- * (see {@see self::columnRow()}); the space it takes is kept all the same.
+ * (see {@see self::columnRow()}); the space it takes is kept all the same. The description of the inventory, when it has one, is the
+ * first thing on the first page below the header, in at most {@see self::DESCRIPTION_MAX_CHARS} characters (a long description must not take
+ * the first page); on a table the row of the columns is drawn under it, on that page, so that it stays right above the rows it names.
  *
  * **The page of signatures** is a table of boxes, two to a row, ten at most (`inventories.max_signers`): name, e-mail, and an empty
  * area the signature goes in. Where each area is on the page is read from the layout the library has just made (its padding box, the
  * inside of the border), never worked out from constants that the layout could drift from: that is what the signature service is told.
  * A position is `{page, x, y, width, height}` with the page the last one and the other four as percentages of the page, `y` from the
  * top. The writer refuses (the version fails) a layout in which the areas do not all lie on the one last page, in the printable part of it.
+ * What stands above the boxes has a height that does not depend on the names it holds, so that ten signers always fit: the notice is a
+ * block of two lines, whatever it says, and the name of the inventory in it is cut to {@see self::NOTICE_NAME_PT} points.
  */
 final class OfficialPdfWriter
 {
@@ -58,6 +63,15 @@ final class OfficialPdfWriter
 
     /** The width a name or an e-mail address may take in a box of the page of signatures, in points. */
     private const SIGNER_TEXT_PT = 330.0;
+
+    /** The width the name of the inventory may take in the notice of the page of signatures, in points. */
+    private const NOTICE_NAME_PT = 300.0;
+
+    /** The most characters of the description of the inventory that are written on the first page. */
+    public const DESCRIPTION_MAX_CHARS = 500;
+
+    /** The air above and below the row of the columns when it is drawn under the description, in CSS pixels. */
+    private const DESCRIPTION_COLUMNS_GAP = 3;
 
     /** The bottom margin of the pages, in CSS pixels (see the stylesheet). */
     private const BOTTOM_MARGIN_PX = 48;
@@ -96,14 +110,15 @@ final class OfficialPdfWriter
         // Checked before the library reads a byte of it: this is the document whose layout would take the memory of the worker.
         PdfWriter::guard($html, $content->fields->count());
 
-        // The library frees the frames of a page as soon as it is drawn: the position of each signature area is read while it is.
+        // The library frees the frames of a page as soon as it is drawn: the position of each signature area (and of the description,
+        // which the row of the columns of the first page goes under) is read while it is.
         $boxes = [];
         $library->setCallbacks([[
             'event' => 'end_frame',
             'f' => function (Frame $frame, Canvas $canvas) use (&$boxes): void {
                 $node = $frame->get_node();
 
-                if ($node instanceof DOMElement && str_starts_with($node->getAttribute('id'), 'signer-')) {
+                if ($node instanceof DOMElement && (str_starts_with($node->getAttribute('id'), 'signer-') || $node->getAttribute('id') === 'description')) {
                     $boxes[$node->getAttribute('id')] = $this->box($frame, $canvas->get_page_number());
                 }
             },
@@ -114,7 +129,7 @@ final class OfficialPdfWriter
         $library->render();
 
         $pages = $library->getCanvas()->get_page_count();
-        $this->columnRow($library, $body, $signers !== []);
+        $this->columnRow($library, $body, $signers !== [], $boxes['description'] ?? null);
         $this->footer($library, $version);
         $areas = $signers === [] ? [] : $this->areas($library, $boxes, count($signers), $head);
 
@@ -165,20 +180,36 @@ final class OfficialPdfWriter
             'documentTitle' => $this->title($version),
             'headTitle' => PdfColumns::fit($this->title($version), PdfBody::TABLE_WIDTH_PT, $metrics, $bold, self::TITLE_SIZE_PT),
             'headLines' => $this->lines($version, $content, $body->count, $formatter, $metrics, $regular),
-            'description' => $content->inventoryDescription,
+            'description' => $this->description($content->inventoryDescription),
+            // Under the description, a table keeps the room of the row of its columns, which is drawn there on the first page.
+            'descriptionGap' => $body->columns === [] ? 10 : PdfHead::COLUMNS + 2 * self::DESCRIPTION_COLUMNS_GAP,
             'count' => $body->count,
             'asTable' => $body->asTable,
             'columns' => $body->columns,
             'rows' => $body->rows,
             'tableRows' => PdfBody::TABLE_ROWS,
             'signers' => $signers,
-            'signNotice' => __('By signing, the people below acknowledge version no. :number of the inventory “:inventory”, whose data has the SHA-256 fingerprint written at the top of every page.', ['number' => $version->number, 'inventory' => $content->inventoryName]),
+            'signNotice' => __('By signing, the people below acknowledge version no. :number of the inventory “:inventory”, whose data has the SHA-256 fingerprint written at the top of every page.', [
+                'number' => $version->number,
+                'inventory' => PdfColumns::fit($content->inventoryName, self::NOTICE_NAME_PT, $metrics, $regular, self::LINE_SIZE_PT),
+            ]),
             'perRow' => self::SIGNERS_PER_ROW,
             'areaWidth' => self::AREA_WIDTH_PX,
             'areaHeight' => self::AREA_HEIGHT_PX,
         ] + $head->view())->render();
 
         return ['html' => $html, 'body' => $body, 'signers' => $signers, 'head' => $head];
+    }
+
+    /**
+     * The description of the inventory as the first page shows it: on one line of text (HTML folds the breaks anyway), cut to
+     * {@see self::DESCRIPTION_MAX_CHARS} characters, the ellipsis included. Null when there is nothing to show.
+     */
+    private function description(?string $description): ?string
+    {
+        $text = trim((string) preg_replace('/\s+/u', ' ', (string) $description));
+
+        return $text === '' ? null : Str::limit($text, self::DESCRIPTION_MAX_CHARS - 1, '…');
     }
 
     /**
@@ -237,8 +268,13 @@ final class OfficialPdfWriter
      * It is drawn here and not written in the repeated header because the library repeats the header on every page, the page of
      * signatures included, where the columns of the items would stand over the boxes of the signers. The row is placed where the
      * header of an export puts it, with the same widths, borders and colours, so that the columns of the items line up under it.
+     *
+     * The first page has the description of the inventory right under the header when there is one: the row is then drawn under the
+     * description, in the room the view keeps for it, not above it.
+     *
+     * @param  array{page: int, x: float, y: float, width: float, height: float}|null  $description  Where the library laid the description out.
      */
-    private function columnRow(Dompdf $library, PdfBody $body, bool $skipLast): void
+    private function columnRow(Dompdf $library, PdfBody $body, bool $skipLast, ?array $description): void
     {
         if ($body->columns === []) {
             return;
@@ -250,17 +286,20 @@ final class OfficialPdfWriter
         $size = PdfBody::HEADER_SIZE_PT;
         $left = 32 * self::PX;
         $width = $canvas->get_width() - 2 * $left;
-        $top = (PdfHead::MARGIN + PdfHead::TITLE + 3 * PdfHead::LINE + PdfHead::GAP) * self::PX;
+        $header = (PdfHead::MARGIN + PdfHead::TITLE + 3 * PdfHead::LINE + PdfHead::GAP) * self::PX;
+        $first = $description !== null && $description['page'] === 1 ? ($description['y'] + $description['height']) + self::DESCRIPTION_COLUMNS_GAP * self::PX : $header;
         $height = PdfHead::COLUMNS * self::PX;
         $padding = 5 * self::PX;
-        $text = $top + ($height - $metrics->getFontHeight($font, $size)) / 2;
         $columns = $body->columns;
         $last = $canvas->get_page_count();
 
-        $canvas->page_script(function (int $page) use ($canvas, $metrics, $columns, $skipLast, $last, $left, $width, $top, $height, $padding, $text, $font, $size): void {
+        $canvas->page_script(function (int $page) use ($canvas, $metrics, $columns, $skipLast, $last, $left, $width, $header, $first, $height, $padding, $font, $size): void {
             if ($skipLast && $page === $last) {
                 return;
             }
+
+            $top = $page === 1 ? $first : $header;
+            $text = $top + ($height - $metrics->getFontHeight($font, $size)) / 2;
 
             $x = $left;
 
