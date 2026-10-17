@@ -284,6 +284,50 @@ function contractScenarios(): array
             contractCheck(contractCall($test, $world['owner'], 'startImport', 'POST', $uri, ['mapping' => $sent->json('data.mapping')]), 'startImport', 202);
         },
 
+        'listVersions' => function (object $test): void {
+            $world = contractWorld();
+            contractVersion($world);
+            contractVersion($world, versionSigners(2), 'Year end');
+
+            contractCheck(contractCall($test, $world['owner'], 'listVersions', 'GET', contractUri($world['inventory'], '/versions')), 'listVersions', 200);
+        },
+
+        'createVersion' => function (object $test): void {
+            Queue::fake();
+            versionDocumenso();
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'createVersion', 'POST', contractUri($world['inventory'], '/versions'), ['label' => 'Year end', 'signers' => versionSigners(2)]), 'createVersion', 202);
+        },
+
+        'getVersion' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world, versionSigners(1), 'Year end');
+
+            contractCheck(contractCall($test, $world['owner'], 'getVersion', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}")), 'getVersion', 200);
+        },
+
+        'deleteVersion' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'deleteVersion', 'DELETE', contractUri($world['inventory'], "/versions/{$version->ulid}")), 'deleteVersion', 204);
+        },
+
+        'downloadVersionPdf' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'downloadVersionPdf', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/pdf")), 'downloadVersionPdf', 200, 'application/pdf');
+        },
+
+        'downloadVersionSnapshot' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'downloadVersionSnapshot', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/snapshot")), 'downloadVersionSnapshot', 200, 'application/json');
+        },
+
         'listTemplates' => function (object $test): void {
             templateFixtures();
 

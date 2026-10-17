@@ -8,6 +8,7 @@ use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Attachments\FileNames;
 use App\Models\Attachment;
 use App\Models\Export;
+use App\Models\InventoryVersion;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -34,7 +35,8 @@ use Throwable;
  *   a reader who loses access (removed from the workspace, file deleted) is not served from their cache for an hour, and one
  *   who still has it costs a 304. The thumbnail, a small image shown by the dozen, is kept for an hour.
  *
- * The file of an export gets the same treatment ({@see self::export()}), with a name of its own and no cache at all.
+ * The file of an export gets the same treatment ({@see self::export()}), with a name of its own and no cache at all, and so do the
+ * files of an official version ({@see self::version()}).
  *
  * The file is streamed from the disk: it is never read into memory whole. A file that is not on its disk is a 404; a disk that
  * is no longer configured is a 404 too; a disk that cannot be read right now (the bucket is down) is a 503, written in the log.
@@ -104,16 +106,36 @@ final class StoredFileResponse
      */
     public static function export(Export $export, AttachmentStorage $storage): StreamedResponse|JsonResponse
     {
-        $name = $export->file_name ?? 'export';
+        return self::download($export->disk, (string) $export->path, $export->file_name ?? 'export', $export->mime ?? 'application/octet-stream', $export->size, $storage);
+    }
 
-        return self::stream($export->disk, (string) $export->path, $storage, [
-            'Content-Type' => $export->mime ?? 'application/octet-stream',
+    /**
+     * A file of an official version (its snapshot, its PDF, its signed PDF), always a download, as the file of an export is: the
+     * name it is given, `nosniff`, a sandbox for whatever it renders, and never kept by a cache. The caller has checked that the reader
+     * may see the version and that the version is completed.
+     *
+     * @param  string  $path  Where the file is on the disk of the version.
+     * @param  string  $name  The name it is downloaded as.
+     * @param  string  $mime  Its type, `application/pdf` or `application/json`.
+     * @param  int  $size  Its size, in bytes, as the version recorded it.
+     */
+    public static function version(InventoryVersion $version, string $path, string $name, string $mime, int $size, AttachmentStorage $storage): StreamedResponse|JsonResponse
+    {
+        return self::download($version->disk, $path, $name, $mime, $size, $storage);
+    }
+
+    /**
+     * A file the application wrote for the reader (an export, a version), as a download that is never cached.
+     */
+    private static function download(string $diskName, string $path, string $name, string $mime, ?int $size, AttachmentStorage $storage): StreamedResponse|JsonResponse
+    {
+        return self::stream($diskName, $path, $storage, [
+            'Content-Type' => $mime,
             'Content-Disposition' => HeaderUtils::makeDisposition('attachment', $name, FileNames::asciiFallback($name)),
             'X-Content-Type-Options' => 'nosniff',
             'Content-Security-Policy' => self::SANDBOX,
             'Cache-Control' => 'private, no-store',
-            'Content-Length' => (string) $export->size,
-        ]);
+        ] + ($size === null ? [] : ['Content-Length' => (string) $size]));
     }
 
     /**

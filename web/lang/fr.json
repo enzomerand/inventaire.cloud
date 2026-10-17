@@ -1173,5 +1173,16 @@
     "The signature service could not be reached. Try again later.": "Le service de signature est injoignable. Réessayez plus tard.",
     "The signature service refused the request. Check its configuration, then try again.": "Le service de signature a refusé la demande. Vérifiez sa configuration, puis réessayez.",
     "The signature request no longer exists at the signature service.": "La demande de signature n'existe plus chez le service de signature.",
-    "The signature request did not finish and was cancelled. Try again.": "La demande de signature ne s'est pas terminée et a été annulée. Réessayez."
+    "The signature request did not finish and was cancelled. Try again.": "La demande de signature ne s'est pas terminée et a été annulée. Réessayez.",
+    "You are not allowed to see the official versions of this inventory.": "Vous n'avez pas le droit de voir les versions officielles de cet inventaire.",
+    "You are not allowed to freeze this inventory as an official version.": "Vous n'avez pas le droit de figer cet inventaire en version officielle.",
+    "Only an owner of this workspace can delete an official version.": "Seul un propriétaire de cet espace de travail peut supprimer une version officielle.",
+    "You are not allowed to cancel the signature request of this version.": "Vous n'avez pas le droit d'annuler la demande de signature de cette version.",
+    "You are not allowed to send the signature request of this version again.": "Vous n'avez pas le droit de relancer l'envoi de la demande de signature de cette version.",
+    "An inventory cannot hold more than :count official version: delete one to freeze it again.|An inventory cannot hold more than :count official versions: delete one to freeze it again.": "Un inventaire ne peut pas contenir plus de :count version officielle : supprimez-en une pour le figer de nouveau.|Un inventaire ne peut pas contenir plus de :count versions officielles : supprimez-en une pour le figer de nouveau.",
+    "Signatures cannot be asked for: this instance has no signature service configured.": "Les signatures ne peuvent pas être demandées : cette instance n'a pas de service de signature configuré.",
+    "A version of this inventory cannot hold more than :count item, which is all a PDF can hold.|A version of this inventory cannot hold more than :count items, which is all a PDF can hold.": "Une version de cet inventaire ne peut pas contenir plus de :count article, ce qu'un PDF peut contenir au maximum.|Une version de cet inventaire ne peut pas contenir plus de :count articles, ce qu'un PDF peut contenir au maximum.",
+    "This version is not ready yet.": "Cette version n'est pas encore prête.",
+    "version :number": "version :number",
+    "Inventory": "Inventaire"
 }
