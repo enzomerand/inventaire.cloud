@@ -12,7 +12,10 @@
 
     The page of signatures comes last, after a page break: a box for each signer, with an empty area (`#signer-N`) the signature is
     drawn in. The writer reads the position of each area from the laid-out page, to tell the signature service where to put the field.
-    The notice above the boxes is a block of two lines whatever it says, so that the boxes are always at the same place.
+    The notice above the boxes is never clipped: it is at least two lines high (so that the boxes are at the same place for the notices
+    the application writes, which take one line or two) and grows with its text if it takes more. The name of the inventory in it is
+    cut by the writer to a width that keeps it short; what is above the boxes does not otherwise depend on the names, and the writer
+    measures where the areas end up and fails the version if they do not all fit on the last page.
 --}}
 <!DOCTYPE html>
 <html lang="{{ $locale }}">
@@ -26,9 +29,10 @@
         .signatures { page-break-before: always; }
         .signatures h2 { font-size: 13pt; line-height: 22px; height: 22px; margin: 0 0 4px 0; padding: 0; }
         .description { margin-bottom: {{ $descriptionGap }}px; }
-        .signatures .notice { color: #52606d; line-height: 13px; height: 26px; overflow: hidden; margin: 0 0 8px 0; }
+        {{-- The library lays a line out 1.28 times the line height it is given: 10px make a line of 12.8px, two lines 25.6px, under the 26px of the least height. --}}
+        .signatures .notice { color: #52606d; line-height: 10px; min-height: 26px; margin: 0 0 8px 0; }
         table.signers { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-        table.signers td { border: 0; padding: 0 6px 6px 0; vertical-align: top; background-color: #ffffff; }
+        table.signers td { border: 0; padding: 0 6px 4px 0; vertical-align: top; background-color: #ffffff; }
         .signer { border: 1px solid #b8c1ca; padding: 4px 6px; }
         .signer .who { font-size: 9pt; font-weight: bold; line-height: 13px; height: 13px; white-space: nowrap; overflow: hidden; }
         .signer .mail { color: #52606d; line-height: 13px; height: 13px; white-space: nowrap; overflow: hidden; }

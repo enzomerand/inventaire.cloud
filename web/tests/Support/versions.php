@@ -220,3 +220,85 @@ function versionDrawnAreas(string $pdf, float $pageHeight = 595.28): array
 
     return $areas;
 }
+
+/**
+ * The text a PDF draws, one string for each text operator of its pages, in the order it was written: the library writes a line of text
+ * as one `[(...)] TJ` operator, its characters as UTF-16, so that a paragraph of three lines is three consecutive strings. Spaces that
+ * do not break (the ones ICU puts in dates, numbers and French punctuation) are plain spaces.
+ *
+ * Clipped text is still in the file: this tells what is written, not what is seen.
+ *
+ * @return list<string>
+ */
+function versionPdfText(string $pdf): array
+{
+    $lines = [];
+
+    foreach (versionPdfStreams($pdf) as $raw) {
+        $content = @gzuncompress($raw);
+
+        if ($content === false) {
+            continue;
+        }
+
+        $length = strlen($content);
+
+        for ($at = 0; $at < $length; $at++) {
+            if ($content[$at] !== '[') {
+                continue;
+            }
+
+            $text = '';
+            $end = $at + 1;
+
+            while ($end < $length && $content[$end] !== ']') {
+                if ($content[$end] === '(') {
+                    $string = '';
+
+                    for ($end++; $end < $length && $content[$end] !== ')'; $end++) {
+                        if ($content[$end] === '\\') {
+                            $end++;
+                            $string .= match ($content[$end]) {
+                                'n' => "\n", 'r' => "\r", 't' => "\t", 'b' => "\x08", 'f' => "\x0C", default => $content[$end],
+                            };
+
+                            continue;
+                        }
+
+                        $string .= $content[$end];
+                    }
+
+                    $text .= mb_convert_encoding($string, 'UTF-8', 'UTF-16BE');
+                }
+
+                $end++;
+            }
+
+            if (preg_match('/^\]\s*TJ/', substr($content, $end, 6)) === 1) {
+                $lines[] = str_replace(["\u{202F}", "\u{00A0}"], ' ', $text);
+            }
+
+            $at = $end;
+        }
+    }
+
+    return $lines;
+}
+
+/**
+ * The notice above the boxes of the page of signatures, as the page the library lays out says it (HTML entities decoded, spaces folded).
+ */
+function versionNoticeText(string $html): string
+{
+    preg_match('/<p class="notice">(.*?)<\/p>/s', $html, $found);
+
+    return trim((string) preg_replace('/\s+/u', ' ', html_entity_decode($found[1] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+}
+
+/**
+ * Whether a PDF writes a text whole, in the order of its words: the lines of the PDF put one after the other, spaces folded.
+ */
+function versionPdfWrites(string $pdf, string $text): bool
+{
+    return str_contains(trim((string) preg_replace('/\s+/u', ' ', implode(' ', versionPdfText($pdf)))), $text);
+}

@@ -338,13 +338,18 @@ describe('the page of signatures, whatever the names', function (): void {
 
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], $cyrillic, $signers));
         $fields = array_column($version->signers ?? [], 'field');
-        $drawn = versionDrawnAreas(versionFile($version, (string) $version->pdf_path));
+        $pdf = versionFile($version, (string) $version->pdf_path);
+        $drawn = versionDrawnAreas($pdf);
+        $notice = versionNoticeText(versionHtml($version));
 
         expect($version->status)->toBe(VersionStatus::Completed, (string) $version->error?->value)
             ->and($fields)->toHaveCount(10)
             ->and($drawn)->toHaveCount(10)
             ->and(array_unique(array_column($fields, 'page')))->toBe([$version->pdf_pages])
-            ->and(max(array_map(fn (array $field): float => $field['y'] + $field['height'], $fields)))->toBeLessThan(100 - 48 * 0.75 / 595.28 * 100);
+            ->and(max(array_map(fn (array $field): float => $field['y'] + $field['height'], $fields)))->toBeLessThan(100 - 48 * 0.75 / 595.28 * 100)
+            // The notice is whole in the file, from its first word to its last, with the name of the inventory cut and not the sentence.
+            ->and($notice)->toContain($locale === 'fr' ? '« WWW' : '“WWW')->toContain($locale === 'fr' ? '… »' : '…”')->toEndWith($locale === 'fr' ? 'chaque page.' : 'every page.')
+            ->and(versionPdfWrites($pdf, $notice))->toBeTrue();
 
         foreach ($fields as $index => $field) {
             expect($field['x'])->toEqualWithDelta($drawn[$index]['x'] / 841.89 * 100, 0.01)
@@ -352,7 +357,7 @@ describe('the page of signatures, whatever the names', function (): void {
         }
     })->with(['en', 'fr']);
 
-    it('puts the boxes at the same place whatever the notice says: it is a block of two lines', function (): void {
+    it('puts the boxes at the same place whatever the usual notice says, one line or two: it is at least two lines high', function (): void {
         versionDocumenso();
         $short = versionTableCase();
         $long = versionTableCase();
@@ -362,6 +367,55 @@ describe('the page of signatures, whatever the names', function (): void {
         $second = versionRun(versionFreeze($long['inventory'], $long['team']['owner'], null, versionSigners(10)));
 
         expect(array_column($second->signers ?? [], 'field'))->toBe(array_column($first->signers ?? [], 'field'));
+    });
+
+    it('shows the whole notice, never cut by the height of a block: the usual one takes two lines of its own', function (string $locale): void {
+        app()->setLocale($locale);
+        versionDocumenso();
+        $case = versionTableCase();
+        $case['inventory']->forceFill(['name' => str_repeat('W', 120)])->save();
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(2)));
+        $css = (string) file_get_contents(resource_path('views/versions/pdf.blade.php'));
+
+        preg_match('/\.signatures \.notice \{([^}]*)\}/', $css, $rule);
+
+        expect($rule[1] ?? '')->not->toContain('overflow')->not->toMatch('/(?<![-a-z])height:/')->toContain('min-height: 26px')
+            ->and(versionPdfWrites(versionFile($version, (string) $version->pdf_path), versionNoticeText(versionHtml($version))))->toBeTrue();
+    })->with(['en', 'fr']);
+
+    it('makes room for a notice that takes more lines than the usual one, and writes all of it: the boxes go down, nothing is clipped', function (): void {
+        versionDocumenso();
+        $key = 'By signing, the people below acknowledge version no. :number of the inventory “:inventory”, whose data has the SHA-256 fingerprint written at the top of every page.';
+        $usual = versionTableCase();
+        $roomy = versionTableCase();
+        $one = versionRun(versionFreeze($usual['inventory'], $usual['team']['owner'], null, versionSigners(10)));
+
+        // A longer sentence, as a language of its own could make: three lines of the page (a fourth would not leave room for the boxes).
+        app('translator')->setLoaded(['*' => ['*' => ['en' => [$key => $key.' '.str_repeat('Each signature binds the person who gives it. ', 8)]]]]);
+        $three = versionRun(versionFreeze($roomy['inventory'], $roomy['team']['owner'], null, versionSigners(10)));
+        $pdf = versionFile($three, (string) $three->pdf_path);
+
+        $first = fn (InventoryVersion $version): float => array_column($version->signers ?? [], 'field')[0]['y'];
+
+        expect($three->status)->toBe(VersionStatus::Completed, (string) $three->error?->value)
+            ->and(array_unique(array_column(array_column($three->signers ?? [], 'field'), 'page')))->toBe([$three->pdf_pages])
+            // One more line of 12.8 pixels: 1.6 % of the page.
+            ->and($first($three) - $first($one))->toBeGreaterThan(1.0)->toBeLessThan(2.5)
+            ->and(versionNoticeText(versionHtml($three)))->toContain('Each signature binds the person who gives it. Each')
+            ->and(versionPdfWrites($pdf, versionNoticeText(versionHtml($three))))->toBeTrue()
+            ->and(max(array_map(fn (array $field): float => $field['y'] + $field['height'], array_column($three->signers ?? [], 'field'))))->toBeLessThan(100 - 48 * 0.75 / 595.28 * 100);
+    });
+
+    it('fails the version, rather than draw the boxes where they do not fit, when the notice takes the room of the boxes', function (): void {
+        versionDocumenso();
+        Log::spy();
+        $key = 'By signing, the people below acknowledge version no. :number of the inventory “:inventory”, whose data has the SHA-256 fingerprint written at the top of every page.';
+        app('translator')->setLoaded(['*' => ['*' => ['en' => [$key => str_repeat('Each signature binds the person who gives it. ', 60)]]]]);
+        $case = versionTableCase();
+
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(10)));
+
+        expect($version->status)->toBe(VersionStatus::Failed)->and($version->error)->toBe(VersionError::GenerationFailed);
     });
 
     it('cuts the name of the inventory in the notice, and keeps the real one in the data', function (): void {

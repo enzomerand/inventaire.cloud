@@ -41,8 +41,11 @@ use RuntimeException;
  * inside of the border), never worked out from constants that the layout could drift from: that is what the signature service is told.
  * A position is `{page, x, y, width, height}` with the page the last one and the other four as percentages of the page, `y` from the
  * top. The writer refuses (the version fails) a layout in which the areas do not all lie on the one last page, in the printable part of it.
- * What stands above the boxes has a height that does not depend on the names it holds, so that ten signers always fit: the notice is a
- * block of two lines, whatever it says, and the name of the inventory in it is cut to {@see self::NOTICE_NAME_PT} points.
+ * What stands above the boxes does not depend on the names it holds, so that ten signers always fit: the name of the inventory in the
+ * notice is cut to {@see self::NOTICE_NAME_PT} points (it is written whole in the header of the page, up to the width of the line, and
+ * in the data), which keeps the notice to two lines in the languages of the application. The notice is never clipped: it is at least
+ * two lines high, so that the boxes sit at the same place for the usual notices, and it takes the room its text needs if that is more;
+ * the check of the areas above then decides, on the layout the library made, whether they all fit.
  */
 final class OfficialPdfWriter
 {
