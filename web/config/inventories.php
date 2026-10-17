@@ -239,6 +239,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Official versions
+    |--------------------------------------------------------------------------
+    |
+    | An editor of a workspace can freeze an inventory as a numbered, dated
+    | official version: a canonical `snapshot.json` taken while the inventory is
+    | locked (its SHA-256 is recorded), then a PDF written from that snapshot by
+    | a queued job, which can be sent to Documenso to be signed. The files are
+    | stored with the other private files and count against `storage_per_workspace`.
+    |
+    | - `max_versions_per_inventory`: versions one inventory may hold
+    |   (`INVENTORIES_MAX_VERSIONS`, 200): the API answers 409
+    |   (`version_limit_reached`) beyond, until one is deleted. Counted under the
+    |   lock of the inventory.
+    | - `max_signers`: people one version may ask a signature from
+    |   (`INVENTORIES_MAX_SIGNERS`, 10): the signature page holds ten boxes at
+    |   most, so a larger value is brought back to 10.
+    | - `versions_per_hour`: versions one person may create in an hour
+    |   (`INVENTORIES_VERSIONS_PER_HOUR`, 10), `429` beyond: every one locks an
+    |   inventory while it reads all its items.
+    |
+    | The PDF holds as many items as `pdf_max_items` allows, as the PDF of an
+    | export does; the API answers 422 (`pdf_too_large`) beyond.
+    |
+    */
+    'max_versions_per_inventory' => (int) env('INVENTORIES_MAX_VERSIONS', 200),
+
+    'max_signers' => min(10, (int) env('INVENTORIES_MAX_SIGNERS', 10)),
+
+    'versions_per_hour' => (int) env('INVENTORIES_VERSIONS_PER_HOUR', 10),
+
+    /*
+    |--------------------------------------------------------------------------
     | API tokens
     |--------------------------------------------------------------------------
     |

@@ -122,6 +122,17 @@ final class Inventory extends Model
     }
 
     /**
+     * The official versions of the inventory, whoever froze them. The route key of a version is its ULID, and a version is bound
+     * through this relation (`/inventories/{inventory}/versions/{version}`), so a version of another inventory is a 404.
+     *
+     * @return HasMany<InventoryVersion, $this>
+     */
+    public function versions(): HasMany
+    {
+        return $this->hasMany(InventoryVersion::class);
+    }
+
+    /**
      * The items of the inventory. Unordered: the caller says whether it wants the newest first or something else.
      *
      * @return HasMany<Item, $this>

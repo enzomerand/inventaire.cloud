@@ -40,6 +40,7 @@ final class ApplicationTables
         'attachments',
         'exports',
         'imports',
+        'inventory_versions',
     ];
 
     /**

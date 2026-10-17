@@ -1156,5 +1156,22 @@
     "Maximum length: :value": "Longueur maximale : :value",
     "Minimum items: :value": "Nombre minimal d'éléments : :value",
     "Maximum items: :value": "Nombre maximal d'éléments : :value",
-    "Pattern: :value": "Motif : :value"
+    "Pattern: :value": "Motif : :value",
+    "Official version no. :number": "Version officielle n° :number",
+    "Frozen on :date": "Figée le :date",
+    "Author: :name": "Auteur : :name",
+    "SHA-256 of the data: :hash": "SHA-256 des données : :hash",
+    "SHA-256 :hash": "SHA-256 :hash",
+    "Signatures": "Signatures",
+    "Signature": "Signature",
+    "By signing, the people below acknowledge version no. :number of the inventory “:inventory”, whose data has the SHA-256 fingerprint written at the top of every page.": "En signant, les personnes ci-dessous reconnaissent la version officielle n° :number de l'inventaire « :inventory », dont les données ont l'empreinte SHA-256 inscrite en haut de chaque page.",
+    "Each signer needs a different email address.": "Chaque signataire doit avoir une adresse e-mail différente.",
+    "The PDF of this version could not be generated. Delete it and freeze the inventory again.": "Le PDF de cette version n'a pas pu être généré. Supprimez-la et figez de nouveau l'inventaire.",
+    "This version is too large to be written as a PDF. Delete it: a PDF holds fewer items than the inventory has.": "Cette version est trop volumineuse pour être écrite en PDF. Supprimez-la : un PDF contient moins d'articles que l'inventaire.",
+    "This version did not finish and was cancelled. Delete it and freeze the inventory again.": "Cette version ne s'est pas terminée et a été annulée. Supprimez-la et figez de nouveau l'inventaire.",
+    "The data of this version could not be stored. Delete it and freeze the inventory again.": "Les données de cette version n'ont pas pu être enregistrées. Supprimez-la et figez de nouveau l'inventaire.",
+    "The signature service could not be reached. Try again later.": "Le service de signature est injoignable. Réessayez plus tard.",
+    "The signature service refused the request. Check its configuration, then try again.": "Le service de signature a refusé la demande. Vérifiez sa configuration, puis réessayez.",
+    "The signature request no longer exists at the signature service.": "La demande de signature n'existe plus chez le service de signature.",
+    "The signature request did not finish and was cancelled. Try again.": "La demande de signature ne s'est pas terminée et a été annulée. Réessayez."
 }
