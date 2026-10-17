@@ -18,7 +18,7 @@ use Throwable;
  * Queued when the PDF is written, and when a person sends a failed request again. It is tried five times, with a pause that grows
  * (10 seconds, a minute, five minutes, a quarter of an hour), and every try resumes where the last stopped: an envelope that was
  * created is recorded at once and never created twice. A refusal by Documenso ends the request without waiting for the tries; when the
- * tries run out (Documenso cannot be reached, keeps failing, or the job outlives its 2 minutes) the request is `failed` with
+ * tries run out (Documenso cannot be reached, keeps failing, or the job outlives its 4 minutes: the creation of the envelope, which carries the PDF, may wait two minutes for Documenso, the other calls 20 seconds) the request is `failed` with
  * `documenso_unavailable`, and the person can send it again.
  *
  * The version is serialized by its key and read again when the job runs: one deleted before that is no failure, the job is dropped.
@@ -27,8 +27,8 @@ final class RequestSignatures implements ShouldQueue
 {
     use Queueable, SerializesModels;
 
-    /** The seconds the job may run. */
-    public const TIMEOUT = 120;
+    /** The seconds the job may run: more than the two minutes the creation of the envelope may wait, and the calls after it. */
+    public const TIMEOUT = 240;
 
     /** How many times the job is tried. */
     public int $tries = 5;

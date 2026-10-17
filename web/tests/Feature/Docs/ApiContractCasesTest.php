@@ -278,6 +278,43 @@ describe('the errors of the official versions', function (): void {
     });
 });
 
+describe('the daily limit of the requests for signatures', function (): void {
+    it('answers 429 in JSON to a workspace that asks for signatures too often, on both operations that ask, with the code and the headers the document lists', function (): void {
+        Queue::fake();
+        config(['inventories.signature_requests_per_workspace_per_day' => 1]);
+        $world = contractWorld();
+        $uri = contractUri($world['inventory'], '/versions');
+        versionDocumenso();
+        $signers = ['signers' => versionSigners(1)];
+
+        contractCheck(contractCall($this, $world['owner'], 'createVersion', 'POST', $uri, $signers), 'createVersion', 202);
+        $created = contractCall($this, $world['owner'], 'createVersion', 'POST', $uri, $signers);
+        contractCheck($created, 'createVersion', 429);
+
+        $failed = versionFreeze($world['inventory'], $world['owner']);
+        $failed->forceFill(['status' => VersionStatus::Completed, 'signature_status' => SignatureStatus::Failed, 'pdf_path' => 'x/official.pdf', 'pdf_size' => 10, 'pdf_sha256' => str_repeat('a', 64), 'pdf_pages' => 1])->save();
+        $retried = contractCall($this, $world['owner'], 'retryVersionSignature', 'POST', contractUri($world['inventory'], "/versions/{$failed->ulid}/signature/retry"));
+        contractCheck($retried, 'retryVersionSignature', 429);
+
+        foreach (['createVersion' => $created, 'retryVersionSignature' => $retried] as $operation => $response) {
+            foreach (contractHeaders($operation, 429) as $header) {
+                expect($response->headers->has($header))->toBeTrue("the header {$header} of {$operation}");
+            }
+
+            expect($response->json('code'))->toBe('too_many_requests')
+                ->and(contractCodes($operation, 429))->toContain('too_many_requests')
+                ->and((int) $response->headers->get('Retry-After'))->toBeBetween(86300, 86400);
+        }
+    });
+
+    it('is told in the document: the descriptions of both operations name the limit of the workspace', function (): void {
+        $document = (string) file_get_contents(resource_path('openapi/v1.yaml'));
+
+        expect(substr_count($document, 'the workspace has already made as many'))->toBe(2)
+            ->and($document)->toContain('A workspace can ask for signatures 20 times a day by default')->toContain('the workspace can make 20 a day by default');
+    });
+});
+
 describe('the errors of the requests for signatures', function (): void {
     it('answers 409 to the download of a signed PDF that is not ready, with a code the document lists', function (): void {
         $world = contractWorld();

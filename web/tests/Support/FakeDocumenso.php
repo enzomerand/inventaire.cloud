@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * A Documenso for the tests, behind `Http::fake()`: it answers the calls of the API version 2 that the application makes
- * (`/envelope/create`, `/envelope/{id}`, `/envelope/distribute`, `/envelope/cancel`, `/envelope/item/{id}/download`) the way the real
+ * (`/envelope/create`, `/envelope/{id}`, `/envelope/distribute`, `/envelope/cancel`, `/envelope/delete`, `/envelope/item/{id}/download`) the way the real
  * one does, with the state of one envelope, and it records every call. Any other request is refused (`Http::preventStrayRequests()`).
  *
  * A test drives it: it makes people sign, refuses, cancels or completes the envelope, makes the next calls of one kind fail (with a
@@ -52,6 +52,12 @@ final class FakeDocumenso
     /** @var list<Request> Every request, in order. */
     public array $requests = [];
 
+    /** @var list<array<string, mixed>> The options each request was made with (`timeout`, `connect_timeout`, `sink`...), in the same order. */
+    public array $options = [];
+
+    /** @var array<string, array{status: string, externalId: string|null, recipients: list<array<string, mixed>>}> Envelopes Documenso has besides the one in the fields above, by id. */
+    public array $others = [];
+
     /** @var list<string> What each request was, in order (`POST /envelope/create`). */
     public array $calls = [];
 
@@ -80,7 +86,7 @@ final class FakeDocumenso
         }
 
         $fake = new self;
-        Http::fake(fn (Request $request) => $fake->respond($request));
+        Http::fake(fn (Request $request, array $options = []) => $fake->respond($request, $options));
         Http::preventStrayRequests();
 
         self::$network = $network;
@@ -169,6 +175,34 @@ final class FakeDocumenso
     }
 
     /**
+     * Gives Documenso another envelope than the one the fields hold, as when two tries made two.
+     *
+     * @param  list<array<string, mixed>>  $recipients
+     */
+    public function other(string $id, string $status, ?string $externalId, array $recipients = []): self
+    {
+        $this->others[$id] = ['status' => $status, 'externalId' => $externalId, 'recipients' => $recipients];
+
+        return $this;
+    }
+
+    /**
+     * The seconds the last request of a kind was allowed to take (the `timeout` it was made with); null when there was none.
+     */
+    public function timeoutOf(string $call): ?int
+    {
+        $found = null;
+
+        foreach ($this->calls as $index => $made) {
+            if ($made === $call) {
+                $found = $this->options[$index]['timeout'] ?? null;
+            }
+        }
+
+        return $found === null ? null : (int) $found;
+    }
+
+    /**
      * The requests of a kind, in order.
      *
      * @return list<Request>
@@ -226,7 +260,7 @@ final class FakeDocumenso
     /**
      * Answers a request.
      */
-    public function respond(Request $request): mixed
+    public function respond(Request $request, array $options = []): mixed
     {
         $path = (string) parse_url($request->url(), PHP_URL_PATH);
 
@@ -236,6 +270,7 @@ final class FakeDocumenso
 
         $call = $request->method().' '.$this->generic(substr($path, strlen('/api/v2')));
         $this->requests[] = $request;
+        $this->options[] = $options;
         $this->calls[] = $call;
 
         if (($request->header('Authorization')[0] ?? null) !== self::API_KEY) {
@@ -257,8 +292,9 @@ final class FakeDocumenso
         return match ($call) {
             'POST /envelope/create' => $this->create($request),
             'GET /envelope/{id}' => $this->read($path),
-            'POST /envelope/distribute' => $this->distribute(),
-            'POST /envelope/cancel' => $this->cancel(),
+            'POST /envelope/distribute' => $this->distribute($request),
+            'POST /envelope/cancel' => $this->cancel($request),
+            'POST /envelope/delete' => $this->delete($request),
             'GET /envelope/item/{id}/download' => $this->download(),
             default => Http::response(['code' => 'NOT_FOUND'], 404),
         };
@@ -269,7 +305,7 @@ final class FakeDocumenso
      */
     private function generic(string $path): string
     {
-        return (string) preg_replace(['#^/envelope/item/[^/]+/download$#', '#^/envelope/(?!create$|distribute$|cancel$)[^/]+$#'], ['/envelope/item/{id}/download', '/envelope/{id}'], $path);
+        return (string) preg_replace(['#^/envelope/item/[^/]+/download$#', '#^/envelope/(?!create$|distribute$|cancel$|delete$)[^/]+$#'], ['/envelope/item/{id}/download', '/envelope/{id}'], $path);
     }
 
     /**
@@ -299,6 +335,18 @@ final class FakeDocumenso
      */
     private function read(string $path): mixed
     {
+        $other = $this->others[basename($path)] ?? null;
+
+        if ($other !== null) {
+            return Http::response([
+                'id' => basename($path),
+                'status' => $other['status'],
+                'externalId' => $other['externalId'],
+                'recipients' => $other['recipients'],
+                'envelopeItems' => [['id' => 'envelope_item_'.basename($path), 'order' => 1, 'title' => 'document.pdf']],
+            ]);
+        }
+
         if (! $this->exists || basename($path) !== $this->envelopeId) {
             return Http::response(['code' => 'NOT_FOUND', 'message' => 'Envelope not found'], 404);
         }
@@ -316,8 +364,18 @@ final class FakeDocumenso
     /**
      * Sends the envelope: its signers are emailed.
      */
-    private function distribute(): mixed
+    private function distribute(Request $request): mixed
     {
+        $other = $request->data()['envelopeId'] ?? null;
+
+        if (is_string($other) && isset($this->others[$other])) {
+            if ($this->others[$other]['status'] === 'DRAFT') {
+                $this->others[$other]['status'] = 'PENDING';
+            }
+
+            return Http::response(['success' => true, 'id' => $other, 'recipients' => $this->others[$other]['recipients']]);
+        }
+
         if ($this->status === 'DRAFT') {
             $this->status = 'PENDING';
 
@@ -332,13 +390,47 @@ final class FakeDocumenso
     /**
      * Cancels the envelope if it is pending.
      */
-    private function cancel(): mixed
+    private function cancel(Request $request): mixed
     {
+        $other = $request->data()['envelopeId'] ?? null;
+
+        if (is_string($other) && isset($this->others[$other])) {
+            if ($this->others[$other]['status'] !== 'PENDING') {
+                return Http::response(['code' => 'INVALID_REQUEST', 'message' => 'Only pending documents can be cancelled'], 400);
+            }
+
+            $this->others[$other]['status'] = 'CANCELLED';
+
+            return Http::response(['success' => true]);
+        }
+
         if ($this->status !== 'PENDING') {
             return Http::response(['code' => 'INVALID_REQUEST', 'message' => 'Only pending documents can be cancelled'], 400);
         }
 
         $this->status = 'CANCELLED';
+
+        return Http::response(['success' => true]);
+    }
+
+    /**
+     * Deletes the envelope: it is gone.
+     */
+    private function delete(Request $request): mixed
+    {
+        $id = $request->data()['envelopeId'] ?? null;
+
+        if (is_string($id) && isset($this->others[$id])) {
+            unset($this->others[$id]);
+
+            return Http::response(['success' => true]);
+        }
+
+        if (! $this->exists || $id !== $this->envelopeId) {
+            return Http::response(['code' => 'NOT_FOUND', 'message' => 'Envelope not found'], 404);
+        }
+
+        $this->exists = false;
 
         return Http::response(['success' => true]);
     }

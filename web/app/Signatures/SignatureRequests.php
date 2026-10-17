@@ -14,7 +14,10 @@ use App\Inventories\Versions\SignatureStatus;
 use App\Inventories\Versions\VersionStatus;
 use App\Jobs\RequestSignatures;
 use App\Jobs\SyncSignature;
+use App\Models\Inventory;
 use App\Models\InventoryVersion;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -28,7 +31,8 @@ use Throwable;
  * 1. `requested` becomes `sending` (a request already `sending` is being tried again);
  * 2. when the version has no envelope yet, the PDF is sent to Documenso, which creates a draft, and the id it gives is recorded **at
  *    once** (a conditional update of its own), so that no later try creates a second one; an envelope that is gone (`404`) is forgotten
- *    and created again, once;
+ *    and created again, once. When another id was recorded meanwhile (a read of the envelope that a webhook announced, say), that one is
+ *    the request's: the draft just made is deleted at Documenso and the request goes on with the recorded envelope;
  * 3. the envelope is read: the id Documenso gave each recipient is recorded with the signers;
  * 4. a draft is distributed (Documenso emails the signers), unless the version was deleted or the request moved on meanwhile;
  * 5. the request is `awaiting` ({@see SignatureSync::apply()}), which also takes whatever the envelope already is (signed, rejected).
@@ -38,18 +42,20 @@ use Throwable;
  * `documenso_unavailable`. A request that is `failed` keeps its envelope: sending it again resumes where it stopped.
  *
  * **Cancelling** and **sending again** are what the API offers a person on a request: the first asks Documenso at once (and tells the
- * person when it cannot), the second puts a failed request back to `requested` and queues the job.
+ * person when it cannot), the second puts a failed request back to `requested` and queues the job. Sending again is a request for
+ * signatures like the first one: it counts against the daily limit of the workspace ({@see SignatureQuota}).
  */
 final class SignatureRequests
 {
     /**
-     * Gets the client, the part that follows an envelope, the storage the PDF is read from and what cancels envelopes.
+     * Gets the client, the part that follows an envelope, the storage the PDF is read from, what cancels envelopes and the daily limit.
      */
     public function __construct(
         private readonly DocumensoClient $client,
         private readonly SignatureSync $sync,
         private readonly AttachmentStorage $storage,
         private readonly EnvelopeCleanup $envelopes,
+        private readonly SignatureQuota $quota,
     ) {}
 
     /**
@@ -145,6 +151,7 @@ final class SignatureRequests
      *
      * @throws SignatureNotFailedException When the request did not fail, or its version is not completed.
      * @throws SignatureUnavailableException When the instance has no Documenso.
+     * @throws ThrottleRequestsException When the workspace has made as many requests for signatures today as it may.
      */
     public function retry(InventoryVersion $version): InventoryVersion
     {
@@ -158,6 +165,14 @@ final class SignatureRequests
             throw new SignatureUnavailableException;
         }
 
+        $workspaceId = Inventory::query()->whereKey($current->inventory_id)->value('workspace_id');
+
+        if ($workspaceId === null) {
+            throw (new ModelNotFoundException)->setModel(Inventory::class, [$current->inventory_id]);
+        }
+
+        $this->quota->ensure((int) $workspaceId);
+
         $moved = InventoryVersion::query()
             ->whereKey($current->getKey())
             ->where('signature_status', SignatureStatus::Failed->value)
@@ -168,6 +183,8 @@ final class SignatureRequests
         if ($moved !== 1) {
             throw new SignatureNotFailedException;
         }
+
+        $this->quota->spend((int) $workspaceId);
 
         $current->refresh();
 
@@ -190,16 +207,22 @@ final class SignatureRequests
     private function transmit(InventoryVersion $version): void
     {
         $envelopeId = $version->documenso_envelope_id;
-        $created = false;
+        // The envelope this try made and recorded, and whether an envelope that was recorded has been forgotten already.
+        $ours = null;
+        $forgotten = false;
 
         do {
             if ($envelopeId === null) {
-                $envelopeId = $this->create($version);
-                $created = true;
+                $made = $this->create($version);
 
-                if (! $this->remember($version, $envelopeId)) {
+                // The id of the request: the one just made, or the one that was recorded first.
+                $envelopeId = $this->remember($version, $made);
+
+                if ($envelopeId === null) {
                     return;
                 }
+
+                $ours = $envelopeId === $made ? $made : null;
             }
 
             try {
@@ -207,13 +230,15 @@ final class SignatureRequests
 
                 break;
             } catch (DocumensoException $exception) {
-                // An envelope recorded earlier that Documenso no longer has is forgotten, and created again once.
-                if (! $exception->notFound() || $created) {
+                // An envelope recorded earlier that Documenso no longer has is forgotten, and created again once. The one this try
+                // has just made is not: if it is not there, something is wrong.
+                if (! $exception->notFound() || $envelopeId === $ours || $forgotten) {
                     throw $exception;
                 }
 
                 $this->forget($version, $envelopeId);
                 $envelopeId = null;
+                $forgotten = true;
             }
         } while (true);
 
@@ -267,10 +292,14 @@ final class SignatureRequests
      * Records the id of the envelope that was just created, in an update of its own, as long as the request is still being sent and
      * has none.
      *
-     * @return bool Whether to go on: false when the version is gone or the request moved on (the envelope stays a draft at Documenso,
-     *              which emails nobody), true when the id is recorded, by this call or by a webhook that came first.
+     * When another id was recorded first (a read of an envelope a webhook announced, which finds it is this version's), that one is the
+     * request's: the draft just made is deleted at Documenso (it emails nobody, and nothing will ever refer to it) and the request goes
+     * on with the recorded one.
+     *
+     * @return string|null The id of the envelope to go on with: the one just made, or the one recorded first. Null when the version is
+     *                     gone or the request moved on (the envelope stays a draft at Documenso, which emails nobody).
      */
-    private function remember(InventoryVersion $version, string $envelopeId): bool
+    private function remember(InventoryVersion $version, string $envelopeId): ?string
     {
         $stored = InventoryVersion::query()
             ->whereKey($version->getKey())
@@ -278,13 +307,38 @@ final class SignatureRequests
             ->whereNull('documenso_envelope_id')
             ->update(['documenso_envelope_id' => $envelopeId]);
 
-        if ($stored === 1 || InventoryVersion::query()->whereKey($version->getKey())->where('documenso_envelope_id', $envelopeId)->exists()) {
-            return true;
+        if ($stored === 1) {
+            return $envelopeId;
+        }
+
+        $recorded = InventoryVersion::query()->whereKey($version->getKey())->value('documenso_envelope_id');
+
+        if ($recorded === $envelopeId) {
+            return $envelopeId;
+        }
+
+        if (is_string($recorded) && $recorded !== '' && InventoryVersion::query()->whereKey($version->getKey())->where('signature_status', SignatureStatus::Sending->value)->exists()) {
+            $this->deleteDraft($version, $envelopeId);
+
+            return $recorded;
         }
 
         Log::warning('An envelope was created for a version that no longer waits for it: it stays a draft at Documenso.', ['version' => $version->ulid, 'envelope' => $envelopeId]);
 
-        return false;
+        return null;
+    }
+
+    /**
+     * Deletes a draft envelope this try made and does not need. Best effort: one that stays is only a draft nobody was told of, and is
+     * written in the log.
+     */
+    private function deleteDraft(InventoryVersion $version, string $envelopeId): void
+    {
+        try {
+            $this->client->deleteEnvelope($envelopeId);
+        } catch (DocumensoException $exception) {
+            Log::warning('A draft envelope that is not needed could not be deleted at Documenso: it stays there.', ['version' => $version->ulid, 'envelope' => $envelopeId, 'status' => $exception->status(), 'reason' => $exception->code()]);
+        }
     }
 
     /**

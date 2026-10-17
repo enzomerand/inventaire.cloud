@@ -5,7 +5,10 @@ declare(strict_types=1);
 use App\Signatures\DocumensoClient;
 use App\Signatures\DocumensoException;
 use App\Signatures\SignatureEnvelope;
+use App\Signatures\SignedPdfTooLargeException;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -91,7 +94,7 @@ describe('creating an envelope', function (): void {
         });
     });
 
-    it('waits 20 seconds for an answer and 5 to connect, and follows no redirect', function (): void {
+    it('waits two minutes for the answer that takes a whole PDF, 5 seconds to connect, and follows no redirect', function (): void {
         $options = null;
         $client = documensoClient(function (Request $request, array $given) use (&$options) {
             $options = $given;
@@ -101,7 +104,7 @@ describe('creating an envelope', function (): void {
 
         $client->createEnvelope('T', 'x', '%PDF-', [], []);
 
-        expect($options['timeout'])->toBe(20)
+        expect($options['timeout'])->toBe(120)
             ->and($options['connect_timeout'])->toBe(5)
             ->and($options['allow_redirects'])->toBeFalse();
     });
@@ -178,12 +181,19 @@ describe('the other calls', function (): void {
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sign.example.test/api/v2/envelope/cancel' && $request->method() === 'POST');
     });
 
-    it('downloads the signed PDF of an item as it is, asking for the signed version', function (): void {
+    it('downloads the signed PDF of an item into a file as it is, asking for the signed version, and gives its size', function (): void {
         $client = documensoClient(Http::response("%PDF-1.7\nsigned", 200, ['Content-Type' => 'application/pdf']));
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
 
-        $pdf = $client->downloadSigned('envelope_item_abc');
+        try {
+            $size = $client->downloadSigned('envelope_item_abc', $file);
 
-        expect($pdf)->toBe("%PDF-1.7\nsigned");
+            expect($size)->toBe(strlen("%PDF-1.7\nsigned"))
+                ->and(file_get_contents($file))->toBe("%PDF-1.7\nsigned");
+        } finally {
+            @unlink($file);
+        }
+
         Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
             && $request->url() === 'https://sign.example.test/api/v2/envelope/item/envelope_item_abc/download?version=signed'
             && $request->header('Authorization') === ['api_test_key']
@@ -192,10 +202,202 @@ describe('the other calls', function (): void {
 
     it('refuses a download that is not a PDF', function (): void {
         $client = documensoClient(Http::response(['error' => 'x']));
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
 
-        expect(fn () => $client->downloadSigned('item'))->toThrow(DocumensoException::class, 'not a PDF');
+        try {
+            expect(fn () => $client->downloadSigned('item', $file))->toThrow(DocumensoException::class, 'not a PDF');
+        } finally {
+            @unlink($file);
+        }
     });
 
+    it('waits two minutes for the download, as for the creation, and 20 seconds for every other call', function (): void {
+        $fake = FakeDocumenso::install();
+        $fake->envelopeId = 'envelope_abc';
+        $fake->exists = true;
+        $fake->status = 'COMPLETED';
+        $client = app(DocumensoClient::class);
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        // The answers do not matter here, the options of each call do.
+        $try = function (callable $call): void {
+            try {
+                $call();
+            } catch (DocumensoException) {
+                // Refused or not, the call was made.
+            }
+        };
+
+        try {
+            $try(fn () => $client->createEnvelope('T', 'x', '%PDF-', [], []));
+            $try(fn () => $client->getEnvelope('envelope_test1'));
+            $try(fn () => $client->downloadSigned('item', $file));
+            $try(fn () => $client->distribute('envelope_test1'));
+            $try(fn () => $client->cancel('envelope_test1'));
+            $try(fn () => $client->deleteEnvelope('envelope_test1'));
+        } finally {
+            @unlink($file);
+        }
+
+        expect($fake->timeoutOf('POST /envelope/create'))->toBe(120)
+            ->and($fake->timeoutOf('GET /envelope/item/{id}/download'))->toBe(120)
+            ->and($fake->timeoutOf('GET /envelope/{id}'))->toBe(20)
+            ->and($fake->timeoutOf('POST /envelope/distribute'))->toBe(20)
+            ->and($fake->timeoutOf('POST /envelope/cancel'))->toBe(20)
+            ->and($fake->timeoutOf('POST /envelope/delete'))->toBe(20);
+    });
+
+    it('deletes an envelope with a JSON body', function (): void {
+        $client = documensoClient(Http::response(['success' => true]));
+
+        $client->deleteEnvelope('envelope_abc');
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://sign.example.test/api/v2/envelope/delete'
+            && $request->header('Authorization') === ['api_test_key']
+            && $request->data() === ['envelopeId' => 'envelope_abc']);
+    });
+});
+
+describe('the weight of the signed PDF', function (): void {
+    it('is 100 MB at the most by default', function (): void {
+        expect(config('inventories.max_signed_pdf_bytes'))->toBe(100 * 1048576);
+    });
+
+    it('is refused when Documenso says it is bigger than the limit, and nothing of it is kept', function (): void {
+        config(['inventories.max_signed_pdf_bytes' => 20]);
+        $client = documensoClient(Http::response("%PDF-1.7\nsigned", 200, ['Content-Type' => 'application/pdf', 'Content-Length' => '21']));
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            expect(fn () => $client->downloadSigned('item', $file))->toThrow(DocumensoException::class, 'bigger than the limit');
+        } finally {
+            @unlink($file);
+        }
+    });
+
+    it('is refused when it really is bigger than the limit, whatever Documenso says (or does not say)', function (): void {
+        config(['inventories.max_signed_pdf_bytes' => 10]);
+        $client = documensoClient(Http::response("%PDF-1.7\nsigned, and some more", 200, ['Content-Type' => 'application/pdf']));
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            $thrown = null;
+
+            try {
+                $client->downloadSigned('item', $file);
+            } catch (DocumensoException $exception) {
+                $thrown = $exception;
+            }
+
+            expect($thrown?->code())->toBe('invalid_response')->and($thrown?->retryable())->toBeFalse();
+        } finally {
+            @unlink($file);
+        }
+    });
+
+    it('is accepted at the limit, to the byte', function (): void {
+        config(['inventories.max_signed_pdf_bytes' => strlen("%PDF-1.7\nsigned")]);
+        $client = documensoClient(Http::response("%PDF-1.7\nsigned", 200, ['Content-Type' => 'application/pdf', 'Content-Length' => (string) strlen("%PDF-1.7\nsigned")]));
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            expect($client->downloadSigned('item', $file))->toBe(strlen("%PDF-1.7\nsigned"));
+        } finally {
+            @unlink($file);
+        }
+    });
+
+    it('is read into a file, not into memory: the sink is what the request is given', function (): void {
+        $options = null;
+        $client = documensoClient(function (Request $request, array $given) use (&$options) {
+            $options = $given;
+
+            return Http::response("%PDF-1.7\nsigned", 200, ['Content-Type' => 'application/pdf']);
+        });
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            $client->downloadSigned('item', $file);
+        } finally {
+            @unlink($file);
+        }
+
+        expect($options['sink'])->toBe($file)->and($options['on_headers'])->toBeCallable()->and($options['progress'])->toBeCallable();
+    });
+
+    it('is refused, not retried, when the transfer was stopped for its size, whatever the HTTP client made of what stopped it', function (): void {
+        $client = documensoClient(function (): never {
+            // The HTTP client wraps what its callbacks throw, twice: the cause is at the bottom of the chain.
+            throw new ConnectionException('An error was encountered during the progress event', 0, new RuntimeException('wrapper', 0, new SignedPdfTooLargeException('too big')));
+        });
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            $thrown = null;
+
+            try {
+                $client->downloadSigned('item', $file);
+            } catch (DocumensoException $exception) {
+                $thrown = $exception;
+            }
+
+            expect($thrown?->code())->toBe('invalid_response')->and($thrown?->retryable())->toBeFalse()->and($thrown?->getMessage())->toContain('bigger than the limit');
+        } finally {
+            @unlink($file);
+        }
+    });
+
+    it('is retried like any other call when the connection is lost for another reason', function (): void {
+        $client = documensoClient(Http::failedConnection('cURL error 28: Operation timed out'));
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            $thrown = null;
+
+            try {
+                $client->downloadSigned('item', $file);
+            } catch (DocumensoException $exception) {
+                $thrown = $exception;
+            }
+
+            expect($thrown?->code())->toBe('unreachable')->and($thrown?->retryable())->toBeTrue();
+        } finally {
+            @unlink($file);
+        }
+    });
+
+    it('is cut at the headers when Documenso announces more than the limit, and while it comes when the body outgrows it', function (): void {
+        // The callbacks the HTTP client calls as soon as the headers are in, and as the body comes: they throw before more is written.
+        config(['inventories.max_signed_pdf_bytes' => 100]);
+        $callback = null;
+        $progress = null;
+        $client = documensoClient(function (Request $request, array $given) use (&$callback, &$progress) {
+            $callback = $given['on_headers'];
+            $progress = $given['progress'];
+
+            return Http::response("%PDF-1.7\nsigned", 200, ['Content-Type' => 'application/pdf']);
+        });
+        $file = tempnam(sys_get_temp_dir(), 'signed-');
+
+        try {
+            $client->downloadSigned('item', $file);
+        } finally {
+            @unlink($file);
+        }
+
+        $headers = fn (string $length, int $status = 200) => new Response($status, ['Content-Length' => $length]);
+
+        expect(fn () => $callback($headers('101')))->toThrow(SignedPdfTooLargeException::class)
+            ->and($callback($headers('100')))->toBeNull()
+            ->and($callback($headers('5000', 404)))->toBeNull()
+            ->and($callback(new Response(200)))->toBeNull()
+            ->and($progress(0, 100))->toBeNull()
+            ->and(fn () => $progress(0, 101))->toThrow(SignedPdfTooLargeException::class);
+    });
+});
+
+describe('the rest', function (): void {
     it('does not even try when the instance has no Documenso', function (): void {
         config(['services.documenso.url' => null, 'services.documenso.api_key' => '']);
         $client = documensoClient();

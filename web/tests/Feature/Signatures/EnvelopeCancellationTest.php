@@ -66,7 +66,7 @@ function cancelQueued(): array
 }
 
 describe('deleting a version', function (): void {
-    it('cancels its envelope when its request is open, awaiting or being sent', function (SignatureStatus $status): void {
+    it('cancels its envelope when its request has not ended: asked for again, being sent, awaiting, or failed', function (SignatureStatus $status): void {
         $case = versionTableCase();
         $version = cancelRow($case['inventory'], 1, $status, 'envelope_open');
 
@@ -75,7 +75,7 @@ describe('deleting a version', function (): void {
         Queue::assertPushed(CancelDocumensoEnvelopes::class, 1);
         expect(cancelQueued())->toBe(['envelope_open'])
             ->and(InventoryVersion::query()->count())->toBe(0);
-    })->with([SignatureStatus::Awaiting, SignatureStatus::Sending]);
+    })->with([SignatureStatus::Awaiting, SignatureStatus::Sending, SignatureStatus::Requested, SignatureStatus::Failed]);
 
     it('has nothing to cancel when its request is over, never sent, or has no envelope', function (?SignatureStatus $status, ?string $envelope): void {
         $case = versionTableCase();
@@ -87,13 +87,12 @@ describe('deleting a version', function (): void {
         expect(InventoryVersion::query()->count())->toBe(0);
     })->with([
         'asked for' => [SignatureStatus::Requested, null],
-        'asked for, with the envelope of an earlier try' => [SignatureStatus::Requested, 'envelope_old'],
+        'failed, no envelope' => [SignatureStatus::Failed, null],
         'being sent, no envelope yet' => [SignatureStatus::Sending, null],
         'awaiting, no envelope (cannot be)' => [SignatureStatus::Awaiting, null],
         'completed' => [SignatureStatus::Completed, 'envelope_done'],
         'rejected' => [SignatureStatus::Rejected, 'envelope_done'],
         'cancelled' => [SignatureStatus::Cancelled, 'envelope_done'],
-        'failed, its envelope a draft' => [SignatureStatus::Failed, 'envelope_draft'],
         'no signature asked for' => [null, null],
     ]);
 
@@ -161,11 +160,14 @@ describe('deleting an inventory', function (): void {
         cancelRow($case['inventory'], 3, SignatureStatus::Completed, 'envelope_c');
         cancelRow($case['inventory'], 4, SignatureStatus::Awaiting, null);
         cancelRow($case['inventory'], 5, null, null);
+        // A request that failed may nevertheless be pending at Documenso: the answer of the call that sent it was lost.
+        cancelRow($case['inventory'], 6, SignatureStatus::Failed, 'envelope_d');
+        cancelRow($case['inventory'], 7, SignatureStatus::Requested, 'envelope_e');
         cancelRow($other, 1, SignatureStatus::Awaiting, 'envelope_elsewhere');
 
         app(Inventories::class)->delete($case['inventory']);
 
-        expect(cancelQueued())->toBe(['envelope_a', 'envelope_b'])
+        expect(cancelQueued())->toBe(['envelope_a', 'envelope_b', 'envelope_d', 'envelope_e'])
             ->and(InventoryVersion::query()->pluck('documenso_envelope_id')->all())->toBe(['envelope_elsewhere']);
     });
 
@@ -223,11 +225,12 @@ describe('deleting a workspace', function (): void {
         cancelRow($case['inventory'], 1, SignatureStatus::Awaiting, 'envelope_a');
         cancelRow($second, 1, SignatureStatus::Sending, 'envelope_b');
         cancelRow($second, 2, SignatureStatus::Cancelled, 'envelope_c');
+        cancelRow($second, 3, SignatureStatus::Failed, 'envelope_d');
         cancelRow($elsewhere, 1, SignatureStatus::Awaiting, 'envelope_elsewhere');
 
         app(Workspaces::class)->delete($case['team']['owner'], $case['team']['workspace']);
 
-        expect(cancelQueued())->toBe(['envelope_a', 'envelope_b'])
+        expect(cancelQueued())->toBe(['envelope_a', 'envelope_b', 'envelope_d'])
             ->and(InventoryVersion::query()->pluck('documenso_envelope_id')->all())->toBe(['envelope_elsewhere']);
     });
 
@@ -272,11 +275,53 @@ describe('deleting a workspace', function (): void {
     });
 });
 
+describe('the envelopes of many versions', function (): void {
+    it('go to the jobs ten at a time, whichever way they were deleted', function (string $how): void {
+        $case = versionTableCase();
+
+        foreach (range(1, 25) as $number) {
+            cancelRow($case['inventory'], $number, SignatureStatus::Awaiting, sprintf('envelope_%02d', $number));
+        }
+
+        match ($how) {
+            'the inventory' => app(Inventories::class)->delete($case['inventory']),
+            'the workspace' => app(Workspaces::class)->delete($case['team']['owner'], $case['team']['workspace']),
+        };
+
+        $jobs = Queue::pushed(CancelDocumensoEnvelopes::class);
+
+        expect($jobs->map(fn (CancelDocumensoEnvelopes $job): int => count($job->envelopeIds))->all())->toBe([10, 10, 5])
+            ->and(cancelQueued())->toHaveCount(25);
+    })->with(['the inventory', 'the workspace']);
+
+    it('go to a job of their own when one version goes, however many it is', function (): void {
+        $case = versionTableCase();
+        $version = cancelRow($case['inventory'], 1, SignatureStatus::Awaiting, 'envelope_a');
+
+        app(OfficialVersions::class)->delete($version);
+
+        expect(Queue::pushed(CancelDocumensoEnvelopes::class)->map(fn (CancelDocumensoEnvelopes $job): array => $job->envelopeIds)->all())->toBe([['envelope_a']]);
+    });
+
+    it('are chunked by the one place that queues the cancellations', function (): void {
+        $source = (string) file_get_contents(app_path('Signatures/EnvelopeCleanup.php'));
+
+        expect(substr_count($source, 'CancelDocumensoEnvelopes::dispatch('))->toBe(1)
+            ->and($source)->toContain('array_chunk($envelopeIds, self::PER_JOB)');
+    });
+});
+
 describe('the job', function (): void {
     it('is tried three times, with a growing pause', function (): void {
         $job = new CancelDocumensoEnvelopes(['envelope_a']);
 
         expect($job->tries)->toBe(3)->and($job->backoff())->toBe([60, 300])->and($job->queue)->toBeNull();
+    });
+
+    it('may run as long as ten envelopes of calls that wait 20 seconds each take, with room', function (): void {
+        $job = new CancelDocumensoEnvelopes(['envelope_a']);
+
+        expect($job->timeout)->toBe(300)->and($job->timeout)->toBeGreaterThan(10 * 20);
     });
 
     it('cancels each envelope with the reason it was given, or a general one', function (): void {
@@ -307,6 +352,70 @@ describe('the job', function (): void {
         expect($fake->count('POST /envelope/cancel'))->toBe(3)
             ->and($fake->status)->toBe('CANCELLED');
         Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $context['again'] === false)->twice();
+    });
+
+    it('writes an error in the log, without the token, when Documenso refuses the token or answers what it should not', function (int $status): void {
+        Log::spy();
+        $fake = FakeDocumenso::install();
+        $fake->failNext('POST /envelope/cancel', $status);
+
+        (new CancelDocumensoEnvelopes(['envelope_a', 'envelope_b']))->handle(app(DocumensoClient::class));
+
+        // Not retried (nothing is thrown), the others still asked for, and somebody is told.
+        expect($fake->count('POST /envelope/cancel'))->toBe(2);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['envelope'] === 'envelope_a'
+            && $context['status'] === $status
+            && ! str_contains((string) json_encode($context), 'api_test_key')
+            && ! str_contains($message, 'api_test_key'))->once();
+    })->with([
+        'the token is refused' => [401],
+        'forbidden' => [403],
+        'a method that is not allowed' => [405],
+        'gone' => [410],
+    ]);
+
+    it('writes no error in the log for what is only an envelope that is not pending any more, or gone', function (int $status): void {
+        Log::spy();
+        $fake = FakeDocumenso::install();
+        $fake->failNext('POST /envelope/cancel', $status);
+
+        (new CancelDocumensoEnvelopes(['envelope_a']))->handle(app(DocumensoClient::class));
+
+        Log::shouldNotHaveReceived('error');
+        Log::shouldHaveReceived('info')->once();
+    })->with([[400], [404], [409], [422]]);
+
+    it('still retries what is worth another try, and writes no error for it yet', function (int $status): void {
+        Log::spy();
+        $fake = FakeDocumenso::install();
+        $fake->failNext('POST /envelope/cancel', $status);
+
+        expect(fn () => (new CancelDocumensoEnvelopes(['envelope_a']))->handle(app(DocumensoClient::class)))->toThrow(RuntimeException::class);
+        Log::shouldNotHaveReceived('error');
+    })->with([[429], [500], [502], [503]]);
+
+    it('deletes the draft it is told to, and cancels what is pending, and leaves the rest alone', function (): void {
+        $fake = FakeDocumenso::install();
+        $fake->other('envelope_draft', 'DRAFT', null)->other('envelope_pending', 'PENDING', null)->other('envelope_done', 'COMPLETED', null);
+
+        (new CancelDocumensoEnvelopes(['envelope_draft', 'envelope_pending', 'envelope_done', 'envelope_gone'], null, true))->handle(app(DocumensoClient::class));
+
+        $data = fn (string $call): array => array_map(fn (Request $request): array => $request->data(), $fake->requestsOf($call));
+
+        expect($data('POST /envelope/delete'))->toBe([['envelopeId' => 'envelope_draft']])
+            ->and(array_column($data('POST /envelope/cancel'), 'envelopeId'))->toBe(['envelope_pending', 'envelope_done'])
+            ->and($fake->others['envelope_pending']['status'])->toBe('CANCELLED')
+            ->and($fake->others['envelope_done']['status'])->toBe('COMPLETED')
+            ->and($fake->others)->not->toHaveKey('envelope_draft');
+    });
+
+    it('does not read an envelope before it cancels it unless it was told to delete drafts', function (): void {
+        $fake = FakeDocumenso::install();
+        $fake->other('envelope_a', 'PENDING', null);
+
+        (new CancelDocumensoEnvelopes(['envelope_a']))->handle(app(DocumensoClient::class));
+
+        expect($fake->count('GET /envelope/{id}'))->toBe(0)->and($fake->count('POST /envelope/cancel'))->toBe(1);
     });
 
     it('fails for another try when Documenso cannot be reached, after it asked for all of them', function (?int $status): void {

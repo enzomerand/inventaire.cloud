@@ -17,27 +17,42 @@ use Throwable;
 /**
  * Cancels envelopes at Documenso, so that signers are not left with a document to sign that the application no longer keeps: queued,
  * once the deletion is committed, for the open requests of a version, an inventory or a workspace that is deleted
- * ({@see EnvelopeCleanup}).
+ * ({@see EnvelopeCleanup}), and for the requests the schedule gave up on.
  *
  * It does what it can: Documenso only cancels an envelope that is pending, so one that is no longer (signed, refused, cancelled, a
- * draft, gone) is refused with a `4xx` and left alone. What is worth another try (Documenso cannot be reached or is failing) makes the
- * job fail and run again, three times with a growing pause; the envelopes already cancelled are refused the second time, which is
- * harmless. What is still open after the last try is written in the log, for somebody to cancel in Documenso.
+ * draft, gone) is refused with a `4xx` and left alone, which is nothing to worry about (written in the log as information). What is
+ * worth another try (Documenso cannot be reached or is failing) makes the job fail and run again, three times with a growing pause; the
+ * envelopes already cancelled are refused the second time, which is harmless. What is still open after the last try is written in the
+ * log, for somebody to cancel in Documenso, and so is what Documenso refuses for a reason that is the configuration's, not the
+ * envelope's (the token is refused, `401` or `403`; any other error) or does not look like a refusal to cancel an envelope that is not
+ * pending (`400`, `404`, `409`, `422`): the application is not doing what it should, and somebody has to be told. The token is never
+ * written.
+ *
+ * The envelopes come a few at a time ({@see EnvelopeCleanup::PER_JOB}), so that the job, which waits for each call for 20 seconds at
+ * the longest, ends within its {@see self::$timeout} seconds. With `$deleteDrafts`, an envelope that is still a draft (nobody was
+ * emailed, and Documenso cannot cancel it) is deleted instead.
  */
 final class CancelDocumensoEnvelopes implements ShouldQueue
 {
     use Queueable;
 
+    /** What Documenso answers to the cancellation of an envelope that is not pending, or that it does not have: nothing is wrong. */
+    private const NOT_PENDING_STATUSES = [400, 404, 409, 422];
+
     /** How many times the job is tried. */
     public int $tries = 3;
+
+    /** The seconds the job may run: ten envelopes ({@see EnvelopeCleanup::PER_JOB}) and a call of 20 seconds at the longest for each, with room. */
+    public int $timeout = 300;
 
     /**
      * Remembers what to cancel.
      *
-     * @param  list<string>  $envelopeIds  The ids of the envelopes at Documenso.
+     * @param  list<string>  $envelopeIds  The ids of the envelopes at Documenso, at most {@see EnvelopeCleanup::PER_JOB}.
      * @param  string|null  $reason  What the signers are told; a general sentence when none is given.
+     * @param  bool  $deleteDrafts  Whether an envelope that is a draft is deleted (it cannot be cancelled), after it is read to know.
      */
-    public function __construct(public readonly array $envelopeIds, public readonly ?string $reason = null) {}
+    public function __construct(public readonly array $envelopeIds, public readonly ?string $reason = null, public readonly bool $deleteDrafts = false) {}
 
     /**
      * The seconds to wait before each new try.
@@ -67,13 +82,26 @@ final class CancelDocumensoEnvelopes implements ShouldQueue
 
         foreach ($this->envelopeIds as $id) {
             try {
+                if ($this->deleteDrafts && strtoupper((string) $client->getEnvelope($id)['status']) === 'DRAFT') {
+                    $client->deleteEnvelope($id);
+
+                    continue;
+                }
+
                 $client->cancel($id, $reason);
             } catch (DocumensoException $exception) {
                 if ($exception->retryable()) {
                     $again++;
                 }
 
-                Log::info('An envelope was not cancelled at Documenso.', ['envelope' => $id, 'status' => $exception->status(), 'reason' => $exception->code(), 'again' => $exception->retryable()]);
+                $context = ['envelope' => $id, 'status' => $exception->status(), 'reason' => $exception->code(), 'again' => $exception->retryable()];
+
+                if ($exception->retryable() || in_array($exception->status(), self::NOT_PENDING_STATUSES, true)) {
+                    Log::info('An envelope was not cancelled at Documenso.', $context);
+                } else {
+                    // The token is refused, or Documenso answered something this application does not expect from it: not about the envelope.
+                    Log::error('An envelope could not be cancelled at Documenso: check its configuration, and cancel the request there by hand if it is still open.', $context);
+                }
             }
         }
 

@@ -63,7 +63,7 @@ function syncQueued(): array
     return Queue::pushed(SyncSignature::class)->map(fn (SyncSignature $job): int => $job->versionId)->values()->all();
 }
 
-describe('the requests that await their signers', function (): void {
+describe('the requests that have an envelope and have not ended', function (): void {
     it('are read again when nobody has looked at them for more than half an hour, or ever', function (): void {
         $inventory = Inventory::factory()->create();
         $never = syncRow($inventory, 1);
@@ -92,18 +92,51 @@ describe('the requests that await their signers', function (): void {
         SignatureStatus::Completed,
         SignatureStatus::Rejected,
         SignatureStatus::Cancelled,
-        SignatureStatus::Failed,
     ]);
 
-    it('are read when they are still being sent long after, with an envelope: the job that sent them is gone', function (): void {
+    it('are not read without an envelope, whatever their state', function (SignatureStatus $status): void {
         $inventory = Inventory::factory()->create();
-        $stuck = syncRow($inventory, 1, SignatureStatus::Sending, null, ['updated_at' => now()->subMinutes(121)]);
-        syncRow($inventory, 2, SignatureStatus::Sending, null, ['updated_at' => now()->subMinutes(119)]);
-        syncRow($inventory, 3, SignatureStatus::Sending, null, ['updated_at' => now()->subMinutes(600), 'documenso_envelope_id' => null]);
+        syncRow($inventory, 1, $status, 600, ['documenso_envelope_id' => null, 'updated_at' => now()->subMinutes(45)]);
 
         app(VersionMaintenance::class)->run();
 
+        Queue::assertNotPushed(SyncSignature::class);
+    })->with([SignatureStatus::Requested, SignatureStatus::Sending, SignatureStatus::Awaiting, SignatureStatus::Failed]);
+
+    it('are read when the request failed: Documenso may have sent the emails although the call that said so was lost', function (): void {
+        $inventory = Inventory::factory()->create();
+        $failed = syncRow($inventory, 1, SignatureStatus::Failed, 31);
+        $never = syncRow($inventory, 2, SignatureStatus::Failed);
+        syncRow($inventory, 3, SignatureStatus::Failed, 29);
+
+        $result = app(VersionMaintenance::class)->run();
+
+        expect(syncQueued())->toBe([$never->id, $failed->id])
+            ->and($result['synced'])->toBe(2);
+    });
+
+    it('are read when they are still asked for or being sent after half an hour without moving, with an envelope: a job works on them before', function (SignatureStatus $status): void {
+        $inventory = Inventory::factory()->create();
+        $stuck = syncRow($inventory, 1, $status, null, ['updated_at' => now()->subMinutes(31)]);
+        syncRow($inventory, 2, $status, null, ['updated_at' => now()->subMinutes(29)]);
+        syncRow($inventory, 3, $status, null, ['updated_at' => now()->subMinutes(100), 'documenso_envelope_id' => null]);
+        // Looked at a moment ago: not again yet.
+        syncRow($inventory, 4, $status, 5, ['updated_at' => now()->subMinutes(100)]);
+
+        app(VersionMaintenance::class)->syncAwaitingRequests();
+
         expect(syncQueued())->toBe([$stuck->id]);
+    })->with([SignatureStatus::Sending, SignatureStatus::Requested]);
+
+    it('are given up on, not read, once they have not moved for two hours: nothing a read can do will move them', function (): void {
+        $inventory = Inventory::factory()->create();
+        $stuck = syncRow($inventory, 1, SignatureStatus::Sending, null, ['updated_at' => now()->subMinutes(121)]);
+
+        $result = app(VersionMaintenance::class)->run();
+
+        expect(syncQueued())->toBe([])
+            ->and($result['requests'])->toBe(1)
+            ->and($stuck->refresh()->signature_status)->toBe(SignatureStatus::Failed);
     });
 
     it('are read a hundred at a time: the ones nobody ever looked at first, then the longest waiting', function (): void {

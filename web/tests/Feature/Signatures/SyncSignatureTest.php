@@ -3,23 +3,33 @@
 declare(strict_types=1);
 
 use App\Inventories\DerivedData;
+use App\Inventories\Exports\ExportTemp;
 use App\Inventories\Versions\OfficialVersions;
 use App\Inventories\Versions\SignatureError;
 use App\Inventories\Versions\SignatureStatus;
 use App\Inventories\Versions\SignerStatus;
 use App\Jobs\PurgeStoredFiles;
+use App\Jobs\RequestSignatures;
 use App\Jobs\SyncSignature;
+use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use App\Signatures\DocumensoClient;
 use App\Signatures\DocumensoException;
+use App\Signatures\SignatureRequests;
 use App\Signatures\SignatureSync;
+use Illuminate\Contracts\Cache\LockProvider;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\FakeDocumenso;
 
 require_once __DIR__.'/../../Support/versions.php';
 
@@ -64,6 +74,7 @@ describe('the job', function (): void {
         expect($job)->toBeInstanceOf(ShouldBeUnique::class)
             ->and($job)->toBeInstanceOf(ShouldBeUniqueUntilProcessing::class)
             ->and($job->uniqueId())->toBe('42')
+            ->and((new SyncSignature(42, 'envelope_x'))->uniqueId())->toBe('42:envelope_x')
             ->and($job->uniqueFor)->toBe(60)
             ->and($job->tries)->toBe(3)
             ->and($job->backoff())->toBe([30, 120])
@@ -83,6 +94,409 @@ describe('the job', function (): void {
         (new SyncSignature($made['version']->id))->handle(app(SignatureSync::class));
 
         expect($made['version']->fresh()->signers[0]['status'])->toBe(SignerStatus::Signed->value);
+    });
+});
+
+describe('two reads of one request', function (): void {
+    /**
+     * The overlap middleware of a job, as the queue gives it to it.
+     */
+    function syncOverlap(SyncSignature $job): WithoutOverlapping
+    {
+        $middleware = $job->middleware();
+
+        expect($middleware)->toHaveCount(1)->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class);
+
+        return $middleware[0];
+    }
+
+    it('never run at the same time: the job has the overlap middleware of its version, which waits half a minute', function (): void {
+        $middleware = syncOverlap(new SyncSignature(42));
+
+        expect($middleware->key)->toBe('42')
+            ->and($middleware->releaseAfter)->toBe(30)
+            // The lock outlives the longest the job may run, so that it is never let go of under a job that is still reading.
+            ->and($middleware->expiresAfter)->toBe(SyncSignature::LOCK_EXPIRES)
+            ->and($middleware->expiresAfter)->toBeGreaterThan((new SyncSignature(42))->timeout)
+            ->and($middleware->shareKey)->toBeFalse();
+    });
+
+    it('is keyed by version: another version is not held up', function (): void {
+        $first = syncOverlap(new SyncSignature(1));
+        $second = syncOverlap(new SyncSignature(2));
+        $ran = [];
+
+        $lock = Cache::lock('laravel-queue-overlap:'.SyncSignature::class.':1', 60);
+        expect($lock->get())->toBeTrue();
+
+        // The job of version 1 is put back in the queue for 30 seconds: the queue job behind it is asked to release it.
+        $one = new SyncSignature(1);
+        $queued = Mockery::mock(Job::class);
+        $queued->shouldReceive('release')->once()->with(30);
+        $one->setJob($queued);
+        $first->handle($one, function () use (&$ran): void {
+            $ran[] = 'one';
+        });
+        $second->handle(new SyncSignature(2), function () use (&$ran): void {
+            $ran[] = 'two';
+        });
+
+        $lock->release();
+
+        // The one of version 1 was put back in the queue for 30 seconds without running; the one of version 2 ran.
+        expect($ran)->toBe(['two']);
+    });
+
+    it('runs when nothing else of that version runs, and lets the lock go afterwards (even when it fails)', function (): void {
+        $middleware = syncOverlap(new SyncSignature(7));
+        $ran = 0;
+
+        $middleware->handle(new SyncSignature(7), function () use (&$ran): void {
+            $ran++;
+        });
+
+        try {
+            $middleware->handle(new SyncSignature(7), function (): void {
+                throw new RuntimeException('Documenso is down.');
+            });
+        } catch (RuntimeException) {
+            // The queue would try again.
+        }
+
+        $middleware->handle(new SyncSignature(7), function () use (&$ran): void {
+            $ran++;
+        });
+
+        expect($ran)->toBe(2);
+    });
+
+    it('holds on the cache every store the application may use can lock', function (string $store): void {
+        $driver = Cache::store($store)->getStore();
+
+        expect($driver)->toBeInstanceOf(LockProvider::class);
+    })->with(['array', 'database', 'file']);
+
+    it('is held on the default store of the application, which locks (the one of the tests and the one of production)', function (): void {
+        expect(Cache::getStore())->toBeInstanceOf(LockProvider::class)
+            ->and(config('cache.stores.database.driver'))->toBe('database')
+            ->and(config('cache.default'))->toBe('array');
+    });
+
+    it('is the job that holds the lock while the service reads, so that a second read waits for it', function (): void {
+        $made = versionAwaiting(1);
+        $id = $made['version']->id;
+        $overlapped = null;
+
+        // While the first read asks Documenso, a second job of the same version arrives and finds the lock taken.
+        $made['fake']->onCall('GET /envelope/{id}', function () use ($id, &$overlapped): void {
+            $overlapped = Cache::lock('laravel-queue-overlap:'.SyncSignature::class.':'.$id, 5)->get();
+        });
+        $job = new SyncSignature($id);
+
+        $job->middleware()[0]->handle($job, fn () => $job->handle(app(SignatureSync::class)));
+
+        // The lock was taken by the first, so the second could not take it.
+        expect($overlapped)->toBeFalse();
+    });
+});
+
+describe('a request that failed', function (): void {
+    /**
+     * A request that failed with the envelope it had, which is in a state at Documenso.
+     *
+     * @return array{case: array{team: array<string, mixed>, inventory: Inventory}, version: InventoryVersion, fake: FakeDocumenso}
+     */
+    function failedWithEnvelope(string $status): array
+    {
+        $made = versionAwaiting(2);
+        $made['fake']->status = $status;
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Failed, 'signature_error' => SignatureError::DocumensoUnavailable, 'signature_requested_at' => null])->save();
+        // What was queued to make the request is not what the test is about.
+        Queue::fake();
+
+        return $made;
+    }
+
+    it('is awaiting its signers when its envelope is pending: Documenso sent the emails, the answer that said so was lost', function (): void {
+        $made = failedWithEnvelope('PENDING');
+        $made['fake']->sign('signer1@example.test');
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe(SignatureStatus::Awaiting)
+            ->and($row->signature_error)->toBeNull()
+            ->and($row->signature_requested_at)->not->toBeNull()
+            ->and($row->signers[0]['status'])->toBe(SignerStatus::Signed->value);
+
+        $shown = inventoryCall($this, $made['case']['team']['editor'], 'GET', "/api/v1/inventories/{$made['case']['inventory']->ulid}/versions/{$row->ulid}")->assertOk();
+
+        expect($shown->json('data.signature.status'))->toBe('awaiting')
+            ->and($shown->json('data.abilities.cancel_signature'))->toBeTrue()
+            ->and($shown->json('data.abilities.retry_signature'))->toBeFalse();
+    });
+
+    it('is completed when its envelope is, with the signed PDF stored and counted', function (): void {
+        $made = failedWithEnvelope('PENDING');
+        $made['fake']->complete();
+        $before = signatureStorageUsed($made['version']);
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe(SignatureStatus::Completed)
+            ->and($row->signed_pdf_sha256)->toBe(hash('sha256', $made['fake']->signedPdf))
+            ->and(signatureStorageUsed($row))->toBe($before + strlen($made['fake']->signedPdf));
+    });
+
+    it('ends as its envelope did: rejected, or cancelled', function (string $status, SignatureStatus $expected): void {
+        $made = failedWithEnvelope($status);
+        $made['fake']->recipients[0]['signingStatus'] = $status === 'REJECTED' ? 'REJECTED' : 'NOT_SIGNED';
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe($expected)->and($row->signature_error)->toBeNull();
+    })->with([['REJECTED', SignatureStatus::Rejected], ['CANCELLED', SignatureStatus::Cancelled]]);
+
+    it('stays failed, and can be sent again, while its envelope is still a draft: nothing was sent', function (): void {
+        $made = failedWithEnvelope('DRAFT');
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($row->signature_error)->toBe(SignatureError::DocumensoUnavailable)
+            ->and($row->signature_synced_at)->not->toBeNull();
+        Queue::assertNotPushed(RequestSignatures::class);
+    });
+
+    it('is cancelled, with the reason, when its envelope is gone from Documenso', function (): void {
+        $made = failedWithEnvelope('PENDING');
+        $made['fake']->exists = false;
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe(SignatureStatus::Cancelled)->and($row->signature_error)->toBe(SignatureError::EnvelopeMissing);
+    });
+
+    it('is looked at by the job the webhook queues', function (): void {
+        $made = failedWithEnvelope('PENDING');
+
+        (new SyncSignature($made['version']->id))->handle(app(SignatureSync::class));
+
+        expect($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Awaiting);
+    });
+
+    it('is awaiting when it was asked for again and its envelope turns out pending, and the job that was to send it does nothing', function (): void {
+        $made = versionAwaiting(1);
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Requested])->save();
+        $calls = $made['fake']->count('POST /envelope/create');
+
+        versionSync($made['version']);
+        versionSend($made['version']);
+
+        expect($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Awaiting)
+            ->and($made['fake']->count('POST /envelope/create'))->toBe($calls)
+            ->and($made['fake']->count('POST /envelope/distribute'))->toBe(1);
+    });
+});
+
+describe('a request being sent whose envelope is a draft', function (): void {
+    /**
+     * A request that is being sent, with a draft envelope at Documenso, that has not moved for `$minutes`.
+     *
+     * @return array{case: array{team: array<string, mixed>, inventory: Inventory}, version: InventoryVersion, fake: FakeDocumenso}
+     */
+    function sendingDraft(int $minutes): array
+    {
+        $made = versionAwaiting(2);
+        $made['fake']->status = 'DRAFT';
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Sending, 'signature_requested_at' => null])->save();
+        DB::table('inventory_versions')->where('id', $made['version']->id)->update(['updated_at' => now()->subMinutes($minutes)]);
+        Queue::fake();
+
+        return $made;
+    }
+
+    it('is taken up again by the job that sends it, once it has not moved for a few minutes: it never stays being sent', function (): void {
+        $made = sendingDraft(10);
+
+        $row = versionSync($made['version']);
+
+        Queue::assertPushed(RequestSignatures::class, fn (RequestSignatures $job): bool => $job->version->is($made['version']));
+        expect($row->signature_status)->toBe(SignatureStatus::Sending);
+    });
+
+    it('is then sent: the job resumes where it stopped, distributes the draft, and the request awaits its signers', function (): void {
+        $made = sendingDraft(10);
+        versionSync($made['version']);
+
+        Queue::pushed(RequestSignatures::class)->each(fn (RequestSignatures $job) => $job->handle(app(SignatureRequests::class)));
+
+        expect($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Awaiting)
+            // The first try distributed it before the test made it a draft again, this one distributed it a second time.
+            ->and($made['fake']->count('POST /envelope/distribute'))->toBe(2)
+            ->and($made['fake']->count('POST /envelope/create'))->toBe(1);
+    });
+
+    it('is left to the job that works on it while it has moved a moment ago', function (): void {
+        $made = sendingDraft(2);
+
+        versionSync($made['version']);
+
+        Queue::assertNotPushed(RequestSignatures::class);
+    });
+
+    it('does not make a job for a request that is anything else', function (SignatureStatus $status): void {
+        $made = sendingDraft(60);
+        $made['version']->forceFill(['signature_status' => $status])->save();
+
+        versionSync($made['version']);
+
+        Queue::assertNotPushed(RequestSignatures::class);
+    })->with([SignatureStatus::Awaiting, SignatureStatus::Requested, SignatureStatus::Failed]);
+
+    it('is read without being moved: the time it last moved is what the schedule judges it by', function (): void {
+        $made = sendingDraft(60);
+        $moved = DB::table('inventory_versions')->where('id', $made['version']->id)->value('updated_at');
+
+        versionSync($made['version']);
+        versionSync($made['version']);
+
+        expect(DB::table('inventory_versions')->where('id', $made['version']->id)->value('updated_at'))->toBe($moved)
+            ->and($made['version']->fresh()->signature_synced_at)->not->toBeNull();
+    });
+});
+
+describe('an envelope a webhook announced', function (): void {
+    /**
+     * A request that is being sent and has no envelope yet, with the envelope it will have at Documenso.
+     *
+     * @return array{case: array{team: array<string, mixed>, inventory: Inventory}, version: InventoryVersion, fake: FakeDocumenso}
+     */
+    function sendingWithoutEnvelope(string $status = 'PENDING'): array
+    {
+        $made = versionAwaiting(2);
+        $made['fake']->status = $status;
+        $made['version']->forceFill(['signature_status' => SignatureStatus::Sending, 'documenso_envelope_id' => null])->save();
+        Queue::fake();
+
+        return $made;
+    }
+
+    it('is recorded once it is read and says it is the version\'s: the request goes on from it', function (): void {
+        $made = sendingWithoutEnvelope();
+
+        app(SignatureSync::class)->sync($made['version']->id, 'envelope_test1');
+
+        $row = $made['version']->fresh();
+
+        expect($row->documenso_envelope_id)->toBe('envelope_test1')
+            ->and($row->signature_status)->toBe(SignatureStatus::Awaiting)
+            // One read: the envelope that was checked is the one that is applied.
+            ->and($made['fake']->count('GET /envelope/{id}'))->toBe(1 + 1);
+    });
+
+    it('is not recorded when it is another version\'s, or says nothing of whose it is', function (?string $externalId): void {
+        Log::spy();
+        $made = sendingWithoutEnvelope();
+        $made['fake']->externalId = $externalId;
+
+        app(SignatureSync::class)->sync($made['version']->id, 'envelope_test1');
+
+        expect($made['version']->fresh()->documenso_envelope_id)->toBeNull()
+            ->and($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Sending);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'not adopted'))->once();
+    })->with([
+        'another version' => ['01j00000000000000000000000'],
+        'the right one in another case' => [strtoupper('x')],
+        'none' => [null],
+        'an empty one' => [''],
+    ]);
+
+    it('is not recorded when Documenso does not have it, and is tried again when Documenso is failing', function (): void {
+        Log::spy();
+        $made = sendingWithoutEnvelope();
+
+        app(SignatureSync::class)->sync($made['version']->id, 'envelope_unknown');
+
+        expect($made['version']->fresh()->documenso_envelope_id)->toBeNull();
+
+        $made['fake']->failNext('GET /envelope/{id}', 503);
+
+        expect(fn () => app(SignatureSync::class)->sync($made['version']->id, 'envelope_test1'))->toThrow(DocumensoException::class)
+            ->and($made['version']->fresh()->documenso_envelope_id)->toBeNull();
+    });
+
+    it('never replaces an id that was recorded meanwhile: the update holds only while the request has none', function (): void {
+        $made = sendingWithoutEnvelope();
+        $version = $made['version'];
+        // While the candidate is being read, the job that sent the request records its own envelope.
+        $made['fake']->onCall('GET /envelope/{id}', fn () => DB::table('inventory_versions')->where('id', $version->id)->update(['documenso_envelope_id' => 'envelope_first']));
+
+        app(SignatureSync::class)->sync($version->id, 'envelope_test1');
+
+        expect($version->fresh()->documenso_envelope_id)->toBe('envelope_first');
+    });
+
+    it('is ignored when the request already has an envelope: the id it has is never touched', function (): void {
+        $made = versionAwaiting(1);
+        $calls = $made['fake']->count('GET /envelope/{id}');
+
+        app(SignatureSync::class)->sync($made['version']->id, 'envelope_forged');
+
+        expect($made['version']->fresh()->documenso_envelope_id)->toBe('envelope_test1')
+            // The request is read through the id it has, never through the candidate.
+            ->and($made['fake']->count('GET /envelope/{id}'))->toBe($calls + 1)
+            ->and(collect($made['fake']->requestsOf('GET /envelope/{id}'))->map(fn (Request $request): string => basename($request->url()))->last())->toBe('envelope_test1');
+    });
+
+    it('is ignored for a request that is not being sent', function (SignatureStatus $status): void {
+        $made = sendingWithoutEnvelope();
+        $made['version']->forceFill(['signature_status' => $status])->save();
+        $calls = $made['fake']->calls;
+
+        app(SignatureSync::class)->sync($made['version']->id, 'envelope_test1');
+
+        expect($made['version']->fresh()->documenso_envelope_id)->toBeNull()
+            ->and($made['fake']->calls)->toBe($calls);
+    })->with([SignatureStatus::Requested, SignatureStatus::Awaiting, SignatureStatus::Failed, SignatureStatus::Cancelled]);
+});
+
+describe('the signed PDF', function (): void {
+    it('is downloaded to a scratch file, stored from it, and the scratch file is deleted', function (): void {
+        $made = versionAwaiting(1);
+        $made['fake']->complete();
+
+        $row = versionSync($made['version']);
+
+        expect($row->signature_status)->toBe(SignatureStatus::Completed)
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->get((string) $row->signed_pdf_path))->toBe($made['fake']->signedPdf)
+            ->and(glob(ExportTemp::directory('versions').'/signed-*'))->toBe([]);
+    });
+
+    it('is refused when it is over the limit: the request stays as it is, a warning is written, nothing is stored or left', function (): void {
+        Log::spy();
+        $made = versionAwaiting(1);
+        $made['fake']->complete();
+        config(['inventories.max_signed_pdf_bytes' => 5]);
+        $used = signatureStorageUsed($made['version']);
+
+        $row = versionSync(signatureSyncedAgo($made['version'], 90));
+
+        expect($row->signature_status)->toBe(SignatureStatus::Awaiting)
+            ->and($row->signed_pdf_path)->toBeNull()
+            ->and(signatureStorageUsed($row))->toBe($used)
+            ->and(glob(ExportTemp::directory('versions').'/signed-*'))->toBe([])
+            // Looked at, so that the schedule does not come back in a minute.
+            ->and($row->signature_synced_at->diffInMinutes(now(), true))->toBeLessThan(2);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'refused') && ! str_contains(json_encode($context), 'api_test_key'))->once();
+    });
+
+    it('leaves no scratch file when the download fails', function (): void {
+        $made = versionAwaiting(1);
+        $made['fake']->complete();
+        $made['fake']->failNext('GET /envelope/item/{id}/download', 503);
+
+        expect(fn () => app(SignatureSync::class)->sync($made['version']->id))->toThrow(DocumensoException::class)
+            ->and(glob(ExportTemp::directory('versions').'/signed-*'))->toBe([]);
     });
 });
 
@@ -378,13 +792,13 @@ describe('a request that is not followed', function (): void {
 
         expect($made['fake']->calls)->toBe($calls);
     })->with([
-        'asked for' => [SignatureStatus::Requested, null],
+        'asked for, with no envelope' => [SignatureStatus::Requested, null],
         'being sent, with no envelope yet' => [SignatureStatus::Sending, null],
         'awaiting, with no envelope (cannot be)' => [SignatureStatus::Awaiting, null],
         'completed' => [SignatureStatus::Completed, 'envelope_test1'],
         'rejected' => [SignatureStatus::Rejected, 'envelope_test1'],
         'cancelled' => [SignatureStatus::Cancelled, 'envelope_test1'],
-        'failed' => [SignatureStatus::Failed, 'envelope_test1'],
+        'failed, with no envelope' => [SignatureStatus::Failed, null],
         'none asked for' => [null, null],
     ]);
 

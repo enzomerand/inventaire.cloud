@@ -67,9 +67,11 @@ Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, Pr
 
 // What Documenso (the e-signature service) calls when something happens to an envelope: a machine, with no session and no cookie, that
 // proves who it is by the secret of the instance in a header (no CSRF token: it has no page to read one from). It is limited in
-// pace per network address (the `documenso-webhook` limiter), whatever it sends. It only wakes up a synchronisation: see the controller.
+// pace per network address by the controller itself, which counts only the calls that fail to authenticate (a throttle middleware would
+// count every call, and a flood of wrong secrets would then use up what the real ones are allowed). It only wakes up a synchronisation:
+// see the controller.
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
-    Route::post('/webhooks/documenso', DocumensoWebhookController::class)->middleware('throttle:documenso-webhook')->name('webhooks.documenso');
+    Route::post('/webhooks/documenso', DocumensoWebhookController::class)->name('webhooks.documenso');
 });
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the

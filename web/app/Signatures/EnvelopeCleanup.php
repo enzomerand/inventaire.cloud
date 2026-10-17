@@ -20,14 +20,21 @@ use WeakMap;
  * inventory or its workspace. Their signers have been emailed, and must not be left with a document to sign that nobody keeps; the
  * envelopes are cancelled at Documenso in the background ({@see CancelDocumensoEnvelopes}), once the deletion is committed.
  *
- * A request is open when its version is `sending` or `awaiting` and Documenso gave it an envelope (a draft that was never sent
- * emails nobody, and Documenso only cancels what is pending). The ids are read before the deletion removes the rows (the database
+ * A request is open when it has not ended ({@see SignatureStatus::unfinished()}: `requested`, `sending`, `awaiting` or `failed`) and
+ * Documenso gave it an envelope. A `failed` one is open as much as the others: the call that sent it may have been lost after Documenso
+ * had emailed the signers, so its envelope may be pending there; and one that is `requested` again after a failure keeps the envelope
+ * of the first try. Over-collecting costs nothing: Documenso only cancels an envelope that is pending, so a draft or an envelope that
+ * is over is refused and left alone. The ids are read before the deletion removes the rows (the database
  * cascades those of an inventory and of a workspace without firing an event), in the `deleting` event of the model, like the folders
  * to purge ({@see AttachmentCleanup}, which calls this class), and the jobs are queued only in its `deleted` event: a deletion that
- * fails cancels nothing.
+ * fails cancels nothing. The ids go to the jobs {@see self::PER_JOB} at a time: a job that holds ten envelopes runs for a few minutes
+ * at the longest, whatever the instance is doing.
  */
 final class EnvelopeCleanup
 {
+    /** The envelopes one job takes care of: each is one call of 20 seconds at the longest (two when a draft is to be deleted). */
+    public const PER_JOB = 10;
+
     /**
      * The envelopes to cancel for each inventory and workspace that is being deleted, between its `deleting` and its `deleted` event.
      * Dropped with the model if the deletion fails.
@@ -75,11 +82,13 @@ final class EnvelopeCleanup
     /**
      * Queues the cancellation of envelopes once the transaction in progress is committed (at once when there is none): one that is
      * rolled back, or retried after a deadlock, cancels nothing. A queue that cannot be reached is written in the log: the signers
-     * keep a document to sign, and an operator can cancel it in Documenso.
+     * keep a document to sign, and an operator can cancel it in Documenso. The envelopes go to the jobs {@see self::PER_JOB} at a time.
      *
      * @param  list<string>  $envelopeIds
+     * @param  bool  $deleteDrafts  Whether an envelope that is still a draft is deleted at Documenso (it cannot be cancelled, and
+     *                              nobody was emailed): for the requests the schedule gave up on.
      */
-    public function cancelAfterCommit(array $envelopeIds): void
+    public function cancelAfterCommit(array $envelopeIds, bool $deleteDrafts = false): void
     {
         $envelopeIds = array_values(array_unique($envelopeIds));
 
@@ -87,11 +96,13 @@ final class EnvelopeCleanup
             return;
         }
 
-        $this->db->connection()->afterCommit(function () use ($envelopeIds): void {
-            try {
-                CancelDocumensoEnvelopes::dispatch($envelopeIds);
-            } catch (Throwable $exception) {
-                Log::error('The cancellation of signature requests could not be queued: cancel them in Documenso by hand.', ['envelopes' => $envelopeIds, 'exception' => $exception]);
+        $this->db->connection()->afterCommit(function () use ($envelopeIds, $deleteDrafts): void {
+            foreach (array_chunk($envelopeIds, self::PER_JOB) as $chunk) {
+                try {
+                    CancelDocumensoEnvelopes::dispatch($chunk, null, $deleteDrafts);
+                } catch (Throwable $exception) {
+                    Log::error('The cancellation of signature requests could not be queued: cancel them in Documenso by hand.', ['envelopes' => $chunk, 'exception' => $exception]);
+                }
             }
         });
     }
@@ -102,7 +113,7 @@ final class EnvelopeCleanup
     private function open(): Builder
     {
         return $this->db->table('inventory_versions')
-            ->whereIn('inventory_versions.signature_status', [SignatureStatus::Sending->value, SignatureStatus::Awaiting->value])
+            ->whereIn('inventory_versions.signature_status', SignatureStatus::unfinishedValues())
             ->whereNotNull('inventory_versions.documenso_envelope_id');
     }
 

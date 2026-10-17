@@ -25,10 +25,12 @@ use App\Rules\PersonName;
 use App\Rules\SingleLineText;
 use App\Signatures\Documenso;
 use App\Signatures\EnvelopeCleanup;
+use App\Signatures\SignatureQuota;
 use App\Signatures\SignatureSync;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -54,11 +56,14 @@ use Throwable;
  * lock, on what it holds then): the people to sign (names and addresses go through the rules and the normalisation of the accounts, and
  * must differ from one another: a `ValidationException` under `signers.N.`), a PDF with more items than a PDF may hold, as for the
  * exports ({@see ExportRefusedException}), a workspace whose files already weigh its quota ({@see StorageLimitReachedException}), and
- * signatures asked for when the instance has no Documenso ({@see SignatureUnavailableException}).
+ * signatures asked for when the instance has no Documenso ({@see SignatureUnavailableException}); then, when signers are given, the
+ * requests for signatures the workspace may make in a day ({@see SignatureQuota}, a `ThrottleRequestsException`, counted once the
+ * version is frozen).
  *
  * **Deleting** a version takes the lock of the workspace, then the one of the inventory, gives its `counted_bytes` back to the storage
  * counter, deletes the row and purges its folder once that is committed. A request for signatures that is still open at Documenso
- * (`sending` or `awaiting`, with an envelope) is cancelled there in the background once that is committed too ({@see EnvelopeCleanup}).
+ * (one that has not ended, `failed` included, and has an envelope: {@see SignatureSync::followed()}) is cancelled there in the
+ * background once that is committed too ({@see EnvelopeCleanup}).
  */
 final class OfficialVersions
 {
@@ -80,6 +85,7 @@ final class OfficialVersions
         private readonly AttachmentStorage $storage,
         private readonly WorkspaceStorage $usage,
         private readonly EnvelopeCleanup $envelopes,
+        private readonly SignatureQuota $quota,
     ) {}
 
     /**
@@ -103,6 +109,7 @@ final class OfficialVersions
      * @throws StorageLimitReachedException When the files of the workspace already weigh its quota.
      * @throws SignatureUnavailableException When signers are given and the instance has no Documenso.
      * @throws VersionLimitReachedException When the inventory already holds as many versions as it may.
+     * @throws ThrottleRequestsException When signers are given and the workspace has made as many requests for signatures today as it may.
      * @throws ModelNotFoundException When the account of the person or the inventory was deleted in the meantime.
      */
     public function create(Inventory $inventory, User $author, ?string $label, array $signers): InventoryVersion
@@ -110,10 +117,19 @@ final class OfficialVersions
         [$label, $signers] = $this->validated($label, $signers);
         $this->check($inventory, $signers);
 
+        // Asking for signatures has Documenso email people: the workspace may only do it so many times a day.
+        if ($signers !== []) {
+            $this->quota->ensure($inventory->workspace_id);
+        }
+
         $scratch = ExportTemp::file('versions', 'snapshot-');
 
         try {
             $version = DeadlockRetries::run(fn (): InventoryVersion => $this->db->transaction(fn (): InventoryVersion => $this->freeze($inventory, $author, $label, $signers, $scratch)));
+
+            if ($signers !== []) {
+                $this->quota->spend($inventory->workspace_id);
+            }
 
             return $this->store($version, $scratch);
         } finally {

@@ -29,9 +29,6 @@ use Illuminate\Support\ServiceProvider;
  */
 class AppServiceProvider extends ServiceProvider
 {
-    /** The calls per minute and network address the webhook of Documenso may make. */
-    private const DOCUMENSO_WEBHOOK_PER_MINUTE = 120;
-
     /**
      * Register any application services.
      */
@@ -75,7 +72,6 @@ class AppServiceProvider extends ServiceProvider
         $this->registerInventoryLimiters();
         $this->registerAdminLimiters();
         $this->registerApiTokenLimiters();
-        $this->registerWebhookLimiters();
     }
 
     /**
@@ -127,16 +123,6 @@ class AppServiceProvider extends ServiceProvider
     {
         RateLimiter::for('api-token-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.api_token_creations_per_hour'))
             ->by('api-token-creation:'.$this->signedInKey($request)));
-    }
-
-    /**
-     * The rate limiter of the webhook of Documenso, 120 calls a minute per network address: a burst of events for a few envelopes is a
-     * handful of calls, and nothing else is allowed to call it (a wrong secret is refused all the same, and counted).
-     */
-    private function registerWebhookLimiters(): void
-    {
-        RateLimiter::for('documenso-webhook', fn (Request $request): Limit => Limit::perMinute(self::DOCUMENSO_WEBHOOK_PER_MINUTE)
-            ->by('documenso-webhook:'.$request->ip()));
     }
 
     /**

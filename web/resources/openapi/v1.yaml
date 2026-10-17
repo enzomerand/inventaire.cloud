@@ -3255,7 +3255,8 @@ paths:
 
         An inventory holds 200 versions by default (`version_limit_reached`), a user can freeze 10 times an hour by default, a PDF
         holds 500 items at most by default (`pdf_too_large`) and the files of a version count against the storage of the workspace
-        (`storage_limit_reached`).
+        (`storage_limit_reached`). A workspace can ask for signatures 20 times a day by default, a version frozen with signers
+        or a failed request sent again counting for one (`429` beyond, with `Retry-After`).
       x-ability: write
       requestBody:
         content:
@@ -3355,7 +3356,9 @@ paths:
                 code: too_many_requests
           x-codes:
             - code: too_many_requests
-              description: The rate limit of the token, or the versions an hour of the user, is reached.
+              description: >-
+                The rate limit of the token, or the versions an hour of the user, is reached; or the workspace has already made as many
+                requests for signatures today as it may (20 a day by default, signers given). Wait `Retry-After` seconds.
   /inventories/{inventory}/versions/{version}:
     parameters:
       - $ref: '#/components/parameters/InventoryId'
@@ -3864,6 +3867,9 @@ paths:
         version: it becomes `requested` and a worker takes it from where it stopped, with the same PDF (an envelope that exists at
         Documenso is not created twice). The answer is the version; poll it until `signature.status` is `awaiting` (or `failed`
         again, with the `error`).
+
+        Sending again is a request for signatures like the first one: the workspace can make 20 a day by default, those of a
+        version frozen with signers included (`429` beyond, with `Retry-After`).
       x-ability: write
       responses:
         '202':
@@ -3924,7 +3930,9 @@ paths:
                 code: too_many_requests
           x-codes:
             - code: too_many_requests
-              description: The rate limit of the token is reached.
+              description: >-
+                The rate limit of the token is reached, or the workspace has already made as many requests for signatures today as it
+                may (20 a day by default). Wait `Retry-After` seconds.
   /templates:
     get:
       tags:

@@ -1276,5 +1276,8 @@
     "Remove": "Retirer",
     "Add a signer": "Ajouter un signataire",
     "Create the version": "Créer la version",
-    "The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.": "Les données de cet inventaire sont trop volumineuses pour être figées en version officielle : elles ne peuvent pas peser plus de :size."
+    "The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.": "Les données de cet inventaire sont trop volumineuses pour être figées en version officielle : elles ne peuvent pas peser plus de :size.",
+    "Not found.": "Introuvable.",
+    "The secret is missing or wrong.": "Le secret est absent ou erroné.",
+    "The body is too large.": "Le corps de la requête est trop volumineux."
 }

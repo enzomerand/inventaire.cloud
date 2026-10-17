@@ -15,6 +15,7 @@ use App\Signatures\DocumensoException;
 use App\Signatures\SignatureRequests;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -85,13 +86,13 @@ describe('the job', function (): void {
             ->and($made['version']->signature_status)->toBe(SignatureStatus::Requested);
     });
 
-    it('is tried five times, with a pause that grows, within two minutes, on the default queue', function (): void {
+    it('is tried five times, with a pause that grows, within four minutes (a creation may wait two), on the default queue', function (): void {
         $made = signatureRequested();
         $job = new RequestSignatures($made['version']);
 
         expect($job->tries)->toBe(5)
             ->and($job->backoff())->toBe([10, 60, 300, 900])
-            ->and($job->timeout)->toBe(120)
+            ->and($job->timeout)->toBe(240)->and($job->timeout)->toBeGreaterThan(120 + 20 + 20)
             ->and($job->queue)->toBeNull()
             ->and($job->deleteWhenMissingModels)->toBeTrue();
     });
@@ -517,15 +518,54 @@ describe('a webhook that comes first', function (): void {
             ->and($made['version']->fresh()->documenso_envelope_id)->toBe('envelope_test1');
     });
 
-    it('has recorded another id: the envelope the job created is left a draft, and the request is not distributed twice', function (): void {
+    it('has recorded another id: the request goes on with that envelope, which is distributed once, and the draft the job made is deleted', function (): void {
+        $made = signatureRequested(1);
+        $version = $made['version'];
+        // The envelope the webhook announced and the read adopted: a draft of this version at Documenso, with its recipients.
+        $made['fake']->other('envelope_other', 'DRAFT', $version->ulid, [['id' => 301, 'email' => 'signer1@example.test', 'name' => 'Signer 1', 'signingStatus' => 'NOT_SIGNED', 'signedAt' => null, 'rejectionReason' => null]]);
+        $made['fake']->onCall('POST /envelope/create', fn () => InventoryVersion::query()->whereKey($version->id)->update(['documenso_envelope_id' => 'envelope_other']));
+
+        versionSend($version);
+
+        $deleted = array_map(fn (Request $request): array => $request->data(), $made['fake']->requestsOf('POST /envelope/delete'));
+        $distributed = array_map(fn (Request $request): array => $request->data(), $made['fake']->requestsOf('POST /envelope/distribute'));
+        $row = $version->fresh();
+
+        // Ours is deleted, theirs is distributed (once), and the request is awaiting its signers with the recorded envelope.
+        expect($deleted)->toBe([['envelopeId' => 'envelope_test1']])
+            ->and($distributed)->toBe([['envelopeId' => 'envelope_other']])
+            ->and($made['fake']->count('POST /envelope/create'))->toBe(1)
+            ->and($row->documenso_envelope_id)->toBe('envelope_other')
+            ->and($row->signature_status)->toBe(SignatureStatus::Awaiting)
+            ->and($row->signers[0]['recipient_id'])->toBe(301);
+    });
+
+    it('has recorded another id that Documenso cannot read: that one is forgotten once and the request is made again, never in a loop', function (): void {
         Log::spy();
         $made = signatureRequested(1);
-        $made['fake']->onCall('POST /envelope/create', fn () => InventoryVersion::query()->whereKey($made['version']->id)->update(['documenso_envelope_id' => 'envelope_other']));
+        $version = $made['version'];
+        $made['fake']->onCall('POST /envelope/create', fn () => InventoryVersion::query()->whereKey($version->id)->update(['documenso_envelope_id' => 'envelope_other']));
 
-        versionSend($made['version']);
+        // The recorded id is not at Documenso: forgotten, a second envelope is made, and the hook records the same stranger again.
+        $row = versionSend($version);
 
-        expect($made['fake']->count('POST /envelope/distribute'))->toBe(0)
-            ->and($made['version']->fresh()->documenso_envelope_id)->toBe('envelope_other');
-        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'no longer waits'))->once();
+        expect($made['fake']->count('POST /envelope/create'))->toBe(2)
+            ->and($row->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($row->signature_error)->toBe(SignatureError::DocumensoRefused);
     });
+
+    it('does not fail the request when the draft it made cannot be deleted: it is only left a draft, and written in the log', function (): void {
+        Log::spy();
+        $made = signatureRequested(1);
+        $version = $made['version'];
+        $made['fake']->other('envelope_other', 'DRAFT', $version->ulid);
+        $made['fake']->onCall('POST /envelope/create', fn () => InventoryVersion::query()->whereKey($version->id)->update(['documenso_envelope_id' => 'envelope_other']));
+        $made['fake']->failNext('POST /envelope/delete', 500);
+
+        versionSend($version);
+
+        expect($version->fresh()->signature_status)->toBe(SignatureStatus::Awaiting);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'could not be deleted'))->once();
+    });
+
 });

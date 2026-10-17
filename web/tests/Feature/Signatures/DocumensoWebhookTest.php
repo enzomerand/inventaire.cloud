@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 
@@ -72,6 +73,16 @@ function webhookQueued(): array
     return Queue::pushed(SyncSignature::class)->map(fn (SyncSignature $job): int => $job->versionId)->values()->all();
 }
 
+/**
+ * The envelopes the jobs of the queue were handed to look at, by version: what a webhook announced for a request that had none.
+ *
+ * @return list<string|null>
+ */
+function webhookCandidates(): array
+{
+    return Queue::pushed(SyncSignature::class)->map(fn (SyncSignature $job): ?string => $job->envelopeId)->values()->all();
+}
+
 describe('who may call it', function (): void {
     it('does not exist while the instance has no secret', function (mixed $secret): void {
         config(['services.documenso.webhook_secret' => $secret]);
@@ -115,6 +126,27 @@ describe('who may call it', function (): void {
 
     it('is a POST: nothing else is answered', function (): void {
         $this->getJson('/webhooks/documenso')->assertStatus(405);
+    });
+});
+
+describe('what it says', function (): void {
+    it('says it in the language the call asks for, in French by default of the instance', function (): void {
+        $event = webhookEvent('DOCUMENT_COMPLETED', ['envelopeId' => 'envelope_x']);
+        $large = $event + ['padding' => str_repeat('a', DocumensoWebhookController::MAX_BYTES)];
+
+        webhookCall($this, $event, ['X-Documenso-Secret' => 'nope', 'Accept-Language' => 'fr'])->assertUnauthorized()->assertJsonPath('message', 'Le secret est absent ou erroné.');
+        webhookCall($this, $large, ['X-Documenso-Secret' => 'secret-test', 'Accept-Language' => 'fr'])->assertStatus(413)->assertJsonPath('message', 'Le corps de la requête est trop volumineux.');
+
+        config(['services.documenso.webhook_secret' => null]);
+
+        webhookCall($this, $event, ['X-Documenso-Secret' => 'secret-test', 'Accept-Language' => 'fr'])->assertNotFound()->assertJsonPath('message', 'Introuvable.');
+        webhookCall($this, $event, ['X-Documenso-Secret' => 'secret-test', 'Accept-Language' => 'en'])->assertNotFound()->assertJsonPath('message', 'Not found.');
+    });
+
+    it('asks the translator for every message it answers with', function (): void {
+        $source = (string) file_get_contents((new ReflectionClass(DocumensoWebhookController::class))->getFileName());
+
+        expect($source)->toContain("__('Not found.')")->toContain("__('The secret is missing or wrong.')")->toContain("__('The body is too large.')");
     });
 });
 
@@ -200,16 +232,46 @@ describe('what it does with an event', function (): void {
         'an empty body' => [''],
     ]);
 
-    it('finds a request that is being sent by our own identifier, and records the id of its envelope', function (): void {
+    it('finds a request that is being sent by our own identifier, and hands the envelope it announces to the job: it records nothing itself', function (): void {
         $made = versionAwaiting(1);
         $version = $made['version'];
         $version->forceFill(['signature_status' => SignatureStatus::Sending, 'documenso_envelope_id' => null])->save();
 
         webhookCall($this, webhookEvent('DOCUMENT_CREATED', ['envelopeId' => 'envelope_test1', 'externalId' => strtoupper($version->ulid)]))->assertOk();
 
-        expect($version->fresh()->documenso_envelope_id)->toBe('envelope_test1')
-            ->and(webhookQueued())->toBe([$version->id]);
+        expect($version->fresh()->documenso_envelope_id)->toBeNull()
+            ->and(webhookQueued())->toBe([$version->id])
+            ->and(webhookCandidates())->toBe(['envelope_test1']);
+        // Not a call to Documenso either: the job reads the envelope, the webhook is fast.
+        expect($made['fake']->count('GET /envelope/{id}'))->toBe(1);
     });
+
+    it('records the id of the envelope it announced only once the job has read it and found our identifier on it', function (): void {
+        $made = versionAwaiting(1);
+        $version = $made['version'];
+        $version->forceFill(['signature_status' => SignatureStatus::Sending, 'documenso_envelope_id' => null])->save();
+        $made['fake']->status = 'PENDING';
+
+        webhookCall($this, webhookEvent('DOCUMENT_CREATED', ['envelopeId' => 'envelope_test1', 'externalId' => $version->ulid]))->assertOk();
+        Queue::pushed(SyncSignature::class)->each(fn (SyncSignature $job) => $job->handle(app(SignatureSync::class)));
+
+        expect($version->fresh()->documenso_envelope_id)->toBe('envelope_test1')
+            ->and($version->fresh()->signature_status)->toBe(SignatureStatus::Awaiting);
+    });
+
+    it('records nothing for an envelope that is not ours, or says nothing of whose it is: the call is not believed', function (?string $externalId): void {
+        $made = versionAwaiting(1);
+        $version = $made['version'];
+        $version->forceFill(['signature_status' => SignatureStatus::Sending, 'documenso_envelope_id' => null])->save();
+        // What the API says of the envelope the call announces: another document's, or none.
+        $made['fake']->externalId = $externalId;
+
+        webhookCall($this, webhookEvent('DOCUMENT_CREATED', ['envelopeId' => 'envelope_test1', 'externalId' => $version->ulid]))->assertOk();
+        Queue::pushed(SyncSignature::class)->each(fn (SyncSignature $job) => $job->handle(app(SignatureSync::class)));
+
+        expect($version->fresh()->documenso_envelope_id)->toBeNull()
+            ->and($version->fresh()->signature_status)->toBe(SignatureStatus::Sending);
+    })->with(['the identifier of another version' => ['01j00000000000000000000000'], 'no identifier' => [null], 'the identifier in another case' => ['SOMETHING']]);
 
     it('does not adopt an envelope for anything but a request that is being sent and has none', function (SignatureStatus $status, ?string $envelope): void {
         $version = versionAwaiting(1)['version'];
@@ -316,14 +378,14 @@ describe('what Documenso says is never believed', function (): void {
 });
 
 describe('the route', function (): void {
-    it('is named, a POST only, without session nor CSRF check, limited in pace per address', function (): void {
+    it('is named, a POST only, without session nor CSRF check, and paced by the controller (no throttle middleware counts every call)', function (): void {
         $route = Route::getRoutes()->getByName('webhooks.documenso');
 
         expect($route)->not->toBeNull()
             ->and($route->uri())->toBe('webhooks/documenso')
             ->and($route->methods())->toBe(['POST'])
             ->and($route->excludedMiddleware())->toContain(StartSession::class, PreventRequestForgery::class)
-            ->and($route->gatherMiddleware())->toContain('throttle:documenso-webhook')
+            ->and(collect($route->gatherMiddleware())->filter(fn (mixed $middleware): bool => is_string($middleware) && str_starts_with($middleware, 'throttle')))->toHaveCount(0)
             ->and(route('webhooks.documenso', [], false))->toBe('/webhooks/documenso');
     });
 
@@ -348,6 +410,92 @@ describe('the route', function (): void {
         expect($slowed->headers->get('Content-Type'))->toContain('application/json')
             ->and($slowed->headers->has('Retry-After'))->toBeTrue()
             ->and($other->status())->toBe(200);
+    });
+
+    it('counts only the calls refused with a 401: any number of calls that authenticate is answered', function (): void {
+        $event = webhookEvent('DOCUMENT_COMPLETED', ['envelopeId' => 'envelope_x']);
+
+        for ($call = 1; $call <= 150; $call++) {
+            webhookCall($this, $event)->assertOk();
+        }
+
+        // The 120 that fail are what it takes, though 150 went through before them.
+        for ($call = 1; $call <= 119; $call++) {
+            webhookCall($this, $event, ['X-Documenso-Secret' => 'wrong'])->assertUnauthorized();
+        }
+
+        webhookCall($this, $event)->assertOk();
+        webhookCall($this, $event, ['X-Documenso-Secret' => 'wrong'])->assertUnauthorized();
+        webhookCall($this, $event)->assertStatus(429);
+    });
+
+    it('looks at the count before it looks at the secret: an address that failed too often is not told whether its guess was right', function (): void {
+        $event = webhookEvent('DOCUMENT_COMPLETED', ['envelopeId' => 'envelope_x']);
+
+        for ($call = 1; $call <= 120; $call++) {
+            webhookCall($this, $event, ['X-Documenso-Secret' => 'wrong'])->assertUnauthorized();
+        }
+
+        // Neither a wrong secret nor the right one: the same refusal.
+        $wrong = webhookCall($this, $event, ['X-Documenso-Secret' => 'wrong']);
+        $right = webhookCall($this, $event);
+
+        $wrong->assertStatus(429)->assertJsonPath('code', 'too_many_requests');
+        $right->assertStatus(429)->assertJsonPath('code', 'too_many_requests');
+        expect($right->headers->get('Retry-After'))->toBeNumeric()->and((int) $right->headers->get('Retry-After'))->toBeLessThanOrEqual(60)
+            ->and($right->headers->get('X-RateLimit-Limit'))->toBe('120')
+            ->and($right->headers->get('X-RateLimit-Remaining'))->toBe('0')
+            ->and($right->headers->get('Content-Type'))->toContain('application/json');
+        Queue::assertNotPushed(SyncSignature::class);
+    });
+
+    it('lets the address in again a minute after its last failure', function (): void {
+        $event = webhookEvent('DOCUMENT_COMPLETED', ['envelopeId' => 'envelope_x']);
+
+        for ($call = 1; $call <= 120; $call++) {
+            webhookCall($this, $event, ['X-Documenso-Secret' => 'wrong'])->assertUnauthorized();
+        }
+
+        webhookCall($this, $event)->assertStatus(429);
+        $this->travel(61)->seconds();
+
+        webhookCall($this, $event)->assertOk();
+    });
+
+    it('does not count what is not a failure to authenticate: no secret on the instance, a body that is too large', function (): void {
+        $event = webhookEvent('DOCUMENT_COMPLETED', ['envelopeId' => 'envelope_x']);
+        $large = $event + ['padding' => str_repeat('a', DocumensoWebhookController::MAX_BYTES)];
+
+        for ($call = 1; $call <= 130; $call++) {
+            webhookCall($this, $large)->assertStatus(413);
+        }
+
+        config(['services.documenso.webhook_secret' => null]);
+
+        for ($call = 1; $call <= 130; $call++) {
+            webhookCall($this, $event)->assertNotFound();
+        }
+
+        config(['services.documenso.webhook_secret' => 'secret-test']);
+
+        webhookCall($this, $event, ['X-Documenso-Secret' => 'wrong'])->assertUnauthorized();
+        webhookCall($this, $event)->assertOk();
+    });
+
+    it('has a generous cap of its own for the calls that do authenticate, in JSON, for that address only', function (): void {
+        $event = webhookEvent('DOCUMENT_COMPLETED', ['envelopeId' => 'envelope_x']);
+
+        for ($call = 1; $call <= DocumensoWebhookController::CALLS_PER_MINUTE; $call++) {
+            RateLimiter::hit('documenso-webhook-calls:127.0.0.1', 60);
+        }
+
+        $slowed = webhookCall($this, $event);
+        $other = $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.9'])->call('POST', '/webhooks/documenso', [], [], [], ['HTTP_X_DOCUMENSO_SECRET' => 'secret-test', 'CONTENT_TYPE' => 'application/json'], json_encode($event));
+
+        $slowed->assertStatus(429)->assertJsonPath('code', 'too_many_requests');
+        expect($slowed->headers->has('Retry-After'))->toBeTrue()
+            ->and($other->status())->toBe(200)
+            ->and(DocumensoWebhookController::CALLS_PER_MINUTE)->toBeGreaterThanOrEqual(600);
     });
 
     it('is told to Documenso with an address built from APP_URL, never from the request', function (): void {

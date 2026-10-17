@@ -8,13 +8,15 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Psr\Http\Message\ResponseInterface;
+use Throwable;
 
 /**
  * The calls this application makes to Documenso, the e-signature service, through its REST API version 2 (`{url}/api/v2/envelope/*`;
  * version 1 and `/document/*` are deprecated and will be removed).
  *
- * The API token goes bare in the `Authorization` header (no `Bearer`). Calls wait 20 seconds for an answer and 5 to connect, and
- * follow no redirect: an address that redirects is a configuration to correct, and the token must not travel to another host. A call
+ * The API token goes bare in the `Authorization` header (no `Bearer`). Calls wait 20 seconds for an answer and 5 to connect (two minutes
+ * for the two that carry a whole PDF: sending one, and downloading the signed one), and follow no redirect: an address that redirects is a configuration to correct, and the token must not travel to another host. A call
  * that does not succeed throws a {@see DocumensoException}, which says whether trying again can help; the client itself never retries,
  * the jobs that call it do (with the pace of the queue). Neither the token nor the document is ever written in a message or a log.
  *
@@ -27,6 +29,9 @@ final class DocumensoClient
 {
     /** Seconds Documenso may take to answer. */
     private const TIMEOUT = 20;
+
+    /** Seconds it may take for the calls that move a whole PDF: the creation of an envelope and the download of the signed document. */
+    private const FILE_TIMEOUT = 120;
 
     /** Seconds to establish the connection. */
     private const CONNECT_TIMEOUT = 5;
@@ -70,7 +75,7 @@ final class DocumensoClient
 
         $response = $this->send('POST /envelope/create', fn (PendingRequest $request): Response => $request
             ->attach('files', $pdf, $fileName, ['Content-Type' => 'application/pdf'])
-            ->post($this->url('/envelope/create'), ['payload' => json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]));
+            ->post($this->url('/envelope/create'), ['payload' => json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]), self::FILE_TIMEOUT);
 
         $id = $response->json('id');
 
@@ -131,26 +136,88 @@ final class DocumensoClient
     }
 
     /**
-     * Downloads the signed PDF of an item of a completed envelope (signatures and certificate included).
-     *
-     * @param  int|string  $itemId  The `id` of the item, from {@see self::getEnvelope()}.
-     * @return string The bytes of the PDF.
+     * Deletes an envelope: a draft that is not wanted (nobody was ever emailed), or any envelope the application no longer keeps.
      *
      * @throws DocumensoException
      */
-    public function downloadSigned(int|string $itemId): string
+    public function deleteEnvelope(string $id): void
+    {
+        $this->send('POST /envelope/delete', fn (PendingRequest $request): Response => $request
+            ->asJson()
+            ->post($this->url('/envelope/delete'), ['envelopeId' => $id]));
+    }
+
+    /**
+     * Downloads the signed PDF of an item of a completed envelope (signatures and certificate included) into a file, without holding
+     * it in memory.
+     *
+     * The document is refused when it weighs more than `inventories.max_signed_pdf_bytes`: by the `Content-Length` Documenso announces
+     * (the transfer is then cut at the headers, before a byte of it is written), while it comes (the transfer is cut when it has
+     * brought more than the limit, whatever was announced) and by the size it really has, which is what counts.
+     * The file is only ever the document or, when the call fails, what Documenso answered; whoever gave the path deletes it.
+     *
+     * @param  int|string  $itemId  The `id` of the item, from {@see self::getEnvelope()}.
+     * @param  string  $into  The path of the file to write, on this machine.
+     * @return int The size of the PDF, in bytes.
+     *
+     * @throws DocumensoException When the call fails, or what came is not a PDF or is bigger than the limit.
+     */
+    public function downloadSigned(int|string $itemId, string $into): int
     {
         $call = 'GET /envelope/item/{id}/download';
-        $response = $this->send($call, fn (PendingRequest $request): Response => $request
-            ->replaceHeaders(['Accept' => 'application/pdf'])
-            ->get($this->url('/envelope/item/'.rawurlencode((string) $itemId).'/download'), ['version' => 'signed']));
-        $body = $response->body();
+        $limit = config()->integer('inventories.max_signed_pdf_bytes');
+        try {
+            $response = $this->send($call, fn (PendingRequest $request): Response => $request
+                ->replaceHeaders(['Accept' => 'application/pdf'])
+                ->withOptions([
+                    'sink' => $into,
+                    // As soon as the headers are in, when Documenso announces a size...
+                    'on_headers' => function (ResponseInterface $answer) use ($limit): void {
+                        $length = $answer->getHeaderLine('Content-Length');
 
-        if (! str_starts_with($body, '%PDF-')) {
+                        if ($answer->getStatusCode() < 300 && ctype_digit($length) && (int) $length > $limit) {
+                            throw new SignedPdfTooLargeException('The signed PDF is bigger than the limit.');
+                        }
+                    },
+                    // ...and while the body comes, for the one that does not (or lies): the transfer stops at the limit.
+                    'progress' => function (int $total, int $downloaded) use ($limit): void {
+                        if ($downloaded > $limit) {
+                            throw new SignedPdfTooLargeException('The signed PDF is bigger than the limit.');
+                        }
+                    },
+                ])
+                ->get($this->url('/envelope/item/'.rawurlencode((string) $itemId).'/download'), ['version' => 'signed']), self::FILE_TIMEOUT);
+        } catch (Throwable $exception) {
+            // The HTTP client wraps what its callbacks throw: the one that stopped the transfer is somewhere in the chain of causes.
+            for ($cause = $exception; $cause !== null; $cause = $cause->getPrevious()) {
+                if ($cause instanceof SignedPdfTooLargeException) {
+                    throw DocumensoException::invalidResponse($call, 'the PDF is bigger than the limit');
+                }
+            }
+
+            throw $exception;
+        }
+
+        clearstatcache(true, $into);
+        $size = (int) filesize($into);
+        $length = $response->header('Content-Length');
+
+        if ($size > $limit || (ctype_digit($length) && (int) $length > $limit)) {
+            throw DocumensoException::invalidResponse($call, 'the PDF is bigger than the limit');
+        }
+
+        $handle = fopen($into, 'rb');
+        $start = $handle === false ? '' : (string) fread($handle, 5);
+
+        if ($handle !== false) {
+            fclose($handle);
+        }
+
+        if ($start !== '%PDF-') {
             throw DocumensoException::invalidResponse($call, 'not a PDF');
         }
 
-        return $body;
+        return $size;
     }
 
     /**
@@ -158,10 +225,11 @@ final class DocumensoClient
      *
      * @param  string  $call  What is asked, `METHOD /path`, for the messages.
      * @param  callable(PendingRequest): Response  $make  Makes the call with the request that is given.
+     * @param  int  $timeout  The seconds Documenso may take to answer.
      *
      * @throws DocumensoException When Documenso is not configured, cannot be reached or does not answer with a success.
      */
-    private function send(string $call, callable $make): Response
+    private function send(string $call, callable $make, int $timeout = self::TIMEOUT): Response
     {
         if (! Documenso::configured()) {
             throw DocumensoException::notConfigured();
@@ -169,7 +237,7 @@ final class DocumensoClient
 
         $request = Http::withHeaders(['Authorization' => Documenso::apiKey()])
             ->acceptJson()
-            ->timeout(self::TIMEOUT)
+            ->timeout($timeout)
             ->connectTimeout(self::CONNECT_TIMEOUT)
             ->withoutRedirecting();
 

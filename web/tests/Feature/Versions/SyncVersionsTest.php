@@ -7,8 +7,12 @@ use App\Inventories\Versions\SignatureStatus;
 use App\Inventories\Versions\VersionError;
 use App\Inventories\Versions\VersionMaintenance;
 use App\Inventories\Versions\VersionStatus;
+use App\Jobs\CancelDocumensoEnvelopes;
 use App\Jobs\PurgeStoredFiles;
+use App\Jobs\RequestSignatures;
 use App\Models\InventoryVersion;
+use App\Signatures\DocumensoClient;
+use App\Signatures\SignatureRequests;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -131,7 +135,7 @@ describe('the requests for signatures that were never sent', function (): void {
             ->and($version->documenso_envelope_id)->toBeNull();
     })->with([SignatureStatus::Requested, SignatureStatus::Sending]);
 
-    it('are left alone before two hours, and when an envelope exists, or when they are beyond sending', function (): void {
+    it('are left alone before two hours, and when they are beyond sending', function (): void {
         versionDocumenso();
         $case = versionTableCase();
         $make = function (SignatureStatus $status, ?string $envelope, int $minutes) use ($case): InventoryVersion {
@@ -141,7 +145,7 @@ describe('the requests for signatures that were never sent', function (): void {
             return versionAged($version, $minutes);
         };
         $recent = $make(SignatureStatus::Requested, null, 119);
-        $sending = $make(SignatureStatus::Sending, 'envelope_1', 600);
+        $sending = $make(SignatureStatus::Sending, 'envelope_1', 119);
         $awaiting = $make(SignatureStatus::Awaiting, null, 600);
         $cancelled = $make(SignatureStatus::Cancelled, null, 600);
         $none = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
@@ -151,6 +155,7 @@ describe('the requests for signatures that were never sent', function (): void {
 
         expect($recent->refresh()->signature_status)->toBe(SignatureStatus::Requested)
             ->and($sending->refresh()->signature_status)->toBe(SignatureStatus::Sending)
+            ->and($sending->documenso_envelope_id)->toBe('envelope_1')
             ->and($awaiting->refresh()->signature_status)->toBe(SignatureStatus::Awaiting)
             ->and($cancelled->refresh()->signature_status)->toBe(SignatureStatus::Cancelled)
             ->and($none->refresh()->signature_status)->toBeNull();
@@ -172,6 +177,144 @@ describe('the requests for signatures that were never sent', function (): void {
             ->and($english->json('data.signature.error'))->toBe('The signature request did not finish and was cancelled. Try again.')
             ->and($french->json('data.signature.error'))->toBe('La demande de signature ne s\'est pas terminée et a été annulée. Réessayez.')
             ->and($english->json('data.abilities.retry_signature'))->toBeTrue();
+    });
+});
+
+describe('the requests for signatures that are stuck with an envelope', function (): void {
+    /**
+     * A request that has an envelope at Documenso and has not moved for `$minutes`.
+     */
+    function stuckRequest(object $test, SignatureStatus $status, int $minutes, string $envelope = 'envelope_stuck'): InventoryVersion
+    {
+        $case = versionTableCase();
+        $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(1)));
+        $version->forceFill(['signature_status' => $status, 'documenso_envelope_id' => $envelope])->save();
+        Queue::fake();
+
+        return versionAged($version, $minutes);
+    }
+
+    it('are failed (stale) after two hours, asked for or being sent: nothing a read of the envelope did got them anywhere', function (SignatureStatus $status): void {
+        versionDocumenso();
+        $version = stuckRequest($this, $status, 121);
+
+        $this->artisan('inventaire:sync-versions')->assertSuccessful();
+
+        $version->refresh();
+
+        expect($version->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($version->signature_error)->toBe(SignatureError::Stale)
+            // The envelope is let go of: sending the request again makes a new one.
+            ->and($version->documenso_envelope_id)->toBeNull()
+            ->and($version->status)->toBe(VersionStatus::Completed);
+    })->with([SignatureStatus::Requested, SignatureStatus::Sending]);
+
+    it('have their envelope deleted if it is a draft and cancelled if it is pending, in the background', function (): void {
+        versionDocumenso();
+        $version = stuckRequest($this, SignatureStatus::Sending, 130);
+
+        app(VersionMaintenance::class)->run();
+
+        Queue::assertPushed(CancelDocumensoEnvelopes::class, 1);
+        Queue::assertPushed(CancelDocumensoEnvelopes::class, fn (CancelDocumensoEnvelopes $job): bool => $job->envelopeIds === ['envelope_stuck'] && $job->deleteDrafts === true);
+        expect($version->refresh()->signature_status)->toBe(SignatureStatus::Failed);
+    });
+
+    it('go through the cleanup job: the draft is deleted at Documenso, a pending envelope is cancelled, one that is over is left alone', function (): void {
+        $fake = versionDocumenso();
+        $fake->other('envelope_draft', 'DRAFT', null)->other('envelope_pending', 'PENDING', null)->other('envelope_done', 'COMPLETED', null);
+        $case = versionTableCase();
+
+        foreach (['envelope_draft', 'envelope_pending', 'envelope_done'] as $envelope) {
+            $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], null, versionSigners(1)));
+            $version->forceFill(['signature_status' => SignatureStatus::Sending, 'documenso_envelope_id' => $envelope])->save();
+            versionAged($version, 130);
+        }
+
+        Queue::fake();
+        app(VersionMaintenance::class)->run();
+        Queue::pushed(CancelDocumensoEnvelopes::class)->each(fn (CancelDocumensoEnvelopes $job) => $job->handle(app(DocumensoClient::class)));
+
+        expect(array_keys($fake->others))->toBe(['envelope_pending', 'envelope_done'])
+            ->and($fake->others['envelope_pending']['status'])->toBe('CANCELLED')
+            ->and($fake->others['envelope_done']['status'])->toBe('COMPLETED');
+    });
+
+    it('can be sent again afterwards, with a new envelope', function (): void {
+        $fake = versionDocumenso();
+        $version = stuckRequest($this, SignatureStatus::Sending, 130);
+        app(VersionMaintenance::class)->run();
+        $case = ['owner' => $version->inventory->workspace->members()->wherePivot('role', 'owner')->first()];
+
+        $retried = inventoryCall($this, $case['owner'], 'POST', "/api/v1/inventories/{$version->inventory->ulid}/versions/{$version->ulid}/signature/retry")->assertStatus(202);
+        Queue::pushed(RequestSignatures::class)->each(fn (RequestSignatures $job) => $job->handle(app(SignatureRequests::class)));
+
+        expect($retried->json('data.signature.status'))->toBe('requested')
+            // The envelope that was let go of was never made by the fake: the one this try makes is the only one.
+            ->and($fake->count('POST /envelope/create'))->toBe(1)
+            ->and($version->fresh()->signature_status)->toBe(SignatureStatus::Awaiting)
+            ->and($version->fresh()->documenso_envelope_id)->not->toBe('envelope_stuck');
+    });
+
+    it('are given up on whatever the reads did meanwhile: reading is not moving', function (): void {
+        $made = versionAwaiting(1);
+        $made['fake']->status = 'DRAFT';
+        $version = $made['version'];
+        $version->forceFill(['signature_status' => SignatureStatus::Sending])->save();
+        versionAged($version, 200);
+
+        // A webhook or a schedule that reads the draft again and again does not keep it alive.
+        versionSync($version);
+        versionSync($version);
+        Queue::fake();
+
+        $result = app(VersionMaintenance::class)->run();
+
+        expect($result['requests'])->toBe(1)
+            ->and($version->refresh()->signature_status)->toBe(SignatureStatus::Failed)
+            ->and($version->signature_error)->toBe(SignatureError::Stale);
+    });
+
+    it('are left alone, with their envelope, when they have moved meanwhile or are not asked for or being sent', function (SignatureStatus $status, int $minutes): void {
+        versionDocumenso();
+        $version = stuckRequest($this, $status, $minutes);
+
+        $this->artisan('inventaire:sync-versions')->assertSuccessful();
+
+        expect($version->refresh()->signature_status)->toBe($status)
+            ->and($version->documenso_envelope_id)->toBe('envelope_stuck');
+        Queue::assertNotPushed(CancelDocumensoEnvelopes::class);
+    })->with([
+        'sending, a moment ago' => [SignatureStatus::Sending, 119],
+        'awaiting, long ago' => [SignatureStatus::Awaiting, 600],
+        'failed, long ago' => [SignatureStatus::Failed, 600],
+        'completed, long ago' => [SignatureStatus::Completed, 600],
+    ]);
+
+    it('are counted with the requests that were never sent, in the output of the command', function (): void {
+        versionDocumenso();
+        stuckRequest($this, SignatureStatus::Sending, 130);
+
+        $this->artisan('inventaire:sync-versions')
+            ->expectsOutputToContain('0 stuck version(s) given up on, 1 unsent signature request(s) given up on, 0 signature request(s) queued to be looked at again.')
+            ->assertSuccessful();
+    });
+
+    it('queue nothing for a deletion that is rolled back with them', function (): void {
+        versionDocumenso();
+        $version = stuckRequest($this, SignatureStatus::Sending, 130);
+
+        try {
+            DB::transaction(function (): void {
+                app(VersionMaintenance::class)->giveUpOnStuckRequests();
+
+                throw new RuntimeException('The caller changes its mind.');
+            });
+        } catch (RuntimeException) {
+        }
+
+        Queue::assertNotPushed(CancelDocumensoEnvelopes::class);
+        expect($version->refresh()->signature_status)->toBe(SignatureStatus::Sending);
     });
 });
 
