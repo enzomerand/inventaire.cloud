@@ -6,6 +6,7 @@ namespace App\Auth;
 
 use App\Models\Inventory;
 use App\Models\InventoryField;
+use App\Models\InventoryVersion;
 use App\Models\User;
 use App\Workspaces\Membership;
 use App\Workspaces\Workspaces;
@@ -33,7 +34,8 @@ use stdClass;
  * What the person wrote in a workspace is counted there, since the history of an item and its files are data about them
  * (right of access) that the items' export does not carry: `revisions_written` is the number of lines of the history of
  * items that they authored (the oldest ones of an item are deleted when it has more than the history keeps), and
- * `files_uploaded` the `count` and the total size in `bytes` of the files they uploaded and that are still attached. Both
+ * `files_uploaded` the `count` and the total size in `bytes` of the files they uploaded and that are still attached, and
+ * `official_versions_created` the number of official versions they froze that still exist (see {@see InventoryVersion}). All
  * are zero in a workspace where they wrote nothing. They are an addition to the document, which keeps its version.
  *
  * Besides the profile and the workspaces it holds what the application keeps about the account's access: the
@@ -98,6 +100,7 @@ final class AccountExport
             ->groupBy('workspace_id');
         $revisions = $this->revisionsWritten($user, $workspaceIds);
         $files = $this->filesUploaded($user, $workspaceIds);
+        $versions = $this->versionsCreated($user, $workspaceIds);
 
         return array_map(fn (Membership $membership): array => [
             'id' => $membership->workspace->ulid,
@@ -108,6 +111,7 @@ final class AccountExport
             'updated_at' => $membership->workspace->updated_at?->toIso8601String(),
             'revisions_written' => $revisions[$membership->workspace->getKey()] ?? 0,
             'files_uploaded' => $files[$membership->workspace->getKey()] ?? ['count' => 0, 'bytes' => 0],
+            'official_versions_created' => $versions[$membership->workspace->getKey()] ?? 0,
             'inventories' => $this->inventories($inventories->get($membership->workspace->getKey(), new Collection)),
         ], $memberships);
     }
@@ -160,6 +164,31 @@ final class AccountExport
         }
 
         return $totals;
+    }
+
+    /**
+     * How many official versions the person froze, by workspace (one query).
+     *
+     * @param  list<int>  $workspaceIds
+     * @return array<int, int> Only the workspaces where they froze some.
+     */
+    private function versionsCreated(User $user, array $workspaceIds): array
+    {
+        $counts = [];
+
+        $rows = DB::table('inventory_versions')
+            ->join('inventories', 'inventories.id', '=', 'inventory_versions.inventory_id')
+            ->where('inventory_versions.user_id', $user->getKey())
+            ->whereIn('inventories.workspace_id', $workspaceIds)
+            ->groupBy('inventories.workspace_id')
+            ->selectRaw('inventories.workspace_id as workspace_id, count(*) as total')
+            ->get();
+
+        foreach ($rows as $row) {
+            $counts[(int) $row->workspace_id] = (int) $row->total;
+        }
+
+        return $counts;
     }
 
     /**
