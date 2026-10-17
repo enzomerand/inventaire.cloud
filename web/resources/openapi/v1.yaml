@@ -146,13 +146,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -183,13 +205,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -218,13 +262,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -266,20 +332,46 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: workspace_limit_reached
               description: The account already belongs to as many workspaces as allowed. `limit` says how many.
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token, or the creations an hour of the user, is reached.
@@ -322,8 +414,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
@@ -332,7 +430,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -351,20 +465,46 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: last_workspace
               description: It is the last workspace of the user. Create another one first.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -397,15 +537,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -459,15 +621,25 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: inventory_limit_reached
               description: The workspace already holds as many inventories as allowed. `limit` says how many.
@@ -476,7 +648,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -509,15 +697,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -566,8 +776,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
@@ -576,7 +792,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -593,15 +825,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -658,22 +912,48 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: field_limit_reached
               description: The inventory already has as many fields as allowed. `limit` says how many.
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -721,8 +1001,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
@@ -731,7 +1017,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -787,8 +1089,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
@@ -797,7 +1105,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -816,15 +1140,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `manage` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `manage` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -969,8 +1315,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
@@ -979,7 +1331,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1019,22 +1387,48 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: item_limit_reached
               description: The inventory already holds as many items as allowed. `limit` says how many.
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1063,15 +1457,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1111,8 +1527,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
@@ -1121,7 +1543,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1138,15 +1576,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1188,15 +1648,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1251,15 +1733,25 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: attachment_limit_reached
               description: The item already holds as many files as allowed. `limit` says how many.
@@ -1270,7 +1762,23 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token, or the uploads a minute of the user, is reached.
@@ -1346,23 +1854,58 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
           x-codes:
             - code: file_not_found
               description: The record exists but its file is no longer on the storage.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
         '503':
-          $ref: '#/components/responses/ServiceUnavailable'
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
           x-codes:
             - code: file_unavailable
               description: The storage cannot be read right now.
@@ -1390,15 +1933,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1430,25 +1995,60 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
           x-codes:
             - code: thumbnail_not_found
               description: The file has no thumbnail.
             - code: file_not_found
               description: The record exists but its file is no longer on the storage.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
         '503':
-          $ref: '#/components/responses/ServiceUnavailable'
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
           x-codes:
             - code: file_unavailable
               description: The storage cannot be read right now.
@@ -1481,15 +2081,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1586,29 +2208,64 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: export_limit_reached
               description: The user already has as many exports of this inventory as allowed. `limit` says how many.
             - code: export_storage_full
               description: Their exports, this one included, would weigh more than allowed. `limit` is in bytes.
         '422':
-          $ref: '#/components/responses/ValidationFailed'
+          description: The body or the query string is refused. `errors` names each fault under the key it is about.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: The name field is required.
+                errors:
+                  name:
+                    - The name field is required.
           x-codes:
             - code: pdf_too_large
               description: A PDF cannot hold that many items (on `format`). `limit` says how many it can.
             - code: zip_without_files
               description: None of the items has a file to put in the zip (on `format`).
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token, or the exports a minute of the user, is reached.
@@ -1638,15 +2295,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1663,15 +2342,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1732,30 +2433,69 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
           x-codes:
             - code: export_expired
               description: The export expired and its file is deleted or about to be.
             - code: file_not_found
               description: The export exists but its file is no longer on the storage.
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: export_not_ready
               description: The export is still being written, or it failed. Check its `status`.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
         '503':
-          $ref: '#/components/responses/ServiceUnavailable'
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
           x-codes:
             - code: file_unavailable
               description: The storage cannot be read right now.
@@ -1788,15 +2528,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -1863,20 +2625,39 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: import_limit_reached
               description: The user already has as many unfinished imports of this inventory as allowed. `limit` says how many.
         '422':
-          $ref: '#/components/responses/ValidationFailed'
+          description: The body or the query string is refused. `errors` names each fault under the key it is about.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: The name field is required.
+                errors:
+                  name:
+                    - The name field is required.
           x-codes:
             - code: unrecognized_format
               description: The file is neither a spreadsheet nor a text file the import reads (on `file`).
@@ -1893,7 +2674,23 @@ paths:
             - code: too_many_cells
               description: The sheet has more cells than allowed (on `file`).
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token, or the files a minute of the user, is reached.
@@ -1925,15 +2722,37 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `read` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `read` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -2005,23 +2824,48 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
           x-codes:
             - code: import_expired
               description: The time of the import is up and its file is gone. Send the file again.
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: import_not_editable
               description: The import was started and can no longer be changed.
         '422':
-          $ref: '#/components/responses/ValidationFailed'
+          description: The body or the query string is refused. `errors` names each fault under the key it is about.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: The name field is required.
+                errors:
+                  name:
+                    - The name field is required.
           x-codes:
             - code: unrecognized_format
               description: The file cannot be read that way (on `file`).
@@ -2038,7 +2882,23 @@ paths:
             - code: too_many_cells
               description: The sheet has more cells than allowed (on `file`).
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token, or the files a minute of the user, is reached.
@@ -2055,20 +2915,46 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: import_running
               description: A worker is adding the rows. Wait for it to end.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -2168,25 +3054,50 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
           description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
           x-codes:
             - code: token_ability_missing
               description: The token lacks the `write` ability.
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
           x-codes:
             - code: import_expired
               description: The time of the import is up and its file is gone. Send the file again.
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: import_not_editable
               description: The import was started already.
             - code: field_limit_reached
               description: The new fields would take the inventory past the number of fields it may have. `limit` says how many.
         '422':
-          $ref: '#/components/responses/ValidationFailed'
+          description: The body or the query string is refused. `errors` names each fault under the key it is about.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: The name field is required.
+                errors:
+                  name:
+                    - The name field is required.
           x-codes:
             - code: unknown_column
               description: The file has no such column (on `mapping`, with `column`).
@@ -2213,7 +3124,23 @@ paths:
             - code: nothing_mapped
               description: Not one column is mapped.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
@@ -2245,7 +3172,23 @@ paths:
                     items:
                       $ref: '#/components/schemas/TemplateSummary'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the catalogue is reached.
@@ -2276,12 +3219,34 @@ paths:
                   data:
                     $ref: '#/components/schemas/Template'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
           x-codes:
             - code: template_not_found
               description: There is no template with this slug.
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
           x-codes:
             - code: too_many_requests
               description: The rate limit of the catalogue is reached.
@@ -2371,6 +3336,23 @@ components:
         type: string
         examples:
           - en
+  headers:
+    RetryAfter:
+      description: Seconds to wait before trying again.
+      schema:
+        type: integer
+    RateLimitLimit:
+      description: Requests allowed in the window of the limit that was hit.
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: Requests left in the window.
+      schema:
+        type: integer
+    RateLimitReset:
+      description: Unix timestamp at which the window ends.
+      schema:
+        type: integer
   responses:
     Unauthenticated:
       description: The token is missing, malformed, expired or revoked.
@@ -2380,16 +3362,6 @@ components:
             $ref: '#/components/schemas/Error'
           example:
             message: Unauthenticated.
-    Forbidden:
-      description: >-
-        The token lacks the ability the operation needs, or the role of its owner in the workspace does not allow it.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            message: This API token lacks the write permission.
-            code: token_ability_missing
     NotFound:
       description: >-
         There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
@@ -2400,24 +3372,6 @@ components:
             $ref: '#/components/schemas/Error'
           example:
             message: Not Found
-    Conflict:
-      description: The request is well formed but the state of the data does not allow it, or a quota is reached.
-      content:
-        application/json:
-          schema:
-            allOf:
-              - $ref: '#/components/schemas/Error'
-              - type: object
-                required:
-                  - code
-                properties:
-                  limit:
-                    type: integer
-                    description: The quota that was reached, when the conflict is a quota.
-          example:
-            message: An inventory cannot hold more than 10000 items.
-            code: item_limit_reached
-            limit: 10000
     ValidationFailed:
       description: The body or the query string is refused. `errors` names each fault under the key it is about.
       content:
@@ -2429,49 +3383,6 @@ components:
             errors:
               name:
                 - The name field is required.
-    TooManyRequests:
-      description: Too many requests. Wait `Retry-After` seconds.
-      headers:
-        Retry-After:
-          description: Seconds to wait before trying again.
-          schema:
-            type: integer
-        X-RateLimit-Limit:
-          description: Requests allowed in the window of the limit that was hit.
-          schema:
-            type: integer
-        X-RateLimit-Remaining:
-          description: Requests left in the window (0).
-          schema:
-            type: integer
-        X-RateLimit-Reset:
-          description: Unix timestamp at which the window ends.
-          schema:
-            type: integer
-      content:
-        application/json:
-          schema:
-            allOf:
-              - $ref: '#/components/schemas/Error'
-              - type: object
-                required:
-                  - code
-          example:
-            message: Too Many Attempts.
-            code: too_many_requests
-    ServiceUnavailable:
-      description: The file cannot be read right now (the storage is down). Try again in a moment.
-      content:
-        application/json:
-          schema:
-            allOf:
-              - $ref: '#/components/schemas/Error'
-              - type: object
-                required:
-                  - code
-          example:
-            message: This file cannot be read right now. Try again in a moment.
-            code: file_unavailable
   schemas:
     Ulid:
       type: string
@@ -2512,6 +3423,22 @@ components:
           type: string
           description: A reason to switch on, for the faults that have one. See `x-codes` of the operation.
       additionalProperties: true
+    CodedError:
+      description: An error that always carries a `code` (`409`, `429`, `503`).
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required:
+            - code
+    ConflictError:
+      description: A request refused for the state of the data or for a quota (`409`).
+      allOf:
+        - $ref: '#/components/schemas/CodedError'
+        - type: object
+          properties:
+            limit:
+              type: integer
+              description: The quota that was reached, when the conflict is a quota.
     PaginationLinks:
       type: object
       description: The addresses of the pages. They keep the query parameters of the request.
