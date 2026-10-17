@@ -117,7 +117,7 @@ describe('the pace of a token', function (): void {
         inventoryCall($this, $user, 'GET', '/api/v1/me')->assertOk();
     });
 
-    it('counts a request that sends a session and a token too, by what it sends as a token, so that sending both is no way around the pace', function (): void {
+    it('counts a request that sends a session and a token too, for the person, so that sending both is no way around the pace', function (): void {
         config(['inventories.api_token_requests_per_minute' => 2]);
         $user = inventoryPerson('Ada');
         $token = tokenFor($user, ['read']);
@@ -130,8 +130,10 @@ describe('the pace of a token', function (): void {
             ->and($refused->json('code'))->toBe('too_many_requests')
             ->and((int) $refused->headers->get('Retry-After'))->toBeBetween(1, 60);
 
-        // Another text sent as a token is another count, and so is the token itself used on its own: the key is the text, not the person.
-        tokenWithSessionCall($this, $user, '1|another-text', 'GET', '/api/v1/me')->assertForbidden()->assertJsonPath('code', 'token_with_session');
+        // Another text sent as a token gains nothing: the session signs the person in, and the person is what is counted.
+        tokenWithSessionCall($this, $user, '1|another-text', 'GET', '/api/v1/me')->assertTooManyRequests();
+
+        // The token used on its own has its own count.
         tokenCall($this, $token, 'GET', '/api/v1/me')->assertOk()->assertHeader('X-RateLimit-Remaining', '1');
     });
 

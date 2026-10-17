@@ -18,8 +18,8 @@ use Symfony\Component\HttpFoundation\Response;
  * the script of one token cannot use up what another is for. A request without a token (the web front's session) is not counted.
  *
  * A request that sends a bearer and a session is signed in by the session (Sanctum looks at it first) and is refused later (`token:<ability>`
- * or {@see RefuseApiTokens}): it is counted all the same, by the hash of what it sends as a token, so that sending both is no way around
- * the pace.
+ * or {@see RefuseApiTokens}): it is counted all the same, for the person it signs in, so that sending both, whatever the bearer says,
+ * is no way around the pace.
  *
  * It runs right after the authentication, which tells it the token, and before everything that refuses a request: every request a token
  * makes counts, the ones that are refused too. The limits of the endpoints (an export, a workspace, a token to make...) are a person's own
@@ -83,7 +83,7 @@ final class PaceApiTokens
     }
 
     /**
-     * What the request is counted for: its token, or the text it sends as one when the session outranks it; null for a session alone.
+     * What the request is counted for: its token, or the person when a session outranks the bearer it sends; null for a session alone.
      */
     private function key(Request $request): ?string
     {
@@ -94,9 +94,7 @@ final class PaceApiTokens
             return 'api-token-pace:token:'.$token->getKey();
         }
 
-        // A bearer the session outranks: the token is not the one that signed the request in, so the text itself is the key.
-        $bearer = $request->bearerToken();
-
-        return $bearer !== null ? 'api-token-pace:bearer:'.hash('sha256', $bearer) : null;
+        // A bearer the session outranks: counted for the person, so that changing the text of the bearer gains nothing.
+        return $request->bearerToken() !== null && $user instanceof User ? 'api-token-pace:user:'.$user->getKey() : null;
     }
 }

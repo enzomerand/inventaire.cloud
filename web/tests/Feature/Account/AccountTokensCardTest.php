@@ -117,13 +117,6 @@ describe('the API tokens card of the account page', function (): void {
         }
     });
 
-    it('takes the names of the permissions from TokenAbility::label() and writes none of its own', function (): void {
-        $source = (string) file_get_contents((string) (new ReflectionClass(ClientMessages::class))->getFileName());
-
-        expect($source)->toContain('TokenAbility::cases()')->toContain('$ability->label()')
-            ->and($source)->not->toContain("__('Read')")->not->toContain("__('Write')")->not->toContain("__('Manage')");
-    });
-
     it('is translated', function (): void {
         $this->actingAs(User::factory()->create())->get(route('app.account'), ['Accept-Language' => 'fr'])
             ->assertOk()

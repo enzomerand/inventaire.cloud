@@ -74,6 +74,7 @@ final class RenderedReference
         $files = [
             ...(glob(app_path('Docs/*.php')) ?: []),
             ...(glob(resource_path('views/docs/*.php')) ?: []),
+            ...(glob(resource_path('views/components/docs/*.php')) ?: []),
             lang_path($locale.'.json'),
         ];
         sort($files);

@@ -100,6 +100,23 @@ describe('the reference of the page', function (): void {
             ->and(Cache::get('docs:api-reference:fr')['version'])->not->toBe($before['version']);
     });
 
+    it('is drawn again when a view of the page changes, the components it draws its tables with included', function (): void {
+        foreach ([resource_path('views/docs/operation.blade.php'), resource_path('views/components/docs/rows.blade.php')] as $view) {
+            $before = app(RenderedReference::class)->version('fr');
+            $time = (int) filemtime($view);
+
+            try {
+                touch($view, $time + 60);
+                clearstatcache(true, $view);
+
+                expect(app(RenderedReference::class)->version('fr'))->not->toBe($before);
+            } finally {
+                touch($view, $time);
+                clearstatcache(true, $view);
+            }
+        }
+    });
+
     it('is drawn for the request when the cache cannot be reached', function (): void {
         Cache::shouldReceive('get')->andThrow(new RuntimeException('no cache'));
         Cache::shouldReceive('forever')->andThrow(new RuntimeException('no cache'));
