@@ -23,7 +23,10 @@ use Exception;
  * A moment written without an offset is a wall clock reading, and the clocks of a time zone skip one hour in spring and show another
  * twice in autumn: a reading in the hour that is skipped (`02:30` the night the clocks of Paris go forward) names no instant and is refused,
  * and a reading in the hour that is shown twice is the first of the two (the summer time, an hour earlier than the winter one), so that the
- * same file always gives the same moment.
+ * same file always gives the same moment. A day alone is not a reading of the clock, only a day: when the clocks skip midnight that day
+ * (Santiago, on the first Sunday of September) it is the first moment of the day, `01:00`, and not a refusal; it is refused only when
+ * the whole day is skipped (Samoa, 30 December 2011). A date cell of a spreadsheet, which holds a time of 00:00:00 whether or not the
+ * person wrote one, is a day alone.
  */
 final class ImportDates
 {
@@ -64,7 +67,7 @@ final class ImportDates
         $failure = new InvalidImportValue(__('":value" is not a date and time.', ['value' => $cell->excerpt()]));
 
         if ($value instanceof DateTimeImmutable) {
-            $parts = ['year' => (int) $value->format('Y'), 'month' => (int) $value->format('n'), 'day' => (int) $value->format('j'), 'hour' => (int) $value->format('G'), 'minute' => (int) $value->format('i'), 'second' => (int) $value->format('s'), 'offset' => null];
+            $parts = ['year' => (int) $value->format('Y'), 'month' => (int) $value->format('n'), 'day' => (int) $value->format('j'), 'hour' => (int) $value->format('G'), 'minute' => (int) $value->format('i'), 'second' => (int) $value->format('s'), 'offset' => null, 'timed' => $value->format('His') !== '000000'];
         } else {
             $parts = self::parse($cell, $context) ?? throw $failure;
         }
@@ -79,6 +82,11 @@ final class ImportDates
         }
 
         $instant = self::instantOf($reading, $zone);
+
+        // A day alone, on a day when the clocks skip its start, begins when they go forward.
+        if ($instant === null && ! $parts['timed']) {
+            $instant = self::startOfSkippedDay($reading, $zone);
+        }
 
         if ($instant === null) {
             throw new InvalidImportValue(__('":value" does not exist: the clocks skip that hour.', ['value' => $cell->excerpt()]));
@@ -112,6 +120,35 @@ final class ImportDates
         }
 
         return $instants === [] ? null : min($instants);
+    }
+
+    /**
+     * The first instant of a day whose start the clocks skip: the one at which they go forward, which is when the day begins. Null when
+     * the reading is not in an hour the clocks skip, or when they skip the whole day (the clocks then show another day at that instant).
+     *
+     * @param  int  $reading  The start of the day as a timestamp of the same figures in UTC.
+     */
+    private static function startOfSkippedDay(int $reading, DateTimeZone $zone): ?int
+    {
+        // A zone with a fixed offset has no transition (false), and skips nothing.
+        $transitions = $zone->getTransitions($reading - 2 * 86400, $reading + 2 * 86400) ?: [];
+        // The first entry is the state at the start of the range: the offset in force before the first change.
+        $before = null;
+
+        foreach ($transitions as $transition) {
+            if ($before !== null) {
+                $skippedFrom = $transition['ts'] + $before;
+                $skippedTo = $transition['ts'] + $transition['offset'];
+
+                if ($reading >= $skippedFrom && $reading < $skippedTo) {
+                    return gmdate('Y-m-d', $skippedTo) === gmdate('Y-m-d', $reading) ? $transition['ts'] : null;
+                }
+            }
+
+            $before = $transition['offset'];
+        }
+
+        return null;
     }
 
     /**
@@ -160,7 +197,7 @@ final class ImportDates
     /**
      * The numbers of a date written as text, with its time and offset when it has them; null when it is not one.
      *
-     * @return array{year: int, month: int, day: int, hour: int, minute: int, second: int, offset: string|null}|null
+     * @return array{year: int, month: int, day: int, hour: int, minute: int, second: int, offset: string|null, timed: bool}|null
      */
     private static function parse(ImportCell $cell, ImportContext $context): ?array
     {
@@ -191,7 +228,7 @@ final class ImportDates
             return null;
         }
 
-        return ['year' => $year, 'month' => $month, 'day' => $day, 'hour' => $hour, 'minute' => $minute, 'second' => $second, 'offset' => self::offset($found['offset'] ?? '')];
+        return ['year' => $year, 'month' => $month, 'day' => $day, 'hour' => $hour, 'minute' => $minute, 'second' => $second, 'offset' => self::offset($found['offset'] ?? ''), 'timed' => ($found['hour'] ?? '') !== ''];
     }
 
     /**

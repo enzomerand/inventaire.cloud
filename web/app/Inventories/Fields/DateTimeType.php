@@ -122,7 +122,7 @@ final class DateTimeType extends AbstractFieldType
 
     /**
      * The moment the cell holds, with its offset from UTC: the one the text says, else the one of the time zone of the application at
-     * that moment (a day alone is midnight).
+     * that moment (a day alone is midnight, or the first moment of the day when the clocks skip midnight).
      */
     public function importValue(ImportCell $cell, InventoryField $field, ImportContext $context): mixed
     {

@@ -247,6 +247,27 @@ describe('a date and time', function (): void {
         'New York' => ['2026-03-08 02:30', 'America/New_York'],
     ]);
 
+    it('reads a day alone, when the clocks skip midnight that day, as the first moment of the day', function (string $value, string $zone, string $expected): void {
+        expect(importConvert('datetime', $value, zone: $zone))->toBe($expected);
+    })->with([
+        'Santiago' => ['2024-09-08', 'America/Santiago', '2024-09-08T01:00:00-03:00'],
+        'Santiago, day first' => ['08/09/2024', 'America/Santiago', '2024-09-08T01:00:00-03:00'],
+        'a date cell, which holds midnight' => ['@2024-09-08 00:00:00', 'America/Santiago', '2024-09-08T01:00:00-03:00'],
+        'the day before' => ['2024-09-07', 'America/Santiago', '2024-09-07T00:00:00-04:00'],
+        'the day after' => ['2024-09-09', 'America/Santiago', '2024-09-09T00:00:00-03:00'],
+        'a zone whose clocks go forward at 02:00' => ['2026-03-29', 'Europe/Paris', '2026-03-29T00:00:00+01:00'],
+    ]);
+
+    it('refuses a time that is written on a day when the clocks skip it, and a day the zone skipped whole', function (string $value, string $zone): void {
+        expect(fn () => importConvert('datetime', $value, zone: $zone))
+            ->toThrow(InvalidImportValue::class, 'does not exist: the clocks skip that hour.');
+    })->with([
+        'midnight, written' => ['2024-09-08 00:00', 'America/Santiago'],
+        'half past midnight' => ['2024-09-08 00:30', 'America/Santiago'],
+        'a date and time cell' => ['@2024-09-08 00:30:00', 'America/Santiago'],
+        'Samoa, which had no 30 December 2011' => ['2011-12-30', 'Pacific/Apia'],
+    ]);
+
     it('is stored the way the field takes it', function (): void {
         $field = importField('datetime');
         $value = importConvert($field, '2026-07-01 12:30');
