@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Middleware\RedirectIfNotInstalled;
+use App\Http\Middleware\RequireTokenAbility;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\SetReferrerPolicy;
 use App\Http\Middleware\SetRobotsTag;
@@ -14,6 +15,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 // Before anything reads .env: the installer must know which variables the process really started with.
@@ -36,6 +38,13 @@ $app = Application::configure(basePath: dirname(__DIR__))
         // The web front calls the API with its session cookie: Sanctum makes the requests that come from the
         // application's own host (config/sanctum.php) stateful, every other client stays stateless.
         $middleware->statefulApi();
+
+        // `token:read`, `token:write` and `token:manage` on the routes an API token may reach (see routes/api.php).
+        $middleware->alias(['token' => RequireTokenAbility::class]);
+
+        // The ability of a token is judged before the models of the route are looked up: a token that may not write is told so
+        // for any inventory, whether it exists, belongs to somebody else or is made up, instead of a 404 that tells them apart.
+        $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: RequireTokenAbility::class);
 
         // A signed-out visitor of a page goes to the login page; an API client has nowhere to be redirected to
         // and gets a 401 in JSON (the default would also fail while no "login" route exists).

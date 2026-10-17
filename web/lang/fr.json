@@ -1074,5 +1074,9 @@
     "Problem": "Problème",
     "Cancel the import": "Annuler l'import",
     "Start the import": "Lancer l'import",
-    "Import another file": "Importer un autre fichier"
+    "Import another file": "Importer un autre fichier",
+    "Read": "Lecture",
+    "Write": "Écriture",
+    "Manage": "Administration",
+    "This API token lacks the :ability permission.": "Ce jeton d'API n'a pas la permission « :ability »."
 }
