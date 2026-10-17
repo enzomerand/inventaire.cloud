@@ -90,11 +90,11 @@ final class PaceApiTokens
         $user = $request->user();
         $token = $user instanceof User ? $user->currentAccessToken() : null;
 
-        if ($token instanceof PersonalAccessToken) {
-            return 'api-token-pace:token:'.$token->getKey();
+        // A bearer the session outranks: counted for the person, so that changing the text of the bearer gains nothing.
+        if ($user instanceof User && $request->bearerToken() !== null && ! $token instanceof PersonalAccessToken) {
+            return 'api-token-pace:user:'.$user->getKey();
         }
 
-        // A bearer the session outranks: counted for the person, so that changing the text of the bearer gains nothing.
-        return $request->bearerToken() !== null && $user instanceof User ? 'api-token-pace:user:'.$user->getKey() : null;
+        return $token instanceof PersonalAccessToken ? 'api-token-pace:token:'.$token->getKey() : null;
     }
 }
