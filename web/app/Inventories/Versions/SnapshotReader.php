@@ -42,7 +42,6 @@ final class SnapshotReader
             throw new RuntimeException('The snapshot has a format this version of the application does not read.');
         }
 
-        $workspace = $this->section($document, 'workspace');
         $inventory = $this->section($document, 'inventory');
         $fields = new Collection;
 
@@ -74,7 +73,7 @@ final class SnapshotReader
 
         $description = $inventory['description'] ?? null;
 
-        return new VersionContent($this->text($workspace, 'name'), $this->text($inventory, 'name'), is_string($description) ? $description : null, $fields, $items);
+        return new VersionContent($this->text($inventory, 'name'), is_string($description) ? $description : null, $fields, $items);
     }
 
     /**

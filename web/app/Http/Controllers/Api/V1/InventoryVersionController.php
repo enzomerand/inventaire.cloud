@@ -144,8 +144,8 @@ final class InventoryVersionController extends Controller
             return $this->notReady();
         }
 
-        return StoredFileResponse::version(
-            $version,
+        return StoredFileResponse::download(
+            $version->disk,
             $version->pdf_path,
             VersionFileName::for($inventory->name, $version->number, 'pdf'),
             'application/pdf',
@@ -166,8 +166,8 @@ final class InventoryVersionController extends Controller
             return $this->notReady();
         }
 
-        return StoredFileResponse::version(
-            $version,
+        return StoredFileResponse::download(
+            $version->disk,
             $version->snapshot_path,
             VersionFileName::for($inventory->name, $version->number, 'json'),
             'application/json',
@@ -188,8 +188,8 @@ final class InventoryVersionController extends Controller
             return ApiError::conflict(__('The signed PDF is not ready yet.'), 'signed_pdf_not_ready');
         }
 
-        return StoredFileResponse::version(
-            $version,
+        return StoredFileResponse::download(
+            $version->disk,
             $version->signed_pdf_path,
             VersionFileName::for($inventory->name, $version->number, 'pdf', signed: true),
             'application/pdf',

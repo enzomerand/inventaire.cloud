@@ -18,6 +18,14 @@ use Tests\Support\FakeDocumenso;
 require_once __DIR__.'/exports.php';
 
 /**
+ * The address of the versions of an inventory, or of one of them, or of something of it (`$suffix` starts with a slash).
+ */
+function versionApiUri(Inventory $inventory, ?InventoryVersion $version = null, string $suffix = ''): string
+{
+    return "/api/v1/inventories/{$inventory->ulid}/versions".($version === null ? '' : "/{$version->ulid}").$suffix;
+}
+
+/**
  * An instance that has a Documenso, with the settings only (a test that fakes the network itself uses this one).
  */
 function versionDocumensoConfig(): void

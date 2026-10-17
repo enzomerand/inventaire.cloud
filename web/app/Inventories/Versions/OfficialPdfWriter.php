@@ -104,11 +104,7 @@ final class OfficialPdfWriter
     public function write(InventoryVersion $version, VersionContent $content, string $path): array
     {
         $library = PdfLibrary::make();
-        $layout = $this->layout($version, $content, $library);
-        $html = $layout['html'];
-        $body = $layout['body'];
-        $signers = $layout['signers'];
-        $head = $layout['head'];
+        ['html' => $html, 'body' => $body, 'signers' => $signers, 'head' => $head] = $this->layout($version, $content, $library);
 
         // Checked before the library reads a byte of it: this is the document whose layout would take the memory of the worker.
         PdfWriter::guard($html, $content->fields->count());
@@ -133,7 +129,8 @@ final class OfficialPdfWriter
 
         $pages = $library->getCanvas()->get_page_count();
         $this->columnRow($library, $body, $signers !== [], $boxes['description'] ?? null);
-        $this->footer($library, $version);
+        // The foot says which version it is and the first characters of its SHA-256, with the page number.
+        PdfLibrary::footer($library, __('Official version no. :number', ['number' => $version->number]).' · '.__('SHA-256 :hash', ['hash' => substr($version->snapshot_sha256, 0, 16).'…']));
         $areas = $signers === [] ? [] : $this->areas($library, $boxes, count($signers), $head);
 
         if (file_put_contents($path, $library->output()) === false) {
@@ -173,15 +170,16 @@ final class OfficialPdfWriter
         $formatter = new ExportFormatter($version->locale, DisplayTime::zone());
         $body = PdfBody::make($library, $table, $formatter, $content->items);
         $metrics = $library->getFontMetrics();
-        $signers = $this->signers($version, $metrics);
-        $head = PdfHead::of(3, $body->columns !== []);
         $bold = $metrics->getFont(PdfLibrary::FONT, 'bold') ?? PdfLibrary::FONT;
         $regular = $metrics->getFont(PdfLibrary::FONT) ?? PdfLibrary::FONT;
+        $signers = $this->signers($version, $metrics, $bold, $regular);
+        $head = PdfHead::of(3, $body->columns !== []);
+        $title = $this->title($version);
 
         $html = view('versions.pdf', [
             'locale' => $version->locale,
-            'documentTitle' => $this->title($version),
-            'headTitle' => PdfColumns::fit($this->title($version), PdfBody::TABLE_WIDTH_PT, $metrics, $bold, self::TITLE_SIZE_PT),
+            'documentTitle' => $title,
+            'headTitle' => PdfColumns::fit($title, PdfBody::TABLE_WIDTH_PT, $metrics, $bold, self::TITLE_SIZE_PT),
             'headLines' => $this->lines($version, $content, $body->count, $formatter, $metrics, $regular),
             'description' => $this->description($content->inventoryDescription),
             // Under the description, a table keeps the room of the row of its columns, which is drawn there on the first page.
@@ -245,14 +243,13 @@ final class OfficialPdfWriter
     }
 
     /**
-     * The people to sign, as the page of signatures shows them: their name and e-mail address, cut to fit a box.
+     * The people to sign, as the page of signatures shows them: their name (in the bold font) and e-mail address (in the regular one),
+     * cut to fit a box.
      *
      * @return list<array{name: string, email: string}>
      */
-    private function signers(InventoryVersion $version, FontMetrics $metrics): array
+    private function signers(InventoryVersion $version, FontMetrics $metrics, string $bold, string $regular): array
     {
-        $bold = $metrics->getFont(PdfLibrary::FONT, 'bold') ?? PdfLibrary::FONT;
-        $regular = $metrics->getFont(PdfLibrary::FONT) ?? PdfLibrary::FONT;
         $signers = [];
 
         foreach ($version->signers ?? [] as $signer) {
@@ -315,24 +312,6 @@ final class OfficialPdfWriter
                 $x += $cell;
             }
         });
-    }
-
-    /**
-     * Writes the version, the first characters of the SHA-256 and "page X / Y" at the foot of every page.
-     */
-    private function footer(Dompdf $library, InventoryVersion $version): void
-    {
-        $canvas = $library->getCanvas();
-        $metrics = $library->getFontMetrics();
-        $font = $metrics->getFont(PdfLibrary::FONT) ?? PdfLibrary::FONT;
-        $size = 7.0;
-        $page = __('Page :page / :pages', ['page' => '{PAGE_NUM}', 'pages' => '{PAGE_COUNT}']);
-        $width = $metrics->getTextWidth(__('Page :page / :pages', ['page' => '00', 'pages' => '00']), $font, $size);
-        $y = $canvas->get_height() - 26;
-        $note = __('Official version no. :number', ['number' => $version->number]).' · '.__('SHA-256 :hash', ['hash' => substr($version->snapshot_sha256, 0, 16).'…']);
-
-        $canvas->page_text(32, $y, $note, $font, $size, [0.4, 0.4, 0.4]);
-        $canvas->page_text($canvas->get_width() - 32 - $width, $y, $page, $font, $size, [0.4, 0.4, 0.4]);
     }
 
     /**

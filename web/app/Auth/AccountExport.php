@@ -124,21 +124,7 @@ final class AccountExport
      */
     private function revisionsWritten(User $user, array $workspaceIds): array
     {
-        $counts = [];
-
-        $rows = DB::table('item_revisions')
-            ->join('inventories', 'inventories.id', '=', 'item_revisions.inventory_id')
-            ->where('item_revisions.user_id', $user->getKey())
-            ->whereIn('inventories.workspace_id', $workspaceIds)
-            ->groupBy('inventories.workspace_id')
-            ->selectRaw('inventories.workspace_id as workspace_id, count(*) as total')
-            ->get();
-
-        foreach ($rows as $row) {
-            $counts[(int) $row->workspace_id] = (int) $row->total;
-        }
-
-        return $counts;
+        return $this->countedByWorkspace('item_revisions', $user, $workspaceIds);
     }
 
     /**
@@ -174,11 +160,24 @@ final class AccountExport
      */
     private function versionsCreated(User $user, array $workspaceIds): array
     {
+        return $this->countedByWorkspace('inventory_versions', $user, $workspaceIds);
+    }
+
+    /**
+     * How many rows of a table that hangs from an inventory (`inventory_id`) and names its author (`user_id`) a person is the author of,
+     * by workspace (one query).
+     *
+     * @param  string  $table  The table, one of the application's own.
+     * @param  list<int>  $workspaceIds
+     * @return array<int, int> Only the workspaces where they are the author of some.
+     */
+    private function countedByWorkspace(string $table, User $user, array $workspaceIds): array
+    {
         $counts = [];
 
-        $rows = DB::table('inventory_versions')
-            ->join('inventories', 'inventories.id', '=', 'inventory_versions.inventory_id')
-            ->where('inventory_versions.user_id', $user->getKey())
+        $rows = DB::table($table)
+            ->join('inventories', 'inventories.id', '=', $table.'.inventory_id')
+            ->where($table.'.user_id', $user->getKey())
             ->whereIn('inventories.workspace_id', $workspaceIds)
             ->groupBy('inventories.workspace_id')
             ->selectRaw('inventories.workspace_id as workspace_id, count(*) as total')

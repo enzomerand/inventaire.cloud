@@ -332,7 +332,7 @@ describe('the job', function (): void {
     });
 
     it('may run as long as the calls of its envelopes take at the longest, with room: ten of one call, or five of two when drafts are deleted', function (bool $deleteDrafts, int $calls): void {
-        $job = new CancelDocumensoEnvelopes(['envelope_a'], null, $deleteDrafts);
+        $job = new CancelDocumensoEnvelopes(['envelope_a'], $deleteDrafts);
         $worst = EnvelopeCleanup::perJob($deleteDrafts) * $calls * DocumensoClient::TIMEOUT;
 
         expect(EnvelopeCleanup::perJob($deleteDrafts))->toBe($deleteDrafts ? 5 : 10)
@@ -351,25 +351,23 @@ describe('the job', function (): void {
             $fake->status = $status;
             $before = count($fake->calls);
 
-            (new CancelDocumensoEnvelopes(['envelope_a'], null, true))->handle(app(DocumensoClient::class));
+            (new CancelDocumensoEnvelopes(['envelope_a'], true))->handle(app(DocumensoClient::class));
 
             expect(count($fake->calls) - $before)->toBeLessThanOrEqual(2);
         }
     });
 
-    it('cancels each envelope with the reason it was given, or a general one', function (): void {
+    it('cancels each envelope with a general reason', function (): void {
         $fake = FakeDocumenso::install();
         $fake->envelopeId = 'envelope_a';
         $fake->exists = true;
         $fake->status = 'PENDING';
 
-        (new CancelDocumensoEnvelopes(['envelope_a', 'envelope_b'], 'The version was deleted.'))->handle(app(DocumensoClient::class));
-        (new CancelDocumensoEnvelopes(['envelope_c']))->handle(app(DocumensoClient::class));
+        (new CancelDocumensoEnvelopes(['envelope_a', 'envelope_b']))->handle(app(DocumensoClient::class));
 
         expect(array_map(fn (Request $request): array => $request->data(), $fake->requestsOf('POST /envelope/cancel')))->toBe([
-            ['envelopeId' => 'envelope_a', 'reason' => 'The version was deleted.'],
-            ['envelopeId' => 'envelope_b', 'reason' => 'The version was deleted.'],
-            ['envelopeId' => 'envelope_c', 'reason' => 'This signature request was cancelled.'],
+            ['envelopeId' => 'envelope_a', 'reason' => 'This signature request was cancelled.'],
+            ['envelopeId' => 'envelope_b', 'reason' => 'This signature request was cancelled.'],
         ]);
     });
 
@@ -431,7 +429,7 @@ describe('the job', function (): void {
         $fake = FakeDocumenso::install();
         $fake->other('envelope_draft', 'DRAFT', null)->other('envelope_pending', 'PENDING', null)->other('envelope_done', 'COMPLETED', null);
 
-        (new CancelDocumensoEnvelopes(['envelope_draft', 'envelope_pending', 'envelope_done', 'envelope_gone'], null, true))->handle(app(DocumensoClient::class));
+        (new CancelDocumensoEnvelopes(['envelope_draft', 'envelope_pending', 'envelope_done', 'envelope_gone'], true))->handle(app(DocumensoClient::class));
 
         $data = fn (string $call): array => array_map(fn (Request $request): array => $request->data(), $fake->requestsOf($call));
 

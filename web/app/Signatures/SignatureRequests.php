@@ -21,7 +21,6 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
-use Throwable;
 
 /**
  * The life of a request for signatures from the moment a version is completed: sending it to Documenso, cancelling it, sending it again.
@@ -197,12 +196,9 @@ final class SignatureRequests
 
         $current->refresh();
 
-        try {
-            RequestSignatures::dispatch($current);
-        } catch (Throwable $exception) {
-            // The request waits as `requested`: the schedule gives up on it after two hours, and the person can send it again.
-            Log::error('The job that sends a request for signatures could not be queued.', ['version' => $current->ulid, 'exception' => $exception]);
-        }
+        // Should the queue be out of reach the request waits as `requested`: the schedule gives up on it after two hours, and the person
+        // can send it again.
+        RequestSignatures::dispatchSafely($current);
 
         return $current;
     }
@@ -310,13 +306,7 @@ final class SignatureRequests
      */
     private function remember(InventoryVersion $version, string $envelopeId): ?string
     {
-        $stored = InventoryVersion::query()
-            ->whereKey($version->getKey())
-            ->where('signature_status', SignatureStatus::Sending->value)
-            ->whereNull('documenso_envelope_id')
-            ->update(['documenso_envelope_id' => $envelopeId]);
-
-        if ($stored === 1) {
+        if ($this->sync->recordEnvelope($version, $envelopeId)) {
             return $envelopeId;
         }
 

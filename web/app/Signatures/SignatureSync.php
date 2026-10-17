@@ -17,7 +17,6 @@ use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
-use Throwable;
 
 /**
  * Brings a request for signatures up to date with what Documenso says of its envelope: what the `SyncSignature` job does, apart from
@@ -195,18 +194,27 @@ final class SignatureSync
             return null;
         }
 
-        $stored = InventoryVersion::query()
-            ->whereKey($version->getKey())
-            ->where('signature_status', SignatureStatus::Sending->value)
-            ->whereNull('documenso_envelope_id')
-            ->update(['documenso_envelope_id' => $candidate]);
-
         // Whoever recorded an id first wins; if it is this very one, there is nothing to undo.
-        if ($stored !== 1 && ! InventoryVersion::query()->whereKey($version->getKey())->where('documenso_envelope_id', $candidate)->exists()) {
+        if (! $this->recordEnvelope($version, $candidate) && ! InventoryVersion::query()->whereKey($version->getKey())->where('documenso_envelope_id', $candidate)->exists()) {
             return null;
         }
 
         return $envelope;
+    }
+
+    /**
+     * Records the id of an envelope for a request that is still `sending` and has none, in one conditional update: an id recorded
+     * meanwhile (by the job that sends the request, or by the read of an envelope a webhook announced) is never replaced.
+     *
+     * @return bool Whether this call recorded the id.
+     */
+    public function recordEnvelope(InventoryVersion $version, string $envelopeId): bool
+    {
+        return InventoryVersion::query()
+            ->whereKey($version->getKey())
+            ->where('signature_status', SignatureStatus::Sending->value)
+            ->whereNull('documenso_envelope_id')
+            ->update(['documenso_envelope_id' => $envelopeId]) === 1;
     }
 
     /**
@@ -224,11 +232,7 @@ final class SignatureSync
             return;
         }
 
-        try {
-            RequestSignatures::dispatch($version);
-        } catch (Throwable $exception) {
-            Log::error('The job that sends a request for signatures could not be queued again.', ['version' => $version->ulid, 'exception' => $exception]);
-        }
+        RequestSignatures::dispatchSafely($version);
     }
 
     /**
@@ -308,25 +312,19 @@ final class SignatureSync
                 return false;
             }
 
-            // Read under the lock of the workspace, which every writer of `counted_bytes` holds: it is the figure to add to.
-            $counted = InventoryVersion::query()->whereKey($version->getKey())->value('counted_bytes');
-
-            if ($counted === null) {
-                return false;
-            }
-
+            // The bytes are added by the statement itself, to the figure the row holds when it is updated (under the lock of the
+            // workspace, which every writer of `counted_bytes` holds); the conditions of the update are the transition.
             $completed = InventoryVersion::query()
                 ->whereKey($version->getKey())
                 ->whereIn('signature_status', SignatureStatus::unfinishedValues())
                 ->where('documenso_envelope_id', $envelope)
-                ->update([
+                ->increment('counted_bytes', $size, [
                     'signature_status' => SignatureStatus::Completed->value,
                     'signature_error' => null,
                     'signers' => $signers,
                     'signed_pdf_path' => $path,
                     'signed_pdf_size' => $size,
                     'signed_pdf_sha256' => $sha256,
-                    'counted_bytes' => (int) $counted + $size,
                     'signature_completed_at' => now(),
                     'signature_synced_at' => now(),
                 ]);

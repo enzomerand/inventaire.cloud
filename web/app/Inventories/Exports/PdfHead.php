@@ -66,7 +66,6 @@ final readonly class PdfHead
             // The header is fixed in the top margin of every page: the margin is as high as it is, with what is above and below.
             'headHeight' => $this->height,
             'headTop' => $this->top,
-            'headMargin' => self::MARGIN,
             'marginTop' => $this->margin,
             'titleLine' => self::TITLE,
             'summaryLine' => self::LINE,

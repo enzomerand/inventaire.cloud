@@ -13,7 +13,6 @@ use App\Policies\InventoryVersionPolicy;
 use App\Workspaces\WorkspaceRole;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Carbon;
 
 /**
  * An official version as the API gives it: what was frozen, where its PDF is up to, the files to download and, when signatures were
@@ -120,13 +119,12 @@ final class InventoryVersionResource extends JsonResource
         $signers = [];
 
         foreach ($this->resource->signers ?? [] as $signer) {
-            $signedAt = $signer['signed_at'] ?? null;
-
             $signers[] = [
                 'name' => $signer['name'] ?? '',
                 'email' => $signer['email'] ?? '',
                 'status' => (SignerStatus::tryFrom((string) ($signer['status'] ?? '')) ?? SignerStatus::Pending)->value,
-                'signed_at' => is_string($signedAt) && $signedAt !== '' ? Carbon::parse($signedAt)->utc()->toIso8601String() : null,
+                // Kept as an ISO 8601 text in UTC, which is how `SignerStates` writes it.
+                'signed_at' => $signer['signed_at'] ?? null,
                 'rejection_reason' => $signer['rejection_reason'] ?? null,
             ];
         }

@@ -117,7 +117,8 @@ final class PdfWriter implements ExportWriter
         unset($html);
         $dompdf->setPaper('A4', 'landscape');
         $dompdf->render();
-        $this->footer($dompdf, $context->inventory->name);
+        $name = $context->inventory->name;
+        PdfLibrary::footer($dompdf, mb_strlen($name) > 80 ? mb_substr($name, 0, 79).'…' : $name);
 
         if (file_put_contents($path, $dompdf->output()) === false) {
             throw new RuntimeException('The PDF of the export could not be written.');
@@ -171,22 +172,5 @@ final class PdfWriter implements ExportWriter
     private function library(): Dompdf
     {
         return $this->library ??= PdfLibrary::make();
-    }
-
-    /**
-     * Writes "name" and "page X / Y" at the foot of every page.
-     */
-    private function footer(Dompdf $dompdf, string $name): void
-    {
-        $canvas = $dompdf->getCanvas();
-        $metrics = $dompdf->getFontMetrics();
-        $font = $metrics->getFont(PdfLibrary::FONT) ?? PdfLibrary::FONT;
-        $size = 7.0;
-        $page = __('Page :page / :pages', ['page' => '{PAGE_NUM}', 'pages' => '{PAGE_COUNT}']);
-        $width = $metrics->getTextWidth(__('Page :page / :pages', ['page' => '00', 'pages' => '00']), $font, $size);
-        $y = $canvas->get_height() - 26;
-
-        $canvas->page_text(32, $y, mb_strlen($name) > 80 ? mb_substr($name, 0, 79).'…' : $name, $font, $size, [0.4, 0.4, 0.4]);
-        $canvas->page_text($canvas->get_width() - 32 - $width, $y, $page, $font, $size, [0.4, 0.4, 0.4]);
     }
 }

@@ -20,6 +20,12 @@ use Illuminate\Support\Facades\Schema;
  * levels MySQL (9.7 at the time of writing) can cascade. The database cannot delete the files a cascade removes: they live under
  * the folder of the inventory and the application purges them (see `App\Jobs\PurgeStoredFiles`). The author is only remembered
  * by id: deleting the account forgets the person, not the version (the name was frozen with it).
+ *
+ * The numbers are also counted on the inventory itself, in `inventories.last_version_number`: a number is never given twice, and
+ * numbering by `MAX(number) + 1` over the versions that exist would give number N again to the version frozen after the last one
+ * (number N) was deleted, whereas a signed PDF, an email or a printout that says "version no. N" must name one document only. The
+ * counter is only ever written with the inventory locked, by the freeze (see `App\Inventories\Versions\OfficialVersions`), like
+ * `items_count`.
  */
 return new class extends Migration
 {
@@ -28,6 +34,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::table('inventories', function (Blueprint $table) {
+            $table->unsignedInteger('last_version_number')->default(0);
+        });
+
         Schema::create('inventory_versions', function (Blueprint $table) {
             $table->id();
             $table->ulid('ulid')->unique();
@@ -91,5 +101,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('inventory_versions');
+
+        Schema::table('inventories', function (Blueprint $table) {
+            $table->dropColumn('last_version_number');
+        });
     }
 };

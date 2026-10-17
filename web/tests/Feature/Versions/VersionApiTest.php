@@ -33,14 +33,6 @@ beforeEach(function (): void {
 });
 
 /**
- * The address of the versions of an inventory, or of one of them.
- */
-function versionApiUri(Inventory $inventory, ?InventoryVersion $version = null, string $suffix = ''): string
-{
-    return "/api/v1/inventories/{$inventory->ulid}/versions".($version === null ? '' : "/{$version->ulid}").$suffix;
-}
-
-/**
  * Freezes an inventory the way the web front does.
  *
  * @param  array<string, mixed>  $data
@@ -582,7 +574,7 @@ describe('reading a version', function (): void {
         $case = versionTableCase();
         $version = versionApiDone($case, signers: versionSigners(3));
         $signers = $version->signers ?? [];
-        $signers[0] = ['status' => SignerStatus::Signed->value, 'signed_at' => '2026-10-15T14:30:00+02:00', 'recipient_id' => 11] + $signers[0];
+        $signers[0] = ['status' => SignerStatus::Signed->value, 'signed_at' => '2026-10-15T12:30:00+00:00', 'recipient_id' => 11] + $signers[0];
         $signers[1] = ['status' => SignerStatus::Rejected->value, 'rejection_reason' => 'Not mine', 'recipient_id' => 12] + $signers[1];
         $version->forceFill([
             'signature_status' => SignatureStatus::Awaiting,

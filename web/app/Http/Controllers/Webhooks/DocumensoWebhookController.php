@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Webhooks;
 
 use App\Http\Controllers\Controller;
+use App\Http\Responses\TooManyRequests;
 use App\Inventories\Versions\SignatureStatus;
 use App\Jobs\SyncSignature;
 use App\Models\InventoryVersion;
@@ -129,12 +130,7 @@ final class DocumensoWebhookController extends Controller
 
         $retryAfter = RateLimiter::availableIn($key);
 
-        throw new ThrottleRequestsException('Too many calls to the webhook.', null, [
-            'X-RateLimit-Limit' => $limit,
-            'X-RateLimit-Remaining' => 0,
-            'Retry-After' => $retryAfter,
-            'X-RateLimit-Reset' => time() + $retryAfter,
-        ]);
+        throw TooManyRequests::exception('Too many calls to the webhook.', $limit, $retryAfter);
     }
 
     /**

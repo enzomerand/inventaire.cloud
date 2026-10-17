@@ -136,11 +136,7 @@ final class DocumensoException extends RuntimeException
      */
     private static function reasonOf(Response $response): ?string
     {
-        try {
-            $code = $response->json('code');
-        } catch (Throwable) {
-            return null;
-        }
+        $code = $response->json('code');
 
         return is_string($code) && preg_match('/^[A-Z][A-Z0-9_]{2,63}$/', $code) === 1 ? $code : null;
     }

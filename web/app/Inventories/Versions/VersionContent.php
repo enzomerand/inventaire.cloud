@@ -21,7 +21,6 @@ final readonly class VersionContent
      * @param  list<Item>  $items  The items, in the order they were frozen.
      */
     public function __construct(
-        public string $workspaceName,
         public string $inventoryName,
         public ?string $inventoryDescription,
         public Collection $fields,

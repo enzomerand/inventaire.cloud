@@ -169,15 +169,14 @@ describe('the other calls', function (): void {
             && $request->data() === ['envelopeId' => 'envelope_abc']);
     });
 
-    it('cancels an envelope, with the reason when there is one', function (): void {
+    it('cancels an envelope, with the reason the signers are told', function (): void {
         $client = documensoClient(Http::response(['success' => true]));
 
         $client->cancel('envelope_abc', 'No longer needed');
-        $client->cancel('envelope_abc');
 
         $sent = Http::recorded()->map(fn (array $pair): array => $pair[0]->data())->all();
 
-        expect($sent)->toBe([['envelopeId' => 'envelope_abc', 'reason' => 'No longer needed'], ['envelopeId' => 'envelope_abc']]);
+        expect($sent)->toBe([['envelopeId' => 'envelope_abc', 'reason' => 'No longer needed']]);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'https://sign.example.test/api/v2/envelope/cancel' && $request->method() === 'POST');
     });
 
@@ -233,7 +232,7 @@ describe('the other calls', function (): void {
             $try(fn () => $client->getEnvelope('envelope_test1'));
             $try(fn () => $client->downloadSigned('item', $file));
             $try(fn () => $client->distribute('envelope_test1'));
-            $try(fn () => $client->cancel('envelope_test1'));
+            $try(fn () => $client->cancel('envelope_test1', 'No longer needed'));
             $try(fn () => $client->deleteEnvelope('envelope_test1'));
         } finally {
             @unlink($file);
@@ -476,7 +475,7 @@ describe('a call that fails', function (): void {
         $client = documensoClient(Http::response($body, 400));
 
         try {
-            $client->cancel('envelope_abc');
+            $client->cancel('envelope_abc', 'No longer needed');
             $thrown = null;
         } catch (DocumensoException $exception) {
             $thrown = $exception;

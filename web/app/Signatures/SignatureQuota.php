@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Signatures;
 
+use App\Http\Responses\TooManyRequests;
 use App\Inventories\Versions\OfficialVersions;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Facades\RateLimiter;
@@ -49,12 +50,7 @@ final class SignatureQuota
 
         $retryAfter = RateLimiter::availableIn($key);
 
-        throw new ThrottleRequestsException('Too many requests for signatures.', null, [
-            'X-RateLimit-Limit' => $limit,
-            'X-RateLimit-Remaining' => 0,
-            'Retry-After' => $retryAfter,
-            'X-RateLimit-Reset' => time() + $retryAfter,
-        ]);
+        throw TooManyRequests::exception('Too many requests for signatures.', $limit, $retryAfter);
     }
 
     /**

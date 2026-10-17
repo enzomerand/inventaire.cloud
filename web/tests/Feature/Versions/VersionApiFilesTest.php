@@ -5,8 +5,6 @@ declare(strict_types=1);
 use App\Inventories\Versions\VersionError;
 use App\Inventories\Versions\VersionFileName;
 use App\Inventories\Versions\VersionStatus;
-use App\Models\Inventory;
-use App\Models\InventoryVersion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -25,20 +23,12 @@ beforeEach(function (): void {
     Queue::fake();
 });
 
-/**
- * The address of a file of a version.
- */
-function versionFileUri(Inventory $inventory, InventoryVersion $version, string $file): string
-{
-    return "/api/v1/inventories/{$inventory->ulid}/versions/{$version->ulid}/{$file}";
-}
-
 describe('the PDF', function (): void {
     it('is the file that was written, as an attachment, never sniffed nor cached', function (): void {
         $case = versionTableCase();
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner'], 'Year end'));
 
-        $response = attachmentGet($this, $case['team']['viewer'], versionFileUri($case['inventory'], $version, 'pdf'))->assertOk();
+        $response = attachmentGet($this, $case['team']['viewer'], versionApiUri($case['inventory'], $version, '/pdf'))->assertOk();
         $bytes = $response->streamedContent();
 
         expect($bytes)->toBe(versionFile($version, (string) $version->pdf_path))
@@ -72,7 +62,7 @@ describe('the PDF', function (): void {
         $case = versionTableCase();
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
 
-        attachmentGet($this, $case['team']['stranger'], versionFileUri($case['inventory'], $version, 'pdf'))->assertNotFound();
+        attachmentGet($this, $case['team']['stranger'], versionApiUri($case['inventory'], $version, '/pdf'))->assertNotFound();
     });
 });
 
@@ -108,7 +98,7 @@ describe('the data', function (): void {
         itemIn($case['inventory'], [], $case['team']['owner']);
         $case['inventory']->update(['name' => 'Renamed']);
 
-        $snapshot = json_decode(attachmentGet($this, $case['team']['owner'], versionFileUri($case['inventory'], $version, 'snapshot'))->assertOk()->streamedContent(), true, flags: JSON_THROW_ON_ERROR);
+        $snapshot = json_decode(attachmentGet($this, $case['team']['owner'], versionApiUri($case['inventory'], $version, '/snapshot'))->assertOk()->streamedContent(), true, flags: JSON_THROW_ON_ERROR);
 
         expect($snapshot['items'])->toHaveCount(3)
             ->and($snapshot['inventory']['name'])->toBe('Tools');
@@ -118,7 +108,7 @@ describe('the data', function (): void {
         $case = versionTableCase();
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
 
-        attachmentGet($this, $case['team']['stranger'], versionFileUri($case['inventory'], $version, 'snapshot'))->assertNotFound();
+        attachmentGet($this, $case['team']['stranger'], versionApiUri($case['inventory'], $version, '/snapshot'))->assertNotFound();
     });
 });
 
@@ -128,7 +118,7 @@ describe('a file that is not there yet', function (): void {
         $version = versionFreeze($case['inventory'], $case['team']['owner']);
         $version->forceFill(['status' => $status, 'error' => $status === VersionStatus::Failed ? VersionError::GenerationFailed : null])->save();
 
-        $response = attachmentGet($this, $case['team']['owner'], versionFileUri($case['inventory'], $version, $file))->assertStatus(409);
+        $response = attachmentGet($this, $case['team']['owner'], versionApiUri($case['inventory'], $version, '/'.$file))->assertStatus(409);
 
         expect($response->json())->toBe(['message' => 'This version is not ready yet.', 'code' => 'version_not_ready']);
     })->with([
@@ -144,7 +134,7 @@ describe('a file that is not there yet', function (): void {
         $case = versionTableCase();
         $version = versionFreeze($case['inventory'], $case['team']['owner']);
 
-        $response = attachmentGet($this, $case['team']['owner'], versionFileUri($case['inventory'], $version, 'pdf'), ['Accept-Language' => 'fr'])->assertStatus(409);
+        $response = attachmentGet($this, $case['team']['owner'], versionApiUri($case['inventory'], $version, '/pdf'), ['Accept-Language' => 'fr'])->assertStatus(409);
 
         expect($response->json('message'))->toBe('Cette version n\'est pas encore prête.');
     });
@@ -156,7 +146,7 @@ describe('a file that is gone', function (): void {
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
         Storage::disk(ATTACHMENT_TEST_DISK)->deleteDirectory((string) $version->directory());
 
-        $response = attachmentGet($this, $case['team']['owner'], versionFileUri($case['inventory'], $version, $file))->assertNotFound();
+        $response = attachmentGet($this, $case['team']['owner'], versionApiUri($case['inventory'], $version, '/'.$file))->assertNotFound();
 
         expect($response->json('code'))->toBe('file_not_found');
     })->with(['pdf', 'snapshot']);
@@ -166,7 +156,7 @@ describe('a file that is gone', function (): void {
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
         $version->forceFill(['disk' => 'gone'])->save();
 
-        attachmentGet($this, $case['team']['owner'], versionFileUri($case['inventory'], $version, 'pdf'))->assertNotFound();
+        attachmentGet($this, $case['team']['owner'], versionApiUri($case['inventory'], $version, '/pdf'))->assertNotFound();
     });
 });
 
@@ -181,7 +171,7 @@ describe('the name of a file', function (): void {
         $case['inventory']->update(['name' => 'Matériel / électrique: "A*"']);
         $version = versionRun(versionFreeze($case['inventory'], $case['team']['owner']));
 
-        $disposition = attachmentGet($this, $case['team']['owner'], versionFileUri($case['inventory'], $version, 'pdf'))->assertOk()->headers->get('Content-Disposition');
+        $disposition = attachmentGet($this, $case['team']['owner'], versionApiUri($case['inventory'], $version, '/pdf'))->assertOk()->headers->get('Content-Disposition');
 
         expect($disposition)->toContain('filename="Materiel _ electrique_ _A_ - version 1.pdf"')
             ->and($disposition)->toContain("filename*=utf-8''Mat%C3%A9riel%20_%20%C3%A9lectrique_%20_A_%20-%20version%201.pdf");

@@ -50,10 +50,9 @@ final class CancelDocumensoEnvelopes implements ShouldQueue
      * Remembers what to cancel.
      *
      * @param  list<string>  $envelopeIds  The ids of the envelopes at Documenso, at most {@see EnvelopeCleanup::perJob()}.
-     * @param  string|null  $reason  What the signers are told; a general sentence when none is given.
      * @param  bool  $deleteDrafts  Whether an envelope that is a draft is deleted (it cannot be cancelled), after it is read to know.
      */
-    public function __construct(public readonly array $envelopeIds, public readonly ?string $reason = null, public readonly bool $deleteDrafts = false) {}
+    public function __construct(public readonly array $envelopeIds, public readonly bool $deleteDrafts = false) {}
 
     /**
      * The seconds to wait before each new try.
@@ -78,7 +77,7 @@ final class CancelDocumensoEnvelopes implements ShouldQueue
             return;
         }
 
-        $reason = $this->reason ?? __('This signature request was cancelled.');
+        $reason = __('This signature request was cancelled.');
         $again = 0;
 
         foreach ($this->envelopeIds as $id) {

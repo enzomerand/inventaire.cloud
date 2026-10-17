@@ -110,29 +110,27 @@ final class DocumensoClient
     /**
      * Sends a draft envelope: Documenso emails the signers and the envelope becomes `PENDING`.
      *
-     * @param  array<string, mixed>  $meta  Replaces what the emails say, when given.
-     *
      * @throws DocumensoException
      */
-    public function distribute(string $id, array $meta = []): void
+    public function distribute(string $id): void
     {
         $this->send('POST /envelope/distribute', fn (PendingRequest $request): Response => $request
             ->asJson()
-            ->post($this->url('/envelope/distribute'), ['envelopeId' => $id] + ($meta === [] ? [] : ['meta' => $meta])));
+            ->post($this->url('/envelope/distribute'), ['envelopeId' => $id]));
     }
 
     /**
      * Cancels an envelope that is pending: its signers are told. Any other envelope is refused (`4xx`).
      *
-     * @param  string|null  $reason  Why, as the signers are told; none when null.
+     * @param  string  $reason  Why, as the signers are told.
      *
      * @throws DocumensoException
      */
-    public function cancel(string $id, ?string $reason = null): void
+    public function cancel(string $id, string $reason): void
     {
         $this->send('POST /envelope/cancel', fn (PendingRequest $request): Response => $request
             ->asJson()
-            ->post($this->url('/envelope/cancel'), ['envelopeId' => $id] + ($reason === null || $reason === '' ? [] : ['reason' => $reason])));
+            ->post($this->url('/envelope/cancel'), ['envelopeId' => $id, 'reason' => $reason]));
     }
 
     /**
@@ -206,14 +204,7 @@ final class DocumensoClient
             throw DocumensoException::invalidResponse($call, 'the PDF is bigger than the limit');
         }
 
-        $handle = fopen($into, 'rb');
-        $start = $handle === false ? '' : (string) fread($handle, 5);
-
-        if ($handle !== false) {
-            fclose($handle);
-        }
-
-        if ($start !== '%PDF-') {
+        if (file_get_contents($into, false, null, 0, 5) !== '%PDF-') {
             throw DocumensoException::invalidResponse($call, 'not a PDF');
         }
 

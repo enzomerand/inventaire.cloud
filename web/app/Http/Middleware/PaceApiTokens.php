@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Http\Responses\TooManyRequests;
 use App\Models\User;
 use Closure;
 use Illuminate\Cache\RateLimiter;
@@ -57,14 +58,7 @@ final class PaceApiTokens
         $maximum = config()->integer('inventories.api_token_requests_per_minute');
 
         if ($this->limiter->tooManyAttempts($key, $maximum)) {
-            $retryAfter = $this->limiter->availableIn($key);
-
-            throw new ThrottleRequestsException('Too Many Attempts.', null, [
-                'X-RateLimit-Limit' => $maximum,
-                'X-RateLimit-Remaining' => 0,
-                'Retry-After' => $retryAfter,
-                'X-RateLimit-Reset' => time() + $retryAfter,
-            ]);
+            throw TooManyRequests::exception('Too Many Attempts.', $maximum, $this->limiter->availableIn($key));
         }
 
         $this->limiter->hit($key, self::WINDOW);

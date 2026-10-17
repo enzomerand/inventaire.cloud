@@ -10,6 +10,7 @@ use App\Signatures\SignatureRequests;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -43,6 +44,20 @@ final class RequestSignatures implements ShouldQueue
      * Remembers which version to send.
      */
     public function __construct(public readonly InventoryVersion $version) {}
+
+    /**
+     * Queues the sending of the request for signatures of a version. A queue that cannot be reached is written in the log and does not
+     * fail the caller, which is fine as it is: the request waits as it is, the schedule resumes it or gives up on it (`failed`/`stale`),
+     * and the person can send it again.
+     */
+    public static function dispatchSafely(InventoryVersion $version): void
+    {
+        try {
+            self::dispatch($version);
+        } catch (Throwable $exception) {
+            Log::error('The job that sends the request for signatures of a version could not be queued.', ['version' => $version->ulid, 'exception' => $exception]);
+        }
+    }
 
     /**
      * The seconds to wait before each new try.

@@ -38,4 +38,24 @@ final class PdfLibrary
 
         return new Dompdf($options);
     }
+
+    /**
+     * Writes a note at the left and "page X / Y" at the right of the foot of every page.
+     *
+     * @param  Dompdf  $dompdf  The library that lays the document out, once the document is loaded.
+     * @param  string  $note  What the foot says at the left of every page, as it is to be written.
+     */
+    public static function footer(Dompdf $dompdf, string $note): void
+    {
+        $canvas = $dompdf->getCanvas();
+        $metrics = $dompdf->getFontMetrics();
+        $font = $metrics->getFont(self::FONT) ?? self::FONT;
+        $size = 7.0;
+        $page = __('Page :page / :pages', ['page' => '{PAGE_NUM}', 'pages' => '{PAGE_COUNT}']);
+        $width = $metrics->getTextWidth(__('Page :page / :pages', ['page' => '00', 'pages' => '00']), $font, $size);
+        $y = $canvas->get_height() - 26;
+
+        $canvas->page_text(32, $y, $note, $font, $size, [0.4, 0.4, 0.4]);
+        $canvas->page_text($canvas->get_width() - 32 - $width, $y, $page, $font, $size, [0.4, 0.4, 0.4]);
+    }
 }

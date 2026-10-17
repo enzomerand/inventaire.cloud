@@ -113,7 +113,7 @@ final class EnvelopeCleanup
         $this->db->connection()->afterCommit(function () use ($envelopeIds, $deleteDrafts): void {
             foreach (array_chunk($envelopeIds, self::perJob($deleteDrafts)) as $chunk) {
                 try {
-                    CancelDocumensoEnvelopes::dispatch($chunk, null, $deleteDrafts);
+                    CancelDocumensoEnvelopes::dispatch($chunk, $deleteDrafts);
                 } catch (Throwable $exception) {
                     Log::error('The cancellation of signature requests could not be queued: cancel them in Documenso by hand.', ['envelopes' => $chunk, 'exception' => $exception]);
                 }
@@ -136,17 +136,8 @@ final class EnvelopeCleanup
      */
     private function remember(Model $model, Builder $query): void
     {
-        $ids = array_values(array_map(strval(...), $query->pluck('inventory_versions.documenso_envelope_id')->all()));
-
         $collected = self::collected();
-
-        if ($ids === []) {
-            unset($collected[$model]);
-
-            return;
-        }
-
-        $collected[$model] = $ids;
+        $collected[$model] = array_values(array_map(strval(...), $query->pluck('inventory_versions.documenso_envelope_id')->all()));
     }
 
     /**

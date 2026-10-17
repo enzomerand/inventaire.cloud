@@ -158,7 +158,6 @@ final class OfficialVersions
                 ?? throw (new ModelNotFoundException)->setModel(InventoryVersion::class, [$version->getKey()]);
 
             $this->usage->move($workspace, -$locked->counted_bytes);
-            $directory = $locked->directory();
             $envelope = SignatureSync::followed($locked) ? (string) $locked->documenso_envelope_id : null;
             $locked->delete();
 
@@ -166,9 +165,7 @@ final class OfficialVersions
                 $this->envelopes->cancelAfterCommit([$envelope]);
             }
 
-            if ($directory !== null) {
-                $this->storage->purgeAfterCommit($locked->disk, [], [$directory]);
-            }
+            $this->generator->purge($locked);
         }));
     }
 
@@ -339,11 +336,7 @@ final class OfficialVersions
         // Deleted (with its inventory or its workspace, maybe) while the file was being copied: nobody will ever ask for what was just
         // written, and the delete purged a folder that did not hold it yet. Purged by the folder, not through the row, which is gone.
         if (! InventoryVersion::query()->whereKey($version->getKey())->exists()) {
-            $directory = $version->directory();
-
-            if ($directory !== null) {
-                $this->storage->purgeAfterCommit($version->disk, [], [$directory]);
-            }
+            $this->generator->purge($version);
 
             return $version;
         }

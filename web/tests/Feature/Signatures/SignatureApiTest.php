@@ -35,14 +35,6 @@ beforeEach(function (): void {
 });
 
 /**
- * The address of a version, or of something of it.
- */
-function signatureUri(Inventory $inventory, InventoryVersion $version, string $suffix = ''): string
-{
-    return "/api/v1/inventories/{$inventory->ulid}/versions/{$version->ulid}".$suffix;
-}
-
-/**
  * The roles of a team, who they are, and what each is answered for an action that needs the right to edit: a viewer is refused (403), a
  * stranger is told the inventory is not there (404).
  *
@@ -75,7 +67,7 @@ describe('downloading the signed PDF', function (): void {
         $made['version']->forceFill(['signature_status' => $status])->save();
 
         foreach (['owner', 'editor', 'viewer'] as $role) {
-            $response = inventoryCall($this, $made['case']['team'][$role], 'GET', signatureUri($made['case']['inventory'], $made['version'], '/signed-pdf'));
+            $response = inventoryCall($this, $made['case']['team'][$role], 'GET', versionApiUri($made['case']['inventory'], $made['version'], '/signed-pdf'));
 
             $response->assertStatus(409)->assertJsonPath('code', 'signed_pdf_not_ready');
         }
@@ -93,7 +85,7 @@ describe('downloading the signed PDF', function (): void {
         $made = versionAwaiting(1);
         $made['version']->forceFill(['signature_status' => SignatureStatus::Completed])->save();
 
-        inventoryCall($this, $made['case']['team']['owner'], 'GET', signatureUri($made['case']['inventory'], $made['version'], '/signed-pdf'))
+        inventoryCall($this, $made['case']['team']['owner'], 'GET', versionApiUri($made['case']['inventory'], $made['version'], '/signed-pdf'))
             ->assertStatus(409)->assertJsonPath('code', 'signed_pdf_not_ready');
     });
 
@@ -101,7 +93,7 @@ describe('downloading the signed PDF', function (): void {
         $made = versionAwaiting(1);
         $made['fake']->complete();
         $done = versionSync($made['version']);
-        $uri = signatureUri($made['case']['inventory'], $done, '/signed-pdf');
+        $uri = versionApiUri($made['case']['inventory'], $done, '/signed-pdf');
 
         foreach (['owner', 'editor', 'viewer'] as $role) {
             expect(attachmentGet($this, $made['case']['team'][$role], $uri)->assertOk()->streamedContent())->toBe($made['fake']->signedPdf);
@@ -116,7 +108,7 @@ describe('downloading the signed PDF', function (): void {
         $done = versionSync($made['version']);
         $other = inventoryIn($made['case']['team']['workspace'], 'Other');
 
-        attachmentGet($this, $made['case']['team']['owner'], signatureUri($other, $done, '/signed-pdf'))->assertNotFound();
+        attachmentGet($this, $made['case']['team']['owner'], versionApiUri($other, $done, '/signed-pdf'))->assertNotFound();
     });
 
     it('is a 404 with a code when the file is gone from the storage', function (): void {
@@ -125,7 +117,7 @@ describe('downloading the signed PDF', function (): void {
         $done = versionSync($made['version']);
         Storage::disk(ATTACHMENT_TEST_DISK)->delete((string) $done->signed_pdf_path);
 
-        attachmentGet($this, $made['case']['team']['owner'], signatureUri($made['case']['inventory'], $done, '/signed-pdf'))
+        attachmentGet($this, $made['case']['team']['owner'], versionApiUri($made['case']['inventory'], $done, '/signed-pdf'))
             ->assertNotFound()->assertJsonPath('code', 'file_not_found');
     });
 
@@ -133,7 +125,7 @@ describe('downloading the signed PDF', function (): void {
         $made = versionAwaiting(1);
         $made['fake']->complete();
         $done = versionSync($made['version']);
-        $uri = signatureUri($made['case']['inventory'], $done, '/signed-pdf');
+        $uri = versionApiUri($made['case']['inventory'], $done, '/signed-pdf');
         $owner = $made['case']['team']['owner'];
 
         expect(tokenCall($this, tokenFor($owner, ['read']), 'GET', $uri)->assertOk()->streamedContent())->toBe($made['fake']->signedPdf);
@@ -184,7 +176,7 @@ describe('cancelling the request', function (): void {
         $made = versionAwaiting(2);
         $calls = $made['fake']->calls;
 
-        $response = inventoryCall($this, $made['case']['team'][$role], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
+        $response = inventoryCall($this, $made['case']['team'][$role], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
 
         $response->assertStatus($status);
         expect($made['fake']->calls)->toBe($calls)
@@ -199,7 +191,7 @@ describe('cancelling the request', function (): void {
         $made = versionAwaiting(2);
         $made['fake']->sign('signer1@example.test');
 
-        $response = inventoryCall($this, $made['case']['team'][$role], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
+        $response = inventoryCall($this, $made['case']['team'][$role], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
         $row = $made['version']->fresh();
 
         $response->assertOk()
@@ -223,14 +215,14 @@ describe('cancelling the request', function (): void {
     it('tells the signers in the language of the person who cancels', function (): void {
         $made = versionAwaiting(1);
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'), headers: ['Accept-Language' => 'fr'])->assertOk();
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'), headers: ['Accept-Language' => 'fr'])->assertOk();
 
         expect($made['fake']->requestsOf('POST /envelope/cancel')[0]->data()['reason'])->toBe('Cette demande de signature a été annulée.');
     });
 
     it('leaves the ability to cancel, and to nothing else, with the request', function (): void {
         $made = versionAwaiting(1);
-        $uri = signatureUri($made['case']['inventory'], $made['version']);
+        $uri = versionApiUri($made['case']['inventory'], $made['version']);
 
         $before = inventoryCall($this, $made['case']['team']['editor'], 'GET', $uri)->assertOk();
         inventoryCall($this, $made['case']['team']['editor'], 'POST', $uri.'/signature/cancel')->assertOk();
@@ -246,7 +238,7 @@ describe('cancelling the request', function (): void {
         $made['version']->forceFill(['signature_status' => $status])->save();
         $calls = $made['fake']->calls;
 
-        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
+        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
 
         $response->assertStatus(409)
             ->assertJsonPath('code', 'signature_not_pending')
@@ -268,7 +260,7 @@ describe('cancelling the request', function (): void {
         $made = versionAwaiting(1);
         $made['fake']->failNext('POST /envelope/cancel', $status);
 
-        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
+        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
 
         $response->assertStatus(409)->assertJsonPath('code', 'signature_not_pending');
         // Nothing is decided on the word of a refusal: the request is as it was, until the job reads the envelope.
@@ -281,7 +273,7 @@ describe('cancelling the request', function (): void {
         $made['fake']->complete();
 
         // Documenso refuses to cancel what is not pending (the fake answers 400 as the real one).
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'))
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'))
             ->assertStatus(409)->assertJsonPath('code', 'signature_not_pending');
 
         Queue::pushed(SyncSignature::class)->each(fn (SyncSignature $job) => $job->handle(app(SignatureSync::class)));
@@ -295,7 +287,7 @@ describe('cancelling the request', function (): void {
         $made = versionAwaiting(1);
         $made['fake']->failNext('POST /envelope/cancel', $status);
 
-        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
+        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'));
 
         $response->assertStatus(503)
             ->assertJsonPath('code', 'documenso_unavailable')
@@ -317,7 +309,7 @@ describe('cancelling the request', function (): void {
         config(['services.documenso.url' => null]);
         $calls = $made['fake']->calls;
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'))
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'))
             ->assertStatus(503)->assertJsonPath('code', 'documenso_unavailable');
 
         expect($made['fake']->calls)->toBe($calls);
@@ -327,14 +319,14 @@ describe('cancelling the request', function (): void {
         $made = versionAwaiting(1);
         $other = inventoryIn($made['case']['team']['workspace'], 'Other');
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($other, $made['version'], '/signature/cancel'))->assertNotFound();
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($other, $made['version'], '/signature/cancel'))->assertNotFound();
         inventoryCall($this, $made['case']['team']['owner'], 'POST', "/api/v1/inventories/{$made['case']['inventory']->ulid}/versions/01j0000000000000000000000x/signature/cancel")->assertNotFound();
     });
 
     it('needs the `write` ability of a token, and no other', function (): void {
         $made = versionAwaiting(1);
         $owner = $made['case']['team']['owner'];
-        $uri = signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel');
+        $uri = versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel');
 
         tokenCall($this, tokenFor($owner, ['read', 'manage']), 'POST', $uri)->assertForbidden()->assertJsonPath('code', 'token_ability_missing');
         expect($made['fake']->count('POST /envelope/cancel'))->toBe(0);
@@ -344,7 +336,7 @@ describe('cancelling the request', function (): void {
 
     it('is not undone by the webhook that follows: a cancelled request is not followed', function (): void {
         $made = versionAwaiting(1);
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/cancel'))->assertOk();
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/cancel'))->assertOk();
         $calls = $made['fake']->calls;
 
         versionSync($made['version']);
@@ -359,7 +351,7 @@ describe('sending the request again', function (): void {
         $made = signatureFailed();
         Queue::fake();
 
-        inventoryCall($this, $made['case']['team'][$role], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'))->assertStatus($status);
+        inventoryCall($this, $made['case']['team'][$role], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'))->assertStatus($status);
 
         expect($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Failed);
         Queue::assertNothingPushed();
@@ -369,7 +361,7 @@ describe('sending the request again', function (): void {
         $made = signatureFailed(SignatureError::Stale);
         Queue::fake();
 
-        $response = inventoryCall($this, $made['case']['team'][$role], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'));
+        $response = inventoryCall($this, $made['case']['team'][$role], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'));
 
         $response->assertStatus(202)
             ->assertJsonPath('data.id', $made['version']->ulid)
@@ -386,7 +378,7 @@ describe('sending the request again', function (): void {
         $made = signatureFailed();
         Queue::fake();
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'))->assertStatus(202);
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'))->assertStatus(202);
         Queue::pushed(RequestSignatures::class)->each(fn (RequestSignatures $job) => $job->handle(app(SignatureRequests::class)));
 
         expect($made['fake']->created)->toBe(1)
@@ -400,7 +392,7 @@ describe('sending the request again', function (): void {
         $version->forceFill(['signature_status' => SignatureStatus::Failed, 'signature_error' => $error])->save();
         Queue::fake();
 
-        inventoryCall($this, $case['team']['owner'], 'POST', signatureUri($case['inventory'], $version, '/signature/retry'))->assertStatus(202);
+        inventoryCall($this, $case['team']['owner'], 'POST', versionApiUri($case['inventory'], $version, '/signature/retry'))->assertStatus(202);
         Queue::pushed(RequestSignatures::class)->each(fn (RequestSignatures $job) => $job->handle(app(SignatureRequests::class)));
 
         expect($fake->created)->toBe(1)
@@ -412,7 +404,7 @@ describe('sending the request again', function (): void {
         $made['version']->forceFill(['signature_status' => $status, 'status' => $version])->save();
         Queue::fake();
 
-        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'));
+        $response = inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'));
 
         $response->assertStatus(409)
             ->assertJsonPath('code', 'signature_not_failed')
@@ -436,7 +428,7 @@ describe('sending the request again', function (): void {
         config(['services.documenso.api_key' => '']);
         Queue::fake();
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'))
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'))
             ->assertStatus(409)
             ->assertJsonPath('code', 'signature_unavailable');
 
@@ -446,14 +438,14 @@ describe('sending the request again', function (): void {
         // A request that did not fail is told so, not that the instance has no Documenso.
         $made['version']->forceFill(['signature_status' => SignatureStatus::Awaiting])->save();
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'))
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'))
             ->assertStatus(409)->assertJsonPath('code', 'signature_not_failed');
     });
 
     it('is done once when it is asked twice: the second call finds a request that did not fail', function (): void {
         $made = signatureFailed();
         Queue::fake();
-        $uri = signatureUri($made['case']['inventory'], $made['version'], '/signature/retry');
+        $uri = versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry');
 
         inventoryCall($this, $made['case']['team']['owner'], 'POST', $uri)->assertStatus(202);
         inventoryCall($this, $made['case']['team']['owner'], 'POST', $uri)->assertStatus(409)->assertJsonPath('code', 'signature_not_failed');
@@ -466,7 +458,7 @@ describe('sending the request again', function (): void {
         $made = signatureFailed();
         $this->mock(Dispatcher::class, fn ($mock) => $mock->shouldReceive('dispatch')->andThrow(new RuntimeException('The queue is down.')));
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($made['case']['inventory'], $made['version'], '/signature/retry'))
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry'))
             ->assertStatus(202)->assertJsonPath('data.signature.status', 'requested');
 
         Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'could not be queued'))->once();
@@ -476,13 +468,13 @@ describe('sending the request again', function (): void {
         $made = signatureFailed();
         $other = inventoryIn($made['case']['team']['workspace'], 'Other');
 
-        inventoryCall($this, $made['case']['team']['owner'], 'POST', signatureUri($other, $made['version'], '/signature/retry'))->assertNotFound();
+        inventoryCall($this, $made['case']['team']['owner'], 'POST', versionApiUri($other, $made['version'], '/signature/retry'))->assertNotFound();
     });
 
     it('needs the `write` ability of a token, and no other', function (): void {
         $made = signatureFailed();
         $owner = $made['case']['team']['owner'];
-        $uri = signatureUri($made['case']['inventory'], $made['version'], '/signature/retry');
+        $uri = versionApiUri($made['case']['inventory'], $made['version'], '/signature/retry');
 
         tokenCall($this, tokenFor($owner, ['read', 'manage']), 'POST', $uri)->assertForbidden()->assertJsonPath('code', 'token_ability_missing');
         expect($made['version']->fresh()->signature_status)->toBe(SignatureStatus::Failed);
@@ -492,7 +484,7 @@ describe('sending the request again', function (): void {
 
     it('is offered by the version exactly when it can be done', function (): void {
         $made = signatureFailed();
-        $uri = signatureUri($made['case']['inventory'], $made['version']);
+        $uri = versionApiUri($made['case']['inventory'], $made['version']);
 
         $failed = inventoryCall($this, $made['case']['team']['editor'], 'GET', $uri)->assertOk();
         $viewer = inventoryCall($this, $made['case']['team']['viewer'], 'GET', $uri)->assertOk();

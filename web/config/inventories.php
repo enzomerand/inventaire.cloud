@@ -283,7 +283,7 @@ return [
     */
     'max_versions_per_inventory' => (int) env('INVENTORIES_MAX_VERSIONS', 200),
 
-    'max_signers' => min(10, (int) env('INVENTORIES_MAX_SIGNERS', 10)),
+    'max_signers' => (int) env('INVENTORIES_MAX_SIGNERS', 10),
 
     'versions_per_hour' => (int) env('INVENTORIES_VERSIONS_PER_HOUR', 10),
 

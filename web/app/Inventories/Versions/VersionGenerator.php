@@ -176,21 +176,7 @@ final class VersionGenerator
         }
 
         if ($version->signature_status === SignatureStatus::Requested) {
-            $this->requestSignatures($version);
-        }
-    }
-
-    /**
-     * Queues the sending of the request for signatures of a version that has just been completed. A queue that cannot be reached is
-     * written in the log and does not fail the version, which is fine as it is: the schedule gives up on a request nothing picked up
-     * (`failed`/`stale`), and the person can send it again.
-     */
-    private function requestSignatures(InventoryVersion $version): void
-    {
-        try {
-            RequestSignatures::dispatch($version);
-        } catch (Throwable $exception) {
-            Log::error('The job that sends the request for signatures of an official version could not be queued.', ['version' => $version->ulid, 'exception' => $exception]);
+            RequestSignatures::dispatchSafely($version);
         }
     }
 
@@ -271,8 +257,9 @@ final class VersionGenerator
 
     /**
      * Has the folder of the version purged from the disk once the transaction in progress is committed (at once when there is none).
+     * Nothing is purged when the snapshot is not where a version keeps it (see {@see InventoryVersion::directory()}).
      */
-    private function purge(InventoryVersion $version): void
+    public function purge(InventoryVersion $version): void
     {
         $directory = $version->directory();
 

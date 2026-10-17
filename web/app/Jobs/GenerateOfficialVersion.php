@@ -17,7 +17,7 @@ use Throwable;
  * cells does not depend on the time a request may take.
  *
  * It is tried once: the generator records a failure on the version itself, and writing a document again from the start is for the
- * person to ask (a new version), not for the queue to repeat in silence. It may run for 15 minutes ({@see self::TIMEOUT}); the queue
+ * person to ask (a new version), not for the queue to repeat in silence. It may run for 15 minutes ({@see GenerateExport::TIMEOUT}); the queue
  * connection must wait longer than that before it hands a running job to another worker (`retry_after` of `config/queue.php`, 960
  * seconds). It goes on the queue of the exports ({@see GenerateExport::QUEUE}): a heavy job like theirs, which must not hold up the
  * short ones.
@@ -30,14 +30,11 @@ final class GenerateOfficialVersion implements ShouldQueue
 {
     use Queueable, SerializesModels;
 
-    /** The seconds the job may run. */
-    public const TIMEOUT = 900;
-
     /** The job is tried once. */
     public int $tries = 1;
 
     /** The seconds the job may run. */
-    public int $timeout = self::TIMEOUT;
+    public int $timeout = GenerateExport::TIMEOUT;
 
     /** A version that is deleted before its job runs is not an error. */
     public bool $deleteWhenMissingModels = true;
