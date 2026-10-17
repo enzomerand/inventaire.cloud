@@ -23,6 +23,8 @@ use App\Models\Workspace;
 use App\Rules\PersonName;
 use App\Rules\SingleLineText;
 use App\Signatures\Documenso;
+use App\Signatures\EnvelopeCleanup;
+use App\Signatures\SignatureSync;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -53,7 +55,8 @@ use Throwable;
  * signatures asked for when the instance has no Documenso ({@see SignatureUnavailableException}).
  *
  * **Deleting** a version takes the lock of the workspace, then the one of the inventory, gives its `counted_bytes` back to the storage
- * counter, deletes the row and purges its folder once that is committed.
+ * counter, deletes the row and purges its folder once that is committed. A request for signatures that is still open at Documenso
+ * (`sending` or `awaiting`, with an envelope) is cancelled there in the background once that is committed too ({@see EnvelopeCleanup}).
  */
 final class OfficialVersions
 {
@@ -64,7 +67,7 @@ final class OfficialVersions
     public const SIGNERS_MAX = 10;
 
     /**
-     * Gets the database, the locks, the writer of the snapshot and the storage.
+     * Gets the database, the locks, the writer of the snapshot, the storage and what cancels the signature requests of versions that go.
      */
     public function __construct(
         private readonly DatabaseManager $db,
@@ -74,6 +77,7 @@ final class OfficialVersions
         private readonly FieldTypes $types,
         private readonly AttachmentStorage $storage,
         private readonly WorkspaceStorage $usage,
+        private readonly EnvelopeCleanup $envelopes,
     ) {}
 
     /**
@@ -138,7 +142,12 @@ final class OfficialVersions
 
             $this->usage->move($workspace, -$locked->counted_bytes);
             $directory = $locked->directory();
+            $envelope = SignatureSync::followed($locked) ? (string) $locked->documenso_envelope_id : null;
             $locked->delete();
+
+            if ($envelope !== null) {
+                $this->envelopes->cancelAfterCommit([$envelope]);
+            }
 
             if ($directory !== null) {
                 $this->storage->purgeAfterCommit($locked->disk, [], [$directory]);
