@@ -77,7 +77,11 @@ final class ImportController extends Controller
         try {
             $import = $this->imports->upload($inventory, $this->user($request), $request->uploaded(), $request->reading(), Gate::allows('manageFields', $inventory));
         } catch (ImportLimitReachedException $limit) {
-            return $this->limitReached($limit);
+            return ApiError::conflict(
+                __('You already have too many imports under way for this inventory. Cancel one or wait for it to end, then try again.'),
+                ImportLimitReachedException::CODE,
+                ['limit' => $limit->limit],
+            );
         } catch (ImportFileException $failure) {
             return ApiError::invalid($failure->getMessage(), 'file', $failure->reason);
         }
@@ -178,18 +182,6 @@ final class ImportController extends Controller
         }
 
         return $import;
-    }
-
-    /**
-     * The answer for a person who already has as many unfinished imports as they may.
-     */
-    private function limitReached(ImportLimitReachedException $limit): JsonResponse
-    {
-        return ApiError::conflict(
-            __('You already have too many imports under way for this inventory. Cancel one or wait for it to end, then try again.'),
-            ImportLimitReachedException::CODE,
-            ['limit' => $limit->limit],
-        );
     }
 
     /**

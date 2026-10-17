@@ -22,9 +22,6 @@ use stdClass;
  */
 final class ItemRevisions
 {
-    /** Revisions written per statement when many items are added at once. */
-    private const BULK_CHUNK = 500;
-
     /**
      * Gets the database.
      */
@@ -48,7 +45,7 @@ final class ItemRevisions
 
     /**
      * Records that many items were added at once, each with every value it was given: the revisions are written in bulk, a statement
-     * for every {@see self::BULK_CHUNK} of them or {@see Items::BULK_BYTES} bytes of changes, whichever comes first (a statement is
+     * for every {@see Items::BULK_CHUNK} of them or {@see Items::BULK_BYTES} bytes of changes, whichever comes first (a statement is
      * one packet, and the database refuses one that is too large). No pruning is needed: an item that was just added has the one
      * revision.
      *
@@ -80,7 +77,7 @@ final class ItemRevisions
             $rows[] = $row;
             $bytes += strlen($row['changes']);
 
-            if (count($rows) >= self::BULK_CHUNK || $bytes >= Items::BULK_BYTES) {
+            if (count($rows) >= Items::BULK_CHUNK || $bytes >= Items::BULK_BYTES) {
                 $this->db->table('item_revisions')->insert($rows);
                 $rows = [];
                 $bytes = 0;

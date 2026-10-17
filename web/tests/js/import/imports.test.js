@@ -10,8 +10,6 @@ import {
     POLL_INTERVAL_MS,
     analysisBody,
     cleanName,
-    defaultDateOrder,
-    defaultDecimal,
     defaultName,
     destinationValue,
     endNotice,
@@ -26,8 +24,6 @@ import {
     mappingSummary,
     maxSizeFrom,
     newFieldType,
-    normalizeDelimiter,
-    normalizeEncoding,
     optionsOf,
     parseDestination,
     pickResumable,
@@ -170,52 +166,7 @@ describe('the imports', () => {
     });
 
     describe('the options of the file', () => {
-        it('writes the separator and the encoding the way the API does, whichever way it said them', () => {
-            expect(['semicolon', 'COMMA', 'tab', ';', ',', '\t', '|', null].map(normalizeDelimiter)).toEqual([
-                'semicolon',
-                'comma',
-                'tab',
-                'semicolon',
-                'comma',
-                'tab',
-                null,
-                null,
-            ]);
-            expect(
-                ['utf-8', 'UTF8', 'windows-1252', 'CP1252', 'Latin1', 'utf-16', 'UTF-16LE', 'ebcdic', 1].map(
-                    normalizeEncoding,
-                ),
-            ).toEqual([
-                'utf-8',
-                'utf-8',
-                'windows-1252',
-                'windows-1252',
-                'windows-1252',
-                'utf-16',
-                'utf-16',
-                null,
-                null,
-            ]);
-        });
-
-        it('expects the decimals with a comma after a semicolon and in French, with a point otherwise', () => {
-            expect(defaultDecimal('semicolon')).toBe('comma');
-            expect(defaultDecimal('comma')).toBe('point');
-
-            document.documentElement.lang = 'fr';
-
-            expect(defaultDecimal('comma')).toBe('comma');
-        });
-
-        it('expects the month first in English, the day first elsewhere', () => {
-            expect(defaultDateOrder()).toBe('mdy');
-
-            document.documentElement.lang = 'fr';
-
-            expect(defaultDateOrder()).toBe('dmy');
-        });
-
-        it('reads the options of an import, and leaves the decimal sign and the dates to the dialog when the API says nothing', () => {
+        it('reads the options of an import, and starts a spreadsheet from the separator of the language and UTF-8', () => {
             const options = optionsOf(
                 record('a', 'uploaded', {
                     options: {
@@ -237,12 +188,18 @@ describe('the imports', () => {
                 dateOrder: 'ymd',
                 onError: 'skip',
             });
-            expect(optionsOf(record('b', 'uploaded', { options: { delimiter: null, encoding: null } }))).toEqual({
+            expect(
+                optionsOf(
+                    record('b', 'uploaded', {
+                        options: { delimiter: null, encoding: null, decimal: 'point', date_order: 'dmy' },
+                    }),
+                ),
+            ).toEqual({
                 hasHeader: true,
                 delimiter: 'comma',
                 encoding: 'utf-8',
-                decimal: null,
-                dateOrder: null,
+                decimal: 'point',
+                dateOrder: 'dmy',
                 onError: 'abort',
             });
             expect(optionsOf(null).hasHeader).toBe(true);

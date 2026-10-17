@@ -42,12 +42,4 @@ final readonly class ImportContext
     {
         return $this->decimal === 'comma' ? ',' : '.';
     }
-
-    /**
-     * The character that separates the thousands of a number: the one that is not the decimal sign.
-     */
-    public function groupSign(): string
-    {
-        return $this->decimal === 'comma' ? '.' : ',';
-    }
 }

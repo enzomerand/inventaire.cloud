@@ -43,8 +43,6 @@ import {
     NEW_FIELD_TYPES,
     POLL_INTERVAL_MS,
     analysisBody,
-    defaultDateOrder,
-    defaultDecimal,
     endNotice,
     failureText,
     importableFields,
@@ -419,8 +417,6 @@ export default function importDialog() {
             this.importHasHeader = true;
             this.importDelimiter = defaultDelimiter();
             this.importEncoding = 'utf-8';
-            this.importDecimal = defaultDecimal(this.importDelimiter);
-            this.importDateOrder = defaultDateOrder();
             this.importOnError = 'abort';
             decimalDefault = null;
             dateOrderDefault = null;
@@ -810,8 +806,7 @@ export default function importDialog() {
         applyAnalysis(record) {
             const options = optionsOf(record);
             const fresh = decimalDefault === null;
-            const decimal = options.decimal ?? defaultDecimal(options.delimiter);
-            const dateOrder = options.dateOrder ?? defaultDateOrder();
+            const { decimal, dateOrder } = options;
 
             this.applyReading(record);
 

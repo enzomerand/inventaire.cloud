@@ -60,8 +60,7 @@ final class ImportCsv
             throw new ImportFileException(ImportFileException::EMPTY);
         }
 
-        $bom = self::byteOrderMark($path);
-        $encoding ??= $bom === 'utf-16' ? 'utf-16' : (self::isUtf8($path) ? 'utf-8' : 'windows-1252');
+        $encoding ??= self::startsWithUtf16Mark($path) ? 'utf-16' : (self::isUtf8($path) ? 'utf-8' : 'windows-1252');
 
         if ($encoding !== 'utf-16' && str_contains((string) file_get_contents($path, false, null, 0, self::BINARY_PROBE_BYTES), "\0")) {
             // A text file has no NUL byte: this is an image, an archive, a legacy spreadsheet...
@@ -335,16 +334,10 @@ final class ImportCsv
     }
 
     /**
-     * Whether the file starts with the byte order mark of UTF-16 (`utf-16`), of UTF-8 (`utf-8`), or none.
+     * Whether the file starts with the byte order mark of UTF-16, little or big endian.
      */
-    private static function byteOrderMark(string $path): ?string
+    private static function startsWithUtf16Mark(string $path): bool
     {
-        $start = (string) file_get_contents($path, false, null, 0, 3);
-
-        return match (true) {
-            str_starts_with($start, "\xEF\xBB\xBF") => 'utf-8',
-            str_starts_with($start, "\xFF\xFE"), str_starts_with($start, "\xFE\xFF") => 'utf-16',
-            default => null,
-        };
+        return in_array(file_get_contents($path, false, null, 0, 2), ["\xFF\xFE", "\xFE\xFF"], true);
     }
 }

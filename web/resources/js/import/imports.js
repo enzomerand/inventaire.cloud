@@ -7,11 +7,9 @@
  *
  * The vocabulary of the options is the API's: the separators `semicolon`, `comma` and `tab` (as for an export), the
  * encodings `utf-8`, `windows-1252` and `utf-16`, the decimal sign `comma` or `point`, the order of a date `dmy`, `mdy` or `ymd`, and
- * what a wrong row does, `abort` the import or `skip` the row. What the API says in another form (a separator written as
- * the character itself) is read all the same, see {@link normalizeDelimiter} and {@link normalizeEncoding}.
+ * what a wrong row does, `abort` the import or `skip` the row.
  */
 import { defaultDelimiter } from '../export/exports.js';
-import { pageLocale } from '../fields/locale.js';
 import { t, tn } from '../lib/i18n.js';
 
 /** How long the dialog waits before it asks again while an import is on its way and the dialog is open, in milliseconds. */
@@ -56,11 +54,8 @@ const NOT_IMPORTABLE = ['file', 'photo'];
 /** The separators of a CSV file, as the API names them. */
 export const DELIMITERS = ['semicolon', 'comma', 'tab'];
 
-/** The decimal signs a number can be written with. */
-export const DECIMALS = ['comma', 'point'];
-
-/** The orders a date can be written in: day, month, year; month, day, year; year, month, day. */
-export const DATE_ORDERS = ['dmy', 'mdy', 'ymd'];
+/** The encodings of a CSV file, as the API names them. */
+const ENCODINGS = ['utf-8', 'windows-1252', 'utf-16'];
 
 /** What an import does with a row it cannot read: give up the whole import, or leave the row out. */
 export const ON_ERRORS = ['abort', 'skip'];
@@ -82,9 +77,6 @@ const SAMPLE_LENGTH = 40;
 
 /** What stands between the samples of a column. */
 const SAMPLE_SEPARATOR = ' · ';
-
-/** What the separators of a CSV file are called when the API gives the character. */
-const DELIMITER_ALIASES = { ';': 'semicolon', ',': 'comma', '\t': 'tab' };
 
 /**
  * @typedef {object} ImportColumn A column of the file, as `ImportResource` describes it.
@@ -140,8 +132,8 @@ const DELIMITER_ALIASES = { ';': 'semicolon', ',': 'comma', '\t': 'tab' };
  * @property {boolean} hasHeader
  * @property {string} delimiter
  * @property {string} encoding
- * @property {string | null} decimal Null when the API does not say.
- * @property {string | null} dateOrder Null when the API does not say.
+ * @property {string} decimal
+ * @property {string} dateOrder
  * @property {string} onError
  *
  * @typedef {object} Problems What is wrong with a mapping.
@@ -224,70 +216,8 @@ export function pickResumable(list, unseen = null) {
 }
 
 /**
- * The separator of a CSV file in the words of the API, whichever way the API wrote it.
- *
- * @param {unknown} value `semicolon`, `comma`, `tab`, or the character itself.
- * @returns {string | null} Null for a separator the dialog does not know.
- */
-export function normalizeDelimiter(value) {
-    if (typeof value !== 'string') {
-        return null;
-    }
-
-    if (DELIMITERS.includes(value.toLowerCase())) {
-        return value.toLowerCase();
-    }
-
-    return DELIMITER_ALIASES[value] ?? null;
-}
-
-/**
- * The encoding of a CSV file in the words of the API, whichever way the API wrote it.
- *
- * @param {unknown} value `utf-8`, `windows-1252`, `utf-16`, or a common spelling of one of them (`UTF8`, `cp1252`...).
- * @returns {string | null} Null for an encoding the dialog does not know.
- */
-export function normalizeEncoding(value) {
-    if (typeof value !== 'string') {
-        return null;
-    }
-
-    const key = value.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    if (key === 'utf8') {
-        return 'utf-8';
-    }
-
-    if (['utf16', 'utf16le', 'utf16be'].includes(key)) {
-        return 'utf-16';
-    }
-
-    return ['windows1252', 'cp1252', 'iso88591', 'latin1'].includes(key) ? 'windows-1252' : null;
-}
-
-/**
- * The decimal sign a file is expected to use when the person does not choose: the comma with a semicolon (a spreadsheet in a
- * language that writes decimals with a comma) and in French, the point otherwise.
- *
- * @param {string} delimiter The separator of the file (only a CSV file has one).
- * @returns {'comma' | 'point'}
- */
-export function defaultDecimal(delimiter) {
-    return delimiter === 'semicolon' || pageLocale().split('-')[0].toLowerCase() === 'fr' ? 'comma' : 'point';
-}
-
-/**
- * The order of the dates of a file when the person does not choose: day first, except in English.
- *
- * @returns {'dmy' | 'mdy'}
- */
-export function defaultDateOrder() {
-    return pageLocale().split('-')[0].toLowerCase() === 'en' ? 'mdy' : 'dmy';
-}
-
-/**
- * The choices an import holds, as the controls of the dialog show them. What the API does not say is `null` (the decimal sign
- * and the order of the dates), for the dialog to work out.
+ * The choices an import holds, as the controls of the dialog show them. A spreadsheet has neither a separator nor an
+ * encoding (`null`): the controls start from the separator of the language and UTF-8.
  *
  * @param {ImportRecord | null} record
  * @returns {ImportOptions}
@@ -297,10 +227,10 @@ export function optionsOf(record) {
 
     return {
         hasHeader: options.has_header !== false,
-        delimiter: normalizeDelimiter(options.delimiter) ?? defaultDelimiter(),
-        encoding: normalizeEncoding(options.encoding) ?? 'utf-8',
-        decimal: DECIMALS.includes(options.decimal) ? options.decimal : null,
-        dateOrder: DATE_ORDERS.includes(options.date_order) ? options.date_order : null,
+        delimiter: DELIMITERS.includes(options.delimiter) ? options.delimiter : defaultDelimiter(),
+        encoding: ENCODINGS.includes(options.encoding) ? options.encoding : 'utf-8',
+        decimal: options.decimal,
+        dateOrder: options.date_order,
         onError: ON_ERRORS.includes(options.on_error) ? options.on_error : 'abort',
     };
 }

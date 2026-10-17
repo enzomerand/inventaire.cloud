@@ -33,26 +33,6 @@ beforeEach(function (): void {
 });
 
 /**
- * A mapping entry that sends a column to a field.
- *
- * @return array{column: int, target: string, field: string}
- */
-function runToField(int $column, string $ulid): array
-{
-    return ['column' => $column, 'target' => 'field', 'field' => $ulid];
-}
-
-/**
- * A mapping entry that creates a field.
- *
- * @return array{column: int, target: string, type: string, name: string}
- */
-function runToNew(int $column, string $type, string $name): array
-{
-    return ['column' => $column, 'target' => 'new', 'type' => $type, 'name' => $name];
-}
-
-/**
  * The fields of an inventory by name, in their order.
  *
  * @return array<string, InventoryField>
@@ -75,7 +55,7 @@ describe('adding items to the fields of an inventory', function (): void {
             ['Perceuse', '2,5', '1 234,56 €', '15/03/2024', 'oui', 'x'],
             ['Scie', '1', '9 €', '16/03/2024', 'non', 'y'],
         ], ';'), 'Windows-1252', 'UTF-8'));
-        $mapping = [runToField(0, $name->ulid), runToField(1, $quantity->ulid), runToField(2, $price->ulid), runToField(3, $bought->ulid), runToField(4, $stock->ulid)];
+        $mapping = [importToField(0, $name->ulid), importToField(1, $quantity->ulid), importToField(2, $price->ulid), importToField(3, $bought->ulid), importToField(4, $stock->ulid)];
 
         $import = importDone(importAsked($this, $case, $csv, $mapping));
 
@@ -101,7 +81,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $tags = fieldIn($case['inventory'], 'tags', 'Tags');
         $csv = importFile(importCsv([['Name', 'Tags'], ['Perceuse Éclair', 'power, cordless'], ['Scie', ''], ['Marteau', 'heavy']]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid), runToField(1, $tags->ulid)], as: $case['team']['editor']));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid), importToField(1, $tags->ulid)], as: $case['team']['editor']));
         $items = Item::query()->where('inventory_id', $case['inventory']->id)->orderBy('id')->get();
 
         expect($import->rows_imported)->toBe(3)
@@ -135,7 +115,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $rows = array_map(fn (int $number): array => ["Item {$number}"], range(1, 1203));
         $csv = importFile(importCsv([['Name'], ...$rows]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid)]));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid)]));
         $names = Item::query()->where('inventory_id', $case['inventory']->id)->orderBy('id')->pluck('values')->map(fn (array $values): string => $values[$name->ulid])->all();
 
         expect($import->rows_imported)->toBe(1203)
@@ -151,7 +131,7 @@ describe('adding items to the fields of an inventory', function (): void {
         itemIn($case['inventory'], [$name->ulid => 'Old']);
         $csv = importFile(importCsv([['Name', 'Ignored'], ['New', 'x']]));
 
-        importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid)]));
+        importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid)]));
 
         expect(importItemsOf($case['inventory']))->toBe([['Name' => 'Old'], ['Name' => 'New']])
             ->and($case['inventory']->refresh()->items_count)->toBe(2);
@@ -162,7 +142,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $quantity = fieldIn($case['inventory'], 'number', 'Quantity', ['decimals' => 2]);
         $bought = fieldIn($case['inventory'], 'date', 'Bought');
         $csv = importFile(importCsv([['Quantity', 'Bought'], ['1.234,5', '03/04/2024']], ';'));
-        $mapping = [runToField(0, $quantity->ulid), runToField(1, $bought->ulid)];
+        $mapping = [importToField(0, $quantity->ulid), importToField(1, $bought->ulid)];
 
         importDone(importAsked($this, $case, $csv, $mapping, ['decimal' => 'comma', 'date_order' => 'mdy']));
         importDone(importAsked($this, $case, $csv, $mapping, ['decimal' => 'comma', 'date_order' => 'dmy']));
@@ -189,7 +169,7 @@ describe('adding items to the fields of an inventory', function (): void {
             ['Drill', 2.55, new DateTimeImmutable('2026-03-01'), new DateTimeImmutable('2026-07-01 12:30'), new DateInterval('PT7H5M'), true],
             ['Saw', 3, new DateTimeImmutable('2026-03-02'), new DateTimeImmutable('2026-01-15 08:00'), new DateInterval('PT9H'), false],
         ]);
-        $mapping = [runToField(0, $name->ulid), runToField(1, $quantity->ulid), runToField(2, $bought->ulid), runToField(3, $seen->ulid), runToField(4, $open->ulid), runToField(5, $stock->ulid)];
+        $mapping = [importToField(0, $name->ulid), importToField(1, $quantity->ulid), importToField(2, $bought->ulid), importToField(3, $seen->ulid), importToField(4, $open->ulid), importToField(5, $stock->ulid)];
 
         $import = importDone(importAsked($this, $case, $sheet, $mapping));
 
@@ -206,7 +186,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $number = fieldIn($case['inventory'], 'number', 'Quantity');
         $csv = importFile("Name,Quantity\r\nDrill,1\r\n\r\n,\r\n  ,  \r\nSaw,x\r\nMallet,3\r\n");
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid), runToField(1, $number->ulid)], ['on_error' => 'skip']));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid), importToField(1, $number->ulid)], ['on_error' => 'skip']));
 
         expect($import->rows_total)->toBe(3)
             ->and($import->rows_imported)->toBe(2)
@@ -219,7 +199,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
 
-        $import = importDone(importAsked($this, $case, importFile("Name\r\n"), [runToField(0, $name->ulid)]));
+        $import = importDone(importAsked($this, $case, importFile("Name\r\n"), [importToField(0, $name->ulid)]));
 
         expect($import->status)->toBe(ImportStatus::Completed)->and($import->rows_total)->toBe(0)->and($import->rows_imported)->toBe(0);
     });
@@ -231,7 +211,7 @@ describe('adding items to the fields of an inventory', function (): void {
         // The first row with something in it is not the header of a file whose first row is empty.
         $csv = importFile("\r\nDrill,1\r\nSaw,x\r\n");
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid), runToField(1, $number->ulid)], ['on_error' => 'skip']));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid), importToField(1, $number->ulid)], ['on_error' => 'skip']));
 
         expect($import->rows_total)->toBe(2)
             ->and($import->rows_imported)->toBe(1)
@@ -243,7 +223,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
 
-        $import = importDone(importAsked($this, $case, importFile("Drill\r\nSaw\r\n"), [runToField(0, $name->ulid)], upload: ['has_header' => 'false']));
+        $import = importDone(importAsked($this, $case, importFile("Drill\r\nSaw\r\n"), [importToField(0, $name->ulid)], upload: ['has_header' => 'false']));
 
         expect($import->rows_imported)->toBe(2)->and(importItemsOf($case['inventory']))->toBe([['Name' => 'Drill'], ['Name' => 'Saw']]);
     });
@@ -253,7 +233,7 @@ describe('adding items to the fields of an inventory', function (): void {
         $number = fieldIn($case['inventory'], 'number', 'Quantité');
         $csv = importFile(importCsv([['Quantité'], ['abc']]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $number->ulid)], headers: ['Accept-Language' => 'fr']));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $number->ulid)], headers: ['Accept-Language' => 'fr']));
 
         expect($import->locale)->toBe('fr')
             ->and($import->errors[0]['message'])->toBe("« abc » n'est pas un nombre.");
@@ -262,7 +242,7 @@ describe('adding items to the fields of an inventory', function (): void {
     it('leaves the language of the worker as it found it', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile("Name\r\nx\r\n"), [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, importFile("Name\r\nx\r\n"), [importToField(0, $name->ulid)]);
         $import->forceFill(['locale' => 'fr'])->save();
 
         importDone($import);
@@ -280,9 +260,9 @@ describe('creating fields from the columns', function (): void {
             ['Saw', '3,125', '5 %', '9 USD', str_repeat('n', 400), '7', 'non', '16/03/2024', '14:00', ''],
         ], ';'));
         $mapping = [
-            runToNew(0, 'text', 'Name'), runToNew(1, 'number', 'Quantity'), runToNew(2, 'percentage', 'Discount'), runToNew(3, 'money', 'Price'),
-            runToNew(4, 'text', 'Notes'), runToNew(5, 'rating', 'Grade'), runToNew(6, 'boolean', 'In stock'), runToNew(7, 'date', 'Bought'),
-            runToNew(8, 'time', 'Opening'), runToNew(9, 'url', 'Site'),
+            importToNew(0, 'text', 'Name'), importToNew(1, 'number', 'Quantity'), importToNew(2, 'percentage', 'Discount'), importToNew(3, 'money', 'Price'),
+            importToNew(4, 'text', 'Notes'), importToNew(5, 'rating', 'Grade'), importToNew(6, 'boolean', 'In stock'), importToNew(7, 'date', 'Bought'),
+            importToNew(8, 'time', 'Opening'), importToNew(9, 'url', 'Site'),
         ];
 
         $import = importDone(importAsked($this, $case, $csv, $mapping, ['decimal' => 'comma', 'date_order' => 'dmy']));
@@ -310,7 +290,7 @@ describe('creating fields from the columns', function (): void {
         $name = fieldIn($case['inventory'], 'text', 'Name');
         $csv = importFile(importCsv([['Zed', 'Name', 'Alpha'], ['z', 'n', 'a']]));
 
-        importDone(importAsked($this, $case, $csv, [runToNew(0, 'text', 'Zed'), runToField(1, $name->ulid), runToNew(2, 'text', 'Alpha')]));
+        importDone(importAsked($this, $case, $csv, [importToNew(0, 'text', 'Zed'), importToField(1, $name->ulid), importToNew(2, 'text', 'Alpha')]));
 
         expect(array_keys(runFields($case['inventory'])))->toBe(['Name', 'Zed', 'Alpha']);
     });
@@ -319,7 +299,7 @@ describe('creating fields from the columns', function (): void {
         $case = importCase();
         $csv = importFile(importCsv([['Condition'], ['Usé'], ['neuf'], ['USE'], ['Neuf'], [' usé '], ['Cassé'], ['']]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToNew(0, 'select', 'Condition')]));
+        $import = importDone(importAsked($this, $case, $csv, [importToNew(0, 'select', 'Condition')]));
         $field = runFields($case['inventory'])['Condition'];
 
         expect($import->status)->toBe(ImportStatus::Completed)
@@ -331,7 +311,7 @@ describe('creating fields from the columns', function (): void {
         $case = importCase();
         $csv = importFile(importCsv([['Condition'], ['A'], ['B'], ['A']]));
 
-        importDone(importAsked($this, $case, $csv, [runToNew(0, 'select', 'Condition')]));
+        importDone(importAsked($this, $case, $csv, [importToNew(0, 'select', 'Condition')]));
         $field = runFields($case['inventory'])['Condition'];
         $ids = array_column(ChoiceType::choicesOf($field->options), 'id');
         $stored = Item::query()->where('inventory_id', $case['inventory']->id)->orderBy('id')->get()->map(fn ($item) => $item->values[$field->ulid])->all();
@@ -350,7 +330,7 @@ describe('creating fields from the columns', function (): void {
         $rows = array_map(fn (int $number): array => ["Choice {$number}"], range(1, 201));
         $csv = importFile(importCsv([['Condition'], ...$rows]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToNew(0, 'select', 'Condition')]));
+        $import = importDone(importAsked($this, $case, $csv, [importToNew(0, 'select', 'Condition')]));
 
         expect($import->status)->toBe(ImportStatus::Failed)
             ->and($import->error)->toBe('too_many_choices')
@@ -365,7 +345,7 @@ describe('creating fields from the columns', function (): void {
         $rows = array_map(fn (int $number): array => ["Choice {$number}"], range(1, 200));
         $csv = importFile(importCsv([['Condition'], ...$rows]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToNew(0, 'select', 'Condition')]));
+        $import = importDone(importAsked($this, $case, $csv, [importToNew(0, 'select', 'Condition')]));
 
         expect($import->status)->toBe(ImportStatus::Completed)->and(ChoiceType::choicesOf(runFields($case['inventory'])['Condition']->options))->toHaveCount(200);
     });
@@ -373,7 +353,7 @@ describe('creating fields from the columns', function (): void {
     it('fails when a column that becomes a list of choices holds no value', function (): void {
         $case = importCase();
 
-        $import = importDone(importAsked($this, $case, importFile(importCsv([['Condition', 'Name'], ['', 'a']])), [runToNew(0, 'select', 'Condition'), runToNew(1, 'text', 'Name')]));
+        $import = importDone(importAsked($this, $case, importFile(importCsv([['Condition', 'Name'], ['', 'a']])), [importToNew(0, 'select', 'Condition'), importToNew(1, 'text', 'Name')]));
 
         expect($import->error)->toBe('no_choices')->and(runFields($case['inventory']))->toBe([]);
     });
@@ -381,7 +361,7 @@ describe('creating fields from the columns', function (): void {
     it('fails when the new fields would take the inventory past the number of fields it may have', function (): void {
         $case = importCase();
         $csv = importFile(importCsv([['A', 'B', 'C'], ['1', '2', '3']]));
-        $import = importAsked($this, $case, $csv, [runToNew(0, 'text', 'A'), runToNew(1, 'text', 'B'), runToNew(2, 'text', 'C')]);
+        $import = importAsked($this, $case, $csv, [importToNew(0, 'text', 'A'), importToNew(1, 'text', 'B'), importToNew(2, 'text', 'C')]);
         // The limit came down since the person started the import.
         config(['inventories.max_fields' => 2]);
 
@@ -412,7 +392,7 @@ describe('a row that is not valid', function (): void {
             ['Chisel', '5', '17/03/2024'],
         ], ';'));
 
-        return ['case' => $case, 'csv' => $csv, 'mapping' => [runToField(0, $name->ulid), runToField(1, $quantity->ulid), runToField(2, $bought->ulid)]];
+        return ['case' => $case, 'csv' => $csv, 'mapping' => [importToField(0, $name->ulid), importToField(1, $quantity->ulid), importToField(2, $bought->ulid)]];
     }
 
     it('cancels everything by default, and says which rows, which columns and why', function (): void {
@@ -468,7 +448,7 @@ describe('a row that is not valid', function (): void {
         $rows = array_map(fn (int $row): array => [$row % 10 === 0 ? '1' : 'bad'], range(1, 150));
         $csv = importFile(importCsv([['Quantity'], ...$rows]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $number->ulid)], ['on_error' => 'skip']));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $number->ulid)], ['on_error' => 'skip']));
 
         expect($import->rows_total)->toBe(150)
             ->and($import->rows_failed)->toBe(135)
@@ -486,7 +466,7 @@ describe('a row that is not valid', function (): void {
         $rows[59][] = 'stray';
         $csv = importFile(importCsv([['Name', 'Qty'], ...$rows]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid)], ['on_error' => $onError]));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid)], ['on_error' => $onError]));
 
         expect($import->status->value)->toBe($status)
             ->and($import->rows_total)->toBe(70)
@@ -503,7 +483,7 @@ describe('a row that is not valid', function (): void {
         $case = importCase();
         $csv = importFile(importCsv([['Code', 'Mail'], ['a', 'ada@example.com'], ['b', 'not an address']]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToNew(0, 'text', 'Code'), runToNew(1, 'email', 'Mail')]));
+        $import = importDone(importAsked($this, $case, $csv, [importToNew(0, 'text', 'Code'), importToNew(1, 'email', 'Mail')]));
 
         expect($import->error)->toBe('invalid_rows')
             ->and($import->errors)->toHaveCount(1)
@@ -522,8 +502,8 @@ describe('the limits', function (): void {
         $ok = importFile("Name\r\na\r\n\r\nb\r\n\r\nc\r\n");
         $tooMany = importFile("Name\r\na\r\nb\r\nc\r\nd\r\n");
 
-        $first = importDone(importAsked($this, $case, $ok, [runToField(0, $name->ulid)]));
-        $second = importDone(importAsked($this, $case, $tooMany, [runToField(0, $name->ulid)]));
+        $first = importDone(importAsked($this, $case, $ok, [importToField(0, $name->ulid)]));
+        $second = importDone(importAsked($this, $case, $tooMany, [importToField(0, $name->ulid)]));
 
         expect($first->status)->toBe(ImportStatus::Completed)
             ->and($second->status)->toBe(ImportStatus::Failed)
@@ -538,7 +518,7 @@ describe('the limits', function (): void {
         config(['inventories.max_items' => 3]);
         $csv = importFile(importCsv([['Name'], ['a'], ['b'], ['c']]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $name->ulid)]));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $name->ulid)]));
 
         expect($import->error)->toBe('item_limit_reached')
             ->and([$import->rows_total, $import->rows_imported])->toBe([3, 0])
@@ -552,7 +532,7 @@ describe('the limits', function (): void {
         itemIn($case['inventory'], [$name->ulid => 'Old']);
         config(['inventories.max_items' => 3]);
 
-        $import = importDone(importAsked($this, $case, importFile(importCsv([['Name'], ['a'], ['b']])), [runToField(0, $name->ulid)]));
+        $import = importDone(importAsked($this, $case, importFile(importCsv([['Name'], ['a'], ['b']])), [importToField(0, $name->ulid)]));
 
         expect($import->status)->toBe(ImportStatus::Completed)->and($case['inventory']->refresh()->items_count)->toBe(3);
     });
@@ -563,7 +543,7 @@ describe('the limits', function (): void {
         config(['inventories.max_items' => 2]);
         $csv = importFile(importCsv([['Quantity'], ['1'], ['x'], ['y'], ['2']]));
 
-        $import = importDone(importAsked($this, $case, $csv, [runToField(0, $number->ulid)], ['on_error' => 'skip']));
+        $import = importDone(importAsked($this, $case, $csv, [importToField(0, $number->ulid)], ['on_error' => 'skip']));
 
         expect($import->status)->toBe(ImportStatus::Completed)->and($import->rows_imported)->toBe(2);
     });
@@ -574,7 +554,7 @@ describe('what changes while the import waits', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
         $quantity = fieldIn($case['inventory'], 'number', 'Quantity');
-        $import = importAsked($this, $case, importFile(importCsv([['Name', 'Quantity'], ['a', '1']])), [runToField(0, $name->ulid), runToField(1, $quantity->ulid)]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name', 'Quantity'], ['a', '1']])), [importToField(0, $name->ulid), importToField(1, $quantity->ulid)]);
         app(InventoryFields::class)->delete($case['inventory'], $quantity);
 
         $import = importDone($import);
@@ -586,7 +566,7 @@ describe('what changes while the import waits', function (): void {
 
     it('fails when a field to create was created by someone else meanwhile', function (): void {
         $case = importCase();
-        $import = importAsked($this, $case, importFile(importCsv([['Name', 'Other'], ['a', 'b']])), [runToNew(0, 'text', 'Name'), runToNew(1, 'text', 'Other')]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name', 'Other'], ['a', 'b']])), [importToNew(0, 'text', 'Name'), importToNew(1, 'text', 'Other')]);
         fieldIn($case['inventory'], 'text', 'Other');
 
         $import = importDone($import);
@@ -599,7 +579,7 @@ describe('what changes while the import waits', function (): void {
     it('fails when the inventory was given a required field that no column fills', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)]);
         fieldIn($case['inventory'], 'text', 'Reference', required: true);
 
         $import = importDone($import);
@@ -610,7 +590,7 @@ describe('what changes while the import waits', function (): void {
     it('checks the rows again when the fields judge a value differently, and skips or cancels on the rows that no longer hold', function (string $onError, ?string $error, int $imported): void {
         $case = importCase();
         $quantity = fieldIn($case['inventory'], 'number', 'Quantity', ['decimals' => 0]);
-        $import = importAsked($this, $case, importFile(importCsv([['Quantity'], ['5'], ['50'], ['7']])), [runToField(0, $quantity->ulid)], ['on_error' => $onError]);
+        $import = importAsked($this, $case, importFile(importCsv([['Quantity'], ['5'], ['50'], ['7']])), [importToField(0, $quantity->ulid)], ['on_error' => $onError]);
         // The maximum came down since the person started the import: 50 is still fine for the first look, not for the fields as they are.
         $runner = app(ImportRunner::class);
         app(InventoryFields::class)->update($case['inventory'], $quantity, ['options' => ['max' => '40']]);
@@ -627,7 +607,7 @@ describe('what changes while the import waits', function (): void {
     it('fails when the person may no longer change the items', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)], as: $case['team']['editor']);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)], as: $case['team']['editor']);
         $case['team']['workspace']->members()->updateExistingPivot($case['team']['editor']->id, ['role' => WorkspaceRole::Viewer->value]);
 
         $import = importDone($import);
@@ -638,7 +618,7 @@ describe('what changes while the import waits', function (): void {
     it('fails when the account that started it is gone... its imports go with it, and the job is dropped', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)], as: $case['team']['editor']);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)], as: $case['team']['editor']);
 
         $case['team']['editor']->delete();
         app(ImportRunner::class)->run($import);
@@ -651,7 +631,7 @@ describe('the job', function (): void {
     it('claims the import, so that a job handed twice does nothing the second time', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)]);
 
         $runner = app(ImportRunner::class);
         $runner->run($import);
@@ -679,7 +659,7 @@ describe('the job', function (): void {
     it('records the failure of a job the queue gave up on, and deletes the file', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)]);
 
         (new ImportItems($import))->failed(new RuntimeException('Timed out.'));
         $import->refresh();
@@ -694,7 +674,7 @@ describe('the job', function (): void {
     it('does not undo an import that completed before a late failure was reported', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importDone(importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)]));
+        $import = importDone(importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)]));
 
         (new ImportItems($import))->failed(new RuntimeException('Late.'));
 
@@ -704,7 +684,7 @@ describe('the job', function (): void {
     it('records a file it cannot read, as a failure of the import and not of the worker', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)]);
         Storage::disk(ATTACHMENT_TEST_DISK)->delete((string) $import->path);
 
         $import = importDone($import);
@@ -721,7 +701,7 @@ describe('the job', function (): void {
             ? importOdsAfterRow(importSpreadsheet('ods', [['Name'], ...$rows]), 61, '<table:table-row table:number-rows-repeated="'.ImportRows::MAX_LINES.'"><table:table-cell/></table:table-row>')
             // A row of 300 cells after the sixtieth.
             : importFile(importCsv([['Name'], ...$rows, array_fill(0, 300, 'x')]));
-        $import = importAsked($this, $case, $path, [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, $path, [importToField(0, $name->ulid)]);
 
         $import = importDone($import);
 
@@ -743,7 +723,7 @@ describe('the job', function (): void {
         $name = fieldIn($case['inventory'], 'text', 'Name');
         // Rows of a cell and 900 empty ones that the formatting leaves, 1 500 times: 1.35 million cells, under the budget of an instance.
         $path = importOdsAfterRow(importSpreadsheet('ods', [['Name'], ['Drill']]), 1, '<table:table-row table:number-rows-repeated="1500"><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell><table:table-cell table:number-columns-repeated="900"/></table:table-row>');
-        $import = importAsked($this, $case, $path, [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, $path, [importToField(0, $name->ulid)]);
         // Rows and columns an import takes, lowered: the budget falls to the lines of a sheet, 1.1 million.
         config(['inventories.import_max_rows' => 1, 'inventories.import_max_columns' => 1]);
 
@@ -762,7 +742,7 @@ describe('the job', function (): void {
     it('is dropped without a fuss when its import was deleted while it waited', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
-        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)]);
 
         inventoryCall($this, $case['team']['owner'], 'DELETE', importUri($case['inventory'], $import))->assertNoContent();
         app(ImportRunner::class)->run($import);
@@ -774,7 +754,7 @@ describe('the job', function (): void {
         $case = importCase();
         $name = fieldIn($case['inventory'], 'text', 'Name');
         $csv = importFile(importCsv([['Name'], ['a'], ['b']]));
-        $import = importAsked($this, $case, $csv, [runToField(0, $name->ulid)]);
+        $import = importAsked($this, $case, $csv, [importToField(0, $name->ulid)]);
 
         Queue::assertPushed(ImportItems::class, 1);
         app()->call([new ImportItems($import), 'handle']);

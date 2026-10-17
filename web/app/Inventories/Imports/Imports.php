@@ -21,7 +21,6 @@ use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -89,7 +88,7 @@ final class Imports
         }
 
         $locale = mb_substr(app()->getLocale(), 0, 12);
-        $wanted = ImportOptions::fromArray(Arr::only($input, ['has_header', 'delimiter', 'encoding']), $locale);
+        $wanted = ImportOptions::fromArray($input, $locale);
         $rows = $this->reader->open($local, $format, $wanted->delimiter, $wanted->encoding);
 
         try {
@@ -138,7 +137,7 @@ final class Imports
         }));
 
         try {
-            $this->files->store($disk, $path, $local);
+            $this->storage->writeFrom($disk, $path, $local);
             Import::query()->whereKey($import->getKey())->update(['path' => $path]);
             $import->setAttribute('path', $path);
             $import->syncOriginalAttribute('path');
@@ -173,7 +172,7 @@ final class Imports
         $this->assertEditable($import);
 
         $current = $import->settings();
-        $merged = [...$current->toArray(), ...Arr::only($changes, ['has_header', 'delimiter', 'encoding', 'decimal', 'date_order', 'on_error'])];
+        $merged = [...$current->toArray(), ...$changes];
 
         // A new separator brings its own decimal sign, unless the person chose one.
         if (isset($changes['delimiter']) && $changes['delimiter'] !== $current->delimiter && ! isset($changes['decimal'])) {
@@ -238,7 +237,7 @@ final class Imports
 
         $entries = ImportMapping::from($mapping);
         $entries->assertValid($inventory->fields()->get(), $this->types, count($import->columns), $canManageFields);
-        $options = $import->settings()->with(Arr::only($settings, ['decimal', 'date_order', 'on_error']));
+        $options = $import->settings()->with($settings);
 
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($import, $entries, $options): void {
             // The row is locked and read again: the mapping was checked against the columns of the copy loaded with the request, and

@@ -30,19 +30,6 @@ require_once __DIR__.'/../../Support/imports.php';
 uses(RefreshDatabase::class);
 
 /**
- * An import in a state, with a file on the disk.
- *
- * @param  array<string, mixed>  $case  As {@see importCase()} gives it.
- * @param  array<string, mixed>  $attributes
- */
-function pruneImport(array $case, array $attributes = []): Import
-{
-    $import = Import::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'disk' => ATTACHMENT_TEST_DISK] + $attributes);
-
-    return importStored($import, "Name\r\na\r\n");
-}
-
-/**
  * Imports in every state: one of each that is over, and an old and a recent of those that never ended.
  *
  * @return array<string, mixed>
@@ -52,14 +39,14 @@ function pruneImportsCase(): array
     $case = importCase();
     config(['inventories.import_stale_minutes' => 60]);
 
-    $case['fresh'] = pruneImport($case, ['expires_at' => now()->addHour()]);
-    $case['expiredFile'] = pruneImport($case, ['expires_at' => now()->subMinute()]);
-    $case['expiredReport'] = pruneImport($case, ['status' => ImportStatus::Completed, 'expires_at' => now()->subHour()]);
-    $case['expiredFailure'] = pruneImport($case, ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subHour()]);
-    $case['stalePending'] = pruneImport($case, ['status' => ImportStatus::Pending, 'expires_at' => null, 'started_at' => now()->subMinutes(61)]);
-    $case['staleRunning'] = pruneImport($case, ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subMinutes(61), 'created_at' => now()->subMinutes(62)]);
-    $case['young'] = pruneImport($case, ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subMinutes(10)]);
-    $case['waiting'] = pruneImport($case, ['status' => ImportStatus::Pending, 'expires_at' => null, 'started_at' => now()->subMinutes(59)]);
+    $case['fresh'] = importWithFile($case['inventory'], $case['team']['owner'], ['expires_at' => now()->addHour()]);
+    $case['expiredFile'] = importWithFile($case['inventory'], $case['team']['owner'], ['expires_at' => now()->subMinute()]);
+    $case['expiredReport'] = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Completed, 'expires_at' => now()->subHour()]);
+    $case['expiredFailure'] = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subHour()]);
+    $case['stalePending'] = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Pending, 'expires_at' => null, 'started_at' => now()->subMinutes(61)]);
+    $case['staleRunning'] = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subMinutes(61), 'created_at' => now()->subMinutes(62)]);
+    $case['young'] = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subMinutes(10)]);
+    $case['waiting'] = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Pending, 'expires_at' => null, 'started_at' => now()->subMinutes(59)]);
 
     return $case;
 }
@@ -82,9 +69,9 @@ describe('the imports that expired', function (): void {
     it('queue the deletion of the folder of every import they delete, whether or not the row still says where its file is', function (): void {
         Queue::fake([PurgeStoredFiles::class]);
         $case = importCase();
-        $upload = pruneImport($case, ['expires_at' => now()->subMinute()]);
-        $report = pruneImport($case, ['status' => ImportStatus::Completed, 'expires_at' => now()->subMinute()]);
-        $failure = pruneImport($case, ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subMinute()]);
+        $upload = importWithFile($case['inventory'], $case['team']['owner'], ['expires_at' => now()->subMinute()]);
+        $report = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Completed, 'expires_at' => now()->subMinute()]);
+        $failure = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Failed, 'error' => 'invalid_rows', 'expires_at' => now()->subMinute()]);
         $directories = collect([$upload, $report, $failure])->map(fn (Import $import): string => dirname((string) $import->path))->all();
         $report->forceFill(['path' => null])->save();
         $failure->forceFill(['path' => null])->save();
@@ -101,7 +88,7 @@ describe('the imports that expired', function (): void {
 
     it('purge the file that a worker left when it stopped after recording that the import ended and before deleting it', function (ImportStatus $status): void {
         $case = importCase();
-        $import = pruneImport($case, ['status' => $status, 'error' => $status === ImportStatus::Failed ? 'invalid_rows' : null, 'expires_at' => now()->subMinute()]);
+        $import = importWithFile($case['inventory'], $case['team']['owner'], ['status' => $status, 'error' => $status === ImportStatus::Failed ? 'invalid_rows' : null, 'expires_at' => now()->subMinute()]);
         // The transaction that ended the import emptied `path`; the file was still to be deleted.
         $import->forceFill(['path' => null])->save();
         expect(Storage::disk(ATTACHMENT_TEST_DISK)->allFiles())->toHaveCount(1);
@@ -115,7 +102,7 @@ describe('the imports that expired', function (): void {
     it('purge the folder of an upload whose row never got its path, found by the identifier of the import', function (): void {
         $case = importCase();
         // The process died after the row and before the path was recorded: the file may be on the disk, and the row does not say where.
-        $import = pruneImport($case, ['expires_at' => now()->subMinute()]);
+        $import = importWithFile($case['inventory'], $case['team']['owner'], ['expires_at' => now()->subMinute()]);
         $import->forceFill(['path' => null])->save();
 
         app(ImportPruner::class)->prune();
@@ -200,9 +187,9 @@ describe('the imports that never ended', function (): void {
     it('are judged on the day they were started, not on the day the file was sent', function (): void {
         $case = pruneImportsCase();
         // Sent three hours ago, started a minute ago: the person took their time, nothing is wrong.
-        $late = pruneImport($case, ['status' => ImportStatus::Pending, 'expires_at' => null, 'created_at' => now()->subHours(3), 'started_at' => now()->subMinute()]);
+        $late = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Pending, 'expires_at' => null, 'created_at' => now()->subHours(3), 'started_at' => now()->subMinute()]);
         // A row written without its start is judged on the day it was sent.
-        $unknown = pruneImport($case, ['status' => ImportStatus::Pending, 'expires_at' => null, 'created_at' => now()->subHours(3), 'started_at' => null]);
+        $unknown = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Pending, 'expires_at' => null, 'created_at' => now()->subHours(3), 'started_at' => null]);
 
         app(ImportPruner::class)->prune();
 
@@ -213,10 +200,10 @@ describe('the imports that never ended', function (): void {
         $case = pruneImportsCase();
         $limit = GenerateExport::TIMEOUT + ImportPruner::RUNNING_MARGIN_SECONDS;
         $this->travelTo(now()->startOfSecond());
-        $inTime = pruneImport($case, ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subSeconds($limit - 5)]);
-        $late = pruneImport($case, ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subSeconds($limit + 5)]);
-        $unknownYoung = pruneImport($case, ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => null, 'created_at' => now()->subMinute()]);
-        $unknownOld = pruneImport($case, ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => null, 'created_at' => now()->subHours(2)]);
+        $inTime = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subSeconds($limit - 5)]);
+        $late = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => now()->subSeconds($limit + 5)]);
+        $unknownYoung = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => null, 'created_at' => now()->subMinute()]);
+        $unknownOld = importWithFile($case['inventory'], $case['team']['owner'], ['status' => ImportStatus::Running, 'expires_at' => null, 'started_at' => null, 'created_at' => now()->subHours(2)]);
 
         app(ImportPruner::class)->prune();
 

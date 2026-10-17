@@ -55,26 +55,6 @@ function importFixture(): array
     return $case + ['fields' => $fields, 'csv' => $csv];
 }
 
-/**
- * A mapping entry that sends a column to a field.
- *
- * @return array{column: int, target: string, field: string}
- */
-function importToField(int $column, string $ulid): array
-{
-    return ['column' => $column, 'target' => 'field', 'field' => $ulid];
-}
-
-/**
- * A mapping entry that creates a field.
- *
- * @return array{column: int, target: string, type: string, name: string}
- */
-function importToNew(int $column, string $type, string $name): array
-{
-    return ['column' => $column, 'target' => 'new', 'type' => $type, 'name' => $name];
-}
-
 describe('without signing in', function (): void {
     it('answers 401 in JSON on every endpoint', function (string $method, string $path): void {
         $case = importFixture();

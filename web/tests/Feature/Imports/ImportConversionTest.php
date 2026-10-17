@@ -18,22 +18,6 @@ beforeEach(function (): void {
     $this->useLanguage('en');
 });
 
-/**
- * The day and the moment of a spreadsheet cell, which is a wall clock (the zone of the object is not meaningful).
- */
-function importWall(string $text): DateTimeImmutable
-{
-    return new DateTimeImmutable($text, new DateTimeZone('UTC'));
-}
-
-/**
- * A value of a data set: a text starting with `@` stands for the date and time cell that follows.
- */
-function importValueOf(mixed $value): mixed
-{
-    return is_string($value) && str_starts_with($value, '@') ? importWall(substr($value, 1)) : $value;
-}
-
 describe('a cell', function (): void {
     it('is empty when it holds nothing or only spaces', function (mixed $value, bool $empty): void {
         expect((new ImportCell($value))->isEmpty())->toBe($empty);

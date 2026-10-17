@@ -120,9 +120,7 @@ final readonly class ImportCell
      */
     public function sample(): string
     {
-        $line = $this->line();
-
-        return mb_strlen($line) > self::SAMPLE_LENGTH ? mb_substr($line, 0, self::SAMPLE_LENGTH - 1).'…' : $line;
+        return $this->excerpt(self::SAMPLE_LENGTH);
     }
 
     /**

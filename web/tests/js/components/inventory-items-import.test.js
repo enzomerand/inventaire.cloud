@@ -1794,21 +1794,7 @@ describe('the import dialog', () => {
         });
     });
 
-    describe('the live region and the language', () => {
-        it('expects the decimals with a comma and the day first in French', async () => {
-            http.post.mockResolvedValue({
-                data: uploaded('i1', { options: { delimiter: 'comma', encoding: 'utf-8', has_header: true } }),
-            });
-            mount();
-            document.documentElement.lang = 'fr';
-            await component.openImport();
-
-            await component.onImportFile(picked(csv()));
-
-            expect(component.importDecimal).toBe('comma');
-            expect(component.importDateOrder).toBe('dmy');
-        });
-
+    describe('the live region', () => {
         it('says the same sentence twice when it is asked to', async () => {
             mount();
             component.announceImport('Same.');

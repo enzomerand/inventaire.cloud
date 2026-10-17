@@ -19,7 +19,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use InvalidArgumentException;
 use stdClass;
 
 /**
@@ -51,7 +50,7 @@ final class Items
     public const PER_PAGE = 50;
 
     /** Items written per statement when many are added at once. */
-    private const BULK_CHUNK = 500;
+    public const BULK_CHUNK = 500;
 
     /**
      * Bytes of values and search text written per statement when many items are added at once: a statement is one packet for the
@@ -137,15 +136,13 @@ final class Items
      * @param  Inventory  $given  The copy the caller holds, whose counter is moved too.
      * @param  Collection<int, InventoryField>  $fields  The fields of the inventory, read under the lock.
      * @param  iterable<array-key, array<string, mixed>>  $stored  The stored values of each item, keyed by the ULID of the field.
-     * @param  int|null  $count  How many items there are, when `$stored` is not an array: the quota is judged before the first is written.
+     * @param  int  $count  How many items there are in `$stored`: the quota is judged before the first is written, and a generator cannot be counted.
      * @return int How many items were added.
      *
      * @throws ItemLimitReachedException When the inventory would hold more items than allowed.
      */
-    public function createMany(Inventory $locked, Inventory $given, Collection $fields, iterable $stored, User $author, ?int $count = null): int
+    public function createMany(Inventory $locked, Inventory $given, Collection $fields, iterable $stored, User $author, int $count): int
     {
-        $count ??= is_array($stored) ? count($stored) : throw new InvalidArgumentException('The number of items must be given with values that are not an array.');
-
         if ($count === 0) {
             return 0;
         }

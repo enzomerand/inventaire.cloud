@@ -282,11 +282,43 @@ function importCsv(array $rows, string $delimiter = ',', string $eol = "\r\n"): 
 function importStored(Import $import, string $bytes): Import
 {
     $inventory = $import->inventory()->firstOrFail();
-    $path = AttachmentStorage::importDirectory($inventory->workspace()->firstOrFail()->ulid, $inventory->ulid, $import->ulid).'/source.'.$import->format->storedExtension();
+    $path = AttachmentStorage::importDirectory($inventory->workspace()->firstOrFail()->ulid, $inventory->ulid, $import->ulid).'/source.'.$import->format->value;
     Storage::disk(ATTACHMENT_TEST_DISK)->put($path, $bytes);
     $import->forceFill(['path' => $path, 'disk' => ATTACHMENT_TEST_DISK, 'size' => strlen($bytes)])->save();
 
     return $import;
+}
+
+/**
+ * An import of an inventory, by a person, with a source file on the fake disk, in a state.
+ *
+ * @param  array<string, mixed>  $attributes
+ */
+function importWithFile(Inventory $inventory, User $user, array $attributes = []): Import
+{
+    $import = Import::factory()->create(['inventory_id' => $inventory->id, 'user_id' => $user->id, 'disk' => ATTACHMENT_TEST_DISK] + $attributes);
+
+    return importStored($import, "Name\r\na\r\n");
+}
+
+/**
+ * A mapping entry that sends a column to a field.
+ *
+ * @return array{column: int, target: string, field: string}
+ */
+function importToField(int $column, string $ulid): array
+{
+    return ['column' => $column, 'target' => 'field', 'field' => $ulid];
+}
+
+/**
+ * A mapping entry that creates a field.
+ *
+ * @return array{column: int, target: string, type: string, name: string}
+ */
+function importToNew(int $column, string $type, string $name): array
+{
+    return ['column' => $column, 'target' => 'new', 'type' => $type, 'name' => $name];
 }
 
 /**
@@ -313,14 +345,29 @@ function importField(string $type, array $options = [], bool $required = false):
 }
 
 /**
+ * The day and the moment of a spreadsheet cell, which is a wall clock (the zone of the object is not meaningful).
+ */
+function importWall(string $text): DateTimeImmutable
+{
+    return new DateTimeImmutable($text, new DateTimeZone('UTC'));
+}
+
+/**
+ * A value of a data set: a text starting with `@` stands for the date and time cell that follows.
+ */
+function importValueOf(mixed $value): mixed
+{
+    return is_string($value) && str_starts_with($value, '@') ? importWall(substr($value, 1)) : $value;
+}
+
+/**
  * What a field of a type reads from a cell value, with the settings of an import.
  */
 function importConvert(InventoryField|string $field, mixed $value, string $decimal = 'point', string $order = 'dmy', string $zone = 'Europe/Paris'): mixed
 {
     $field = is_string($field) ? importField($field) : $field;
     $context = new ImportContext($decimal, $order, $zone, 'en');
-    // A text starting with `@` stands for a date and time cell (a data set cannot hold an object built later).
-    $value = is_string($value) && str_starts_with($value, '@') ? new DateTimeImmutable(substr($value, 1), new DateTimeZone('UTC')) : $value;
+    $value = importValueOf($value);
 
     return FieldTypes::standard()->get($field->type)->importValue(new ImportCell($value, is_string($value)), $field, $context);
 }

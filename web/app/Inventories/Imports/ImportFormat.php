@@ -45,24 +45,6 @@ enum ImportFormat: string
     }
 
     /**
-     * Every extension an import reads, for the validation of the upload.
-     *
-     * @return list<string>
-     */
-    public static function allExtensions(): array
-    {
-        return array_merge(...array_values(self::EXTENSIONS));
-    }
-
-    /**
-     * The extension the source is stored with: the one of the format, whatever the person called the file.
-     */
-    public function storedExtension(): string
-    {
-        return $this->value;
-    }
-
-    /**
      * Whether the file is a zip archive (a spreadsheet) rather than text.
      */
     public function isArchive(): bool

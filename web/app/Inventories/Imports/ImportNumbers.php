@@ -97,28 +97,6 @@ final class ImportNumbers
     }
 
     /**
-     * The currency a cell is written with (a symbol or an ISO code), or null.
-     */
-    public static function currencyOf(ImportCell $cell): ?string
-    {
-        if (! is_string($cell->value)) {
-            return null;
-        }
-
-        foreach (self::SYMBOLS as $symbol => $code) {
-            if (str_contains($cell->value, $symbol)) {
-                return $code;
-            }
-        }
-
-        if (preg_match('/(?<![A-Za-z])([A-Za-z]{3})(?![A-Za-z])/', $cell->value, $found) === 1 && Currencies::exists(strtoupper($found[1]))) {
-            return strtoupper($found[1]);
-        }
-
-        return null;
-    }
-
-    /**
      * The digits of a number with a point for the decimals and nothing else.
      *
      * @throws InvalidImportValue

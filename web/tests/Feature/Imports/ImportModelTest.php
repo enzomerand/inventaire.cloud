@@ -12,7 +12,6 @@ use App\Inventories\Imports\ImportStatus;
 use App\Jobs\PurgeStoredFiles;
 use App\Models\Import;
 use App\Models\Inventory;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -26,24 +25,12 @@ require_once __DIR__.'/../../Support/imports.php';
 
 uses(RefreshDatabase::class);
 
-/**
- * An import with a source file on the fake disk, in a state.
- *
- * @param  array<string, mixed>  $attributes
- */
-function modelImport(Inventory $inventory, User $user, array $attributes = []): Import
-{
-    $import = Import::factory()->create(['inventory_id' => $inventory->id, 'user_id' => $user->id, 'disk' => ATTACHMENT_TEST_DISK] + $attributes);
-
-    return importStored($import, "Name\r\na\r\n");
-}
-
 describe('the row', function (): void {
     it('is created uploaded, with its enums, options and dates cast', function (): void {
         attachmentDisk();
         $team = inventoryTeam();
 
-        $import = modelImport(inventoryIn($team['workspace']), $team['editor'], ['options' => ['has_header' => false, 'delimiter' => 'tab', 'encoding' => 'utf-16', 'decimal' => 'point', 'date_order' => 'ymd', 'on_error' => 'skip']]);
+        $import = importWithFile(inventoryIn($team['workspace']), $team['editor'], ['options' => ['has_header' => false, 'delimiter' => 'tab', 'encoding' => 'utf-16', 'decimal' => 'point', 'date_order' => 'ymd', 'on_error' => 'skip']]);
         $fresh = Import::query()->findOrFail($import->id);
 
         expect($fresh->ulid)->toHaveLength(26)
@@ -124,10 +111,7 @@ describe('the options', function (): void {
     it('change by the keys they are given, and recompute nothing else', function (): void {
         $options = new ImportOptions(true, 'semicolon', 'utf-8', 'comma', 'dmy', 'abort');
 
-        expect($options->with(['on_error' => 'skip', 'has_header' => false])->toArray())->toBe(['has_header' => false, 'delimiter' => 'semicolon', 'encoding' => 'utf-8', 'decimal' => 'comma', 'date_order' => 'dmy', 'on_error' => 'skip'])
-            ->and($options->delimiterCharacter())->toBe(';')
-            ->and(new ImportOptions(delimiter: 'tab')->delimiterCharacter())->toBe("\t")
-            ->and(new ImportOptions)->delimiterCharacter()->toBe(',');
+        expect($options->with(['on_error' => 'skip', 'has_header' => false])->toArray())->toBe(['has_header' => false, 'delimiter' => 'semicolon', 'encoding' => 'utf-8', 'decimal' => 'comma', 'date_order' => 'dmy', 'on_error' => 'skip']);
     });
 });
 
@@ -154,8 +138,8 @@ describe('the files', function (): void {
         attachmentDisk();
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
-        $first = modelImport($inventory, $team['owner']);
-        $second = modelImport($inventory, $team['owner']);
+        $first = importWithFile($inventory, $team['owner']);
+        $second = importWithFile($inventory, $team['owner']);
 
         $first->delete();
 
@@ -165,7 +149,7 @@ describe('the files', function (): void {
     it('are purged after the commit, and not at all when the deletion is rolled back', function (): void {
         attachmentDisk();
         $team = inventoryTeam();
-        $import = modelImport(inventoryIn($team['workspace']), $team['owner']);
+        $import = importWithFile(inventoryIn($team['workspace']), $team['owner']);
 
         try {
             DB::transaction(function () use ($import): void {
@@ -190,13 +174,13 @@ describe('the files', function (): void {
         $team = inventoryTeam();
         $one = inventoryIn($team['workspace'], 'One');
         $two = inventoryIn($team['workspace'], 'Two');
-        $viewers = modelImport($one, $team['viewer']);
-        $editors = modelImport($two, $team['editor']);
-        $owners = modelImport($two, $team['owner']);
+        $viewers = importWithFile($one, $team['viewer']);
+        $editors = importWithFile($two, $team['editor']);
+        $owners = importWithFile($two, $team['owner']);
 
         $stranger = $team['stranger'];
         $elsewhere = inventoryIn($stranger->workspaces()->sole());
-        $theirs = modelImport($elsewhere, $stranger);
+        $theirs = importWithFile($elsewhere, $stranger);
 
         // The inventory takes its imports with it.
         $one->delete();
@@ -220,9 +204,9 @@ describe('the files', function (): void {
         attachmentDisk();
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
-        $import = modelImport($inventory, $team['editor']);
+        $import = importWithFile($inventory, $team['editor']);
         $export = exportStored(exportRow($inventory, $team['editor']), 'mine.csv');
-        $ownersImport = modelImport($inventory, $team['owner']);
+        $ownersImport = importWithFile($inventory, $team['owner']);
         $ownersExport = exportStored(exportRow($inventory, $team['owner']), 'owners.csv');
 
         expect(storedFiles())->toHaveCount(4);
@@ -237,7 +221,7 @@ describe('the files', function (): void {
     it('are not purged for an account whose deletion is refused', function (): void {
         attachmentDisk();
         $team = inventoryTeam();
-        $import = modelImport(inventoryIn($team['workspace']), $team['owner']);
+        $import = importWithFile(inventoryIn($team['workspace']), $team['owner']);
 
         // The owner of a workspace shared with other people cannot be deleted while it is the only owner.
         expect(fn () => $team['owner']->delete())->toThrow(AccountDeletionRefused::class);
@@ -249,7 +233,7 @@ describe('the files', function (): void {
         attachmentDisk();
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
-        $import = modelImport($inventory, $team['owner']);
+        $import = importWithFile($inventory, $team['owner']);
 
         try {
             DB::transaction(function () use ($inventory): void {

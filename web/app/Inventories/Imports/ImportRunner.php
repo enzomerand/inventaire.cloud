@@ -207,13 +207,7 @@ final class ImportRunner
      */
     private function createsFields(ImportMapping $mapping): bool
     {
-        foreach ($mapping->mapped() as $entry) {
-            if ($entry['target'] === ImportMapping::NEW) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($mapping->mapped(), fn (array $entry): bool => $entry['target'] === ImportMapping::NEW);
     }
 
     /**
@@ -330,7 +324,7 @@ final class ImportRunner
             $rows->close();
         }
 
-        return array_map(fn (ImportTarget $target): ImportTarget => isset($seen[$target->column]) && $target->new
+        return array_map(fn (ImportTarget $target): ImportTarget => isset($seen[$target->column])
             ? new ImportTarget($target->column, $target->label, $this->madeUp($target->field->name, $target->type, $this->optionsFor($target, $seen[$target->column])), $target->type, true)
             : $target, $targets);
     }

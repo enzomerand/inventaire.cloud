@@ -9,10 +9,8 @@ use App\Inventories\Imports\ImportPlan;
 use App\Inventories\Imports\ImportStatus;
 use App\Inventories\Imports\ImportTarget;
 use App\Inventories\Imports\ImportWriter;
-use App\Inventories\Items;
 use App\Models\Item;
 use App\Models\ItemRevision;
-use App\Workspaces\Locks;
 use App\Workspaces\WorkspaceRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -174,23 +172,5 @@ describe('the statements', function (): void {
         $into = fn (string $table): int => count(array_filter($statements, fn (string $sql): bool => preg_match('/^insert into [`"]'.$table.'[`"]/i', $sql) === 1));
 
         expect([$into('items'), $into('item_revisions')])->toBe([1, 1]);
-    });
-
-    it('take the values of the items from a generator only when the number of items is given', function (): void {
-        $case = importCase();
-        $name = fieldIn($case['inventory'], 'text', 'Name');
-        $values = (function () use ($name): Generator {
-            yield [$name->ulid => 'a'];
-        })();
-
-        DB::transaction(function () use ($case, $values): void {
-            $locked = app(Locks::class)->inventory($case['inventory']->id);
-            $fields = $locked->fields()->get();
-
-            expect(fn () => app(Items::class)->createMany($locked, $case['inventory'], $fields, $values, $case['team']['owner']))
-                ->toThrow(InvalidArgumentException::class);
-        });
-
-        expect(Item::query()->count())->toBe(0);
     });
 });

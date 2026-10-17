@@ -240,31 +240,31 @@ final class ImportAnalyzer
             return 'text';
         }
 
-        if ($this->all($cells, fn (ImportCell $cell): bool => $this->isYesNo($cell))) {
+        if (array_all($cells, fn (ImportCell $cell): bool => $this->isYesNo($cell))) {
             return 'boolean';
         }
 
-        if ($this->all($cells, fn (ImportCell $cell): bool => $this->isTime($cell))) {
+        if (array_all($cells, fn (ImportCell $cell): bool => $this->isTime($cell))) {
             return 'time';
         }
 
-        if ($this->all($cells, fn (ImportCell $cell): bool => $this->isDay($cell, $context))) {
-            return $this->any($cells, fn (ImportCell $cell): bool => $this->hasTime($cell)) ? 'datetime' : 'date';
+        if (array_all($cells, fn (ImportCell $cell): bool => $this->isDay($cell, $context))) {
+            return array_any($cells, fn (ImportCell $cell): bool => $this->hasTime($cell)) ? 'datetime' : 'date';
         }
 
-        if ($this->all($cells, fn (ImportCell $cell): bool => $this->isNumber($cell, $context))) {
+        if (array_all($cells, fn (ImportCell $cell): bool => $this->isNumber($cell, $context))) {
             return $this->kindOfNumber($cells, $context);
         }
 
-        if ($this->all($cells, fn (ImportCell $cell): bool => is_string($cell->value) && filter_var($cell->line(), FILTER_VALIDATE_EMAIL) !== false)) {
+        if (array_all($cells, fn (ImportCell $cell): bool => is_string($cell->value) && filter_var($cell->line(), FILTER_VALIDATE_EMAIL) !== false)) {
             return 'email';
         }
 
-        if ($this->all($cells, fn (ImportCell $cell): bool => preg_match('~^https?://\S+$~i', $cell->line()) === 1)) {
+        if (array_all($cells, fn (ImportCell $cell): bool => preg_match('~^https?://\S+$~i', $cell->line()) === 1)) {
             return 'url';
         }
 
-        return $this->any($cells, fn (ImportCell $cell): bool => preg_match('/[\r\n]/', $cell->text()) === 1 || mb_strlen($cell->text()) > 255) ? 'textarea' : 'text';
+        return array_any($cells, fn (ImportCell $cell): bool => preg_match('/[\r\n]/', $cell->text()) === 1 || mb_strlen($cell->text()) > 255) ? 'textarea' : 'text';
     }
 
     /**
@@ -412,36 +412,6 @@ final class ImportAnalyzer
         } catch (InvalidImportValue) {
             return false;
         }
-    }
-
-    /**
-     * @param  list<ImportCell>  $cells
-     * @param  callable(ImportCell): bool  $test
-     */
-    private function all(array $cells, callable $test): bool
-    {
-        foreach ($cells as $cell) {
-            if (! $test($cell)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * @param  list<ImportCell>  $cells
-     * @param  callable(ImportCell): bool  $test
-     */
-    private function any(array $cells, callable $test): bool
-    {
-        foreach ($cells as $cell) {
-            if ($test($cell)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

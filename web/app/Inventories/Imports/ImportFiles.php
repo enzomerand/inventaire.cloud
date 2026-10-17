@@ -33,17 +33,7 @@ final class ImportFiles
     {
         $workspace = $inventory->workspace()->firstOrFail()->ulid;
 
-        return AttachmentStorage::importDirectory($workspace, $inventory->ulid, $import).'/source.'.$format->storedExtension();
-    }
-
-    /**
-     * Writes the file that was sent to the disk.
-     *
-     * @throws \RuntimeException When the disk refuses it.
-     */
-    public function store(string $disk, string $path, string $local): void
-    {
-        $this->storage->writeFrom($disk, $path, $local);
+        return AttachmentStorage::importDirectory($workspace, $inventory->ulid, $import).'/source.'.$format->value;
     }
 
     /**

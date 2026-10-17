@@ -7,6 +7,7 @@ namespace App\Inventories\Imports;
 use App\Inventories\Exports\ExportTemp;
 use App\Jobs\GenerateExport;
 use App\Models\Import;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -54,15 +55,10 @@ final class ImportPruner
             ->where(fn (Builder $query): Builder => $query
                 ->where(fn (Builder $pending): Builder => $pending
                     ->where('status', ImportStatus::Pending->value)
-                    // Started when the person started it; a row without (written by hand) is judged on the day it was sent.
-                    ->where(fn (Builder $started): Builder => $started
-                        ->where('started_at', '<', $waitingSince)
-                        ->orWhere(fn (Builder $unknown): Builder => $unknown->whereNull('started_at')->where('created_at', '<', $waitingSince))))
+                    ->where(fn (Builder $started): Builder => $this->startedBefore($started, $waitingSince)))
                 ->orWhere(fn (Builder $running): Builder => $running
                     ->where('status', ImportStatus::Running->value)
-                    ->where(fn (Builder $started): Builder => $started
-                        ->where('started_at', '<', $runningSince)
-                        ->orWhere(fn (Builder $unknown): Builder => $unknown->whereNull('started_at')->where('created_at', '<', $runningSince)))))
+                    ->where(fn (Builder $started): Builder => $this->startedBefore($started, $runningSince))))
             ->chunkById(100, function ($imports) use (&$stale): void {
                 foreach ($imports as $import) {
                     $this->runner->fail($import, ImportError::Stale);
@@ -80,5 +76,19 @@ final class ImportPruner
             });
 
         return ['expired' => $expired, 'stale' => $stale, 'scratch' => ExportTemp::prune('imports')];
+    }
+
+    /**
+     * Narrows a query to the imports started before a moment: the person started them, and a row without a start (written by hand) is
+     * judged on the day it was sent.
+     *
+     * @param  Builder<Import>  $query
+     * @return Builder<Import>
+     */
+    private function startedBefore(Builder $query, CarbonInterface $moment): Builder
+    {
+        return $query
+            ->where('started_at', '<', $moment)
+            ->orWhere(fn (Builder $unknown): Builder => $unknown->whereNull('started_at')->where('created_at', '<', $moment));
     }
 }

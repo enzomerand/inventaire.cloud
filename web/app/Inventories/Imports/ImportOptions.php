@@ -110,12 +110,4 @@ final readonly class ImportOptions
 
         return self::fromArray([...$current, ...$changes]);
     }
-
-    /**
-     * The delimiter as the character that separates the values, comma when unknown.
-     */
-    public function delimiterCharacter(): string
-    {
-        return CsvWriter::DELIMITERS[$this->delimiter ?? 'comma'];
-    }
 }

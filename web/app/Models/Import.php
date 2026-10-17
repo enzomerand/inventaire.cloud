@@ -122,7 +122,7 @@ final class Import extends Model
     {
         return $query
             ->whereIn('status', [ImportStatus::Uploaded->value, ImportStatus::Pending->value, ImportStatus::Running->value])
-            ->where(fn (Builder $live): Builder => $live->whereNull('expires_at')->orWhere('expires_at', '>', now()));
+            ->unexpired();
     }
 
     /**
