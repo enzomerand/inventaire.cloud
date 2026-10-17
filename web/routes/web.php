@@ -10,6 +10,7 @@ use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\RobotsController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UpdateLocaleController;
+use App\Http\Controllers\Web\AdminSettingsPageController;
 use App\Http\Controllers\Web\ApiDocsController;
 use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
 use App\Http\Controllers\Web\HomePageController;
@@ -101,7 +102,7 @@ Route::middleware(['auth', AuthenticateSession::class])->group(function (): void
     // The administration of the instance: its administrators only (the "admin" gate), a 403 for everybody else.
     Route::middleware('can:admin')->prefix('app/admin')->name('app.admin.')->group(function (): void {
         Route::view('/users', 'app.admin.users')->name('users');
-        Route::view('/settings', 'app.admin.settings')->name('settings');
+        Route::get('/settings', AdminSettingsPageController::class)->name('settings');
     });
 });
 

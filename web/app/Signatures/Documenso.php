@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Signatures;
 
 use App\Installer\Settings\DocumensoSettings;
+use App\Support\PublicUrls;
 
 /**
  * What the instance is configured to do with Documenso, the e-signature service: whether signatures can be asked for, whether its
@@ -31,6 +32,21 @@ final class Documenso
     public static function webhookEnabled(): bool
     {
         return self::setting('webhook_secret') !== '';
+    }
+
+    /**
+     * Where Documenso stands, for the administrators (the settings API and the settings page): whether signatures can be asked for, whether
+     * the webhook is open, and the address Documenso is told to call, built from `APP_URL`. No secret is ever given.
+     *
+     * @return array{configured: bool, webhook_secret_configured: bool, webhook_url: string}
+     */
+    public static function status(): array
+    {
+        return [
+            'configured' => self::configured(),
+            'webhook_secret_configured' => self::webhookEnabled(),
+            'webhook_url' => PublicUrls::documensoWebhook(),
+        ];
     }
 
     /**

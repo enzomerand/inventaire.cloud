@@ -110,6 +110,11 @@ const PAGE = {
     abilities: {},
     signaturesAvailable: true,
     maxSigners: 3,
+    documenso: {
+        configured: true,
+        webhook_secret_configured: true,
+        webhook_url: 'https://inventaire.example/webhooks/documenso',
+    },
 };
 
 /** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
@@ -261,6 +266,9 @@ function render(path) {
             "$settings->registrationOpen() ? '1' : '0'": '1',
             "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
             $maxSigners: String(PAGE.maxSigners),
+            "$documenso['configured'] ? '1' : '0'": PAGE.documenso.configured ? '1' : '0',
+            "$documenso['webhook_secret_configured'] ? '1' : '0'": PAGE.documenso.webhook_secret_configured ? '1' : '0',
+            "$documenso['webhook_url']": PAGE.documenso.webhook_url,
             $current: 'Shop',
             '$workspace->name': PAGE.workspace.name,
             '$inventory->name': PAGE.inventory.name,
@@ -428,6 +436,11 @@ describe('the pages under the real Alpine CSP build', () => {
         PAGE.abilities = {};
         PAGE.signaturesAvailable = true;
         PAGE.maxSigners = 3;
+        PAGE.documenso = {
+            configured: true,
+            webhook_secret_configured: true,
+            webhook_url: 'https://inventaire.example/webhooks/documenso',
+        };
     });
 
     describe('the switcher of the header', () => {
@@ -1479,6 +1492,105 @@ describe('the pages under the real Alpine CSP build', () => {
 
             expect(notify).toHaveBeenCalledWith('danger', 'Server down');
             expect(registrationSwitch().checked).toBe(true);
+        });
+
+        describe('the card of the e-signature service', () => {
+            /** The card, found by its title. */
+            const card = () =>
+                [...document.querySelectorAll('.card')].find((one) =>
+                    one.textContent.includes('Electronic signature (Documenso)'),
+                );
+
+            /** The badges of the card that can be seen, one per line: the service, then the webhook secret. */
+            const badges = () =>
+                [...card().querySelectorAll('.badge')].filter(visible).map((badge) => badge.textContent.trim());
+
+            const address = () => card().querySelector('#admin-settings-webhook');
+
+            /** The hint of the card that starts with some words. */
+            const hint = (start) =>
+                [...card().querySelectorAll('.form-hint')].find((one) => one.textContent.trim().startsWith(start));
+
+            afterEach(() => {
+                Reflect.deleteProperty(navigator, 'clipboard');
+            });
+
+            it('says the service and the webhook secret are set', () => {
+                expect(card()).toBeDefined();
+                expect(badges()).toEqual(['Configured', 'Configured']);
+                expect(hint('Until it is')).toSatisfy((one) => !visible(one));
+                expect(hint('Without a secret')).toSatisfy((one) => !visible(one));
+            });
+
+            it('says what is missing, and what that costs', async () => {
+                PAGE.documenso = {
+                    configured: false,
+                    webhook_secret_configured: false,
+                    webhook_url: 'https://inventaire.example/webhooks/documenso',
+                };
+                await mount('app/admin/settings.blade.php');
+
+                expect(badges()).toEqual(['Not configured', 'Not configured']);
+                expect(visible(hint('Until it is'))).toBe(true);
+                expect(visible(hint('Without a secret'))).toBe(true);
+            });
+
+            it('says the service is set while the webhook is not', async () => {
+                PAGE.documenso = {
+                    configured: true,
+                    webhook_secret_configured: false,
+                    webhook_url: 'https://inventaire.example/webhooks/documenso',
+                };
+                await mount('app/admin/settings.blade.php');
+
+                expect(badges()).toEqual(['Configured', 'Not configured']);
+            });
+
+            it('shows the address of the webhook in a box that cannot be edited', () => {
+                expect(address().value).toBe('https://inventaire.example/webhooks/documenso');
+                expect(address().readOnly).toBe(true);
+                expect(card().querySelector('label[for="admin-settings-webhook"]').textContent).toBe('Webhook address');
+            });
+
+            it('tells how often the statuses are refreshed without a webhook, and where the values are set', () => {
+                expect(card().textContent).toContain('refreshed every 10 minutes');
+
+                for (const name of ['DOCUMENSO_URL', 'DOCUMENSO_API_KEY', 'DOCUMENSO_WEBHOOK_SECRET']) {
+                    expect([...card().querySelectorAll('code')].map((code) => code.textContent)).toContain(name);
+                }
+            });
+
+            it('copies the address, and says so', async () => {
+                const writeText = vi.fn().mockResolvedValue(undefined);
+                Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+                await press('Copy', card());
+
+                expect(writeText).toHaveBeenCalledWith('https://inventaire.example/webhooks/documenso');
+                expect(buttons('Copied', card())).toHaveLength(1);
+                expect(card().querySelector('[role="status"]').textContent).toBe('Copied');
+            });
+
+            it('selects the address when the browser does not let the page copy it, and says to copy it by hand', async () => {
+                Object.defineProperty(navigator, 'clipboard', {
+                    value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+                    configurable: true,
+                });
+                const select = vi.spyOn(address(), 'select');
+
+                await press('Copy', card());
+
+                expect(select).toHaveBeenCalled();
+                expect(card().querySelector('[role="status"]').textContent).toBe(
+                    'The address is selected: copy it with your keyboard.',
+                );
+                expect(buttons('Copied', card())).toHaveLength(0);
+            });
+
+            it('does not touch the switch of the sign-ups', () => {
+                expect(registrationSwitch().checked).toBe(true);
+                expect(http.put).not.toHaveBeenCalled();
+            });
         });
     });
 

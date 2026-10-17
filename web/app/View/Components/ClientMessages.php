@@ -82,6 +82,7 @@ class ClientMessages extends Component
             'tokens.error.limit' => __('You already have :count API tokens: revoke one, or wait for one to expire.'),
             'admin.settings.notice.opened' => __('New addresses can create an account again.'),
             'admin.settings.notice.closed' => __('Sign-ups are closed: only existing accounts can sign in.'),
+            'admin.settings.select_hint' => __('The address is selected: copy it with your keyboard.'),
             'admin.users.workspace_count' => __('Workspaces: :count'),
             'admin.users.created_on' => __('Created on :date'),
             'admin.users.promote' => __('Make administrator'),

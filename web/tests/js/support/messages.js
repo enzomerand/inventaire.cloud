@@ -284,6 +284,9 @@ export const MESSAGES = {
     'error.too_many_requests': 'Too many attempts. Please wait a moment before trying again.',
     'login.error.throttled': 'Too many attempts. Try again in :seconds seconds.',
     'login.error.throttled_minutes': 'Too many attempts. Try again in :minutes minutes.',
+    'tokens.copy': 'Copy',
+    'tokens.copied': 'Copied',
+    'admin.settings.select_hint': 'The address is selected: copy it with your keyboard.',
 };
 
 /**

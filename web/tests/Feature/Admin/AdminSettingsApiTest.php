@@ -7,6 +7,7 @@ use App\Settings\InstanceSettings;
 use App\Support\PublicUrls;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 
 uses(RefreshDatabase::class);
 
@@ -170,6 +171,94 @@ describe('the settings page', function (): void {
             ->assertOk()
             ->assertSee('Inscriptions')
             ->assertSee('Tout le monde peut créer un compte');
+    });
+
+    describe('the card of the e-signature service', function (): void {
+        beforeEach(function (): void {
+            config(['services.documenso.url' => null, 'services.documenso.api_key' => null, 'services.documenso.webhook_secret' => null]);
+        });
+
+        /**
+         * The settings page as an administrator reads it.
+         */
+        function adminSettingsPage(object $test, string $language = 'en'): TestResponse
+        {
+            return $test->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => $language])
+                ->assertOk();
+        }
+
+        /**
+         * A `data-*` attribute of the markup of the page, decoded as the browser decodes it.
+         */
+        function adminSettingsAttribute(TestResponse $page, string $name): ?string
+        {
+            return preg_match('/\s'.preg_quote($name, '/').'="([^"]*)"/', $page->getContent(), $match) === 1 ? html_entity_decode($match[1], ENT_QUOTES) : null;
+        }
+
+        it('says there is no service, and gives the address the webhook would have', function (): void {
+            $page = adminSettingsPage($this)
+                ->assertSee('Electronic signature (Documenso)')
+                ->assertSee('Webhook address');
+
+            expect(adminSettingsAttribute($page, 'data-documenso-configured'))->toBe('0')
+                ->and(adminSettingsAttribute($page, 'data-documenso-secret'))->toBe('0')
+                ->and(adminSettingsAttribute($page, 'data-webhook-url'))->toBe(PublicUrls::documensoWebhook());
+        });
+
+        it('says the service and the webhook are set, whichever way they are', function (mixed $url, mixed $key, mixed $secret, string $configured, string $open): void {
+            config(['services.documenso.url' => $url, 'services.documenso.api_key' => $key, 'services.documenso.webhook_secret' => $secret]);
+
+            $page = adminSettingsPage($this);
+
+            expect(adminSettingsAttribute($page, 'data-documenso-configured'))->toBe($configured)
+                ->and(adminSettingsAttribute($page, 'data-documenso-secret'))->toBe($open);
+        })->with([
+            'both, with a secret' => ['https://sign.example.test', 'api_test_key', 'secret-test', '1', '1'],
+            'both, without a secret' => ['https://sign.example.test', 'api_test_key', null, '1', '0'],
+            'a secret only' => [null, null, 'secret-test', '0', '1'],
+            'an address only' => ['https://sign.example.test', null, null, '0', '0'],
+        ]);
+
+        it('never writes the address, the token or the secret in the page', function (): void {
+            config(['services.documenso.url' => 'https://sign.example.test', 'services.documenso.api_key' => 'api_test_key', 'services.documenso.webhook_secret' => 'secret-test']);
+
+            adminSettingsPage($this)
+                ->assertDontSee('sign.example.test')
+                ->assertDontSee('api_test_key')
+                ->assertDontSee('secret-test');
+        });
+
+        it('builds the address of the webhook from APP_URL, never from the request', function (): void {
+            $page = $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['X-Forwarded-Host' => 'evil.example.test'])
+                ->assertOk();
+
+            expect(adminSettingsAttribute($page, 'data-webhook-url'))->toBe(PublicUrls::documensoWebhook())
+                ->and($page->getContent())->not->toContain('evil.example.test');
+        });
+
+        it('names the settings of the environment, and says how often the statuses are refreshed without a webhook', function (): void {
+            adminSettingsPage($this)
+                ->assertSee('DOCUMENSO_URL')
+                ->assertSee('DOCUMENSO_API_KEY')
+                ->assertSee('DOCUMENSO_WEBHOOK_SECRET')
+                ->assertSee('refreshed every 10 minutes');
+        });
+
+        it('is in the same component as the sign-ups, which keeps its endpoint', function (): void {
+            adminSettingsPage($this)
+                ->assertSee('x-data="adminSettings"', false)
+                ->assertSee('data-url="/api/v1/admin/settings"', false)
+                ->assertSee('data-registration-open="1"', false);
+        });
+
+        it('is translated', function (): void {
+            adminSettingsPage($this, 'fr')
+                ->assertSee('Signature électronique (Documenso)')
+                ->assertSee('Adresse du webhook')
+                ->assertSee('actualisés toutes les 10 minutes');
+        });
     });
 });
 
