@@ -20,11 +20,13 @@ use XMLReader;
  *
  * Two things are bounded, counting what the library builds, the empty cells it fills a row with included:
  *
- * - **A row**: at most {@see self::limit()} cells, which is {@see self::MATERIALISED_COLUMNS} unless the import is allowed more columns
- *   than that (`inventories.import_max_columns`). That is the width of the rows a spreadsheet application writes, padded with a trailing
- *   empty cell that is repeated up to 1 024 columns (older versions of LibreOffice); the 16 384 columns of Excel and recent versions are
- *   not built, as the library leaves such a cell out. What the row holds is judged later, once its empty cells are cut off
- *   ({@see ImportRows}).
+ * - **A row**: at most {@see self::limit()} cells, which is {@see self::MATERIALISED_COLUMNS} for an OpenDocument sheet and a text file,
+ *   {@see self::MATERIALISED_XLSX_COLUMNS} for an Excel sheet, unless the import is allowed more columns than that
+ *   (`inventories.import_max_columns`). The first is the width of the rows that older versions of LibreOffice write, padded with a
+ *   trailing empty cell that is repeated up to 1 024 columns, which the library builds; the 16 384 columns of Excel and recent versions
+ *   are not built, as the library leaves such a cell out. An Excel sheet has the lower one because that library is the one whose time
+ *   grows with the square of the width (10 milliseconds a row at 1 024 cells, 3 at 512), and Excel does not pad its rows. What the row
+ *   holds is judged later, once its empty cells are cut off ({@see ImportRows}).
  * - **A sheet**: at most {@see self::budget()} cells in all, twice what an import can take at most (its rows by its columns), with room
  *   for the empty cells of the formatting. A row that is repeated counts as many times as it is repeated, as the import goes through
  *   each time.
@@ -48,18 +50,22 @@ final class ImportWidthGuard
     /** The columns of a sheet in Excel and in LibreOffice (`XFD`): the width of a row padded by an application that is not built. */
     public const SPREADSHEET_COLUMNS = 16384;
 
-    /** The most cells a row is let to be built with: the width of the rows that older versions of LibreOffice pad, and no more. */
+    /** The most cells a row of an OpenDocument sheet or of a text file is let to be built with: the width that older versions of LibreOffice pad to. */
     public const MATERIALISED_COLUMNS = 1024;
+
+    /** The most cells a row of an Excel sheet is let to be built with: the library takes time as the square of the width, and Excel pads nothing. */
+    public const MATERIALISED_XLSX_COLUMNS = 512;
 
     /** The most letters of a column in a cell reference: `XFD` is the last column, `ZZZ` the last that three letters can name. */
     private const MAX_LETTERS = 3;
 
     /**
-     * The most cells a row is let to be built with: {@see self::MATERIALISED_COLUMNS}, or the columns the import is allowed if more.
+     * The most cells a row is let to be built with: {@see self::MATERIALISED_XLSX_COLUMNS} for an Excel sheet, else
+     * {@see self::MATERIALISED_COLUMNS}, or the columns the import is allowed if more.
      */
-    public static function limit(): int
+    public static function limit(ImportFormat $format): int
     {
-        return max(config()->integer('inventories.import_max_columns'), self::MATERIALISED_COLUMNS);
+        return max(config()->integer('inventories.import_max_columns'), $format === ImportFormat::Xlsx ? self::MATERIALISED_XLSX_COLUMNS : self::MATERIALISED_COLUMNS);
     }
 
     /**
@@ -80,7 +86,7 @@ final class ImportWidthGuard
      */
     public static function ods(string $path): void
     {
-        $limit = self::limit();
+        $limit = self::limit(ImportFormat::Ods);
         $budget = self::budget();
         // Whether a row is open, the cells counted in it so far, how many times the last one seen is repeated (it is counted once the
         // next one comes, or at the end of the row, whose rules differ), whether any cell holds something, how many times the row is
@@ -168,7 +174,7 @@ final class ImportWidthGuard
      */
     public static function xlsx(string $path): void
     {
-        $limit = self::limit();
+        $limit = self::limit(ImportFormat::Xlsx);
         $budget = self::budget();
 
         foreach (self::sheets($path) as $part) {
@@ -251,7 +257,7 @@ final class ImportWidthGuard
             throw new ImportFileException(ImportFileException::UNREADABLE);
         }
 
-        $limit = self::limit();
+        $limit = self::limit(ImportFormat::Csv);
         $budget = self::budget();
         // The fields of the file so far, a record's first one apart (the records themselves are counted by the lines of the file).
         $total = 0;
