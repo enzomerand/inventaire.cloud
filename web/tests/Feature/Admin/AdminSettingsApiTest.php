@@ -4,10 +4,21 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Settings\InstanceSettings;
+use App\Support\PublicUrls;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
+
+/**
+ * What the settings say of the e-signature service when the instance has none.
+ *
+ * @return array{configured: bool, webhook_secret_configured: bool, webhook_url: string}
+ */
+function adminNoDocumenso(): array
+{
+    return ['configured' => false, 'webhook_secret_configured' => false, 'webhook_url' => PublicUrls::documensoWebhook()];
+}
 
 dataset('settings calls', [
     'read' => ['GET', []],
@@ -50,7 +61,7 @@ describe('the settings', function (): void {
     it('are open to sign-ups until an administrator says otherwise', function (): void {
         $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('close registration, and are answered as they now are', function (): void {
@@ -58,7 +69,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
@@ -133,7 +144,7 @@ describe('the settings', function (): void {
         $this->actingAs(User::factory()->admin()->create())
             ->putJson('/api/v1/admin/settings', ['registration_open' => false, 'something_else' => 'x'], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'documenso' => adminNoDocumenso()]]);
 
         expect(DB::table('settings')->pluck('key')->all())->toBe(['registration_open']);
     });
@@ -159,5 +170,87 @@ describe('the settings page', function (): void {
             ->assertOk()
             ->assertSee('Inscriptions')
             ->assertSee('Tout le monde peut créer un compte');
+    });
+});
+
+describe('the state of the e-signature service', function (): void {
+    beforeEach(function (): void {
+        config(['services.documenso.url' => null, 'services.documenso.api_key' => null, 'services.documenso.webhook_secret' => null]);
+    });
+
+    /**
+     * What an administrator reads of the service.
+     *
+     * @return array<string, mixed>
+     */
+    function adminDocumenso(object $test): array
+    {
+        return $test->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())->assertOk()->json('data.documenso');
+    }
+
+    it('says there is none, and where the webhook would be', function (): void {
+        expect(adminDocumenso($this))->toBe([
+            'configured' => false,
+            'webhook_secret_configured' => false,
+            'webhook_url' => rtrim(config()->string('app.url'), '/').'/webhooks/documenso',
+        ]);
+    });
+
+    it('says whether signatures can be asked for: the address and the token are both there', function (mixed $url, mixed $key, bool $configured): void {
+        config(['services.documenso.url' => $url, 'services.documenso.api_key' => $key]);
+
+        expect(adminDocumenso($this)['configured'])->toBe($configured);
+    })->with([
+        'both' => ['https://sign.example.test', 'api_test_key', true],
+        'the address only' => ['https://sign.example.test', null, false],
+        'the token only' => [null, 'api_test_key', false],
+        'an address of spaces' => ['   ', 'api_test_key', false],
+        'an empty token' => ['https://sign.example.test', '', false],
+    ]);
+
+    it('says whether the webhook is open: a secret is there, whatever the rest', function (mixed $secret, bool $open): void {
+        config(['services.documenso.webhook_secret' => $secret]);
+
+        $documenso = adminDocumenso($this);
+
+        expect($documenso['webhook_secret_configured'])->toBe($open)
+            ->and($documenso['configured'])->toBeFalse();
+    })->with([
+        'a secret' => ['secret-test', true],
+        'none' => [null, false],
+        'empty' => ['', false],
+        'spaces' => ['  ', false],
+    ]);
+
+    it('gives the address to tell Documenso, built from APP_URL and never from the request', function (): void {
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->getJson('/api/v1/admin/settings', frontend(['X-Forwarded-Host' => 'evil.example.test']))
+            ->assertOk();
+
+        expect($response->json('data.documenso.webhook_url'))->toBe(PublicUrls::documensoWebhook())
+            ->and($response->json('data.documenso.webhook_url'))->not->toContain('evil.example.test')
+            ->and($response->json('data.documenso.webhook_url'))->toStartWith(rtrim(config()->string('app.url'), '/'));
+    });
+
+    it('never gives the token nor the secret', function (): void {
+        config(['services.documenso.url' => 'https://sign.example.test', 'services.documenso.api_key' => 'api_test_key', 'services.documenso.webhook_secret' => 'secret-test']);
+
+        $response = $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())->assertOk();
+
+        expect($response->getContent())->not->toContain('api_test_key')->not->toContain('secret-test')->not->toContain('sign.example.test')
+            ->and(array_keys($response->json('data.documenso')))->toBe(['configured', 'webhook_secret_configured', 'webhook_url']);
+    });
+
+    it('is read-only: it is answered after a change, and nothing of it can be set', function (): void {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['registration_open' => false, 'documenso' => ['configured' => true]], frontend())
+            ->assertOk()
+            ->assertJsonPath('data.documenso.configured', false);
+
+        $this->flushSession();
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['documenso' => ['configured' => true]], frontend())->assertUnprocessable();
+
+        expect(DB::table('settings')->pluck('key')->all())->toBe(['registration_open']);
     });
 });
