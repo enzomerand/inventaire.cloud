@@ -39,7 +39,7 @@ final class PurgeStoredFiles implements ShouldQueue
      * @param  list<string>  $paths  Files to delete.
      * @param  list<string>  $directories  Folders to delete with everything below them.
      *
-     * @throws InvalidArgumentException When a folder is not one of a workspace, an inventory, an item, an export or an import.
+     * @throws InvalidArgumentException When a folder is not one of a workspace, an inventory, an item, an export, an import or an official version.
      */
     public function __construct(
         public readonly string $disk,
@@ -47,8 +47,8 @@ final class PurgeStoredFiles implements ShouldQueue
         public readonly array $directories = [],
     ) {
         foreach ($directories as $directory) {
-            if (preg_match('#^workspaces/[0-9a-z]+(/inventories/[0-9a-z]+(/items/[0-9a-z]+|/exports/[0-9a-z]+|/imports/[0-9a-z]+)?)?$#', $directory) !== 1) {
-                throw new InvalidArgumentException("Refusing to purge [{$directory}]: it is not the folder of a workspace, an inventory, an item, an export or an import.");
+            if (preg_match('#^workspaces/[0-9a-z]+(/inventories/[0-9a-z]+(/items/[0-9a-z]+|/exports/[0-9a-z]+|/imports/[0-9a-z]+|/versions/[0-9a-z]+)?)?$#', $directory) !== 1) {
+                throw new InvalidArgumentException("Refusing to purge [{$directory}]: it is not the folder of a workspace, an inventory, an item, an export, an import or an official version.");
             }
         }
     }

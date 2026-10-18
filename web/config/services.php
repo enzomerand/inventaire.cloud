@@ -31,13 +31,18 @@ return [
     ],
 
     /*
-    | Documenso, the e-signature service used to sign official exports. The URL
-    | is the instance root (https://app.documenso.com or a self-hosted one); the
-    | API key is a team token created in Documenso. Both are optional.
+    | Documenso, the e-signature service used to sign official versions of an
+    | inventory. The URL is the instance root (https://app.documenso.com or a
+    | self-hosted one); the API key is a team token created in Documenso. The
+    | webhook secret is the one Documenso is told to send in the
+    | `X-Documenso-Secret` header of its calls to `/webhooks/documenso`; without
+    | it the webhook answers 404 and the signatures are only synchronised by the
+    | schedule. All three are optional.
     */
     'documenso' => [
         'url' => env('DOCUMENSO_URL'),
         'api_key' => env('DOCUMENSO_API_KEY'),
+        'webhook_secret' => env('DOCUMENSO_WEBHOOK_SECRET'),
     ],
 
     'slack' => [

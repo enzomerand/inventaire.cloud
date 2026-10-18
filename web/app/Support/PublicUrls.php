@@ -8,8 +8,8 @@ use App\Services\LocaleResolver;
 use Closure;
 
 /**
- * The addresses of the public pages (the home page, the documentation of the API and the gallery of templates), as search engines and other sites must
- * see them: absolute, and built from `APP_URL`, never from the request. A `Host` header is written by whoever calls, so an
+ * The addresses of the public pages (the home page, the documentation of the API and the gallery of templates) and of the endpoint other
+ * services call (the webhook of Documenso), as search engines and other sites must see them: absolute, and built from `APP_URL`, never from the request. A `Host` header is written by whoever calls, so an
  * address made from it could be made to point anywhere (the same rule as the welcome mail's link to the sign-in page).
  *
  * The pages of the gallery exist in every supported language: the one of the instance (`app.default_locale`) has no prefix
@@ -56,6 +56,14 @@ final class PublicUrls
     public static function apiDocsPath(): string
     {
         return '/docs/api';
+    }
+
+    /**
+     * The address Documenso is told to call when something happens to an envelope (`POST`, with the secret in `X-Documenso-Secret`).
+     */
+    public static function documensoWebhook(): string
+    {
+        return self::to(route('webhooks.documenso', [], false));
     }
 
     /**

@@ -112,7 +112,7 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
-     * Empties the sandbox once the test is over.
+     * Empties the sandbox once the test is over, and makes sure it leaves no timer behind.
      */
     protected function tearDown(): void
     {
@@ -120,6 +120,29 @@ abstract class TestCase extends BaseTestCase
 
         $this->sandbox?->destroy();
         $this->sandbox = null;
+
+        $this->assertNoAlarmLeft();
+    }
+
+    /**
+     * Fails the test that leaves the alarm of the process armed.
+     *
+     * The suite runs in one process, and that process has one alarm: `set_time_limit()` arms it (so does a queue worker, for the job it
+     * runs), and it goes off in whichever test is running by then, minutes later. The signal reaches the handler that is in place at that
+     * moment: PHP's own, which stops the run ("Maximum execution time exceeded"), or one an earlier test left behind, which belongs to
+     * an application that is gone. Here the test that leaves the alarm is the one that fails.
+     */
+    private function assertNoAlarmLeft(): void
+    {
+        if (! function_exists('pcntl_alarm')) {
+            return;
+        }
+
+        $seconds = pcntl_alarm(0);
+
+        if ($seconds > 0) {
+            $this->fail("This test left the alarm of the process armed for {$seconds} more seconds: it would go off in a later test. Whatever armed it (set_time_limit(), a queue worker) must put it back.");
+        }
     }
 
     /**

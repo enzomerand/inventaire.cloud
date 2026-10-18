@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateSettingsRequest;
 use App\Settings\InstanceSettings;
+use App\Signatures\Documenso;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -16,17 +17,21 @@ use Illuminate\Http\JsonResponse;
  * `registration_open`: whether an address that has no account can create one by signing in. Closed, only the
  * addresses that already have an account get a code (see {@see RequestCodeController}), and a code issued earlier to
  * an address without one opens nothing; accounts then come from the administrators.
+ *
+ * The answer also tells, read-only, where the e-signature service (Documenso) stands: `documenso.configured` (the instance has its
+ * address and API token), `documenso.webhook_secret_configured` (the webhook is open) and `documenso.webhook_url`, the address to give
+ * Documenso, built from `APP_URL` (see {@see Documenso::status()}). The secrets themselves are never given, and these are set in the environment, not here.
  */
 final class SettingsController extends Controller
 {
     public function __construct(private readonly InstanceSettings $settings) {}
 
     /**
-     * Every setting with its current value.
+     * Every setting with its current value, and the state of the e-signature service.
      */
     public function show(): JsonResponse
     {
-        return new JsonResponse(['data' => $this->settings->all()]);
+        return new JsonResponse(['data' => $this->settings->all() + ['documenso' => Documenso::status()]]);
     }
 
     /**

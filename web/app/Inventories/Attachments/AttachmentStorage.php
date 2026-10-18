@@ -115,6 +115,15 @@ final class AttachmentStorage
     }
 
     /**
+     * The folder of an official version: its snapshot, its PDF and its signed PDF are in it, alone. It is under the folder of the
+     * inventory, so that the purge of an inventory or of a workspace takes the versions with it.
+     */
+    public static function versionDirectory(string $workspace, string $inventory, string $version): string
+    {
+        return self::inventoryDirectory($workspace, $inventory)."/versions/{$version}";
+    }
+
+    /**
      * The path of a thumbnail, from the path of its file.
      */
     public static function thumbnailPath(string $path): string

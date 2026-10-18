@@ -239,6 +239,62 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Official versions
+    |--------------------------------------------------------------------------
+    |
+    | An editor of a workspace can freeze an inventory as a numbered, dated
+    | official version: a canonical `snapshot.json` taken while the inventory is
+    | locked (its SHA-256 is recorded), then a PDF written from that snapshot by
+    | a queued job, which can be sent to Documenso to be signed. The files are
+    | stored with the other private files and count against `storage_per_workspace`.
+    |
+    | - `max_versions_per_inventory`: versions one inventory may hold
+    |   (`INVENTORIES_MAX_VERSIONS`, 200): the API answers 409
+    |   (`version_limit_reached`) beyond, until one is deleted. Counted under the
+    |   lock of the inventory.
+    | - `max_signers`: people one version may ask a signature from
+    |   (`INVENTORIES_MAX_SIGNERS`, 10): the signature page holds ten boxes at
+    |   most, so a larger value is brought back to 10.
+    | - `versions_per_hour`: versions one person may create in an hour
+    |   (`INVENTORIES_VERSIONS_PER_HOUR`, 10), `429` beyond: every one locks an
+    |   inventory while it reads all its items.
+    | - `signature_requests_per_workspace_per_day`: requests for signatures one
+    |   workspace may make in a day, a version frozen with signers or a failed
+    |   request sent again (`INVENTORIES_SIGNATURE_REQUESTS_PER_DAY`, 20), `429`
+    |   beyond. Documenso emails every signer, at addresses the person types: this
+    |   keeps the instance from being used to send mail. Counted for 24 hours
+    |   from the first request of a window, per workspace, whoever asks.
+    | - `max_snapshot_bytes`: bytes the `snapshot.json` of a version may weigh
+    |   (`INVENTORIES_MAX_SNAPSHOT_MB`, megabytes, 64). The file is written while
+    |   the inventory is locked and stops being written past the limit (the API
+    |   answers 422, `pdf_too_large`, and nothing is kept); the job that writes the
+    |   PDF reads the whole file into the memory of a worker, so it refuses (the
+    |   version fails with `pdf_too_large`) a file that is over the limit when it
+    |   is read, whatever it was when it was written.
+    | - `max_signed_pdf_bytes`: bytes the signed PDF that Documenso gives back
+    |   may weigh (`INVENTORIES_MAX_SIGNED_PDF_MB`, megabytes, 100). It is
+    |   downloaded to a scratch file, never into memory, and refused (the request
+    |   stays `awaiting`, and is looked at again by the schedule, with a warning in
+    |   the log) when Documenso announces more, or sends more.
+    |
+    | The PDF holds as many items as `pdf_max_items` allows, as the PDF of an
+    | export does; the API answers 422 (`pdf_too_large`) beyond.
+    |
+    */
+    'max_versions_per_inventory' => (int) env('INVENTORIES_MAX_VERSIONS', 200),
+
+    'max_signers' => (int) env('INVENTORIES_MAX_SIGNERS', 10),
+
+    'versions_per_hour' => (int) env('INVENTORIES_VERSIONS_PER_HOUR', 10),
+
+    'signature_requests_per_workspace_per_day' => (int) env('INVENTORIES_SIGNATURE_REQUESTS_PER_DAY', 20),
+
+    'max_snapshot_bytes' => (int) round((float) env('INVENTORIES_MAX_SNAPSHOT_MB', 64) * 1048576),
+
+    'max_signed_pdf_bytes' => (int) round((float) env('INVENTORIES_MAX_SIGNED_PDF_MB', 100) * 1048576),
+
+    /*
+    |--------------------------------------------------------------------------
     | API tokens
     |--------------------------------------------------------------------------
     |

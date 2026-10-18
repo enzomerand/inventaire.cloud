@@ -13,7 +13,6 @@ use App\Inventories\Fields\FieldTypes;
 use App\Jobs\GenerateExport;
 use App\Models\Export;
 use App\Models\Inventory;
-use App\Models\InventoryField;
 use App\Models\User;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
@@ -123,7 +122,7 @@ final class Exports
         }
 
         if ($format === ExportFormat::Pdf) {
-            $limit = PdfWriter::maxItems($fields->filter(fn (InventoryField $field): bool => $this->types->of($field) !== null)->count());
+            $limit = PdfWriter::limitFor($fields, $this->types);
 
             if ($this->items->count($matching) > $limit) {
                 throw new ExportRefusedException(ExportRefusedException::PDF_TOO_LARGE, $limit);

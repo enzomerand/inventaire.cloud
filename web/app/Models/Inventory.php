@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Items;
+use App\Inventories\Versions\OfficialVersions;
 use App\Models\Concerns\HasUlidRouteKey;
 use App\Policies\InventoryPolicy;
 use Database\Factories\InventoryFactory;
@@ -24,7 +25,9 @@ use Illuminate\Support\Carbon;
  * with it by the database. `ulid` is the identifier the outside world uses ({@see HasUlidRouteKey}).
  *
  * `items_count` is the number of its items, kept on the row so that nothing has to count them: it is moved only by
- * {@see Items}, with the inventory locked, in the transaction that adds or deletes the item.
+ * {@see Items}, with the inventory locked, in the transaction that adds or deletes the item. `last_version_number` is the number of
+ * the last official version frozen from it, which only ever goes up (a number is never given twice, even after the version that had
+ * it was deleted): it is moved only by {@see OfficialVersions}, with the inventory locked, when a version is frozen.
  *
  * @property int $id
  * @property string $ulid
@@ -32,6 +35,7 @@ use Illuminate\Support\Carbon;
  * @property string $name
  * @property string|null $description
  * @property int $items_count
+ * @property int $last_version_number
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -58,11 +62,11 @@ final class Inventory extends Model
     }
 
     /**
-     * The attributes a new inventory starts with: no item, as the column does.
+     * The attributes a new inventory starts with: no item and no version, as the columns do.
      *
      * @var array<string, mixed>
      */
-    protected $attributes = ['items_count' => 0];
+    protected $attributes = ['items_count' => 0, 'last_version_number' => 0];
 
     /**
      * Get the attributes that should be cast.
@@ -73,6 +77,7 @@ final class Inventory extends Model
     {
         return [
             'items_count' => 'integer',
+            'last_version_number' => 'integer',
         ];
     }
 
@@ -119,6 +124,17 @@ final class Inventory extends Model
     public function imports(): HasMany
     {
         return $this->hasMany(Import::class);
+    }
+
+    /**
+     * The official versions of the inventory, whoever froze them. The route key of a version is its ULID, and a version is bound
+     * through this relation (`/inventories/{inventory}/versions/{version}`), so a version of another inventory is a 404.
+     *
+     * @return HasMany<InventoryVersion, $this>
+     */
+    public function versions(): HasMany
+    {
+        return $this->hasMany(InventoryVersion::class);
     }
 
     /**

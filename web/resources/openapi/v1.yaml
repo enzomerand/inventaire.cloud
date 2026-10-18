@@ -4,7 +4,7 @@ info:
   version: '1'
   summary: The public JSON API of inventaire.cloud.
   description: |
-    The public API of inventaire.cloud: workspaces, inventories, fields, items and their files, exports and imports.
+    The public API of inventaire.cloud: workspaces, inventories, fields, items and their files, exports, imports and official versions.
     Most of what the web application does with your data can be done here, with a personal access token.
 
     ## Authentication
@@ -28,12 +28,12 @@ info:
     A token carries one or more abilities, and every operation of this document names the one it needs in `x-ability`:
 
     - `read`: every `GET` operation;
-    - `write`: the content of an inventory, that is items, attachments, exports and imports (create, change, delete);
+    - `write`: the content of an inventory, that is items, attachments, exports, imports and official versions (create, change, delete);
     - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete).
 
     The abilities are independent: `write` and `manage` do not include `read`. A token that cannot read can hardly be
     used, since the ids that the other operations need are found with `GET`: give `read` along with the others. What a
-    `write` operation answers is the resource it wrote (the item, the attachment, the export or the import), so `write`
+    `write` operation answers is the resource it wrote (the item, the attachment, the export, the import or the version), so `write`
     sees what it writes. `manage` can delete a workspace or an inventory with all the data in it: give it only to what
     needs it. A request made with a token that lacks the ability is answered with `403` and the code
     `token_ability_missing`.
@@ -50,7 +50,7 @@ info:
     `too_many_requests` and a `Retry-After` header, the number of seconds to wait.
 
     Some operations have a stricter limit of their own, counted per user: creating a workspace, uploading a file,
-    asking for an export, sending or re-reading a file to import. A request that is refused before it gets that far (a
+    asking for an export, sending or re-reading a file to import, freezing an inventory as an official version. A request that is refused before it gets that far (a
     token that lacks the ability, for instance) does not use it up. Past it the answer is `429` as well, with
     `Retry-After`. The public template catalogue has its own limit, per network address.
 
@@ -93,7 +93,7 @@ info:
 
     ## Pagination
 
-    Lists that can be long are paginated with the `page` query parameter (1 by default): 50 items or 25 revisions per
+    Lists that can be long are paginated with the `page` query parameter (1 by default): 50 items, 25 revisions or 20 versions per
     page. The answer is `{"data": […], "links": {"first", "last", "prev", "next"}, "meta": {"current_page", "last_page",
     "per_page", "total", "from", "to", "path", "links"}}`; the links of the pages keep your other query parameters.
     The other lists (workspaces, inventories, field types, templates) are answered in one piece, in `data`; the lists of
@@ -133,6 +133,9 @@ tags:
     description: Files of the items of an inventory (XLSX, ODS, CSV, JSON, PDF, zip), written in the background.
   - name: Imports
     description: Spreadsheets and CSV files brought into an inventory, with a mapping of their columns, run in the background.
+  - name: Official versions
+    description: >-
+      The inventory frozen as numbered, dated versions, each with its data (JSON), its PDF and, if asked for, signatures by email.
   - name: Templates
     description: The public catalogue of inventory templates. No token needed.
 paths:
@@ -3163,6 +3166,773 @@ paths:
           x-codes:
             - code: too_many_requests
               description: The rate limit of the token is reached.
+  /inventories/{inventory}/versions:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    get:
+      tags:
+        - Official versions
+      operationId: listVersions
+      summary: List the official versions of an inventory
+      description: >-
+        The official versions of the inventory, newest first, 20 per page. A version belongs to the inventory, not to the person
+        who froze it: every member of the workspace sees every version.
+      x-ability: read
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: A page of versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - links
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryVersion'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Official versions
+      operationId: createVersion
+      summary: Freeze the inventory as an official version
+      description: >-
+        Freezes the inventory as its next official version, numbered 1, 2, 3... Editors and owners only. The state of the inventory
+        at that moment is written as a canonical JSON file (`snapshot`, with its SHA-256) while the inventory is locked against
+        writes, which takes a second or two for thousands of items; a PDF is then written from that file in the background. The
+        answer is the version, `pending`: poll `GET /inventories/{inventory}/versions/{version}` until its `status` is
+        `completed` (or `failed`), then download the files.
+
+        `signers` asks the signature service of the instance (Documenso) to have the PDF signed by each person: it adds a page of
+        signatures to the PDF and sends each signer an email. It needs the instance to have one (`signature_unavailable`). The
+        people are fixed for the version: to ask others, freeze the inventory again.
+
+        An inventory holds 200 versions by default (`version_limit_reached`), a user can freeze 10 times an hour by default, a PDF
+        holds 500 items at most by default (`pdf_too_large`) and the files of a version count against the storage of the workspace
+        (`storage_limit_reached`). A workspace can ask for signatures 20 times a day by default, a version frozen with signers
+        or a failed request sent again counting for one (`429` beyond, with `Retry-After`).
+      x-ability: write
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type:
+                    - string
+                    - 'null'
+                  maxLength: 120
+                  description: What you call the version, on one line. None when absent, null or empty.
+                signers:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  description: >-
+                    The people to ask a signature from, at most 10 (the administrator of the instance can lower it). Their emails must
+                    differ. Absent for a version nobody has to sign.
+                  items:
+                    $ref: '#/components/schemas/SignerInput'
+      responses:
+        '202':
+          description: The version, `pending`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InventoryVersion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: version_limit_reached
+              description: The inventory already holds as many versions as allowed. `limit` says how many.
+            - code: storage_limit_reached
+              description: The files of the workspace already weigh as much as allowed. `limit` is in bytes.
+            - code: signature_unavailable
+              description: Signers were given and the instance has no signature service.
+        '422':
+          description: The body is refused, or the inventory holds more items than a PDF can. `errors` names each fault under the key it is about.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: The signers.0.email field must be a valid email address.
+                errors:
+                  signers.0.email:
+                    - The signers.0.email field must be a valid email address.
+          x-codes:
+            - code: pdf_too_large
+              description: >-
+                A PDF cannot hold that many items, or the data of the inventory is too heavy to be frozen (on `inventory`, 64 MB by
+                default). `limit` says how many items a PDF can hold; it is absent when the data is what is too heavy.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: >-
+                The rate limit of the token, or the versions an hour of the user, is reached; or the workspace has already made as many
+                requests for signatures today as it may (20 a day by default, signers given). Wait `Retry-After` seconds.
+  /inventories/{inventory}/versions/{version}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    get:
+      tags:
+        - Official versions
+      operationId: getVersion
+      summary: Get an official version
+      description: Where a version is up to, with the SHA-256 of its files and what its signers did.
+      x-ability: read
+      responses:
+        '200':
+          description: The version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InventoryVersion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Official versions
+      operationId: deleteVersion
+      summary: Delete an official version
+      description: >-
+        Owners only. Deletes the version and its files, and gives their size back to the storage of the workspace. A request for
+        signatures that still awaits its signers is cancelled at the signature service in the background. A version that is being
+        written is deleted all the same. The next version is numbered after the highest one that remains.
+      x-ability: write
+      responses:
+        '204':
+          description: The version is deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `write` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /inventories/{inventory}/versions/{version}/pdf:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    get:
+      tags:
+        - Official versions
+      operationId: downloadVersionPdf
+      summary: Download the PDF of a version
+      description: >-
+        The official PDF of a completed version, always as a download. It is written from the frozen data, never from the live
+        inventory, and carries the number, the date, the author, the SHA-256 of the data on every page, and the page of signatures
+        when signers were asked for. It is never kept by a cache.
+      x-ability: read
+      responses:
+        '200':
+          description: The PDF.
+          headers:
+            Content-Disposition:
+              description: '`attachment` with the name of the file.'
+              schema:
+                type: string
+            Content-Length:
+              description: Bytes.
+              schema:
+                type: integer
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          x-codes:
+            - code: file_not_found
+              description: The version exists but its file is no longer on the storage.
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: version_not_ready
+              description: The version is still being written, or it failed. Check its `status`.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+  /inventories/{inventory}/versions/{version}/snapshot:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    get:
+      tags:
+        - Official versions
+      operationId: downloadVersionSnapshot
+      summary: Download the data of a version
+      description: >-
+        The data that was frozen with a completed version, as a JSON file (`format` `inventaire.cloud/official-version`): the
+        inventory, its fields, its items and the list of their files, with sorted keys and no insignificant space. The SHA-256 of
+        these very bytes is the one the version gives under `snapshot.sha256` (`shasum -a 256` on the file). It is always a
+        download, and never kept by a cache.
+      x-ability: read
+      responses:
+        '200':
+          description: The data.
+          headers:
+            Content-Disposition:
+              description: '`attachment` with the name of the file.'
+              schema:
+                type: string
+            Content-Length:
+              description: Bytes.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          x-codes:
+            - code: file_not_found
+              description: The version exists but its file is no longer on the storage.
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: version_not_ready
+              description: The version is still being written, or it failed. Check its `status`.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+  /inventories/{inventory}/versions/{version}/signed-pdf:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    get:
+      tags:
+        - Official versions
+      operationId: downloadVersionSignedPdf
+      summary: Download the signed PDF of a version
+      description: >-
+        The PDF with the signatures, once every signer has signed: the signature service (Documenso) gives it back with the
+        signatures and the certificate of completion, and it is stored with the version. It is always a download, and never kept by
+        a cache. Its SHA-256 and its size are under `signature.signed_pdf` of the version. It answers `409` until then, and for a
+        version nobody was asked to sign.
+      x-ability: read
+      responses:
+        '200':
+          description: The signed PDF.
+          headers:
+            Content-Disposition:
+              description: '`attachment` with the name of the file.'
+              schema:
+                type: string
+            Content-Length:
+              description: Bytes.
+              schema:
+                type: integer
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          description: >-
+            There is no such resource, or it belongs to a workspace the owner of the token is not a member of (the two are
+            not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          x-codes:
+            - code: file_not_found
+              description: The version exists but its file is no longer on the storage.
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: signed_pdf_not_ready
+              description: Not every signer has signed yet, or nobody was asked to sign. Check `signature.status`.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          description: The file cannot be read right now (the storage is down). Try again in a moment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: This file cannot be read right now. Try again in a moment.
+                code: file_unavailable
+          x-codes:
+            - code: file_unavailable
+              description: The storage cannot be read right now.
+  /inventories/{inventory}/versions/{version}/signature/cancel:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      tags:
+        - Official versions
+      operationId: cancelVersionSignature
+      summary: Cancel the signature request of a version
+      description: >-
+        Editors and owners only. Cancels the request for signatures while its signers are awaited (`signature.status` is `awaiting`):
+        the signature service (Documenso) is asked at once, tells the signers, and the request becomes `cancelled`. The version, its
+        PDF and its data are untouched; to ask for signatures again, freeze the inventory again. The answer is the version.
+
+        If Documenso says the request is not pending any more (the last signer signed, or somebody refused, a moment before), nothing is
+        cancelled: the request is read again in the background and the answer is `409` (`signature_not_pending`). If Documenso cannot
+        be reached, the answer is `503` (`documenso_unavailable`) and nothing has changed: try again.
+      x-ability: write
+      responses:
+        '200':
+          description: The version, with a `cancelled` request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InventoryVersion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: signature_not_pending
+              description: The request is not waiting for its signers (it was never sent, or it is over), or Documenso says it is not pending.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+        '503':
+          description: The signature service cannot be used right now. Nothing was cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: The signature service cannot be used right now. Try again in a moment.
+                code: documenso_unavailable
+          x-codes:
+            - code: documenso_unavailable
+              description: Documenso cannot be reached, is failing, or refuses the token of the instance.
+  /inventories/{inventory}/versions/{version}/signature/retry:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/VersionId'
+    post:
+      tags:
+        - Official versions
+      operationId: retryVersionSignature
+      summary: Send the signature request of a version again
+      description: >-
+        Editors and owners only. Sends again a request for signatures that failed (`signature.status` is `failed`) on a completed
+        version: it becomes `requested` and a worker takes it from where it stopped, with the same PDF (an envelope that exists at
+        Documenso is not created twice). The answer is the version; poll it until `signature.status` is `awaiting` (or `failed`
+        again, with the `error`).
+
+        Sending again is a request for signatures like the first one: the workspace can make 20 a day by default, those of a
+        version frozen with signers included (`429` beyond, with `Retry-After`).
+      x-ability: write
+      responses:
+        '202':
+          description: The version, with a `requested` request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InventoryVersion'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `write` ability, or the user is a viewer of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the write permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `write` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: signature_not_failed
+              description: The request did not fail, or its version is not completed.
+            - code: signature_unavailable
+              description: The instance has no signature service.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: >-
+                The rate limit of the token is reached, or the workspace has already made as many requests for signatures today as it
+                may (20 a day by default). Wait `Retry-After` seconds.
   /templates:
     get:
       tags:
@@ -3334,6 +4104,13 @@ components:
       in: path
       required: true
       description: The id of the import. Only the person who sent the file can see it.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    VersionId:
+      name: version
+      in: path
+      required: true
+      description: The id of the official version. It must belong to the inventory of the path.
       schema:
         $ref: '#/components/schemas/Ulid'
     TemplateSlug:
@@ -4452,6 +5229,257 @@ components:
           description: >-
             When the report, or a file that was sent and never started, is deleted. Null while the import is started and
             has not ended.
+    VersionStatus:
+      type: string
+      description: >-
+        Where the writing of the PDF is. `pending`: frozen, waiting for a worker. `running`. `completed`: the PDF and the data can be
+        downloaded. `failed`: nothing was kept, the `error` says why, and the version can only be deleted.
+      enum:
+        - pending
+        - running
+        - completed
+        - failed
+    SignatureStatus:
+      type: string
+      description: >-
+        Where the request for signatures is. `requested`: asked for, not sent to the signature service yet. `sending`. `awaiting`: the
+        signers have their emails and not all have signed. `completed`: everybody signed and the signed PDF is stored. `rejected`:
+        a signer refused. `cancelled`: cancelled here or at the signature service. `failed`: the request could not be sent or was lost,
+        the `error` says why.
+      enum:
+        - requested
+        - sending
+        - awaiting
+        - completed
+        - rejected
+        - cancelled
+        - failed
+    SignerStatus:
+      type: string
+      description: >-
+        Where one signer is. `pending`: yet to sign. `signed`. `rejected`: refused to sign.
+      enum:
+        - pending
+        - signed
+        - rejected
+    SignerInput:
+      type: object
+      description: A person to ask a signature from.
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          description: The name, as it is shown on the page of signatures and in the email they get.
+          examples:
+            - Ada Lovelace
+        email:
+          type: string
+          description: The email address the signature service writes to.
+          examples:
+            - ada@example.com
+    Signer:
+      type: object
+      description: A person asked to sign a version, and what they did.
+      required:
+        - name
+        - email
+        - status
+        - signed_at
+        - rejection_reason
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        status:
+          $ref: '#/components/schemas/SignerStatus'
+        signed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When they signed. Null until they do.
+        rejection_reason:
+          type:
+            - string
+            - 'null'
+          description: Why they refused to sign, when they said.
+    InventoryVersion:
+      type: object
+      description: >-
+        An inventory frozen at a date: numbered inventory by inventory, with the data that was frozen, the official PDF written from
+        it and, when signatures were asked for, where they stand.
+      required:
+        - id
+        - number
+        - label
+        - status
+        - error
+        - frozen_at
+        - created_at
+        - author
+        - items_count
+        - fields_count
+        - snapshot
+        - pdf
+        - signature
+        - abilities
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        number:
+          type: integer
+          minimum: 1
+          description: 1 for the first version of the inventory, then 2, 3... A new version is numbered after the highest one that remains.
+        label:
+          type:
+            - string
+            - 'null'
+          description: What the person who froze the inventory called the version.
+        status:
+          $ref: '#/components/schemas/VersionStatus'
+        error:
+          type:
+            - string
+            - 'null'
+          description: For a failed version, what went wrong, in the language of the request. Null otherwise.
+        frozen_at:
+          $ref: '#/components/schemas/Timestamp'
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        author:
+          type: object
+          description: Who froze the inventory. The name is kept with the version when the account is deleted.
+          required:
+            - name
+          properties:
+            name:
+              type: string
+        items_count:
+          type: integer
+          description: The number of items that were frozen.
+        fields_count:
+          type: integer
+          description: The number of fields that were frozen.
+        snapshot:
+          type: object
+          description: The frozen data, a canonical JSON file. Everything else is written from it.
+          required:
+            - sha256
+            - size
+            - download_url
+          properties:
+            sha256:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+              description: The SHA-256 of the bytes of the file, in hexadecimal.
+            size:
+              type: integer
+              description: Bytes.
+            download_url:
+              type:
+                - string
+                - 'null'
+              description: >-
+                The path of the file, relative to the host. Null until the version is completed (`status` is `completed`), as the
+                download answers `409` (`version_not_ready`) before that.
+        pdf:
+          description: The official PDF. Null until the version is completed.
+          oneOf:
+            - type: object
+              required:
+                - sha256
+                - size
+                - pages
+                - download_url
+              properties:
+                sha256:
+                  type: string
+                  pattern: ^[0-9a-f]{64}$
+                size:
+                  type: integer
+                  description: Bytes.
+                pages:
+                  type: integer
+                  minimum: 1
+                download_url:
+                  type: string
+                  description: The path of the file, relative to the host.
+            - type: 'null'
+        signature:
+          description: The request for signatures. Null for a version nobody was asked to sign.
+          oneOf:
+            - type: object
+              required:
+                - status
+                - error
+                - requested_at
+                - completed_at
+                - signers
+                - signed_pdf
+              properties:
+                status:
+                  $ref: '#/components/schemas/SignatureStatus'
+                error:
+                  type:
+                    - string
+                    - 'null'
+                  description: For a request that failed or was lost, what went wrong, in the language of the request. Null otherwise.
+                requested_at:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                  description: When the signature service sent the emails. Null until it did.
+                completed_at:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                  description: When the last signer signed and the signed PDF was stored. Null until then.
+                signers:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Signer'
+                signed_pdf:
+                  description: The PDF with the signatures. Null until every signer has signed.
+                  oneOf:
+                    - type: object
+                      required:
+                        - sha256
+                        - size
+                        - download_url
+                      properties:
+                        sha256:
+                          type: string
+                          pattern: ^[0-9a-f]{64}$
+                        size:
+                          type: integer
+                          description: Bytes.
+                        download_url:
+                          type: string
+                          description: The path of the file, relative to the host.
+                    - type: 'null'
+            - type: 'null'
+        abilities:
+          type: object
+          description: What the owner of the token may do with this version right now, with their role and the state of the version.
+          required:
+            - delete
+            - cancel_signature
+            - retry_signature
+          properties:
+            delete:
+              type: boolean
+              description: Owners of the workspace.
+            cancel_signature:
+              type: boolean
+              description: Editors and owners, while the signers are awaited.
+            retry_signature:
+              type: boolean
+              description: Editors and owners, for a completed version whose request for signatures failed.
     TemplateBase:
       type: object
       description: What a template is called and where to read about it. The list and the detail share it.

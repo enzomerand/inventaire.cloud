@@ -10,6 +10,7 @@ use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\Workspace;
+use App\Signatures\EnvelopeCleanup;
 use App\Workspaces\Locks;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Model;
@@ -47,12 +48,13 @@ final class AttachmentCleanup
     private static ?WeakMap $collected = null;
 
     /**
-     * Gets the database, the storage that purges files and the counter of the workspace.
+     * Gets the database, the storage that purges files, the counter of the workspace and what cancels the open signature requests.
      */
     public function __construct(
         private readonly DatabaseManager $db,
         private readonly AttachmentStorage $storage,
         private readonly WorkspaceStorage $usage,
+        private readonly EnvelopeCleanup $envelopes,
     ) {}
 
     /**
@@ -83,31 +85,39 @@ final class AttachmentCleanup
     }
 
     /**
-     * Counts the files of an inventory that is about to be deleted out of the storage of its workspace. Their rows go with
-     * the inventory (the foreign key cascades) and their deletion from the disk is queued by {@see self::purgeCollected()}
-     * (the `deleted` event of the inventory), after {@see self::collectForInventory()} (its `deleting` event) worked it out.
+     * Counts the files of an inventory that is about to be deleted out of the storage of its workspace: those of its items, and
+     * what its official versions count (`counted_bytes`: their snapshots and PDFs). Their rows go with the inventory (the foreign key
+     * cascades) and their deletion from the disk is queued by {@see self::purgeCollected()} (the `deleted` event of the inventory),
+     * after {@see self::collectForInventory()} (its `deleting` event) worked it out.
      *
      * @param  Workspace  $workspace  The workspace of the inventory, locked.
      */
     public function releaseInventory(Workspace $workspace, Inventory $inventory): void
     {
-        $this->usage->move($workspace, -(int) $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->sum('size'));
+        $files = (int) $this->db->table('attachments')->where('inventory_id', $inventory->getKey())->sum('size');
+        $versions = (int) $this->db->table('inventory_versions')->where('inventory_id', $inventory->getKey())->sum('counted_bytes');
+
+        $this->usage->move($workspace, -($files + $versions));
     }
 
     /**
      * Works out the folder of an inventory that is being deleted, on every disk its files were written to, to be queued by
      * {@see self::purgeCollected()} once the inventory is really gone. Called by the `deleting` event of {@see Inventory}, so
-     * that every way of deleting an inventory through its model does it. Collects nothing for an inventory that holds no file and no
-     * export.
+     * that every way of deleting an inventory through its model does it. Collects no folder for an inventory that holds no file and no
+     * export. It also remembers the requests for signatures of its versions that are still open at Documenso, to be cancelled in the
+     * background ({@see EnvelopeCleanup}).
      */
     public function collectForInventory(Inventory $inventory): void
     {
-        // The exports and the imports of the inventory are stored under its folder too (see AttachmentStorage::exportDirectory()
-        // and AttachmentStorage::importDirectory()).
+        $this->envelopes->collectForInventory($inventory);
+
+        // The exports, the imports and the official versions of the inventory are stored under its folder too (see
+        // AttachmentStorage::exportDirectory(), AttachmentStorage::importDirectory() and AttachmentStorage::versionDirectory()).
         $disks = [
             ...$this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('exports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('imports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
+            ...$this->db->table('inventory_versions')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
         ];
 
         if ($disks === []) {
@@ -129,10 +139,13 @@ final class AttachmentCleanup
      *
      * The disks are the ones the files of its inventories were written to, and always the one new files are written to:
      * an upload writes its file before its row is committed, so a file may be on the disk with no row to say which one.
-     * Deleting a folder that does not exist is harmless.
+     * Deleting a folder that does not exist is harmless. It also remembers the requests for signatures of the versions of its
+     * inventories that are still open at Documenso, to be cancelled in the background ({@see EnvelopeCleanup}).
      */
     public function collectForWorkspace(Workspace $workspace): void
     {
+        $this->envelopes->collectForWorkspace($workspace);
+
         $disks = [
             ...$this->db->table('attachments')
                 ->join('inventories', 'inventories.id', '=', 'attachments.inventory_id')
@@ -140,7 +153,7 @@ final class AttachmentCleanup
                 ->distinct()
                 ->pluck('attachments.disk')
                 ->all(),
-            // The exports and the imports are stored under the folder of their inventory too.
+            // The exports, the imports and the official versions are stored under the folder of their inventory too.
             ...$this->db->table('exports')
                 ->join('inventories', 'inventories.id', '=', 'exports.inventory_id')
                 ->where('inventories.workspace_id', $workspace->getKey())
@@ -153,6 +166,12 @@ final class AttachmentCleanup
                 ->distinct()
                 ->pluck('imports.disk')
                 ->all(),
+            ...$this->db->table('inventory_versions')
+                ->join('inventories', 'inventories.id', '=', 'inventory_versions.inventory_id')
+                ->where('inventories.workspace_id', $workspace->getKey())
+                ->distinct()
+                ->pluck('inventory_versions.disk')
+                ->all(),
         ];
 
         $this->remember($workspace, [...array_map(strval(...), $disks), $this->storage->diskName()], AttachmentStorage::workspaceDirectory($workspace->ulid));
@@ -161,10 +180,12 @@ final class AttachmentCleanup
     /**
      * Queues the deletion of the folders collected for a model that has just been deleted (an inventory, a workspace or an
      * account), to be run once the transaction that deletes it is committed (at once when there is none). Called by the
-     * `deleted` event of those models.
+     * `deleted` event of those models. The cancellation of the open signature requests collected for the model is queued with them.
      */
     public function purgeCollected(Model $model): void
     {
+        $this->envelopes->dispatchCollected($model);
+
         $collected = self::collected();
         $folders = $collected[$model] ?? [];
         $this->drop($model);

@@ -80,7 +80,8 @@ class AppServiceProvider extends ServiceProvider
      * of the catalogue of templates, keyed on the user when there is one, else on the network: the one of its API endpoints
      * (`templates_per_minute`) and the one of its public pages and the sitemap (`public_pages_per_minute`), which do not
      * share a count. And the one of the endpoint that asks for an export (`exports_per_minute`), keyed on the user, and the one of the endpoints
-     * that read the file of an import (`imports_per_minute`), keyed on the user too.
+     * that read the file of an import (`imports_per_minute`), keyed on the user too, and the one of the endpoint that freezes an inventory as an
+     * official version (`versions_per_hour`), keyed on the user as well.
      */
     private function registerInventoryLimiters(): void
     {
@@ -105,6 +106,10 @@ class AppServiceProvider extends ServiceProvider
         // Sending a file to import, or reading it again with other options, reads a whole file (`imports_per_minute`), keyed on the user.
         RateLimiter::for('imports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.imports_per_minute'))
             ->by('imports:'.$this->signedInKey($request)));
+
+        // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
+        RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))
+            ->by('official-versions:'.$this->signedInKey($request)));
     }
 
     /**

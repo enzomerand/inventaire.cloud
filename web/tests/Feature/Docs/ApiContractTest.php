@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Inventories\Exports\ExportFormat;
+use App\Inventories\Versions\SignatureError;
+use App\Inventories\Versions\SignatureStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 
@@ -282,6 +284,73 @@ function contractScenarios(): array
             $uri = contractUri($world['inventory'], "/imports/{$sent->json('data.id')}/start");
 
             contractCheck(contractCall($test, $world['owner'], 'startImport', 'POST', $uri, ['mapping' => $sent->json('data.mapping')]), 'startImport', 202);
+        },
+
+        'listVersions' => function (object $test): void {
+            $world = contractWorld();
+            contractVersion($world);
+            contractVersion($world, versionSigners(2), 'Year end');
+
+            contractCheck(contractCall($test, $world['owner'], 'listVersions', 'GET', contractUri($world['inventory'], '/versions')), 'listVersions', 200);
+        },
+
+        'createVersion' => function (object $test): void {
+            Queue::fake();
+            versionDocumenso();
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'createVersion', 'POST', contractUri($world['inventory'], '/versions'), ['label' => 'Year end', 'signers' => versionSigners(2)]), 'createVersion', 202);
+        },
+
+        'getVersion' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world, versionSigners(1), 'Year end');
+
+            contractCheck(contractCall($test, $world['owner'], 'getVersion', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}")), 'getVersion', 200);
+        },
+
+        'deleteVersion' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'deleteVersion', 'DELETE', contractUri($world['inventory'], "/versions/{$version->ulid}")), 'deleteVersion', 204);
+        },
+
+        'downloadVersionPdf' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'downloadVersionPdf', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/pdf")), 'downloadVersionPdf', 200, 'application/pdf');
+        },
+
+        'downloadVersionSnapshot' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'downloadVersionSnapshot', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/snapshot")), 'downloadVersionSnapshot', 200, 'application/json');
+        },
+
+        'downloadVersionSignedPdf' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractSigned($world);
+
+            contractCheck(contractCall($test, $world['owner'], 'downloadVersionSignedPdf', 'GET', contractUri($world['inventory'], "/versions/{$version->ulid}/signed-pdf")), 'downloadVersionSignedPdf', 200, 'application/pdf');
+        },
+
+        'cancelVersionSignature' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world, versionSigners(2));
+
+            contractCheck(contractCall($test, $world['owner'], 'cancelVersionSignature', 'POST', contractUri($world['inventory'], "/versions/{$version->ulid}/signature/cancel")), 'cancelVersionSignature', 200);
+        },
+
+        'retryVersionSignature' => function (object $test): void {
+            $world = contractWorld();
+            $version = contractVersion($world, versionSigners(2));
+            $version->forceFill(['signature_status' => SignatureStatus::Failed, 'signature_error' => SignatureError::DocumensoUnavailable])->save();
+            Queue::fake();
+
+            contractCheck(contractCall($test, $world['owner'], 'retryVersionSignature', 'POST', contractUri($world['inventory'], "/versions/{$version->ulid}/signature/retry")), 'retryVersionSignature', 202);
         },
 
         'listTemplates' => function (object $test): void {

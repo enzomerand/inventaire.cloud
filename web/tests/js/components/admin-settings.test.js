@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import adminSettings from '../../../resources/js/components/admin-settings.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
@@ -15,6 +15,9 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
         ({
             'admin.settings.notice.opened': 'Sign-ups are open',
             'admin.settings.notice.closed': 'Sign-ups are closed',
+            'admin.settings.select_hint': 'The address is selected: copy it with your keyboard.',
+            'tokens.copy': 'Copy',
+            'tokens.copied': 'Copied',
         })[key] ?? key,
 }));
 
@@ -109,5 +112,119 @@ describe('administration settings page', () => {
 
         expect(http.put).not.toHaveBeenCalled();
         expect(checkbox.target.checked).toBe(true);
+    });
+
+    describe('the state of the e-signature service', () => {
+        const ADDRESS = 'https://inventaire.example/webhooks/documenso';
+
+        beforeEach(() => {
+            vi.useFakeTimers();
+            component.$root.dataset.documensoConfigured = '1';
+            component.$root.dataset.documensoSecret = '0';
+            component.$root.dataset.webhookUrl = ADDRESS;
+            component.$refs = { webhook: { select: vi.fn() } };
+            component.$nextTick = (callback) => callback();
+            component.init();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+            Reflect.deleteProperty(navigator, 'clipboard');
+            Reflect.deleteProperty(document, 'execCommand');
+        });
+
+        it('reads whether the service and the webhook secret are set, and the address of the webhook', () => {
+            expect(component.documensoConfigured).toBe(true);
+            expect(component.webhookSecretConfigured).toBe(false);
+            expect(component.webhookUrl).toBe(ADDRESS);
+        });
+
+        it('takes a page that says nothing for an instance with no service', () => {
+            component.$root.dataset = { url: URL };
+            component.init();
+
+            expect(component.documensoConfigured).toBe(false);
+            expect(component.webhookSecretConfigured).toBe(false);
+            expect(component.webhookUrl).toBe('');
+        });
+
+        it('copies the address, says so for a moment, and tells it in the live region', async () => {
+            const writeText = vi.fn().mockResolvedValue(undefined);
+
+            Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+            await component.copyWebhook();
+
+            expect(writeText).toHaveBeenCalledWith(ADDRESS);
+            expect(component.copied).toBe(true);
+            expect(component.copyLabel).toBe('Copied');
+            expect(component.announcement).toBe('Copied');
+
+            vi.advanceTimersByTime(2000);
+
+            expect(component.copied).toBe(false);
+            expect(component.copyLabel).toBe('Copy');
+        });
+
+        it('stops the timer of the button when the page is taken apart, so that nothing fires on a component that is gone', async () => {
+            Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText: vi.fn().mockResolvedValue(undefined) },
+                configurable: true,
+            });
+
+            await component.copyWebhook();
+
+            expect(component.copiedTimer).not.toBeNull();
+            expect(vi.getTimerCount()).toBe(1);
+
+            component.destroy();
+
+            expect(vi.getTimerCount()).toBe(0);
+            expect(component.copiedTimer).toBeNull();
+
+            vi.advanceTimersByTime(5000);
+
+            // The timer never fired: the button still says what it said when the component went.
+            expect(component.copied).toBe(true);
+        });
+
+        it('has nothing to stop when nothing was copied', () => {
+            expect(() => component.destroy()).not.toThrow();
+            expect(component.copiedTimer).toBeNull();
+        });
+
+        it('selects the address and copies the selection when the page may not write to the clipboard', async () => {
+            Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+                configurable: true,
+            });
+            document.execCommand = vi.fn().mockReturnValue(true);
+
+            await component.copyWebhook();
+
+            expect(component.$refs.webhook.select).toHaveBeenCalled();
+            expect(document.execCommand).toHaveBeenCalledWith('copy');
+            expect(component.copied).toBe(true);
+        });
+
+        it('tells to copy by hand when nothing could be copied', async () => {
+            document.execCommand = vi.fn().mockReturnValue(false);
+
+            await component.copyWebhook();
+
+            expect(component.copied).toBe(false);
+            expect(component.announcement).toBe('The address is selected: copy it with your keyboard.');
+        });
+
+        it('tells to copy by hand when the browser refuses the command', async () => {
+            document.execCommand = vi.fn().mockImplementation(() => {
+                throw new Error('not allowed');
+            });
+
+            await component.copyWebhook();
+
+            expect(component.copied).toBe(false);
+            expect(component.announcement).toBe('The address is selected: copy it with your keyboard.');
+        });
     });
 });

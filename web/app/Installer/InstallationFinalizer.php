@@ -86,25 +86,32 @@ final class InstallationFinalizer
             ]);
         }
 
-        // Creating dozens of tables can outlast the default execution limit of a web request.
+        // Creating dozens of tables can outlast the default execution limit of a web request. The limit is a timer of the whole process,
+        // which goes on after the installation in a command or in a run of tests (the same process runs thousands of them): it is put back
+        // as it was, so that it does not go off, or deliver a signal to whatever handles it, five minutes later.
+        $limit = (int) ini_get('max_execution_time');
         @set_time_limit(300);
 
-        // 1. The tables. 2. Whatever else needs them. 3. Settings. 4. The marker, which ends the installation: last.
-        $this->migrator->onConnection($this->connection(), function (): void {
-            $this->migrator->migrate();
-            $this->runHooks();
-        });
+        try {
+            // 1. The tables. 2. Whatever else needs them. 3. Settings. 4. The marker, which ends the installation: last.
+            $this->migrator->onConnection($this->connection(), function (): void {
+                $this->migrator->migrate();
+                $this->runHooks();
+            });
 
-        if ($productionDefaults) {
-            $this->applyProductionDefaults();
+            if ($productionDefaults) {
+                $this->applyProductionDefaults();
+            }
+
+            // A stale cache would keep serving the old settings. getCachedConfigPath() honours APP_CONFIG_CACHE, so tests clear their own file.
+            @unlink($this->app->getCachedConfigPath());
+
+            $this->state->markInstalled();
+            $this->token->forget();
+            $this->state->forgetProgress();
+        } finally {
+            @set_time_limit($limit);
         }
-
-        // A stale cache would keep serving the old settings. getCachedConfigPath() honours APP_CONFIG_CACHE, so tests clear their own file.
-        @unlink($this->app->getCachedConfigPath());
-
-        $this->state->markInstalled();
-        $this->token->forget();
-        $this->state->forgetProgress();
 
         return route('login', absolute: false);
     }

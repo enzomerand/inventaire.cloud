@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\FieldTypeController;
 use App\Http\Controllers\Api\V1\ImportController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryFieldController;
+use App\Http\Controllers\Api\V1\InventoryVersionController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
@@ -107,6 +108,11 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 Route::get('/inventories/{inventory}/exports/{export}/download', [ExportController::class, 'download'])->name('inventories.exports.download');
                 Route::get('/inventories/{inventory}/imports', [ImportController::class, 'index'])->name('inventories.imports.index');
                 Route::get('/inventories/{inventory}/imports/{import}', [ImportController::class, 'show'])->name('inventories.imports.show');
+                Route::get('/inventories/{inventory}/versions', [InventoryVersionController::class, 'index'])->name('inventories.versions.index');
+                Route::get('/inventories/{inventory}/versions/{version}', [InventoryVersionController::class, 'show'])->name('inventories.versions.show');
+                Route::get('/inventories/{inventory}/versions/{version}/pdf', [InventoryVersionController::class, 'pdf'])->name('inventories.versions.pdf');
+                Route::get('/inventories/{inventory}/versions/{version}/snapshot', [InventoryVersionController::class, 'snapshot'])->name('inventories.versions.snapshot');
+                Route::get('/inventories/{inventory}/versions/{version}/signed-pdf', [InventoryVersionController::class, 'signedPdf'])->name('inventories.versions.signed-pdf');
             });
         });
 
@@ -131,6 +137,17 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::patch('/inventories/{inventory}/imports/{import}', [ImportController::class, 'update'])->middleware('throttle:imports')->name('inventories.imports.update');
             Route::post('/inventories/{inventory}/imports/{import}/start', [ImportController::class, 'start'])->name('inventories.imports.start');
             Route::delete('/inventories/{inventory}/imports/{import}', [ImportController::class, 'destroy'])->name('inventories.imports.destroy');
+
+            // Official versions: the inventory frozen as a numbered, dated state, with a PDF and, if asked, a request for signatures. They
+            // belong to the inventory, not to the person who froze it: whoever can see the inventory sees them. Freezing is for editors and
+            // owners (and counted per person, since it locks the inventory while it reads every item), deleting for owners.
+            Route::post('/inventories/{inventory}/versions', [InventoryVersionController::class, 'store'])->middleware('throttle:official-versions')->name('inventories.versions.store');
+            Route::delete('/inventories/{inventory}/versions/{version}', [InventoryVersionController::class, 'destroy'])->name('inventories.versions.destroy');
+
+            // The request for signatures of a version: cancelling it while its signers are awaited (Documenso is asked at once) and sending
+            // it again after it failed. Editors and owners, like asking for signatures in the first place.
+            Route::post('/inventories/{inventory}/versions/{version}/signature/cancel', [InventoryVersionController::class, 'cancelSignature'])->name('inventories.versions.signature.cancel');
+            Route::post('/inventories/{inventory}/versions/{version}/signature/retry', [InventoryVersionController::class, 'retrySignature'])->name('inventories.versions.signature.retry');
         });
 
         // Managing: the structure. Workspaces, the inventories in them and their fields.

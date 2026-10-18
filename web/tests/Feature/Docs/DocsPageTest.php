@@ -168,7 +168,7 @@ describe('the page', function (): void {
         // The commands are focusable and scroll; the code of the introduction is a block Bootstrap lets scroll too.
         $commands = $page->query('//article//pre') ?: [];
 
-        expect($commands->length)->toBe(38);
+        expect($commands->length)->toBe(47);
 
         foreach ($commands as $pre) {
             /** @var DOMElement $pre */

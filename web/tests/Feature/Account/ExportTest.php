@@ -71,8 +71,8 @@ describe('the export of the account', function (): void {
         $workspaces = $this->actingAs($user)->getJson('/api/v1/me/export', frontend())->assertOk()->json('workspaces');
 
         expect($workspaces)->toBe([
-            ['id' => $personal->ulid, 'name' => 'Espace personnel', 'role' => 'owner', 'is_current' => true, 'created_at' => $personal->created_at->toIso8601String(), 'updated_at' => $personal->updated_at->toIso8601String(), 'revisions_written' => 0, 'files_uploaded' => ['count' => 0, 'bytes' => 0], 'inventories' => []],
-            ['id' => $shared->ulid, 'name' => 'Hers', 'role' => 'viewer', 'is_current' => false, 'created_at' => $shared->created_at->toIso8601String(), 'updated_at' => $shared->updated_at->toIso8601String(), 'revisions_written' => 0, 'files_uploaded' => ['count' => 0, 'bytes' => 0], 'inventories' => []],
+            ['id' => $personal->ulid, 'name' => 'Espace personnel', 'role' => 'owner', 'is_current' => true, 'created_at' => $personal->created_at->toIso8601String(), 'updated_at' => $personal->updated_at->toIso8601String(), 'revisions_written' => 0, 'files_uploaded' => ['count' => 0, 'bytes' => 0], 'official_versions_created' => 0, 'inventories' => []],
+            ['id' => $shared->ulid, 'name' => 'Hers', 'role' => 'viewer', 'is_current' => false, 'created_at' => $shared->created_at->toIso8601String(), 'updated_at' => $shared->updated_at->toIso8601String(), 'revisions_written' => 0, 'files_uploaded' => ['count' => 0, 'bytes' => 0], 'official_versions_created' => 0, 'inventories' => []],
         ]);
     });
 
