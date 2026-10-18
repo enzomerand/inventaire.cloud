@@ -41,6 +41,34 @@ beforeEach(function (): void {
 });
 
 /**
+ * Remembers the signals of the process as they are, and gives what puts them back: the handlers, whether they are delivered at once, and
+ * the alarm.
+ *
+ * A queue worker that does not stop after one job (`queue:work` without `--once`) listens for signals for the rest of the process: it
+ * delivers them at once, and its handlers stay in place, one of them (the alarm) to stop a job that runs too long. They belong to the
+ * application of the test that started the worker, which is gone with the test: a signal that comes later, in another test, would run
+ * them against a container that was emptied, and the handler of the alarm ends the process.
+ *
+ * @return Closure(): void
+ */
+function exportKeepSignals(): Closure
+{
+    $signals = [SIGALRM, SIGQUIT, SIGTERM, SIGINT, SIGUSR2, SIGCONT];
+    $handlers = array_map(pcntl_signal_get_handler(...), $signals);
+    $async = pcntl_async_signals();
+
+    return function () use ($signals, $handlers, $async): void {
+        pcntl_alarm(0);
+
+        foreach ($signals as $index => $signal) {
+            pcntl_signal($signal, $handlers[$index]);
+        }
+
+        pcntl_async_signals($async);
+    };
+}
+
+/**
  * The files of the exports on the fake disk.
  *
  * @return list<string>
@@ -560,8 +588,15 @@ describe('the job', function (): void {
 
         expect(DB::table('jobs')->where('queue', 'exports')->count())->toBe(2);
 
-        // The memory of the worker is the one of the whole test run: the default limit of the command (128 MB) would stop it.
-        $this->artisan('queue:work', ['--queue' => 'default,exports', '--stop-when-empty' => true, '--memory' => 8192])->assertSuccessful();
+        // The signals are as they were before the worker listened for them: see exportKeepSignals().
+        $restoreSignals = exportKeepSignals();
+
+        try {
+            // The memory of the worker is the one of the whole test run: the default limit of the command (128 MB) would stop it.
+            $this->artisan('queue:work', ['--queue' => 'default,exports', '--stop-when-empty' => true, '--memory' => 8192])->assertSuccessful();
+        } finally {
+            $restoreSignals();
+        }
 
         expect(DB::table('jobs')->count())->toBe(0)
             ->and(DB::table('failed_jobs')->count())->toBe(0)
