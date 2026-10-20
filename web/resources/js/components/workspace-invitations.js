@@ -73,6 +73,14 @@ export default function workspaceInvitations() {
             return this.rootElement.dataset.url;
         },
 
+        /**
+         * Whether a request is in flight for any invitation. Only one at a time is made (`resend()` and `withdraw()` ignore a click
+         * while another is in flight), so the buttons of every row are disabled meanwhile rather than left to do nothing.
+         */
+        get anyWorking() {
+            return this.workingId !== null;
+        },
+
         /** Whether the form can be submitted: an address, and nothing in flight. */
         get canInvite() {
             return !this.busy && this.form.email.trim() !== '';
@@ -292,6 +300,17 @@ export default function workspaceInvitations() {
          */
         confirmText(invitation) {
             return t('members.confirm_withdraw', { email: invitation.email });
+        },
+
+        /**
+         * The `id` of the element that holds the question of the confirmation of a withdrawal: the button that confirms points at it
+         * (`aria-describedby`).
+         *
+         * @param {SentInvitation} invitation
+         * @returns {string}
+         */
+        confirmTextId(invitation) {
+            return `invitation-confirm-text-${invitation.id}`;
         },
 
         /**

@@ -49,7 +49,7 @@
                         {{ __('Loading…') }}
                     </div>
 
-                    <div class="list-group-item" :hidden="!loadFailed">
+                    <div class="list-group-item" hidden :hidden="!loadFailed">
                         <div class="d-flex flex-wrap align-items-center gap-2">
                             <span class="text-danger" role="alert">{{ __('The members could not be loaded.') }}</span>
                             <button type="button" class="btn btn-sm" @click="load">{{ __('Try again') }}</button>
@@ -73,13 +73,14 @@
                                     <div class="col-12 col-md-auto" :hidden="!canManage(member)">
                                         <div :hidden="!isConfirming(member)">
                                             <div class="d-flex flex-wrap align-items-center gap-2">
-                                                <span class="fw-bold" x-text="confirmText(member)"></span>
+                                                <span class="fw-bold" :id="confirmTextId(member)" x-text="confirmText(member)"></span>
                                                 <button
                                                     type="button"
                                                     class="btn btn-sm"
                                                     :class="confirmClass"
                                                     data-member-action="confirm"
                                                     :data-member-id="member.id"
+                                                    :aria-describedby="confirmTextId(member)"
                                                     @click="confirm(member)"
                                                     :disabled="busy"
                                                 >
@@ -136,7 +137,7 @@
                 </div>
 
                 @if ($isOwner)
-                    <div class="card-footer" :hidden="!hasOthers">
+                    <div class="card-footer" hidden :hidden="!hasOthers">
                         <p class="text-secondary mb-0">{{ __('To leave this workspace, hand its ownership over to another member first.') }}</p>
                     </div>
                 @else
@@ -147,11 +148,11 @@
                                 {{ __('Leave this workspace') }}
                             </button>
                         </div>
-                        <div :hidden="!confirmingLeave">
+                        <div hidden :hidden="!confirmingLeave">
                             <div class="d-flex flex-wrap align-items-center gap-2">
-                                <span class="fw-bold" x-text="leaveConfirmText"></span>
-                                <button type="button" class="btn btn-danger" data-focus="confirmLeave" @click="leave" :disabled="busy">
-                                    <span class="spinner-border spinner-border-sm me-2" :hidden="!busy" aria-hidden="true"></span>
+                                <span class="fw-bold" id="member-leave-text" x-text="leaveConfirmText"></span>
+                                <button type="button" class="btn btn-danger" data-focus="confirmLeave" aria-describedby="member-leave-text" @click="leave" :disabled="busy">
+                                    <span class="spinner-border spinner-border-sm me-2" hidden :hidden="!busy" aria-hidden="true"></span>
                                     {{ __('Leave') }}
                                 </button>
                                 <button type="button" class="btn" @click="cancelLeave" :disabled="busy">{{ __('Cancel') }}</button>
@@ -176,7 +177,7 @@
                         <form class="card-body" @submit.prevent="invite" novalidate>
                             <p class="text-secondary">{{ __('We email an invitation to this address. The person signs in with it, then accepts or declines.') }}</p>
 
-                            <div class="alert alert-danger" role="alert" :hidden="!formError" x-text="formError"></div>
+                            <div class="alert alert-danger" role="alert" hidden :hidden="!formError" x-text="formError"></div>
 
                             <div class="mb-3">
                                 <label class="form-label required" for="member-invite-email">{{ __('Email address') }}</label>
@@ -217,7 +218,7 @@
                             </div>
 
                             <button type="submit" class="btn btn-primary w-100" :disabled="!canInvite">
-                                <span class="spinner-border spinner-border-sm me-2" :hidden="!busy" aria-hidden="true"></span>
+                                <span class="spinner-border spinner-border-sm me-2" hidden :hidden="!busy" aria-hidden="true"></span>
                                 <x-tabler-send aria-hidden="true" />
                                 {{ __('Send the invitation') }}
                             </button>
@@ -235,9 +236,9 @@
                                 {{ __('Loading…') }}
                             </div>
 
-                            <div class="list-group-item text-secondary" :hidden="!empty">{{ __('No invitation is waiting for an answer.') }}</div>
+                            <div class="list-group-item text-secondary" hidden :hidden="!empty">{{ __('No invitation is waiting for an answer.') }}</div>
 
-                            <div class="list-group-item" :hidden="!loadFailed">
+                            <div class="list-group-item" hidden :hidden="!loadFailed">
                                 <div class="d-flex flex-wrap align-items-center gap-2">
                                     <span class="text-danger" role="alert">{{ __('The invitations could not be loaded.') }}</span>
                                     <button type="button" class="btn btn-sm" @click="load">{{ __('Try again') }}</button>
@@ -254,19 +255,20 @@
 
                                     <div :hidden="!isConfirming(invitation)">
                                         <div class="d-flex flex-wrap align-items-center gap-2">
-                                            <span class="fw-bold" x-text="confirmText(invitation)"></span>
+                                            <span class="fw-bold" :id="confirmTextId(invitation)" x-text="confirmText(invitation)"></span>
                                             <button
                                                 type="button"
                                                 class="btn btn-sm btn-danger"
                                                 data-invitation-action="confirm"
                                                 :data-invitation-id="invitation.id"
+                                                :aria-describedby="confirmTextId(invitation)"
                                                 @click="withdraw(invitation)"
-                                                :disabled="isWorking(invitation)"
+                                                :disabled="anyWorking"
                                             >
                                                 <span class="spinner-border spinner-border-sm me-2" :hidden="!isWorking(invitation)" aria-hidden="true"></span>
                                                 {{ __('Withdraw') }}
                                             </button>
-                                            <button type="button" class="btn btn-sm" @click="cancelWithdraw" :disabled="isWorking(invitation)">{{ __('Cancel') }}</button>
+                                            <button type="button" class="btn btn-sm" @click="cancelWithdraw" :disabled="anyWorking">{{ __('Cancel') }}</button>
                                         </div>
                                     </div>
                                     <div :hidden="isConfirming(invitation)">
@@ -276,7 +278,7 @@
                                                 class="btn btn-sm"
                                                 :aria-label="resendLabel(invitation)"
                                                 @click="resend(invitation)"
-                                                :disabled="isWorking(invitation)"
+                                                :disabled="anyWorking"
                                             >
                                                 <span class="spinner-border spinner-border-sm me-2" :hidden="!isWorking(invitation)" aria-hidden="true"></span>
                                                 <x-tabler-refresh aria-hidden="true" />
@@ -289,7 +291,7 @@
                                                 :data-invitation-id="invitation.id"
                                                 :aria-label="withdrawLabel(invitation)"
                                                 @click="askWithdraw(invitation)"
-                                                :disabled="isWorking(invitation)"
+                                                :disabled="anyWorking"
                                             >{{ __('Withdraw') }}</button>
                                         </div>
                                     </div>

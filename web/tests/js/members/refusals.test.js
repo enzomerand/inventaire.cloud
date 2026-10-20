@@ -21,11 +21,6 @@ describe('the words of the refusals of the members API', () => {
             'The role of the owner cannot be changed: hand the ownership over to another member instead.',
         ],
         [
-            'cannot_remove_owner',
-            409,
-            'The owner cannot be removed from the workspace: hand the ownership over to another member first.',
-        ],
-        [
             'owner_cannot_leave',
             409,
             'The owner cannot leave the workspace: hand the ownership over to another member first.',

@@ -134,6 +134,17 @@ describe('the invitations of the members page', () => {
             expect(component.confirmText(sent)).toBe('Withdraw the invitation sent to a@example.test?');
             expect(component.resendLabel(sent)).toBe('Send again: a@example.test');
             expect(component.withdrawLabel(sent)).toBe('Withdraw the invitation sent to a@example.test');
+            expect(component.confirmTextId(sent)).toBe('invitation-confirm-text-a');
+        });
+
+        it('says whether a request is in flight for any row, so that the buttons of all of them are disabled meanwhile', () => {
+            expect(component.anyWorking).toBe(false);
+
+            component.workingId = 'b';
+
+            expect(component.anyWorking).toBe(true);
+            expect(component.isWorking(invitation('b'))).toBe(true);
+            expect(component.isWorking(invitation('a'))).toBe(false);
         });
     });
 

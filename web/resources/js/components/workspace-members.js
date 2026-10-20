@@ -255,6 +255,17 @@ export default function workspaceMembers() {
         },
 
         /**
+         * The `id` of the element that holds the question of a member's confirmation: the button that confirms points at it
+         * (`aria-describedby`), so that a screen reader says what is being confirmed along with the button.
+         *
+         * @param {Member} member
+         * @returns {string}
+         */
+        confirmTextId(member) {
+            return `member-confirm-text-${member.id}`;
+        },
+
+        /**
          * Asks for the confirmation of the removal of a member.
          *
          * @param {Member} member
@@ -377,7 +388,7 @@ export default function workspaceMembers() {
             this.busy = true;
 
             try {
-                await http.post(this.transferUrl, { user_id: member.id });
+                await http.post(this.transferUrl, { member_id: member.id });
             } catch (error) {
                 this.busy = false;
                 this.fail(error);
@@ -473,6 +484,11 @@ export default function workspaceMembers() {
 
             if (error.code === 'not_owner') {
                 scheduleNavigation(reloadPage);
+
+                // Said whether or not the helper reported: its own words for a 403 do not say why, these do.
+                notify('danger', t('members.error.not_owner'));
+
+                return;
             }
 
             if (!error.reported) {

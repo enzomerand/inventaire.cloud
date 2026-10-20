@@ -139,6 +139,7 @@ describe('the page of the invitations addressed to the person', () => {
             expect(component.acceptLabel(received)).toBe('Accept the invitation to Workspace a');
             expect(component.declineLabel(received)).toBe('Decline the invitation to Workspace a');
             expect(component.declineText(received)).toBe('Decline the invitation to Workspace a?');
+            expect(component.declineTextId(received)).toBe(`invitation-decline-text-${received.id}`);
         });
     });
 

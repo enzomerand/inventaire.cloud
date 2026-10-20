@@ -32,7 +32,7 @@
             {{ __('Loading…') }}
         </p>
 
-        <div class="alert alert-danger" role="alert" :hidden="!loadFailed">
+        <div class="alert alert-danger" role="alert" hidden :hidden="!loadFailed">
             <div class="d-flex align-items-center gap-3">
                 <span>{{ __('Your invitations could not be loaded.') }}</span>
                 <button type="button" class="btn btn-sm ms-auto" @click="load" :disabled="loading">{{ __('Try again') }}</button>
@@ -53,12 +53,13 @@
 
                             <div :hidden="!isConfirming(invitation)">
                                 <div class="d-flex flex-wrap align-items-center gap-2">
-                                    <span class="fw-bold" x-text="declineText(invitation)"></span>
+                                    <span class="fw-bold" :id="declineTextId(invitation)" x-text="declineText(invitation)"></span>
                                     <button
                                         type="button"
                                         class="btn btn-danger"
                                         data-invitation-action="confirm"
                                         :data-invitation-id="invitation.id"
+                                        :aria-describedby="declineTextId(invitation)"
                                         @click="decline(invitation)"
                                         :disabled="busy"
                                     >
@@ -100,7 +101,7 @@
             </template>
         </div>
 
-        <div class="card" :hidden="!empty">
+        <div class="card" hidden :hidden="!empty">
             <div class="card-body">
                 <div class="empty">
                     <div class="empty-icon hero-icon text-primary">

@@ -317,8 +317,6 @@ export const MESSAGES = {
     'members.error.already_invited': 'An invitation to this address is already waiting for an answer.',
     'members.error.cannot_change_owner_role':
         'The role of the owner cannot be changed: hand the ownership over to another member instead.',
-    'members.error.cannot_remove_owner':
-        'The owner cannot be removed from the workspace: hand the ownership over to another member first.',
     'members.error.owner_cannot_leave':
         'The owner cannot leave the workspace: hand the ownership over to another member first.',
     'members.error.already_owner': 'This member is already the owner of the workspace.',

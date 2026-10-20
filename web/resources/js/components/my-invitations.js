@@ -182,6 +182,17 @@ export default function myInvitations() {
         },
 
         /**
+         * The `id` of the element that holds the question of the confirmation of a refusal: the button that confirms points at it
+         * (`aria-describedby`).
+         *
+         * @param {ReceivedInvitation} invitation
+         * @returns {string}
+         */
+        declineTextId(invitation) {
+            return `invitation-decline-text-${invitation.id}`;
+        },
+
+        /**
          * Whether the refusal of an invitation waits for its confirmation.
          *
          * @param {ReceivedInvitation} invitation

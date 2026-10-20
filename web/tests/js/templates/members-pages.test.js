@@ -392,7 +392,7 @@ describe('the members and invitations pages under the real Alpine CSP build', ()
 
             await press('Make owner', row);
 
-            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/transfer', { user_id: 'm-edgar' });
+            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/transfer', { member_id: 'm-edgar' });
             expect(notify).toHaveBeenCalledWith('success', expect.stringContaining('Edgar is now the owner'));
             scheduleNavigation.mock.calls[0][0]();
             expect(reloadPage).toHaveBeenCalledTimes(1);
@@ -685,6 +685,135 @@ describe('the members and invitations pages under the real Alpine CSP build', ()
 
             expect(visible(alert)).toBe(false);
             expect(visible(document.querySelector('.empty').closest('.card'))).toBe(true);
+        });
+    });
+    describe('before Alpine has started', () => {
+        /** The elements of a template, as plain HTML (nothing is mounted: this is the page as the browser first paints it). */
+        function painted(path, page = {}) {
+            const holder = document.createElement('div');
+            holder.innerHTML = render(path, page);
+
+            return holder;
+        }
+
+        it.each([
+            [
+                'app/workspace-members.blade.php',
+                { owner: true },
+                ['!loadFailed', '!hasOthers', '!formError', '!empty', '!busy'],
+            ],
+            ['app/workspace-members.blade.php', { owner: false }, ['!loadFailed', '!confirmingLeave', '!busy']],
+            ['app/invitations.blade.php', {}, ['!loadFailed', '!empty']],
+        ])('hides what only appears later: %s %j', (path, page, conditions) => {
+            const holder = painted(path, page);
+
+            for (const condition of conditions) {
+                const elements = holder.querySelectorAll(`[\\:hidden="${condition}"]`);
+
+                expect(elements.length, `an element hidden by ${condition}`).toBeGreaterThan(0);
+
+                for (const element of elements) {
+                    // Outside a template, which is only rendered once Alpine has started, and never on a display utility, which would win.
+                    if (element.closest('template')) {
+                        continue;
+                    }
+
+                    expect(element.hasAttribute('hidden'), `${condition} on <${element.tagName.toLowerCase()}>`).toBe(
+                        true,
+                    );
+                    expect(element.className, `${condition} on <${element.tagName.toLowerCase()}>`).not.toMatch(
+                        /(?:^|\s)d-/,
+                    );
+                }
+            }
+        });
+
+        it('shows what is there from the start', () => {
+            const holder = painted('app/workspace-members.blade.php', { owner: true });
+
+            expect(holder.querySelector('[\\:hidden="!loading"]').hasAttribute('hidden')).toBe(false);
+        });
+    });
+
+    describe('the questions that precede an irreversible action', () => {
+        it('are what the button that confirms is described by: removing a member', async () => {
+            await mount(['app/workspace-members.blade.php']);
+            const row = memberRows()[2];
+
+            await press('Remove Vera from the workspace', row);
+
+            const confirm = row.querySelector('[data-member-action="confirm"]');
+            const question = document.getElementById(confirm.getAttribute('aria-describedby'));
+
+            expect(question.textContent).toBe('Remove Vera from the workspace? They lose access at once.');
+            expect(memberRows().map((one) => one.querySelector('[id^="member-confirm-text-"]').id)).toEqual([
+                'member-confirm-text-m-olga',
+                'member-confirm-text-m-edgar',
+                'member-confirm-text-m-vera',
+            ]);
+        });
+
+        it('are what the button that confirms is described by: leaving the workspace', async () => {
+            answers[MEMBERS_URL] = { data: team({ asOwner: false }) };
+            await mount(['app/workspace-members.blade.php'], { owner: false });
+
+            await press('Leave this workspace');
+
+            const confirm = buttons('Leave').find((button) => button.getAttribute('data-focus') === 'confirmLeave');
+
+            expect(document.getElementById(confirm.getAttribute('aria-describedby')).textContent).toContain(
+                'Leave Shop?',
+            );
+        });
+
+        it('are what the button that confirms is described by: withdrawing an invitation', async () => {
+            await mount(['app/workspace-members.blade.php']);
+            const row = sentRows()[1];
+
+            await press('Withdraw the invitation sent to old@example.test', row);
+
+            const confirm = row.querySelector('[data-invitation-action="confirm"]');
+
+            expect(document.getElementById(confirm.getAttribute('aria-describedby')).textContent).toBe(
+                'Withdraw the invitation sent to old@example.test?',
+            );
+        });
+
+        it('are what the button that confirms is described by: declining an invitation', async () => {
+            await mount(['app/invitations.blade.php'], { waiting: 2 });
+            const card = cards()[0];
+
+            await press('Decline the invitation to Warehouse', card);
+
+            const confirm = card.querySelector('[data-invitation-action="confirm"]');
+
+            expect(document.getElementById(confirm.getAttribute('aria-describedby')).textContent).toBe(
+                'Decline the invitation to Warehouse?',
+            );
+        });
+    });
+
+    describe('while a request is in flight for an invitation', () => {
+        it('disables the buttons of every row, not only the one it is about', async () => {
+            let finish;
+            http.post.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+            await mount(['app/workspace-members.blade.php']);
+            const [first, second] = sentRows();
+
+            await press('Send again: new@example.test', first);
+
+            for (const row of [first, second]) {
+                expect([...row.querySelectorAll('button')].filter(visible).every((button) => button.disabled)).toBe(
+                    true,
+                );
+            }
+
+            finish({ data: sent('i-2', 'new@example.test', 'viewer') });
+            await flush();
+
+            expect([...second.querySelectorAll('button')].filter(visible).some((button) => button.disabled)).toBe(
+                false,
+            );
         });
     });
 });

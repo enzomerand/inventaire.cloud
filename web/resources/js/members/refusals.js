@@ -14,7 +14,6 @@ const MESSAGE_KEYS = {
     already_member: 'members.error.already_member',
     already_invited: 'members.error.already_invited',
     cannot_change_owner_role: 'members.error.cannot_change_owner_role',
-    cannot_remove_owner: 'members.error.cannot_remove_owner',
     owner_cannot_leave: 'members.error.owner_cannot_leave',
     already_owner: 'members.error.already_owner',
 };

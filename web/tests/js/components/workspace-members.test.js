@@ -280,6 +280,18 @@ describe('the members page of a workspace', () => {
             expect(scheduleNavigation).toHaveBeenCalledWith(reloadPage);
         });
 
+        it('says why even when the helper already gave its own words for the 403', async () => {
+            const refused = new HttpError(403, 'You are not allowed to do this.', { code: 'not_owner', body: {} });
+            refused.reported = true;
+            http.patch.mockRejectedValue(refused);
+
+            await component.changeRole(component.members[1], chosen('viewer'));
+
+            expect(notify).toHaveBeenCalledTimes(1);
+            expect(notify).toHaveBeenCalledWith('danger', 'Only an owner of this workspace can manage it.');
+            expect(scheduleNavigation).toHaveBeenCalledWith(reloadPage);
+        });
+
         it('stays quiet when the request was cancelled', async () => {
             http.patch.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
             const select = chosen('viewer');
@@ -312,6 +324,7 @@ describe('the members page of a workspace', () => {
             expect(component.confirmText(editor)).toBe(
                 'Remove Member m-ed from the workspace? They lose access at once.',
             );
+            expect(component.confirmTextId(editor)).toBe('member-confirm-text-m-ed');
             expect(component.confirmLabel).toBe('Remove');
             expect(component.confirmClass).toBe('btn-danger');
             expect(log).toEqual(['confirm:m-ed']);
@@ -360,7 +373,7 @@ describe('the members page of a workspace', () => {
 
         it('says why when the rules refuse, and reads the list again', async () => {
             http.delete.mockRejectedValue(
-                new HttpError(409, 'Something went wrong.', { code: 'cannot_remove_owner', body: {} }),
+                new HttpError(409, 'Something went wrong.', { code: 'owner_cannot_leave', body: {} }),
             );
             http.get.mockClear();
             component.askRemove(component.members[1]);
@@ -369,7 +382,7 @@ describe('the members page of a workspace', () => {
 
             expect(notify).toHaveBeenCalledWith(
                 'danger',
-                'The owner cannot be removed from the workspace: hand the ownership over to another member first.',
+                'The owner cannot leave the workspace: hand the ownership over to another member first.',
             );
             expect(component.members).toHaveLength(3);
             expect(component.confirmingId).toBeNull();
@@ -408,7 +421,7 @@ describe('the members page of a workspace', () => {
 
             await component.confirm(component.members[1]);
 
-            expect(http.post).toHaveBeenCalledWith(TRANSFER_URL, { user_id: 'm-ed' });
+            expect(http.post).toHaveBeenCalledWith(TRANSFER_URL, { member_id: 'm-ed' });
             expect(notify).toHaveBeenCalledWith(
                 'success',
                 'Member m-ed is now the owner of the workspace. The page is about to reload.',
