@@ -299,12 +299,12 @@ describe('the login page', function (): void {
             ->assertDontSee('role="note"', false);
     });
 
-    it('says, to everybody alike, that only existing accounts can sign in once registration is closed', function (): void {
+    it('says, to everybody alike, that only existing accounts and invited addresses can sign in once registration is closed', function (): void {
         registration(false);
 
         $this->get(route('login'), ['Accept-Language' => 'en'])
             ->assertOk()
-            ->assertSee('role="note">Sign-ups are closed: only existing accounts can sign in.', false)
+            ->assertSee('role="note">Sign-ups are closed: only existing accounts and invited addresses can sign in.', false)
             ->assertDontSee('If you are new here')
             // The steps are the same: the page does not know which addresses have an account.
             ->assertSee('x-data="login"', false)
@@ -316,6 +316,6 @@ describe('the login page', function (): void {
 
         $this->get(route('login'), ['Accept-Language' => 'fr'])
             ->assertOk()
-            ->assertSee('role="note">Les inscriptions sont fermées : seuls les comptes existants peuvent se connecter.', false);
+            ->assertSee('role="note">Les inscriptions sont fermées : seuls les comptes existants et les adresses invitées peuvent se connecter.', false);
     });
 });

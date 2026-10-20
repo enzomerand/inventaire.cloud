@@ -51,7 +51,7 @@
                         <span class="form-check-label">{{ __('Anybody can create an account') }}</span>
                     </label>
                     <div class="form-hint mt-2">
-                        {{ __('When this is off, only people who already have an account can sign in, and nobody receives a code for an address that has none. You can still create accounts from the Users page.') }}
+                        {{ __('When this is off, only people who already have an account, or who were invited to a workspace, can sign in: nobody else receives a code. You can still create accounts from the Users page.') }}
                     </div>
                 </div>
             </div>

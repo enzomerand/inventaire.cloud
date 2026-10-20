@@ -37,6 +37,8 @@
                     {{-- The install wizard runs before there are any accounts, or even a database to look them up in. --}}
                     @unless (request()->routeIs('install.*'))
                         @auth
+                            {{-- The invitations that wait for the person: on the pages of the app only, and only when there are some. --}}
+                            <x-invitations-link />
                             <x-workspace-switcher :active="$activeWorkspace ?? null" />
                             <x-account-menu />
                         @else
