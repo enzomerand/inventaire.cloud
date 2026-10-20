@@ -15,11 +15,26 @@ namespace App\Docs;
  */
 final class OpenApiTranslation
 {
+    /**
+     * The version of the rule: what {@see self::texts()} and {@see self::apply()} take for a text, and how they put it in place.
+     *
+     * The document made of a translation is kept in the cache ({@see OpenApi::localized()}) under the hash of the two files it
+     * is made from, and this number: a change of the rule changes the document without changing either file, so bump it with the
+     * change, or the old document keeps being served.
+     */
+    public const VERSION = 1;
+
     /** The keys whose string value is a text to translate. */
     public const TEXT_KEYS = ['summary', 'description', 'title'];
 
     /** The keys whose content is data of the API (an example, a value, a default...), never a text of the document: not looked into. */
     public const DATA_KEYS = ['example', 'value', 'default', 'enum', 'const'];
+
+    /**
+     * The keys whose content is a map of names the document chose (the properties of an object), not of keywords: a property
+     * can be called `default` or `example`, and what it says about itself is a text like any other.
+     */
+    public const NAME_MAPS = ['properties'];
 
     /**
      * The texts of a document, with the tree around them: what a translation of the document must repeat.
@@ -28,26 +43,28 @@ final class OpenApiTranslation
      * the positions of the translation are those of the document); a branch with no text is left out.
      *
      * @param  array<array-key, mixed>  $node
+     * @param  bool  $names  Whether the keys of the node are names the document chose, which are not keywords whatever they are.
      * @return array<array-key, mixed>|null Null when the node holds no text.
      */
-    public static function texts(array $node): ?array
+    public static function texts(array $node, bool $names = false): ?array
     {
         $list = array_is_list($node);
+        $keywords = ! $names && ! $list;
         $texts = [];
         $found = false;
 
         foreach ($node as $key => $value) {
-            if (! $list && in_array($key, self::DATA_KEYS, true)) {
+            if ($keywords && in_array($key, self::DATA_KEYS, true)) {
                 continue;
             }
 
-            if (! $list && in_array($key, self::TEXT_KEYS, true) && is_string($value)) {
+            if ($keywords && in_array($key, self::TEXT_KEYS, true) && is_string($value)) {
                 $texts[$key] = $value;
 
                 continue;
             }
 
-            $branch = is_array($value) ? self::texts($value) : null;
+            $branch = is_array($value) ? self::texts($value, $keywords && in_array($key, self::NAME_MAPS, true)) : null;
 
             if ($list) {
                 $texts[$key] = $branch ?? [];
@@ -72,25 +89,26 @@ final class OpenApiTranslation
      *
      * @param  array<array-key, mixed>  $document
      * @param  array<array-key, mixed>  $translation
+     * @param  bool  $names  Whether the keys of the node are names the document chose, which are not keywords whatever they are.
      * @return array<array-key, mixed>
      */
-    public static function apply(array $document, array $translation): array
+    public static function apply(array $document, array $translation, bool $names = false): array
     {
-        $list = array_is_list($document);
+        $keywords = ! $names && ! array_is_list($document);
 
         foreach ($translation as $key => $translated) {
-            if (! array_key_exists($key, $document) || (! $list && in_array($key, self::DATA_KEYS, true))) {
+            if (! array_key_exists($key, $document) || ($keywords && in_array($key, self::DATA_KEYS, true))) {
                 continue;
             }
 
             $original = $document[$key];
 
-            if (! $list && in_array($key, self::TEXT_KEYS, true) && is_string($original)) {
+            if ($keywords && in_array($key, self::TEXT_KEYS, true) && is_string($original)) {
                 if (is_string($translated) && trim($translated) !== '') {
                     $document[$key] = $translated;
                 }
             } elseif (is_array($original) && is_array($translated)) {
-                $document[$key] = self::apply($original, $translated);
+                $document[$key] = self::apply($original, $translated, $keywords && in_array($key, self::NAME_MAPS, true));
             }
         }
 

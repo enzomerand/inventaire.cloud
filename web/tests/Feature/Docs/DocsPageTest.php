@@ -144,6 +144,13 @@ describe('the page', function (): void {
             ->and(templateAttributes($page, '//a[contains(., "jeton") and not(starts-with(@href, "#"))]', 'href'))->toBe(['/app/account']);
     });
 
+    it('links the contents to the operations by their identifiers, whatever the words of their summaries', function (): void {
+        $page = templateDom(docsPage($this, ['Accept-Language' => 'fr'])->assertOk());
+
+        expect(templateAttributes($page, '//nav//a[normalize-space(.) = "Obtenir l\'utilisateur du jeton"]', 'href'))->toBe(['#getCurrentUser'])
+            ->and(templateAttributes($page, '//article[@id="getCurrentUser"]', 'id'))->toBe(['getCurrentUser']);
+    });
+
     it('shows the introduction of the document, its Markdown rendered, in the language of the page', function (): void {
         $english = templateDom(docsPage($this, ['Accept-Language' => 'en'])->assertOk());
         $french = templateDom(docsPage($this, ['Accept-Language' => 'fr'])->assertOk());

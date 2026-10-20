@@ -42,7 +42,7 @@ final class OpenApi
     private const CACHE_KEY = 'openapi:v1';
 
     /** What a language must look like to be part of the name of a file (`fr`, `pt-BR`): nothing that could lead elsewhere. */
-    private const LANGUAGE_PATTERN = '/^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$/';
+    private const LANGUAGE_PATTERN = '/^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*\z/';
 
     /** How many `$ref` are followed in a row before giving up (a reference to a reference to...). */
     private const MAX_REFERENCE_DEPTH = 16;
@@ -151,8 +151,8 @@ final class OpenApi
     }
 
     /**
-     * The hash of what {@see self::localized()} is made from: the one of the specification, and the one of the translation when
-     * there is one. It changes when either file does.
+     * The hash of what {@see self::localized()} is made from: the one of the specification, and the one of the translation (with the
+     * version of the rule that applies it, {@see OpenApiTranslation::VERSION}) when there is one. It changes when either file does.
      */
     public function localizedHash(string $language): string
     {
@@ -404,8 +404,11 @@ final class OpenApi
     }
 
     /**
-     * The document in a language, with the hash of the files it comes from and whether a translation was found (built once for
+     * The document in a language, with the hash of the files it comes from and whether a translation was used (built once for
      * each language by a process).
+     *
+     * A translation that cannot be read or understood does not take the page down in its language: the warning says so, and the
+     * page is the English one until the file is mended (the hash is the one of the specification alone, so it is drawn again then).
      *
      * @return array{hash: string, document: array<string, mixed>, translated: bool}
      */
@@ -422,14 +425,20 @@ final class OpenApi
             return $this->translations[$language] = ['hash' => $this->hash(), 'document' => $document, 'translated' => false];
         }
 
-        $content = $this->read($path, 'translation');
-        $hash = hash('xxh128', $this->hash().'|'.$content);
+        try {
+            $content = $this->read($path, 'translation');
+            $hash = hash('xxh128', OpenApiTranslation::VERSION.'|'.$this->hash().'|'.$content);
 
-        $localized = $this->remembered(
-            self::CACHE_KEY.':'.$language,
-            $hash,
-            fn (): array => OpenApiTranslation::apply($document, $this->parse($content, $path, 'translation')),
-        );
+            $localized = $this->remembered(
+                self::CACHE_KEY.':'.$language,
+                $hash,
+                fn (): array => OpenApiTranslation::apply($document, $this->parse($content, $path, 'translation')),
+            );
+        } catch (Throwable $exception) {
+            Log::warning('The translation of the OpenAPI document into '.$language.' cannot be used: the page is in English until it can.', ['path' => $path, 'exception' => $exception]);
+
+            return $this->translations[$language] = ['hash' => $this->hash(), 'document' => $document, 'translated' => false];
+        }
 
         /** @var array<string, mixed> $localized */
         return $this->translations[$language] = ['hash' => $hash, 'document' => $localized, 'translated' => true];

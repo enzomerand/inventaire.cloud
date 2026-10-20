@@ -8,6 +8,7 @@ use App\Docs\RenderedReference;
 use App\Services\LocaleResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\Yaml\Yaml;
 
@@ -208,6 +209,8 @@ describe('OpenApiTranslation', function (): void {
             'summary' => 'Get A',
             'responses' => ['200' => ['description' => 'Done', 'content' => ['application/json' => ['example' => ['title' => 'Example'], 'schema' => ['properties' => [
                 'title' => ['type' => 'string', 'description' => 'The title', 'enum' => ['x'], 'default' => 'x'],
+                'default' => ['type' => 'string', 'description' => 'The default one', 'example' => 'y'],
+                'enum' => ['type' => 'object', 'properties' => ['value' => ['description' => 'Inside']]],
             ]]]]]],
         ]]],
     ];
@@ -220,6 +223,8 @@ describe('OpenApiTranslation', function (): void {
                 'summary' => 'Get A',
                 'responses' => ['200' => ['description' => 'Done', 'content' => ['application/json' => ['schema' => ['properties' => [
                     'title' => ['description' => 'The title'],
+                    'default' => ['description' => 'The default one'],
+                    'enum' => ['properties' => ['value' => ['description' => 'Inside']]],
                 ]]]]]],
             ]]],
         ])->and(OpenApiTranslation::texts(['openapi' => '3.1.0', 'paths' => ['/a' => ['get' => ['operationId' => 'x']]]]))->toBeNull();
@@ -236,6 +241,8 @@ describe('OpenApiTranslation', function (): void {
                     'summary' => ['not' => 'a text'],
                     'responses' => ['200' => ['description' => 'Fait', 'content' => ['application/json' => ['example' => ['title' => 'Exemple'], 'schema' => ['properties' => [
                         'title' => ['description' => 'Le titre', 'enum' => ['y'], 'default' => 'y'],
+                        'default' => ['description' => 'Celui par défaut', 'example' => 'z'],
+                        'enum' => ['properties' => ['value' => ['description' => 'Dedans']]],
                     ]]]]]],
                 ]],
                 '/b' => ['get' => ['summary' => 'Orpheline']],
@@ -255,7 +262,12 @@ describe('OpenApiTranslation', function (): void {
 
         expect($response['description'])->toBe('Fait')
             ->and($response['content']['application/json']['example'])->toBe(['title' => 'Example'])
-            ->and($response['content']['application/json']['schema']['properties']['title'])->toBe(['type' => 'string', 'description' => 'Le titre', 'enum' => ['x'], 'default' => 'x']);
+            ->and($response['content']['application/json']['schema']['properties'])->toBe([
+                'title' => ['type' => 'string', 'description' => 'Le titre', 'enum' => ['x'], 'default' => 'x'],
+                // A property can be called as a keyword is: its text is a text, and what the keywords of its schema hold is still data.
+                'default' => ['type' => 'string', 'description' => 'Celui par défaut', 'example' => 'y'],
+                'enum' => ['type' => 'object', 'properties' => ['value' => ['description' => 'Dedans']]],
+            ]);
     });
 });
 
@@ -277,7 +289,7 @@ describe('the document in a language', function (): void {
             ->and($api->localizedHash($language))->toBe($api->hash())
             ->and($api->forLocale($language)->language())->toBe('en')
             ->and($api->translationPath($language) === null || ! is_file($api->translationPath($language)))->toBeTrue();
-    })->with(['en', 'de', 'fr-CA', '../openapi/v1', 'fr/../fr', '', 'FR ']);
+    })->with(['en', 'de', 'fr-CA', '../openapi/v1', 'fr/../fr', '', 'FR ', "fr\n"]);
 
     it('leaves the document the API serves in English, and the shared instance as it was', function (): void {
         $api = app(OpenApi::class);
@@ -300,7 +312,8 @@ describe('the document in a language', function (): void {
         expect($api->translationPath('fr'))->toBe(resource_path('openapi/v1.fr.yaml'))
             ->and((new OpenApi('/some/folder/spec.yaml'))->translationPath('pt-BR'))->toBe('/some/folder/spec.pt-BR.yaml')
             ->and((new OpenApi('/some/folder/spec'))->translationPath('fr'))->toBe('/some/folder/spec.fr')
-            ->and($api->translationPath('../fr'))->toBeNull();
+            ->and($api->translationPath('../fr'))->toBeNull()
+            ->and($api->translationPath("fr\n"))->toBeNull();
     });
 
     it('is kept in the cache under a key of its own, with the hash of both files, and replaced when either changes', function (): void {
@@ -311,7 +324,7 @@ describe('the document in a language', function (): void {
         $api = new OpenApi($folder.'/v1.yaml');
         $localized = $api->localized('fr');
 
-        expect(Cache::get('openapi:v1:fr')['hash'])->toBe(hash('xxh128', hash('xxh128', $english).'|'.$french))
+        expect(Cache::get('openapi:v1:fr')['hash'])->toBe(hash('xxh128', OpenApiTranslation::VERSION.'|'.hash('xxh128', $english).'|'.$french))
             ->and($api->localizedHash('fr'))->toBe(Cache::get('openapi:v1:fr')['hash'])
             ->and(Cache::get('openapi:v1')['hash'])->toBe(hash('xxh128', $english))
             ->and($api->localizedHash('fr'))->not->toBe($api->hash());
@@ -320,6 +333,12 @@ describe('the document in a language', function (): void {
         Cache::forever('openapi:v1:fr', ['hash' => $api->localizedHash('fr'), 'document' => ['from' => 'the cache']]);
 
         expect((new OpenApi($folder.'/v1.yaml'))->localized('fr'))->toBe(['from' => 'the cache']);
+
+        // An entry made under another version of the rule (a change of OpenApiTranslation that bumped it) is not this one's, whatever the files.
+        Cache::forever('openapi:v1:fr', ['hash' => hash('xxh128', (OpenApiTranslation::VERSION + 1).'|'.hash('xxh128', $english).'|'.$french), 'document' => ['from' => 'another version']]);
+
+        expect((new OpenApi($folder.'/v1.yaml'))->localized('fr')['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail')
+            ->and(Cache::get('openapi:v1:fr')['hash'])->toBe($api->localizedHash('fr'));
 
         // Another content takes the place of the entry.
         file_put_contents($folder.'/v1.fr.yaml', str_replace('Créer un espace de travail', 'Ouvrir un espace de travail', $french));
@@ -344,11 +363,32 @@ describe('the document in a language', function (): void {
         expect((new OpenApi)->localized('fr')['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail');
     });
 
-    it('refuses a translation that is not a mapping', function (): void {
-        $folder = translationScratch('plain text');
+    it('is the English document, with a warning in the log, when the translation is malformed', function (string $content): void {
+        Log::spy();
+        $api = new OpenApi(translationScratch($content).'/v1.yaml');
 
-        expect(fn () => (new OpenApi($folder.'/v1.yaml'))->localized('fr'))->toThrow(RuntimeException::class, 'translation is not a mapping');
-    });
+        expect($api->localized('fr'))->toBe($api->raw())
+            ->and($api->localizedHash('fr'))->toBe($api->hash())
+            ->and($api->forLocale('fr')->language())->toBe('en');
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'translation of the OpenAPI document into fr cannot be used'))->once();
+    })->with(['not a mapping' => 'plain text', 'not YAML' => "summary: [unclosed\n  other: {"]);
+
+    it('is the English document, with a warning in the log, when the translation cannot be read', function (): void {
+        Log::spy();
+        $folder = translationScratch('info: {title: Titre}');
+        chmod($folder.'/v1.fr.yaml', 0);
+
+        try {
+            $api = new OpenApi($folder.'/v1.yaml');
+
+            expect($api->localized('fr'))->toBe($api->raw())->and($api->forLocale('fr')->language())->toBe('en');
+        } finally {
+            chmod($folder.'/v1.fr.yaml', 0644);
+        }
+
+        Log::shouldHaveReceived('warning')->once();
+    })->skip(function_exists('posix_geteuid') && posix_geteuid() === 0, 'The superuser reads any file');
 });
 
 describe('the page /docs/api', function (): void {
@@ -387,6 +427,19 @@ describe('the page /docs/api', function (): void {
         expect($french)->toContain('lang="fr"')->not->toContain('lang="en"')
             ->and($english)->toContain('lang="en"')->not->toContain('lang="fr"')
             ->and($other)->toContain('lang="en"')->toContain('Create a workspace')->not->toContain('lang="de"')->not->toContain('Créer un espace de travail');
+    });
+
+    it('is drawn in English, with a warning in the log, when the translation of its language cannot be used', function (): void {
+        Log::spy();
+        app()->instance(OpenApi::class, new OpenApi(translationScratch("summary: [unclosed\n  other: {").'/v1.yaml'));
+
+        $page = templateDom(translationPage($this, 'fr')->assertOk());
+
+        expect(templateTexts($page, '//*[@id="createWorkspace-title"]'))->toBe(['Create a workspace'])
+            ->and(templateAttributes($page, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['en'])
+            ->and(templateTexts($page, '//h1'))->toBe(["Documentation de l'API"]);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'cannot be used'))->once();
     });
 
     it('is drawn again, and the entry replaced, when the translation changes', function (): void {
