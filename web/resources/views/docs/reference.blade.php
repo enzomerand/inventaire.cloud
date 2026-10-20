@@ -29,7 +29,7 @@
             </ul>
 
             @foreach ($reference['tags'] as $tag)
-                <div class="fw-bold mb-1"><a class="text-reset" href="#{{ $tag['id'] }}" lang="{{ $textLang }}">{{ $tag['name'] }}</a></div>
+                <div class="fw-bold mb-1"><a class="text-reset" href="#{{ $tag['id'] }}" lang="{{ $textLang }}">{{ $tag['title'] }}</a></div>
                 <ul class="list-unstyled mb-3">
                     @foreach ($tag['operations'] as $op)
                         <li><a class="d-block py-1 text-break" href="#{{ $op['id'] }}" lang="{{ $textLang }}">{{ $op['summary'] }}</a></li>
@@ -73,7 +73,7 @@
 
         @foreach ($reference['tags'] as $tag)
             <section class="mb-5" aria-labelledby="{{ $tag['id'] }}">
-                <h2 class="h2 mb-1" id="{{ $tag['id'] }}" lang="{{ $textLang }}">{{ $tag['name'] }}</h2>
+                <h2 class="h2 mb-1" id="{{ $tag['id'] }}" lang="{{ $textLang }}">{{ $tag['title'] }}</h2>
                 <div class="text-secondary mb-3" lang="{{ $textLang }}">{{ $tag['description'] }}</div>
 
                 @foreach ($tag['operations'] as $op)

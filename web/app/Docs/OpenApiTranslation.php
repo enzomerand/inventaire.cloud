@@ -7,11 +7,11 @@ namespace App\Docs;
 /**
  * What a translation of the OpenAPI document (`resources/openapi/v1.<locale>.yaml`) is allowed to change, and how it is applied.
  *
- * A translation is an overlay: the tree of the document with only its texts left, the `summary`, `description` and `title`
- * strings, translated. Everything else (the paths, the schemas, the examples, the enums) is read from the English file, so a
- * translation cannot change what the API does, only what the page says about it. Two things describe the same rule, and both live
- * here so that they cannot drift apart: {@see self::texts()} extracts the texts of a document (what an overlay must hold, no more
- * and no less), {@see self::apply()} puts an overlay back into it.
+ * A translation is an overlay: the tree of the document with only its texts left, the `summary`, `description`, `title` and
+ * `x-displayName` (the name a tag is shown under) strings, translated. Everything else (the paths, the schemas, the examples, the
+ * enums) is read from the English file, so a translation cannot change what the API does, only what the page says about it. Two
+ * things describe the same rule, and both live here so that they cannot drift apart: {@see self::texts()} extracts the texts of a
+ * document (what an overlay must hold, no more and no less), {@see self::apply()} puts an overlay back into it.
  */
 final class OpenApiTranslation
 {
@@ -22,10 +22,10 @@ final class OpenApiTranslation
      * change of the rule changes the document without changing either file, so bump it with the change, or the old document keeps
      * being served.
      */
-    public const VERSION = 1;
+    public const VERSION = 2;
 
     /** The keys whose string value is a text to translate. */
-    public const TEXT_KEYS = ['summary', 'description', 'title'];
+    public const TEXT_KEYS = ['summary', 'description', 'title', 'x-displayName'];
 
     /** The keys whose content is data of the API (an example, a value, a default...), never a text of the document: not looked into. */
     public const DATA_KEYS = ['example', 'value', 'default', 'enum', 'const'];

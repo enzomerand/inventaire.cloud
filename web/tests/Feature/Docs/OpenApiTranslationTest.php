@@ -194,7 +194,7 @@ describe('OpenApiTranslation', function (): void {
     $document = [
         'openapi' => '3.1.0',
         'info' => ['title' => 'Title', 'version' => '1', 'description' => 'About'],
-        'tags' => [['name' => 'A', 'description' => 'Tag a'], ['name' => 'B']],
+        'tags' => [['name' => 'A', 'x-displayName' => 'The A', 'description' => 'Tag a'], ['name' => 'B']],
         'paths' => ['/a' => ['get' => [
             'operationId' => 'getA',
             'summary' => 'Get A',
@@ -209,7 +209,7 @@ describe('OpenApiTranslation', function (): void {
     it('lists the texts of a document, with the tree around them and a placeholder for a list item that has none', function () use ($document): void {
         expect(OpenApiTranslation::texts($document))->toBe([
             'info' => ['title' => 'Title', 'description' => 'About'],
-            'tags' => [['description' => 'Tag a'], []],
+            'tags' => [['x-displayName' => 'The A', 'description' => 'Tag a'], []],
             'paths' => ['/a' => ['get' => [
                 'summary' => 'Get A',
                 'responses' => ['200' => ['description' => 'Done', 'content' => ['application/json' => ['schema' => ['properties' => [
@@ -225,7 +225,7 @@ describe('OpenApiTranslation', function (): void {
         $translation = [
             'openapi' => '9',
             'info' => ['title' => 'Titre', 'version' => '2', 'description' => '   '],
-            'tags' => [['name' => 'Z', 'description' => 'Étiquette a'], ['name' => 'Y', 'description' => 'Étiquette inventée'], ['description' => 'Troisième']],
+            'tags' => [['name' => 'Z', 'x-displayName' => 'La A', 'description' => 'Étiquette a'], ['name' => 'Y', 'description' => 'Étiquette inventée'], ['description' => 'Troisième']],
             'paths' => [
                 '/a' => ['get' => [
                     'operationId' => 'getZ',
@@ -244,7 +244,7 @@ describe('OpenApiTranslation', function (): void {
 
         expect($applied['openapi'])->toBe('3.1.0')
             ->and($applied['info'])->toBe(['title' => 'Titre', 'version' => '1', 'description' => 'About'])
-            ->and($applied['tags'])->toBe([['name' => 'A', 'description' => 'Étiquette a'], ['name' => 'B']])
+            ->and($applied['tags'])->toBe([['name' => 'A', 'x-displayName' => 'La A', 'description' => 'Étiquette a'], ['name' => 'B']])
             ->and(array_keys($applied['paths']))->toBe(['/a'])
             ->and($applied['paths']['/a']['get']['operationId'])->toBe('getA')
             ->and($applied['paths']['/a']['get']['summary'])->toBe('Get A');
@@ -263,6 +263,18 @@ describe('OpenApiTranslation', function (): void {
 });
 
 describe('the document in a language', function (): void {
+    it('shows a tag under its display name, which a translation changes, and identifies it by its name', function (): void {
+        $api = app(OpenApi::class);
+        $french = $api->forLocale('fr');
+        $untitled = new OpenApi(contractScratchSpec("openapi: 3.1.0\ntags:\n  - name: Things\n"));
+
+        expect($api->tags()[0])->toMatchArray(['name' => 'Account', 'displayName' => 'Account'])
+            ->and($french->tags()[0])->toMatchArray(['name' => 'Account', 'displayName' => 'Compte'])
+            ->and(array_column($french->tags(), 'name'))->toBe(array_column($api->tags(), 'name'))
+            ->and(array_filter($api->raw()['tags'], fn (array $tag): bool => ! isset($tag['x-displayName'])))->toBe([])
+            ->and($untitled->tags())->toBe([['name' => 'Things', 'displayName' => 'Things', 'description' => '']]);
+    });
+
     it('is the document itself for the language of the file, for a language with no translation and for what is no language', function (string $language): void {
         $api = app(OpenApi::class);
 
@@ -379,6 +391,17 @@ describe('the page /docs/api', function (): void {
         expect(templateTexts($page, '//*[@id="createWorkspace-title"]'))->toBe(['Créer un espace de travail'])
             ->and(templateAttributes($page, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['fr'])
             ->and(templateTexts($page, '//nav//a[@href="#createWorkspace"]'))->toBe(['Créer un espace de travail']);
+    });
+
+    it('shows the title of a tag in the language of the page, and keeps its anchor', function (): void {
+        $french = templateDom($this->get('/docs/api', ['Accept-Language' => 'fr'])->assertOk());
+        $english = templateDom($this->get('/docs/api', ['Accept-Language' => 'en'])->assertOk());
+
+        expect(templateTexts($french, '//h2[@id="tag-workspaces"]'))->toBe(['Espaces de travail'])
+            ->and(templateAttributes($french, '//h2[@id="tag-workspaces"]', 'lang'))->toBe(['fr'])
+            ->and(templateTexts($french, '//nav//a[@href="#tag-workspaces"]'))->toBe(['Espaces de travail'])
+            ->and(templateTexts($english, '//h2[@id="tag-workspaces"]'))->toBe(['Workspaces'])
+            ->and(templateTexts($english, '//nav//a[@href="#tag-workspaces"]'))->toBe(['Workspaces']);
     });
 
     it('gives the same anchors to the sections of the introduction in every language', function (): void {

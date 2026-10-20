@@ -72,7 +72,7 @@ final class ApiReference
      *     baseUrl: string,
      *     intro: HtmlString,
      *     introHeadings: list<array{id: string, text: string}>,
-     *     tags: list<array{id: string, name: string, description: HtmlString, operations: list<array<string, mixed>>}>,
+     *     tags: list<array{id: string, name: string, title: string, description: HtmlString, operations: list<array<string, mixed>>}>,
      *     schemas: list<array<string, mixed>>
      * }
      */
@@ -85,11 +85,13 @@ final class ApiReference
 
         $tags = [];
         $descriptions = array_column($this->api->tags(), 'description', 'name');
+        $titles = array_column($this->api->tags(), 'displayName', 'name');
 
         foreach ($this->api->operationsByTag() as $name => $operations) {
             $tags[] = [
                 'id' => 'tag-'.Str::slug($name),
                 'name' => $name,
+                'title' => $titles[$name] ?? $name,
                 'description' => $this->inline($descriptions[$name] ?? ''),
                 'operations' => array_map($this->operation(...), $operations),
             ];

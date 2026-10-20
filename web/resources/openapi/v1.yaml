@@ -114,29 +114,41 @@ security:
   - bearer: []
 tags:
   - name: Account
+    x-displayName: Account
     description: The user a token belongs to.
   - name: Field types
+    x-displayName: Field types
     description: The types a field can have, with their names in the language of the request.
   - name: Workspaces
+    x-displayName: Workspaces
     description: The workspaces the user belongs to, with their role in each.
   - name: Inventories
+    x-displayName: Inventories
     description: The inventories of a workspace, with their fields and what the user may do with them.
   - name: Fields
+    x-displayName: Fields
     description: The typed columns of an inventory (add, change, order, delete).
   - name: Items
+    x-displayName: Items
     description: The rows of an inventory, with sorting, filtering, search and totals.
   - name: Revisions
+    x-displayName: Revisions
     description: The history of an item, latest change first.
   - name: Attachments
+    x-displayName: Attachments
     description: Files attached to an item, or filling one of its file or photo fields.
   - name: Exports
+    x-displayName: Exports
     description: Files of the items of an inventory (XLSX, ODS, CSV, JSON, PDF, zip), written in the background.
   - name: Imports
+    x-displayName: Imports
     description: Spreadsheets and CSV files brought into an inventory, with a mapping of their columns, run in the background.
   - name: Official versions
+    x-displayName: Official versions
     description: >-
       The inventory frozen as numbered, dated versions, each with its data (JSON), its PDF and, if asked for, signatures by email.
   - name: Templates
+    x-displayName: Templates
     description: The public catalogue of inventory templates. No token needed.
 paths:
   /me:

@@ -115,28 +115,40 @@ servers:
     description: "Cette instance. Les chemins ci-dessous sont relatifs à celle-ci."
 tags:
   -
+    x-displayName: 'Compte'
     description: "L'utilisateur auquel appartient un jeton."
   -
+    x-displayName: 'Types de champ'
     description: 'Les types que peut avoir un champ, avec leurs noms dans la langue de la requête.'
   -
+    x-displayName: 'Espaces de travail'
     description: "Les espaces de travail auxquels appartient l'utilisateur, avec son rôle dans chacun."
   -
+    x-displayName: 'Inventaires'
     description: "Les inventaires d'un espace de travail, avec leurs champs et ce que l'utilisateur peut en faire."
   -
+    x-displayName: 'Champs'
     description: "Les colonnes typées d'un inventaire (ajouter, modifier, ordonner, supprimer)."
   -
+    x-displayName: 'Articles'
     description: "Les lignes d'un inventaire, avec tri, filtres, recherche et totaux."
   -
+    x-displayName: 'Historique'
     description: "L'historique d'un article, de la modification la plus récente à la plus ancienne."
   -
+    x-displayName: 'Pièces jointes'
     description: "Fichiers joints à un article, ou renseignant l'un de ses champs de type fichier ou photo."
   -
+    x-displayName: 'Exports'
     description: "Fichiers des articles d'un inventaire (XLSX, ODS, CSV, JSON, PDF, zip), générés en arrière-plan."
   -
+    x-displayName: 'Imports'
     description: "Feuilles de calcul et fichiers CSV importés dans un inventaire, avec une correspondance de leurs colonnes, traités en arrière-plan."
   -
+    x-displayName: 'Versions officielles'
     description: "L'inventaire figé en versions numérotées et datées, chacune avec ses données (JSON), son PDF et, sur demande, des signatures par e-mail."
   -
+    x-displayName: 'Modèles'
     description: "Le catalogue public des modèles d'inventaire. Aucun jeton requis."
 paths:
   /me:

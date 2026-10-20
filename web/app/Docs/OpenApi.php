@@ -228,9 +228,10 @@ final class OpenApi
     }
 
     /**
-     * The tags the document declares, in order.
+     * The tags the document declares, in order. The name identifies a tag (the operations refer to it); the display name, which
+     * `x-displayName` gives and a translation can change, is what a page shows (the name when there is none).
      *
-     * @return list<array{name: string, description: string}>
+     * @return list<array{name: string, displayName: string, description: string}>
      */
     public function tags(): array
     {
@@ -238,7 +239,11 @@ final class OpenApi
 
         foreach ($this->raw()['tags'] ?? [] as $tag) {
             if (is_array($tag) && isset($tag['name'])) {
-                $tags[] = ['name' => (string) $tag['name'], 'description' => (string) ($tag['description'] ?? '')];
+                $tags[] = [
+                    'name' => (string) $tag['name'],
+                    'displayName' => (string) ($tag['x-displayName'] ?? $tag['name']),
+                    'description' => (string) ($tag['description'] ?? ''),
+                ];
             }
         }
 
