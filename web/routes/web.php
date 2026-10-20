@@ -53,7 +53,8 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
         });
 });
 
-// The documentation of the API: one page at one address (the text of the document is English whatever the language), public and
+// The documentation of the API: one page at one address, in the language of the request (the text of the document is French or
+// English: resources/openapi/v1.fr.yaml translates the texts of v1.yaml, which /api/v1/openapi.json keeps as they are), public and
 // rendered from a file, so limited in pace with the other public pages.
 Route::get('/docs/api', ApiDocsController::class)->middleware('throttle:public-pages')->name('docs.api');
 

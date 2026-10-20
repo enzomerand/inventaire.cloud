@@ -23,6 +23,8 @@ use Throwable;
  *
  * Two consumers read it: `GET /api/v1/openapi.json` ({@see self::document()}) and the page `/docs/api` (the operations, and
  * the helpers that follow a `$ref` for rendering).
+ *
+ * The page can read the document in another language ({@see self::forLocale()}); the JSON the API serves stays English.
  */
 #[Singleton]
 final class OpenApi
@@ -30,8 +32,14 @@ final class OpenApi
     /** The keys of a path item that are operations, in the order a page lists them. */
     public const METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 
+    /** The language the file is written in: the one of every text of the document that has no translation. */
+    public const SOURCE_LANGUAGE = 'en';
+
     /** The key of the cache entry: a pair `['hash' => hash of the content of the file, 'document' => the parsed file]`. */
     private const CACHE_KEY = 'openapi:v1';
+
+    /** What a language must look like to be part of the name of a file (`fr`, `pt-BR`): nothing that could lead elsewhere. */
+    private const LANGUAGE_PATTERN = '/^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*\z/';
 
     /** How many `$ref` are followed in a row before giving up (a reference to a reference to...). */
     private const MAX_REFERENCE_DEPTH = 16;
@@ -41,6 +49,12 @@ final class OpenApi
 
     /** @var string|null The hash of the content of the file the parsed document comes from. */
     private ?string $hash = null;
+
+    /** @var array<string, array{hash: string, document: array<string, mixed>, translated: bool}> The document in each language asked for, once built by this process. */
+    private array $translations = [];
+
+    /** @var string The language of the texts of the parsed document. */
+    private string $language = self::SOURCE_LANGUAGE;
 
     /**
      * @param  string|null  $path  The file to read; the specification shipped with the application when null.
@@ -100,6 +114,56 @@ final class OpenApi
     public function path(): string
     {
         return $this->path ?? resource_path('openapi/v1.yaml');
+    }
+
+    /**
+     * The path of the file that would hold the translation of the texts into a language: next to the specification, with the
+     * language before the extension (`v1.fr.yaml`). Null for a language that cannot be part of a file name.
+     */
+    public function translationPath(string $language): ?string
+    {
+        if (preg_match(self::LANGUAGE_PATTERN, $language) !== 1) {
+            return null;
+        }
+
+        $path = $this->path();
+        $extension = pathinfo($path, PATHINFO_EXTENSION);
+
+        if ($extension === '') {
+            return $path.'.'.$language;
+        }
+
+        return substr($path, 0, -strlen($extension) - 1).'.'.$language.'.'.$extension;
+    }
+
+    /**
+     * The same specification, read in a language: the specification with the texts of its translation into it
+     * (`v1.<language>.yaml`, see {@see OpenApiTranslation}) in place of the English ones, or the specification itself when
+     * the language is the one of the file or has no translation. {@see self::raw()}, {@see self::hash()} (the hash of both files,
+     * and of the version of the rule that applies the translation), {@see self::operations()}, {@see self::resolve()} and the
+     * other readers answer for that document, and {@see self::language()} says which language its texts are in. Meant for the
+     * page that shows the document; the JSON the API serves comes from the shared instance, which stays English.
+     */
+    public function forLocale(string $language): self
+    {
+        $translation = $this->translation($language);
+
+        $view = clone $this;
+        $view->parsed = $translation['document'];
+        $view->hash = $translation['hash'];
+        $view->language = $translation['translated'] ? $language : self::SOURCE_LANGUAGE;
+        $view->translations = [];
+
+        return $view;
+    }
+
+    /**
+     * The language the texts of this document are in: the one of the translation it was read with ({@see self::forLocale()}), the
+     * one of the file when there is none.
+     */
+    public function language(): string
+    {
+        return $this->language;
     }
 
     /**
@@ -164,9 +228,10 @@ final class OpenApi
     }
 
     /**
-     * The tags the document declares, in order.
+     * The tags the document declares, in order. The name identifies a tag (the operations refer to it); the display name, which
+     * `x-displayName` gives and a translation can change, is what a page shows (the name when there is none).
      *
-     * @return list<array{name: string, description: string}>
+     * @return list<array{name: string, displayName: string, description: string}>
      */
     public function tags(): array
     {
@@ -174,7 +239,13 @@ final class OpenApi
 
         foreach ($this->raw()['tags'] ?? [] as $tag) {
             if (is_array($tag) && isset($tag['name'])) {
-                $tags[] = ['name' => (string) $tag['name'], 'description' => (string) ($tag['description'] ?? '')];
+                $tags[] = [
+                    'name' => (string) $tag['name'],
+                    'displayName' => is_string($tag['x-displayName'] ?? null) && $tag['x-displayName'] !== ''
+                        ? $tag['x-displayName']
+                        : (string) $tag['name'],
+                    'description' => (string) ($tag['description'] ?? ''),
+                ];
             }
         }
 
@@ -313,22 +384,104 @@ final class OpenApi
      */
     private function load(): array
     {
-        $content = @file_get_contents($this->path());
-
-        if ($content === false) {
-            throw new RuntimeException('The OpenAPI document cannot be read: '.$this->path());
-        }
-
+        $content = $this->read($this->path(), 'document');
         $hash = $this->hash = hash('xxh128', $content);
 
+        return $this->remembered(self::CACHE_KEY, $hash, fn (): array => $this->parse($content, $this->path(), 'document'));
+    }
+
+    /**
+     * The document in a language, with the hash of the files it comes from and whether a translation was used (built once for
+     * each language by a process).
+     *
+     * A translation that cannot be read or understood does not take the page down in its language: the warning says so, and the
+     * page is the English one until the file is mended (the hash is the one of the specification alone, so it is drawn again then).
+     *
+     * @return array{hash: string, document: array<string, mixed>, translated: bool}
+     */
+    private function translation(string $language): array
+    {
+        if (isset($this->translations[$language])) {
+            return $this->translations[$language];
+        }
+
+        $document = $this->raw();
+        $fallback = ['hash' => $this->hash(), 'document' => $document, 'translated' => false];
+        $path = $language === self::SOURCE_LANGUAGE ? null : $this->translationPath($language);
+
+        if ($path === null || ! is_file($path)) {
+            return $this->translations[$language] = $fallback;
+        }
+
         try {
-            $cached = Cache::get(self::CACHE_KEY);
+            $content = $this->read($path, 'translation');
+            $hash = hash('xxh128', OpenApiTranslation::VERSION.'|'.$this->hash().'|'.$content);
+
+            $localized = $this->remembered(
+                self::CACHE_KEY.':'.$language,
+                $hash,
+                fn (): array => OpenApiTranslation::apply($document, $this->parse($content, $path, 'translation')),
+            );
+        } catch (Throwable $exception) {
+            Log::warning('The translation of the OpenAPI document into '.$language.' cannot be used: the page is in English until it can.', ['path' => $path, 'exception' => $exception]);
+
+            return $this->translations[$language] = $fallback;
+        }
+
+        /** @var array<string, mixed> $localized */
+        return $this->translations[$language] = ['hash' => $hash, 'document' => $localized, 'translated' => true];
+    }
+
+    /**
+     * The content of a file of the specification.
+     *
+     * @param  string  $what  What the file is, for the message.
+     */
+    private function read(string $path, string $what): string
+    {
+        $content = @file_get_contents($path);
+
+        if ($content === false) {
+            throw new RuntimeException('The OpenAPI '.$what.' cannot be read: '.$path);
+        }
+
+        return $content;
+    }
+
+    /**
+     * The mapping a file of the specification holds.
+     *
+     * @param  string  $what  What the file is, for the message.
+     * @return array<string, mixed>
+     */
+    private function parse(string $content, string $path, string $what): array
+    {
+        $parsed = Yaml::parse($content);
+
+        if (! is_array($parsed)) {
+            throw new RuntimeException('The OpenAPI '.$what.' is not a mapping: '.$path);
+        }
+
+        /** @var array<string, mixed> $parsed */
+        return $parsed;
+    }
+
+    /**
+     * What was made of this very content: taken from the cache, or built and kept there under a key of its own.
+     *
+     * @param  callable(): array<string, mixed>  $build
+     * @return array<string, mixed>
+     */
+    private function remembered(string $key, string $hash, callable $build): array
+    {
+        try {
+            $cached = Cache::get($key);
         } catch (Throwable $exception) {
             $this->cacheUnusable($exception);
             $cached = null;
         }
 
-        // The entry of another version of the file (or a damaged one) is not this content's: parse again and replace it.
+        // The entry of another version of the content (or a damaged one) is not this content's: build again and replace it.
         if (is_array($cached) && ($cached['hash'] ?? null) === $hash && is_array($cached['document'] ?? null)) {
             /** @var array<string, mixed> $document */
             $document = $cached['document'];
@@ -336,20 +489,15 @@ final class OpenApi
             return $document;
         }
 
-        $parsed = Yaml::parse($content);
-
-        if (! is_array($parsed)) {
-            throw new RuntimeException('The OpenAPI document is not a mapping: '.$this->path());
-        }
+        $document = $build();
 
         try {
-            Cache::forever(self::CACHE_KEY, ['hash' => $hash, 'document' => $parsed]);
+            Cache::forever($key, ['hash' => $hash, 'document' => $document]);
         } catch (Throwable $exception) {
             $this->cacheUnusable($exception);
         }
 
-        /** @var array<string, mixed> $parsed */
-        return $parsed;
+        return $document;
     }
 
     /**
