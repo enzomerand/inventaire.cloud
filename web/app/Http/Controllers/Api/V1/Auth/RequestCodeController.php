@@ -30,7 +30,12 @@ use Illuminate\Support\Facades\Mail;
  * sign-in step would reveal who has an account.
  *
  * Registration closed, an address without an account is still given its code when an invitation to join a workspace waits for it
- * ({@see Invitations}): the invitation is its ticket. That, too, is looked up after the answer.
+ * ({@see Invitations::hasTicketFor()}) and the administrator has left invitations on as a way to sign up
+ * ({@see InstanceSettings::invitationSignUp()}): the invitation is its ticket, so that "closed" means "on invitation". That, too, is looked up
+ * after the answer. What the visitor sees is the same for every address. The work after the answer is not (an address that has an account is
+ * not looked up for an invitation, and the mail goes to some addresses only), so the time the server stays busy after answering differs
+ * between them: a visitor can only measure it where the web server holds the connection until that work is done, which the ones the
+ * README names do not (the answer has gone by then).
  */
 final class RequestCodeController extends Controller
 {
@@ -51,7 +56,7 @@ final class RequestCodeController extends Controller
             function () use ($email, $code, $locale, $minutes, $settings, $invitations): void {
                 // Registration closed: only an address that has an account, or that an invitation waits for, gets its code
                 // (the lookups are made here, after the answer, and only then).
-                if (! $settings->registrationOpen() && ! User::query()->where('email', $email)->exists() && ! $invitations->hasPendingFor($email)) {
+                if (! $settings->registrationOpen() && ! User::query()->where('email', $email)->exists() && ! ($invitations->hasTicketFor($email) && $settings->invitationSignUp())) {
                     return;
                 }
 

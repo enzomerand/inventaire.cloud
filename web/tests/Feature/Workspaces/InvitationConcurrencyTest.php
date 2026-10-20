@@ -111,7 +111,7 @@ describe('invitations accepted at the same moment', function (): void {
             $outcomes = actTogether($this->sandbox->root, [
                 ['accept-invitation', $ada->id, $inOne->id],
                 ['accept-invitation', $ada->id, $inTwo->id],
-            ], ['WORKSPACES_MAX_MEMBERSHIPS_PER_USER' => '2']);
+            ], ['WORKSPACES_MAX_PER_USER' => '2']);
 
             expect($outcomes)->toBe(['accepted', 'refused:membership_limit_reached'])
                 ->and(WorkspaceMember::query()->where('user_id', $ada->id)->count())->toBe(2);
@@ -267,6 +267,36 @@ describe('the ownership handed over at the same moment', function (): void {
             expect($outcomes)->toBeIn([['refused:not_owner', 'transferred'], ['refused:gone', 'removed']])
                 ->and(concurrentOwners($workspace))->toBe(1)
                 ->and(User::query()->whereDoesntHave('workspaces')->count())->toBe(0);
+
+            removeConcurrencyRows();
+        }
+    });
+
+    it('lets two members leave two shared workspaces at the same moment, each judged against the memberships it locked first', function (): void {
+        foreach (range(1, 6) as $_) {
+            $first = concurrentShop();
+            $second = concurrentShop();
+            // The same two people (an owner of neither) belong to both workspaces, so that each leave reads rows the other holds.
+            $alice = $first['editor'];
+            $bob = User::factory()->withPersonalWorkspace()->create();
+            foreach ([$first['workspace'], $second['workspace']] as $workspace) {
+                foreach ([$alice, $bob] as $member) {
+                    if (! $workspace->members()->whereKey($member->id)->exists()) {
+                        $workspace->members()->attach($member->id, ['role' => 'viewer']);
+                    }
+                }
+            }
+
+            $outcomes = actTogether($this->sandbox->root, [
+                ['leave-workspace', $alice->id, $first['workspace']->id],
+                ['leave-workspace', $bob->id, $second['workspace']->id],
+            ]);
+
+            expect($outcomes)->toBe(['left', 'left'])
+                ->and(WorkspaceMember::query()->where('workspace_id', $first['workspace']->id)->where('user_id', $alice->id)->exists())->toBeFalse()
+                ->and(WorkspaceMember::query()->where('workspace_id', $second['workspace']->id)->where('user_id', $bob->id)->exists())->toBeFalse()
+                ->and(WorkspaceMember::query()->where('workspace_id', $second['workspace']->id)->where('user_id', $alice->id)->exists())->toBeTrue()
+                ->and(WorkspaceMember::query()->where('workspace_id', $first['workspace']->id)->where('user_id', $bob->id)->exists())->toBeTrue();
 
             removeConcurrencyRows();
         }

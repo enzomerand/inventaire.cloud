@@ -16,7 +16,6 @@ use App\Models\Item;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
-use App\Workspaces\MemberIds;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Testing\TestResponse;
 
@@ -166,7 +165,7 @@ function contractSigned(array $world, array $signers = []): InventoryVersion
  */
 function contractMemberUri(Workspace $workspace, ?User $member = null): string
 {
-    return "/api/v1/workspaces/{$workspace->ulid}/members".($member === null ? '' : '/'.app(MemberIds::class)->of($workspace, $member));
+    return "/api/v1/workspaces/{$workspace->ulid}/members".($member === null ? '' : '/'.$member->ulid);
 }
 
 /**

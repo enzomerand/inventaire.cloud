@@ -48,7 +48,6 @@ final class MembershipError
             MembershipRefused::MEMBER_LIMIT_REACHED => trans_choice('A workspace cannot have more than :count member, counting the invitations waiting for an answer.|A workspace cannot have more than :count members, counting the invitations waiting for an answer.', $refused->limit ?? 0),
             MembershipRefused::MEMBERSHIP_LIMIT_REACHED => trans_choice('You cannot belong to more than :count workspace.|You cannot belong to more than :count workspaces.', $refused->limit ?? 0),
             MembershipRefused::CANNOT_CHANGE_OWNER_ROLE => __('The role of the owner cannot be changed: hand the ownership over to another member instead.'),
-            MembershipRefused::CANNOT_REMOVE_OWNER => __('The owner cannot be removed from the workspace: hand the ownership over to another member first.'),
             MembershipRefused::OWNER_CANNOT_LEAVE => __('The owner cannot leave the workspace: hand the ownership over to another member first.'),
             MembershipRefused::ALREADY_OWNER => __('This member is already the owner of the workspace.'),
             MembershipRefused::RESEND_TOO_SOON => __('This invitation was sent a moment ago: wait a few minutes before sending it again.'),

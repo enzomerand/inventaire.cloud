@@ -49,6 +49,8 @@ return new class extends Migration
             // One invitation per address in a workspace; the invitations waiting for an address (sign-in, the page of invitations).
             $table->unique(['workspace_id', 'email']);
             $table->index(['email', 'expires_at']);
+            // The pruning (`inventaire:prune-invitations`) looks for the rows past their limit, whoever they are for.
+            $table->index('expires_at');
         });
 
         ExactEmailColumns::apply('workspace_invitations');

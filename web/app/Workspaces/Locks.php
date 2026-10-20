@@ -49,7 +49,12 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * Code that adds members follows the same order, accounts then the workspace then the memberships: it is what lets the
  * exceptions below stay safety nets. That is the case of everything that changes who belongs to a workspace (inviting,
  * accepting, changing a role, removing, leaving, handing the ownership over: see {@see Roster}, which takes the locks in that
- * order). The invitations (`workspace_invitations`) come last among these: every writer of the invitations of a workspace holds the
+ * order). One consequence: once the memberships *of the workspace* are locked, no transaction locks the memberships *of an account*
+ * (`memberships('user_id', ...)`) any more: level 4 would be taken a second time, on rows that sort differently from the first, and a
+ * request that locks them the other way round (the account's memberships, then the workspace's) could wait for it. What those transactions need to know about
+ * the account's memberships (does it belong to another workspace? how many?) is a plain count under the lock of the account (2), which
+ * is enough: everything that adds or removes a membership of an account locks that account first. Accepting an invitation and leaving or
+ * being removed are the cases ({@see Invitations::accept()}, {@see Members::remove()}). The invitations (`workspace_invitations`) come last among these: every writer of the invitations of a workspace holds the
  * workspace's lock, which is what keeps them one after the other, so they are read and written with plain queries and never
  * with a locking read (on MySQL and MariaDB it would lock the gap after the last invitation of the workspace, where the first
  * invitation of the next workspace is inserted). Declining an invitation deletes the one row by its key, without the lock.

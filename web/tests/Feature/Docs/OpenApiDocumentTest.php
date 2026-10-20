@@ -67,7 +67,7 @@ describe('the document', function (): void {
             $ids[] = $id;
         }
 
-        expect($ids)->toHaveCount(58)->and($tags)->toHaveCount(count(array_unique($tags)));
+        expect($ids)->toHaveCount(57)->and($tags)->toHaveCount(count(array_unique($tags)));
     });
 
     it('names for each operation an ability that exists', function (): void {
@@ -314,7 +314,7 @@ describe('OpenApi', function (): void {
     it('lists the operations in the order of the file, with their parameters resolved', function (): void {
         $operations = app(OpenApi::class)->operations();
 
-        expect($operations)->toHaveCount(58)
+        expect($operations)->toHaveCount(57)
             ->and($operations[0])->toMatchArray(['method' => 'get', 'path' => '/me', 'operationId' => 'getCurrentUser', 'tag' => 'Account', 'ability' => 'read']);
 
         $listItems = collect($operations)->firstWhere('operationId', 'listItems');
@@ -327,7 +327,7 @@ describe('OpenApi', function (): void {
         $groups = app(OpenApi::class)->operationsByTag();
 
         expect(array_keys($groups))->toBe(array_column(app(OpenApi::class)->tags(), 'name'))
-            ->and(count(array_merge(...array_values($groups))))->toBe(58);
+            ->and(count(array_merge(...array_values($groups))))->toBe(57);
     });
 
     it('follows a reference, what is written next to it winning over what it points to', function (): void {

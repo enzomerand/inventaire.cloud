@@ -62,7 +62,7 @@ describe('the settings', function (): void {
     it('are open to sign-ups until an administrator says otherwise', function (): void {
         $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('close registration, and are answered as they now are', function (): void {
@@ -70,13 +70,38 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
         $this->actingAs($admin)->getJson('/api/v1/admin/settings', frontend())->assertOk()->assertJsonPath('data.registration_open', false);
         expect(DB::table('settings')->where('key', 'registration_open')->count())->toBe(1)
             ->and(json_decode((string) DB::table('settings')->where('key', 'registration_open')->value('value')))->toBeFalse();
+    });
+
+    it('let an administrator turn the invitations off and on, apart from the registration', function (): void {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['invitation_sign_up' => false], frontend())
+            ->assertOk()
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => false, 'documenso' => adminNoDocumenso()]]);
+
+        $this->flushSession();
+
+        $this->actingAs($admin)->getJson('/api/v1/admin/settings', frontend())->assertOk()->assertJsonPath('data.invitation_sign_up', false)->assertJsonPath('data.registration_open', true);
+        expect(DB::table('settings')->pluck('key')->all())->toBe(['invitation_sign_up']);
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['invitation_sign_up' => true, 'registration_open' => false], frontend())
+            ->assertOk()
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
+    });
+
+    it('refuse an invitation_sign_up that is not a boolean, and change nothing', function (): void {
+        $this->actingAs(User::factory()->admin()->create())->putJson('/api/v1/admin/settings', ['invitation_sign_up' => 'maybe'], frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('invitation_sign_up');
+
+        expect(DB::table('settings')->count())->toBe(0);
     });
 
     it('open registration again', function (): void {
@@ -145,7 +170,7 @@ describe('the settings', function (): void {
         $this->actingAs(User::factory()->admin()->create())
             ->putJson('/api/v1/admin/settings', ['registration_open' => false, 'something_else' => 'x'], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
 
         expect(DB::table('settings')->pluck('key')->all())->toBe(['registration_open']);
     });

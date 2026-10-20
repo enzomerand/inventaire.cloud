@@ -17,8 +17,8 @@ info:
 
     A missing, malformed, expired or revoked token is answered with `401`. Signing out everywhere from the account page
     revokes every token of the account. Sign-in, the account itself, the administration and the management of tokens
-    belong to the web application and are not part of this API: they refuse a request made with a token (`403`,
-    `session_required`).
+    belong to the web application and are not part of this API, nor is handing the ownership of a workspace over to another
+    member: they refuse a request made with a token (`403`, `session_required`).
 
     Send the token alone. A request that carries the session cookie of the web application as well is answered with `403`
     and the code `token_with_session`, whatever the token can do: with both, it would be unclear which of the two decides.
@@ -30,7 +30,7 @@ info:
     - `read`: every `GET` operation;
     - `write`: the content of an inventory, that is items, attachments, exports, imports and official versions (create, change, delete);
     - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete), and the people of a workspace, that is its members,
-      their roles, its ownership and its invitations.
+      their roles and its invitations.
 
     The abilities are independent: `write` and `manage` do not include `read`. A token that cannot read can hardly be
     used, since the ids that the other operations need are found with `GET`: give `read` along with the others. What a
@@ -78,7 +78,8 @@ info:
 
     Resources are identified by lowercase ULIDs (26 characters, digits and letters), in paths and in bodies. The numeric
     keys of the database are never exposed; the only exception is the `id` of the account in `GET /me`. A member of a workspace is named by an
-    identifier of the same shape, valid in that workspace only. Dates are ISO 8601
+    identifier of the same shape, the same in every workspace, drawn at random for each account: it says nothing about the
+    account, not even when it was opened. Dates are ISO 8601
     in UTC (`2026-10-15T12:30:00+00:00`).
 
     ## Items and their values
@@ -126,7 +127,7 @@ tags:
     description: The workspaces the user belongs to, with their role in each.
   - name: Members
     x-displayName: Members
-    description: Who belongs to a workspace, with their role in it, and the ownership of the workspace.
+    description: Who belongs to a workspace, with their role in it.
   - name: Invitations
     x-displayName: Invitations
     description: The invitations to join a workspace, sent by its owner and answered by the person they are addressed to.
@@ -555,8 +556,8 @@ paths:
       description: >-
         Every member of the workspace, the owner first, then in the order they joined. Any member can ask. The `email`
         of a member is given to the owner of the workspace and to that member only, and is `null` for anybody else
-        (the key is always there). `id` names the member in this workspace; it is not the number of their account and
-        means nothing in another workspace.
+        (the key is always there). `id` names the person, the same in every workspace; it is drawn at random for
+        each account, so it is not the number of their account and says nothing about when it was opened.
       x-ability: read
       responses:
         '200':
@@ -619,8 +620,8 @@ paths:
       operationId: updateMemberRole
       summary: Change the role of a member
       description: >-
-        Makes a member an `editor` or a `viewer`. Owners only. The role of the owner cannot be changed: hand the
-        ownership over with `POST /workspaces/{workspace}/transfer`.
+        Makes a member an `editor` or a `viewer`. Owners only. The role of the owner cannot be changed: the ownership is
+        handed over to another member from the web application.
       x-ability: manage
       requestBody:
         required: true
@@ -672,7 +673,7 @@ paths:
                 $ref: '#/components/schemas/ConflictError'
           x-codes:
             - code: cannot_change_owner_role
-              description: The member is the owner, whose role cannot be changed. Hand the ownership over instead.
+              description: The member is the owner, whose role cannot be changed. The ownership is handed over from the web application instead.
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '429':
@@ -704,7 +705,7 @@ paths:
       description: >-
         Removes a member: they lose access to the workspace at once. Owners can remove any member but themselves. A
         member can remove themselves, which is leaving the workspace; a person whose last workspace it was is given a
-        personal workspace. The owner cannot leave: hand the ownership over first.
+        personal workspace. The owner cannot leave: they hand the ownership over first, from the web application.
       x-ability: manage
       responses:
         '204':
@@ -738,112 +739,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConflictError'
           x-codes:
-            - code: cannot_remove_owner
-              description: The member is the owner, who cannot be removed. Hand the ownership over first.
             - code: owner_cannot_leave
               description: >-
                 The user is the owner and is removing themselves: the owner cannot leave. Hand the ownership over
                 first.
-        '429':
-          description: Too many requests. Wait `Retry-After` seconds.
-          headers:
-            Retry-After:
-              $ref: '#/components/headers/RetryAfter'
-            X-RateLimit-Limit:
-              $ref: '#/components/headers/RateLimitLimit'
-            X-RateLimit-Remaining:
-              $ref: '#/components/headers/RateLimitRemaining'
-            X-RateLimit-Reset:
-              $ref: '#/components/headers/RateLimitReset'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CodedError'
-              example:
-                message: Too many attempts. Please wait a moment before trying again.
-                code: too_many_requests
-          x-codes:
-            - code: too_many_requests
-              description: The rate limit of the token is reached.
-  /workspaces/{workspace}/transfer:
-    parameters:
-      - $ref: '#/components/parameters/WorkspaceId'
-    post:
-      tags:
-        - Members
-      operationId: transferOwnership
-      summary: Hand the ownership of a workspace over
-      description: >-
-        Makes a member the owner of the workspace and the user, who must be its owner, an editor; both happen
-        together. `user_id` is the `id` of the member, as `GET /workspaces/{workspace}/members` gives it. A workspace
-        has one owner at any time.
-      x-ability: manage
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - user_id
-              properties:
-                user_id:
-                  type: string
-                  maxLength: 64
-                  description: The `id` of the member who becomes the owner.
-      responses:
-        '200':
-          description: The workspace as the user sees it now, with their new role.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - data
-                properties:
-                  data:
-                    $ref: '#/components/schemas/Workspace'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CodedError'
-              example:
-                message: Only an owner of this workspace can manage it.
-                code: not_owner
-          x-codes:
-            - code: token_ability_missing
-              description: The token lacks the `manage` ability.
-            - code: not_owner
-              description: >-
-                The user belongs to the workspace without owning it: only its owner decides who belongs to it.
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ConflictError'
-          x-codes:
-            - code: already_owner
-              description: The member is the owner already.
-        '422':
-          description: >-
-            The body is refused, or `user_id` is not a member of the workspace. `errors` names each fault under the
-            key it is about.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidationError'
-              example:
-                message: This person is not a member of the workspace.
-                errors:
-                  user_id:
-                    - This person is not a member of the workspace.
         '429':
           description: Too many requests. Wait `Retry-After` seconds.
           headers:
@@ -940,13 +839,14 @@ paths:
         Invites an address to the workspace, as an `editor` or a `viewer`, and mails it. Owners only. The invitation
         is bound to the address, not to a link: the person signs in with that address, finds the invitation among
         theirs (`GET /me/invitations`) and accepts or declines it; while registration is closed, a waiting invitation
-        also lets its address sign up. The mail is sent after the answer, in the language of the account of that
+        also lets its address sign up, unless the administrator turned that off or the person who sent it has deleted their
+        account. The mail is sent after the answer, in the language of the account of that
         address if there is one, else of the request. The invitation lapses after 14 days by default; sending it again
         gives it another term.
 
         A workspace holds 50 members and waiting invitations together by default (`member_limit_reached`), and an
-        owner can send 20 mails an hour by default, invitations and invitations sent again together (`429` beyond,
-        with `Retry-After`).
+        owner can send 20 mails an hour by default, invitations and invitations sent again together, and one address
+        receives 5 a day by default from everybody on the instance together (`429` beyond, with `Retry-After`).
       x-ability: manage
       requestBody:
         required: true
@@ -1032,7 +932,7 @@ paths:
                 code: too_many_requests
           x-codes:
             - code: too_many_requests
-              description: The rate limit of the token, or the invitations an hour of the user, is reached.
+              description: The rate limit of the token, the invitations an hour of the user, or the invitations a day of the address, is reached.
   /workspaces/{workspace}/invitations/{invitation}:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -1099,7 +999,7 @@ paths:
       description: >-
         Mails the invitation once more and gives it another term (14 days by default). Owners only. An invitation can
         be sent again once every 10 minutes (`resend_too_soon`, with `Retry-After`), and sending it counts against the
-        same hourly limit as inviting.
+        same limits as inviting (the hourly one of the owner and the daily one of the address).
       x-ability: manage
       responses:
         '200':
@@ -1152,7 +1052,7 @@ paths:
                 code: too_many_requests
           x-codes:
             - code: too_many_requests
-              description: The rate limit of the token, or the invitations an hour of the user, is reached.
+              description: The rate limit of the token, the invitations an hour of the user, or the invitations a day of the address, is reached.
             - code: resend_too_soon
               description: >-
                 The invitation was sent less than 10 minutes ago. `retry_after`, like `Retry-After`, says how many
@@ -4949,7 +4849,7 @@ components:
       name: member
       in: path
       required: true
-      description: The id of the member, as `GET /workspaces/{workspace}/members` gives it. It names the person in this workspace only.
+      description: The id of the member, as `GET /workspaces/{workspace}/members` gives it. A person who is not a member of the workspace is a `404`.
       schema:
         $ref: '#/components/schemas/Ulid'
     InvitationId:
@@ -5291,7 +5191,7 @@ components:
       properties:
         id:
           $ref: '#/components/schemas/Ulid'
-          description: Names the member in this workspace only. It is not the number of their account.
+          description: Names the person, the same in every workspace. It is not the number of their account and says nothing about it.
         name:
           type: string
         email:
@@ -5329,7 +5229,7 @@ components:
         role:
           $ref: '#/components/schemas/InvitableRole'
         invited_by:
-          description: The member who sent it last, null once their account was deleted.
+          description: The person who sent it last, as the id they have among the members, null once their account was deleted.
           oneOf:
             - type: object
               required:

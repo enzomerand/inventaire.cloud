@@ -9,6 +9,8 @@ use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
+use App\Models\WorkspaceMember;
+use App\Settings\InstanceSettings;
 use App\Workspaces\Exceptions\MembershipRefused;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\DatabaseManager;
@@ -28,10 +30,11 @@ use Illuminate\Validation\ValidationException;
  * or a viewer; there is one invitation per address and workspace, and it lapses after `workspaces.invitation_ttl_days`. One that has
  * lapsed is invisible and refused everywhere (it is answered as if it was not there), even before {@see self::prune()} clears it.
  *
- * While registration is closed, a waiting invitation is also what lets an address without an account sign up ({@see self::hasPendingFor()}).
+ * While registration is closed, a waiting invitation is also what lets an address without an account sign up, as long as the person
+ * who sent it still has an account and the administrator has left that on ({@see self::hasTicketFor()}).
  *
  * The workspace holds at most `workspaces.max_members` places, taken by its members and by the invitations that wait; an account
- * cannot belong to more than `workspaces.max_memberships_per_user` workspaces.
+ * cannot belong to more than `workspaces.max_per_user` workspaces, the ones it was invited to included (the limit of creating them).
  *
  * Whatever changes the members runs in one transaction under the row locks of {@see Locks}, in their order (the accounts, the workspace,
  * its memberships: see {@see Roster}), and the person who acts is judged again there. The invitations are not locked row by row: every
@@ -135,10 +138,22 @@ final class Invitations
                 throw new MembershipRefused(MembershipRefused::RESEND_TOO_SOON, retryAfter: max(1, $available->getTimestamp() - now()->getTimestamp()));
             }
 
-            $current->expires_at = $this->expiry();
-            $current->invited_by_id = $actor->getKey();
-            $current->updated_at = now();
-            $current->save();
+            // The row is judged by the statement itself: declining does not take the workspace's lock, so the invitation read above may have been
+            // deleted since, and a mail must not go out for one that is gone. This statement always changes the row (the pause between two
+            // sends is what lets `updated_at` move, and MySQL counts the rows it changed, not the ones it matched), so none means it is gone.
+            $expires = $this->expiry();
+            $sentAt = now();
+            $changed = WorkspaceInvitation::query()->whereKey($current->getKey())->update([
+                'expires_at' => $expires,
+                'invited_by_id' => $actor->getKey(),
+                'updated_at' => $sentAt,
+            ]);
+
+            if ($changed !== 1) {
+                throw (new ModelNotFoundException)->setModel(WorkspaceInvitation::class, [$current->getKey()]);
+            }
+
+            $current->forceFill(['expires_at' => $expires, 'invited_by_id' => $actor->getKey(), 'updated_at' => $sentAt])->syncOriginal();
             $current->setRelation('workspace', $roster->workspace);
 
             return $current;
@@ -196,11 +211,16 @@ final class Invitations
     }
 
     /**
-     * Whether an invitation waits for an address: what lets it sign up while registration is closed.
+     * Whether an invitation waits for an address that can serve as its ticket to sign up while registration is closed.
+     *
+     * The person who sent it must still have an account: an invitation whose sender is gone (the database forgets who sent it when the
+     * account is deleted) is nobody's ticket, so that an address cannot be let in on the word of somebody who is not there to answer
+     * for it. It can still be accepted by a person who has an account. Whether the administrator lets invitations open the door at
+     * all is not asked here: it is a setting ({@see InstanceSettings::invitationSignUp()}).
      */
-    public function hasPendingFor(string $email): bool
+    public function hasTicketFor(string $email): bool
     {
-        return WorkspaceInvitation::query()->addressedTo($email)->pending()->exists();
+        return WorkspaceInvitation::query()->addressedTo($email)->pending()->whereNotNull('invited_by_id')->exists();
     }
 
     /**
@@ -251,14 +271,25 @@ final class Invitations
                 throw new MembershipRefused(MembershipRefused::MEMBER_LIMIT_REACHED, limit: $limit);
             }
 
-            $joined = config()->integer('workspaces.max_memberships_per_user');
+            // A plain count, not a locking read of the account's memberships: the workspace's memberships are locked already, and taking
+            // those of the account now would go back up the global order (see Locks). The account's row is locked, and everything that adds
+            // or removes one of its memberships takes that lock first, so the count cannot change under us.
+            $joined = config()->integer('workspaces.max_per_user');
 
-            if ($this->locks->memberships('user_id', [$account->getKey()])->count() >= $joined) {
+            if (WorkspaceMember::query()->where('user_id', $account->getKey())->count() >= $joined) {
                 throw new MembershipRefused(MembershipRefused::MEMBERSHIP_LIMIT_REACHED, limit: $joined);
             }
 
-            $workspace->members()->attach($account->getKey(), ['role' => $current->role->value]);
-            $current->delete();
+            // Whatever the row says, an invitation gives an editor's or a viewer's rights, the less when it is neither (a row written by hand).
+            $role = in_array($current->role, [WorkspaceRole::Editor, WorkspaceRole::Viewer], true) ? $current->role : WorkspaceRole::Viewer;
+
+            // Spent by the statement that counts, before the membership is made: an invitation that was declined or lapsed since it was
+            // read (declining takes no lock) joins nobody.
+            if (WorkspaceInvitation::query()->whereKey($current->getKey())->pending()->delete() !== 1) {
+                throw (new ModelNotFoundException)->setModel(WorkspaceInvitation::class, [$current->getKey()]);
+            }
+
+            $workspace->members()->attach($account->getKey(), ['role' => $role->value]);
 
             return $workspace;
         }));

@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Inventories\Exports\ExportFormat;
 use App\Inventories\Versions\SignatureError;
 use App\Inventories\Versions\SignatureStatus;
-use App\Workspaces\MemberIds;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -86,13 +85,6 @@ function contractScenarios(): array
             $world = contractWorld();
 
             contractCheck(contractCall($test, $world['owner'], 'removeMember', 'DELETE', contractMemberUri($world['team']['workspace'], $world['team']['editor'])), 'removeMember', 204);
-        },
-
-        'transferOwnership' => function (object $test): void {
-            $world = contractWorld();
-            $uri = "/api/v1/workspaces/{$world['team']['workspace']->ulid}/transfer";
-
-            contractCheck(contractCall($test, $world['owner'], 'transferOwnership', 'POST', $uri, ['user_id' => app(MemberIds::class)->of($world['team']['workspace'], $world['team']['editor'])]), 'transferOwnership', 200);
         },
 
         'listInvitations' => function (object $test): void {

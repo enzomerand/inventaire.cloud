@@ -88,6 +88,17 @@ final class Workspace extends Model
     }
 
     /**
+     * The invitations to join the workspace, those that lapsed and were not pruned yet included (see {@see WorkspaceInvitation::scopePending()}).
+     * They go with it when it is deleted (the foreign key cascades).
+     *
+     * @return HasMany<WorkspaceInvitation, $this>
+     */
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(WorkspaceInvitation::class);
+    }
+
+    /**
      * The inventories of the workspace. They go with it when it is deleted (the foreign key cascades).
      *
      * @return HasMany<Inventory, $this>

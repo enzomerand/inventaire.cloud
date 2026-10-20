@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Workspaces;
 
-use App\Workspaces\MemberIds;
+use App\Workspaces\Members;
 
 /**
- * The member the ownership of the workspace is handed over to: the identifier `GET /workspaces/{workspace}/members` gives them.
+ * The member the ownership of the workspace is handed over to: the `id` `GET /workspaces/{workspace}/members` gives them, sent as `member_id`.
  *
- * Whether it is one of the members is for the controller to find out (it looks the identifier up among them, see
- * {@see MemberIds}); this checks that there is one.
+ * Whether it is one of the members is for the controller to find out (it looks the identifier up among them, see {@see Members::find()},
+ * and answers `404` for one that is not, as the path of a member does); this checks that there is one.
  */
 final class TransferOwnershipRequest extends ManagesMembersRequest
 {
@@ -20,7 +20,7 @@ final class TransferOwnershipRequest extends ManagesMembersRequest
     public function rules(): array
     {
         return [
-            'user_id' => ['required', 'string', 'max:64'],
+            'member_id' => ['required', 'string', 'max:64'],
         ];
     }
 
@@ -29,6 +29,6 @@ final class TransferOwnershipRequest extends ManagesMembersRequest
      */
     public function memberId(): string
     {
-        return $this->string('user_id')->toString();
+        return $this->string('member_id')->toString();
     }
 }

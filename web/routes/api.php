@@ -86,6 +86,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 Route::get('/me/tokens', [ApiTokenController::class, 'index'])->name('me.tokens.index');
                 Route::post('/me/tokens', [ApiTokenController::class, 'store'])->middleware('throttle:api-token-creation')->name('me.tokens.store');
                 Route::delete('/me/tokens/{token}', [ApiTokenController::class, 'destroy'])->where('token', '[0-9]{1,18}')->name('me.tokens.destroy');
+
+                // Handing the ownership of a workspace over: the person decides it at their browser. A leaked token, whatever its abilities,
+                // must not be able to make somebody else the owner of a workspace and lock its real owner out.
+                Route::post('/workspaces/{workspace}/transfer', WorkspaceOwnershipController::class)->name('workspaces.transfer');
             });
         });
 
@@ -160,15 +164,15 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::post('/inventories/{inventory}/versions/{version}/signature/retry', [InventoryVersionController::class, 'retrySignature'])->name('inventories.versions.signature.retry');
         });
 
-        // Managing the people of a workspace: its members (their role, who stays, who owns it) and the invitations. They are the owner's
-        // to make, and the invited person's to answer. A member is named by the identifier of App\Workspaces\MemberIds, which the controller
-        // looks up among the members of the workspace, and an invitation by its ULID alone (the service checks that it is the workspace's, or
-        // the person's): no scoped binding, the workspace has no relation to scope by. Inviting and sending again mail an address the
-        // owner chooses, hence their own pace.
-        Route::middleware('token:manage')->group(function (): void {
-            Route::patch('/workspaces/{workspace}/members/{member}', [WorkspaceMemberController::class, 'update'])->name('workspaces.members.update');
-            Route::delete('/workspaces/{workspace}/members/{member}', [WorkspaceMemberController::class, 'destroy'])->name('workspaces.members.destroy');
-            Route::post('/workspaces/{workspace}/transfer', WorkspaceOwnershipController::class)->name('workspaces.transfer');
+        // Managing the people of a workspace: its members (their role, who stays) and the invitations. They are the owner's to make, and
+        // the invited person's to answer. A member is named in the path by the `ulid` of their account, found among the members of the
+        // workspace (`{member:ulid}`: User::resolveRouteBindingQuery() lowers its case), and an invitation by its own ULID among the
+        // invitations of the workspace (the bindings are scoped by Workspace::members() and Workspace::invitations()). Inviting and sending
+        // again mail an address the owner chooses, hence their own pace. (Handing the ownership over is not here: it is for a person at their
+        // browser, see the routes of the account above.)
+        Route::scopeBindings()->middleware('token:manage')->group(function (): void {
+            Route::patch('/workspaces/{workspace}/members/{member:ulid}', [WorkspaceMemberController::class, 'update'])->name('workspaces.members.update');
+            Route::delete('/workspaces/{workspace}/members/{member:ulid}', [WorkspaceMemberController::class, 'destroy'])->name('workspaces.members.destroy');
 
             Route::post('/workspaces/{workspace}/invitations', [WorkspaceInvitationController::class, 'store'])->middleware('throttle:workspace-invitations')->name('workspaces.invitations.store');
             Route::post('/workspaces/{workspace}/invitations/{invitation}/resend', [WorkspaceInvitationController::class, 'resend'])->middleware('throttle:workspace-invitations')->name('workspaces.invitations.resend');

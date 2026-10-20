@@ -164,7 +164,7 @@ function insertUserWhileLocked(string $go): array
 
         $started = microtime(true);
 
-        DB::table('users')->insert(['name' => 'Newcomer', 'email' => 'newcomer@example.com', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('users')->insert(['ulid' => User::newUlid(), 'name' => 'Newcomer', 'email' => 'newcomer@example.com', 'created_at' => now(), 'updated_at' => now()]);
 
         return ['result' => 'inserted', 'seconds' => round(microtime(true) - $started, 2)];
     } finally {

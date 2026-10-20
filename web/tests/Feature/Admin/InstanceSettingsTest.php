@@ -58,7 +58,7 @@ describe('the registration setting', function (): void {
         // Asked many times, in many ways, during one request: it is said once.
         expect($settings->registrationOpen())->toBeFalse()
             ->and($settings->registrationOpen())->toBeFalse()
-            ->and($settings->all())->toBe(['registration_open' => false]);
+            ->and($settings->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true]);
 
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'registration_open'])->once();
     })->with([
@@ -94,6 +94,41 @@ describe('the registration setting', function (): void {
 
         Log::shouldHaveReceived('warning')->once();
     });
+
+    it('lets invitations open the door unless an administrator turned that off, and keeps it apart from the registration', function (): void {
+        $settings = freshSettings();
+
+        expect($settings->invitationSignUp())->toBeTrue();
+
+        $settings->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+
+        expect(freshSettings()->invitationSignUp())->toBeFalse()
+            ->and(freshSettings()->registrationOpen())->toBeTrue()
+            ->and(DB::table('settings')->pluck('key')->all())->toBe(['invitation_sign_up']);
+
+        $settings->update([InstanceSettings::REGISTRATION_OPEN => false, InstanceSettings::INVITATION_SIGN_UP => true]);
+
+        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true])
+            ->and(DB::table('settings')->count())->toBe(2);
+    });
+
+    it('turns the invitations off, with one warning, when the stored value is not a flag', function (string $stored): void {
+        Log::spy();
+        DB::table('settings')->insert(['key' => 'invitation_sign_up', 'value' => $stored, 'created_at' => now(), 'updated_at' => now()]);
+        $settings = freshSettings();
+
+        expect($settings->invitationSignUp())->toBeFalse()
+            ->and($settings->invitationSignUp())->toBeFalse()
+            // Nothing else is touched: registration is open, as nothing says otherwise.
+            ->and($settings->registrationOpen())->toBeTrue();
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'invitation_sign_up'])->once();
+    })->with([
+        'a string' => ['"yes"'],
+        'a number' => ['1'],
+        'null' => ['null'],
+        'a list' => ['[true]'],
+    ]);
 
     it('does not write what is stored in the log', function (): void {
         Log::spy();
@@ -139,7 +174,7 @@ describe('the registration setting', function (): void {
         DB::table('settings')->insert(['key' => 'something_else', 'value' => '{"a":1}', 'created_at' => now(), 'updated_at' => now()]);
         freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
-        expect(freshSettings()->all())->toBe(['registration_open' => false]);
+        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true]);
     });
 });
 

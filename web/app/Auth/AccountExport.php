@@ -9,7 +9,9 @@ use App\Models\InventoryField;
 use App\Models\InventoryVersion;
 use App\Models\User;
 use App\Models\WorkspaceInvitation;
+use App\Models\WorkspaceMember;
 use App\Workspaces\Membership;
+use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -39,10 +41,15 @@ use stdClass;
  * `official_versions_created` the number of official versions they froze that still exist (see {@see InventoryVersion}). All
  * are zero in a workspace where they wrote nothing. They are an addition to the document, which keeps its version.
  *
+ * `user.ulid` is the identifier by which the other members of a workspace know the account in the API (`id` there). An addition to
+ * the document, which keeps its version.
+ *
  * `invitations` are the invitations to join a workspace that still wait for an answer: the ones the account **sent** (the workspace, the
  * address invited, the role, when it was sent and when it lapses) and the ones **received** (the name of the workspace, the name of who
- * invited, the role, when it lapses). The ones that lapsed are not there: the application treats them as gone. An addition to the
- * document, which keeps its version.
+ * invited, the role, when it lapses). The ones that lapsed are not there: the application treats them as gone. The ones sent are only
+ * those of the workspaces the account still owns: the address of a person who was invited is shown to the owner who manages the
+ * invitations and to nobody else, and an account that handed a workspace over (or was removed from it) no longer sees them in the
+ * application, so its export does not give them either. An addition to the document, which keeps its version.
  *
  * Besides the profile and the workspaces it holds what the application keeps about the account's access: the
  * sessions it has in the database (network address, browser and last activity, never the session id, which is a
@@ -71,6 +78,7 @@ final class AccountExport
             'exported_at' => now()->toIso8601String(),
             'user' => [
                 'id' => $user->id,
+                'ulid' => $user->ulid,
                 'name' => $user->name,
                 'email' => $user->email,
                 'locale' => $user->locale,
@@ -124,13 +132,15 @@ final class AccountExport
     }
 
     /**
-     * The invitations to join a workspace that wait for an answer, sent by the account and addressed to it, newest first.
+     * The invitations to join a workspace that wait for an answer, sent by the account (from the workspaces it still owns) and addressed
+     * to it, newest first.
      *
      * @return array{sent: list<array<string, mixed>>, received: list<array<string, mixed>>}
      */
     private function invitations(User $user): array
     {
-        $sent = WorkspaceInvitation::query()->where('invited_by_id', $user->getKey())->pending()->with('workspace')->orderByDesc('id')->get();
+        $owned = WorkspaceMember::query()->where('user_id', $user->getKey())->where('role', WorkspaceRole::Owner->value)->select('workspace_id');
+        $sent = WorkspaceInvitation::query()->where('invited_by_id', $user->getKey())->whereIn('workspace_id', $owned)->pending()->with('workspace')->orderByDesc('id')->get();
         $received = WorkspaceInvitation::query()->addressedTo($user->email)->pending()->with(['workspace', 'inviter'])->orderByDesc('id')->get();
 
         return [

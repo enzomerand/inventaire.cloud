@@ -311,6 +311,19 @@ describe('the login page', function (): void {
             ->assertSee('Send me a code');
     });
 
+    it('stops mentioning invited addresses when the administrator turned invitations off as a way to sign up', function (): void {
+        registration(false);
+        app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+
+        $this->get(route('login'), ['Accept-Language' => 'en'])
+            ->assertOk()
+            ->assertSee('role="note">Sign-ups are closed: only existing accounts can sign in.', false)
+            ->assertDontSee('invited addresses can sign in');
+        $this->get(route('login'), ['Accept-Language' => 'fr'])
+            ->assertOk()
+            ->assertSee('role="note">Les inscriptions sont fermées : seuls les comptes existants peuvent se connecter.', false);
+    });
+
     it('is translated', function (): void {
         registration(false);
 

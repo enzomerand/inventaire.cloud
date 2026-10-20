@@ -36,7 +36,7 @@ function tokenRouteClassification(): array
     $manage = [
         'workspaces.store', 'workspaces.update', 'workspaces.destroy', 'workspaces.inventories.store', 'inventories.update',
         'inventories.destroy', 'inventories.fields.store', 'inventories.fields.order', 'inventories.fields.update', 'inventories.fields.destroy',
-        'workspaces.members.update', 'workspaces.members.destroy', 'workspaces.transfer', 'workspaces.invitations.store',
+        'workspaces.members.update', 'workspaces.members.destroy', 'workspaces.invitations.store',
         'workspaces.invitations.resend', 'workspaces.invitations.destroy', 'me.invitations.accept', 'me.invitations.destroy',
     ];
 
@@ -61,7 +61,7 @@ function tokenSessionOnlyRoutes(): array
     return array_map(fn (string $name): string => 'api.v1.'.$name, [
         'auth.code', 'auth.verify', 'auth.logout', 'me.update', 'me.export', 'me.current-workspace', 'me.sign-out-everywhere',
         'me.deletion-code', 'me.destroy', 'admin.users.index', 'admin.users.store', 'admin.users.update', 'admin.users.destroy',
-        'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy',
+        'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy', 'workspaces.transfer',
     ]);
 }
 

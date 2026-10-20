@@ -34,7 +34,9 @@ use Illuminate\Support\Str;
  * When an administrator has closed registration, an address that has no account cannot create one: it is judged like
  * any other address (wrong codes are counted, attempts run out), but whatever it types is refused as a wrong code,
  * even the right one, so a code issued before registration closed opens nothing and nothing tells the two apart. The exception is an
- * address that an invitation to join a workspace waits for: the invitation is its ticket, and the right code creates the account.
+ * address that an invitation to join a workspace waits for (one that a person who still has an account sent, and only while the administrator
+ * leaves invitations on as a way to sign up: {@see Invitations::hasTicketFor()}, {@see InstanceSettings::invitationSignUp()}): the invitation is
+ * its ticket, and the right code creates the account.
  *
  * Spending the code and everything that is saved because of it (the account,
  * its verified address, its language, its workspace) is one transaction: if any of it fails,
@@ -89,9 +91,10 @@ final class VerifyCodeController extends Controller
         $codes->lock($email);
 
         // Read for every address, so that the work is the same whether it has an account or not (and so is the look for an
-        // invitation, which only matters while registration is closed).
+        // invitation, which only matters while registration is closed: it is made first, whatever the setting says, and the setting
+        // is already in memory).
         $registrationOpen = $this->settings->registrationOpen();
-        $invited = ! $registrationOpen && $this->invitations->hasPendingFor($email);
+        $invited = ! $registrationOpen && $this->invitations->hasTicketFor($email) && $this->settings->invitationSignUp();
 
         $user = User::query()->where('email', $email)->first();
 

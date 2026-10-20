@@ -200,7 +200,7 @@ describe('the markup', function (): void {
             'members.notice.role_changed', 'members.notice.removed', 'members.notice.transferred', 'members.notice.left',
             'members.notice.invited', 'members.notice.resent', 'members.notice.withdrawn',
             'members.error.not_owner', 'members.error.already_member', 'members.error.already_invited',
-            'members.error.cannot_change_owner_role', 'members.error.cannot_remove_owner', 'members.error.owner_cannot_leave',
+            'members.error.cannot_change_owner_role', 'members.error.owner_cannot_leave',
             'members.error.already_owner', 'members.error.member_limit', 'members.error.membership_limit',
             'members.error.resend_too_soon', 'members.error.resend_wait.one', 'members.error.resend_wait.other',
             'invitations.expires', 'invitations.invited_by',

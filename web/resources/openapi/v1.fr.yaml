@@ -23,8 +23,8 @@ info:
 
     Un jeton absent, mal formé, expiré ou révoqué reçoit la réponse `401`. Se déconnecter partout depuis la page Compte
     révoque tous les jetons du compte. La connexion, le compte lui-même, l'administration et la gestion des jetons
-    relèvent de l'application web et ne font pas partie de cette API : ils refusent une requête faite avec un jeton (`403`,
-    `session_required`).
+    relèvent de l'application web et ne font pas partie de cette API, pas plus que le transfert de la propriété d'un espace de
+    travail à un autre membre : ils refusent une requête faite avec un jeton (`403`, `session_required`).
 
     Envoyez le jeton seul. Une requête qui porte aussi le cookie de session de l'application web reçoit la réponse `403`
     avec le code `token_with_session`, quelles que soient les permissions du jeton : avec les deux, on ne saurait pas lequel des deux décide.
@@ -36,7 +36,7 @@ info:
     - `read` : toutes les opérations `GET` ;
     - `write` : le contenu d'un inventaire, c'est-à-dire les articles, les pièces jointes, les exports, les imports et les versions officielles (création, modification, suppression) ;
     - `manage` : la structure, c'est-à-dire les espaces de travail, les inventaires et les champs (création, modification, suppression), et les personnes d'un espace de travail, c'est-à-dire ses membres,
-      leurs rôles, sa propriété et ses invitations.
+      leurs rôles et ses invitations.
 
     Les permissions sont indépendantes : `write` et `manage` n'incluent pas `read`. Un jeton qui ne peut pas lire est difficilement
     utilisable, puisque les identifiants dont les autres opérations ont besoin se trouvent avec `GET` : donnez `read` en plus
@@ -83,7 +83,7 @@ info:
     ## Identifiants et dates
 
     Les ressources sont identifiées par des ULID en minuscules (26 caractères, chiffres et lettres), dans les chemins et dans les
-    corps. Les clés numériques de la base de données ne sont jamais exposées ; la seule exception est l'`id` du compte dans `GET /me`. Un membre d'un espace de travail est désigné par un identifiant de même forme, valable dans cet espace de travail seulement.
+    corps. Les clés numériques de la base de données ne sont jamais exposées ; la seule exception est l'`id` du compte dans `GET /me`. Un membre d'un espace de travail est désigné par un identifiant de même forme, le même dans tous les espaces de travail, tiré au hasard pour chaque compte : il ne dit rien du compte, pas même quand il a été ouvert.
     Les dates sont au format ISO 8601 en UTC (`2026-10-15T12:30:00+00:00`).
 
     ## Articles et leurs valeurs
@@ -126,7 +126,7 @@ tags:
     description: "Les espaces de travail auxquels appartient l'utilisateur, avec son rôle dans chacun."
   -
     x-displayName: 'Membres'
-    description: "Les personnes qui appartiennent à un espace de travail, avec leur rôle, et la propriété de l'espace de travail."
+    description: "Les personnes qui appartiennent à un espace de travail, avec leur rôle."
   -
     x-displayName: 'Invitations'
     description: 'Les invitations à rejoindre un espace de travail, envoyées par son propriétaire et auxquelles répond la personne concernée.'
@@ -285,7 +285,7 @@ paths:
   '/workspaces/{workspace}/members':
     get:
       summary: "Lister les membres d'un espace de travail"
-      description: "Tous les membres de l'espace de travail, le propriétaire en premier, puis dans l'ordre où ils ont rejoint l'espace. N'importe quel membre peut le demander. L'`email` d'un membre n'est donné qu'au propriétaire de l'espace de travail et à ce membre, et vaut `null` pour tous les autres (la clé est toujours présente). `id` désigne le membre dans cet espace de travail ; ce n'est pas le numéro de son compte et il ne signifie rien dans un autre espace de travail."
+      description: "Tous les membres de l'espace de travail, le propriétaire en premier, puis dans l'ordre où ils ont rejoint l'espace. N'importe quel membre peut le demander. L'`email` d'un membre n'est donné qu'au propriétaire de l'espace de travail et à ce membre, et vaut `null` pour tous les autres (la clé est toujours présente). `id` désigne la personne, le même dans tous les espaces de travail ; il est tiré au hasard pour chaque compte, ce n'est donc pas le numéro de son compte et il ne dit rien de la date où il a été ouvert."
       responses:
         200:
           description: 'Les membres.'
@@ -302,7 +302,7 @@ paths:
   '/workspaces/{workspace}/members/{member}':
     patch:
       summary: "Modifier le rôle d'un membre"
-      description: "Fait d'un membre un `editor` ou un `viewer`. Réservé aux propriétaires. Le rôle du propriétaire ne peut pas être modifié : transférez la propriété avec `POST /workspaces/{workspace}/transfer`."
+      description: "Fait d'un membre un `editor` ou un `viewer`. Réservé aux propriétaires. Le rôle du propriétaire ne peut pas être modifié : la propriété se transfère à un autre membre depuis l'application web."
       responses:
         200:
           description: 'Le membre, avec son nouveau rôle.'
@@ -317,7 +317,7 @@ paths:
           description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
           x-codes:
             -
-              description: 'Le membre est le propriétaire, dont le rôle ne peut pas être modifié. Transférez plutôt la propriété.'
+              description: "Le membre est le propriétaire, dont le rôle ne peut pas être modifié. La propriété se transfère plutôt depuis l'application web."
         429:
           description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
           x-codes:
@@ -325,7 +325,7 @@ paths:
               description: 'La limite de débit du jeton est atteinte.'
     delete:
       summary: "Retirer un membre d'un espace de travail, ou le quitter"
-      description: "Retire un membre : il perd l'accès à l'espace de travail aussitôt. Les propriétaires peuvent retirer n'importe quel membre sauf eux-mêmes. Un membre peut se retirer lui-même, ce qui revient à quitter l'espace de travail ; une personne dont c'était le dernier espace de travail en reçoit un personnel. Le propriétaire ne peut pas le quitter : il doit d'abord transférer la propriété."
+      description: "Retire un membre : il perd l'accès à l'espace de travail aussitôt. Les propriétaires peuvent retirer n'importe quel membre sauf eux-mêmes. Un membre peut se retirer lui-même, ce qui revient à quitter l'espace de travail ; une personne dont c'était le dernier espace de travail en reçoit un personnel. Le propriétaire ne peut pas le quitter : il doit d'abord transférer la propriété, depuis l'application web."
       responses:
         204:
           description: "Le membre n'est plus dans l'espace de travail."
@@ -340,42 +340,7 @@ paths:
           description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
           x-codes:
             -
-              description: "Le membre est le propriétaire, qui ne peut pas être retiré. Transférez d'abord la propriété."
-            -
               description: "L'utilisateur est le propriétaire et se retire lui-même : le propriétaire ne peut pas quitter l'espace de travail. Il doit d'abord transférer la propriété."
-        429:
-          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
-          x-codes:
-            -
-              description: 'La limite de débit du jeton est atteinte.'
-  '/workspaces/{workspace}/transfer':
-    post:
-      summary: "Transférer la propriété d'un espace de travail"
-      description: "Fait d'un membre le propriétaire de l'espace de travail, et de l'utilisateur, qui doit en être le propriétaire, un éditeur ; les deux changements ont lieu ensemble. `user_id` est l'`id` du membre, tel que le donne `GET /workspaces/{workspace}/members`. Un espace de travail a toujours un seul propriétaire."
-      requestBody:
-        content:
-          application/json:
-            schema:
-              properties:
-                user_id:
-                  description: "L'`id` du membre qui devient propriétaire."
-      responses:
-        200:
-          description: "L'espace de travail tel que l'utilisateur le voit désormais, avec son nouveau rôle."
-        403:
-          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
-          x-codes:
-            -
-              description: "Le jeton n'a pas la permission `manage`."
-            -
-              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
-        409:
-          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
-          x-codes:
-            -
-              description: 'Le membre est déjà le propriétaire.'
-        422:
-          description: "Le corps est refusé, ou `user_id` n'est pas un membre de l'espace de travail. `errors` nomme chaque erreur sous la clé qu'elle concerne."
         429:
           description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
           x-codes:
@@ -403,8 +368,8 @@ paths:
     post:
       summary: 'Inviter une adresse dans un espace de travail'
       description: |-
-        Invite une adresse dans l'espace de travail, comme `editor` ou `viewer`, et lui envoie un e-mail. Réservé aux propriétaires. L'invitation est liée à l'adresse, pas à un lien : la personne se connecte avec cette adresse, trouve l'invitation parmi les siennes (`GET /me/invitations`) et l'accepte ou la refuse ; tant que les inscriptions sont fermées, une invitation en attente permet aussi à son adresse de s'inscrire. L'e-mail part après la réponse, dans la langue du compte de cette adresse s'il y en a un, sinon dans celle de la requête. L'invitation expire au bout de 14 jours par défaut ; la renvoyer lui donne un nouveau délai.
-        Un espace de travail compte 50 membres et invitations en attente ensemble par défaut (`member_limit_reached`), et un propriétaire peut envoyer 20 e-mails par heure par défaut, invitations et invitations renvoyées ensemble (`429` au-delà, avec `Retry-After`).
+        Invite une adresse dans l'espace de travail, comme `editor` ou `viewer`, et lui envoie un e-mail. Réservé aux propriétaires. L'invitation est liée à l'adresse, pas à un lien : la personne se connecte avec cette adresse, trouve l'invitation parmi les siennes (`GET /me/invitations`) et l'accepte ou la refuse ; tant que les inscriptions sont fermées, une invitation en attente permet aussi à son adresse de s'inscrire, sauf si l'administrateur l'a désactivé ou si la personne qui l'a envoyée a supprimé son compte. L'e-mail part après la réponse, dans la langue du compte de cette adresse s'il y en a un, sinon dans celle de la requête. L'invitation expire au bout de 14 jours par défaut ; la renvoyer lui donne un nouveau délai.
+        Un espace de travail compte 50 membres et invitations en attente ensemble par défaut (`member_limit_reached`), et un propriétaire peut envoyer 20 e-mails par heure par défaut, invitations et invitations renvoyées ensemble, et une même adresse en reçoit 5 par jour par défaut de la part de tous les utilisateurs de l'instance ensemble (`429` au-delà, avec `Retry-After`).
       requestBody:
         content:
           application/json:
@@ -435,7 +400,7 @@ paths:
           description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
           x-codes:
             -
-              description: "La limite de débit du jeton, ou celle des invitations par heure de l'utilisateur, est atteinte."
+              description: "La limite de débit du jeton, celle des invitations par heure de l'utilisateur, ou celle des invitations par jour de l'adresse, est atteinte."
   '/workspaces/{workspace}/invitations/{invitation}':
     delete:
       summary: 'Retirer une invitation'
@@ -458,7 +423,7 @@ paths:
   '/workspaces/{workspace}/invitations/{invitation}/resend':
     post:
       summary: 'Renvoyer une invitation'
-      description: "Envoie l'invitation par e-mail une fois de plus et lui donne un nouveau délai (14 jours par défaut). Réservé aux propriétaires. Une invitation peut être renvoyée une fois toutes les 10 minutes (`resend_too_soon`, avec `Retry-After`), et l'envoi compte dans la même limite horaire que l'invitation."
+      description: "Envoie l'invitation par e-mail une fois de plus et lui donne un nouveau délai (14 jours par défaut). Réservé aux propriétaires. Une invitation peut être renvoyée une fois toutes les 10 minutes (`resend_too_soon`, avec `Retry-After`), et l'envoi compte dans les mêmes limites que l'invitation (celle du propriétaire par heure et celle de l'adresse par jour)."
       responses:
         200:
           description: "L'invitation, avec sa nouvelle expiration."
@@ -473,7 +438,7 @@ paths:
           description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
           x-codes:
             -
-              description: "La limite de débit du jeton, ou celle des invitations par heure de l'utilisateur, est atteinte."
+              description: "La limite de débit du jeton, celle des invitations par heure de l'utilisateur, ou celle des invitations par jour de l'adresse, est atteinte."
             -
               description: "L'invitation a été envoyée il y a moins de 10 minutes. `retry_after`, comme `Retry-After`, indique combien de secondes attendre."
   /me/invitations:
@@ -1719,7 +1684,7 @@ components:
     VersionId:
       description: "L'identifiant de la version officielle. Elle doit appartenir à l'inventaire du chemin."
     MemberId:
-      description: "L'identifiant du membre, tel que le donne `GET /workspaces/{workspace}/members`. Il désigne la personne dans cet espace de travail seulement."
+      description: "L'identifiant du membre, tel que le donne `GET /workspaces/{workspace}/members`. Une personne qui n'est pas membre de l'espace de travail reçoit la réponse `404`."
     InvitationId:
       description: "L'identifiant de l'invitation, tel que le donnent les listes d'invitations. Une invitation qui n'est pas celle de l'espace de travail du chemin (ou pas adressée à l'utilisateur), qui a expiré ou qui a été retirée reçoit la réponse `404`."
     TemplateSlug:
@@ -1822,7 +1787,7 @@ components:
       description: "Un membre d'un espace de travail, vu par la personne qui le demande."
       properties:
         id:
-          description: "Désigne le membre dans cet espace de travail seulement. Ce n'est pas le numéro de son compte."
+          description: "Désigne la personne, le même dans tous les espaces de travail. Ce n'est pas le numéro de son compte et il n'en dit rien."
         email:
           description: "L'adresse du membre, pour le propriétaire de l'espace de travail et pour le membre lui-même ; null pour tous les autres."
         joined_at:
@@ -1835,7 +1800,7 @@ components:
         email:
           description: "L'adresse à laquelle elle est adressée, en minuscules."
         invited_by:
-          description: "Le membre qui l'a envoyée en dernier, null quand son compte a été supprimé depuis."
+          description: "La personne qui l'a envoyée en dernier, avec l'identifiant qu'elle a parmi les membres, null quand son compte a été supprimé depuis."
         expires_at:
           description: "Jusqu'à quand elle peut être acceptée."
     ReceivedInvitation:

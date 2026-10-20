@@ -18,7 +18,7 @@ uses(RefreshDatabase::class);
  */
 function storeRawUsers(array $addresses, array $extra = []): void
 {
-    DB::table('users')->insert(array_map(fn (string $address): array => ['name' => 'Someone', 'email' => $address, 'created_at' => now(), 'updated_at' => now()] + $extra, $addresses));
+    DB::table('users')->insert(array_map(fn (string $address): array => ['ulid' => User::newUlid(), 'name' => 'Someone', 'email' => $address, 'created_at' => now(), 'updated_at' => now()] + $extra, $addresses));
 }
 
 /**

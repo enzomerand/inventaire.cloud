@@ -11,9 +11,6 @@ use App\Inventories\Versions\VersionError;
 use App\Inventories\Versions\VersionStatus;
 use App\Models\Import;
 use App\Models\InventoryVersion;
-use App\Models\WorkspaceMember;
-use App\Workspaces\MemberIds;
-use App\Workspaces\WorkspaceRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -520,7 +517,6 @@ describe('the errors of the members and the invitations', function (): void {
         foreach ([
             ['updateMemberRole', 'PATCH', contractMemberUri($workspace, $team['viewer']), ['role' => 'editor']],
             ['removeMember', 'DELETE', contractMemberUri($workspace, $team['viewer']), []],
-            ['transferOwnership', 'POST', "{$uri}/transfer", ['user_id' => app(MemberIds::class)->of($workspace, $team['editor'])]],
             ['listInvitations', 'GET', "{$uri}/invitations", []],
             ['createInvitation', 'POST', "{$uri}/invitations", ['email' => 'other@example.test', 'role' => 'viewer']],
             ['resendInvitation', 'POST', "{$uri}/invitations/{$invitation->ulid}/resend", []],
@@ -578,12 +574,10 @@ describe('the errors of the members and the invitations', function (): void {
         $team = $world['team'];
         $workspace = $team['workspace'];
         $uri = "/api/v1/workspaces/{$workspace->ulid}";
-        $ids = app(MemberIds::class);
 
         $cases = [
             ['updateMemberRole', 'PATCH', contractMemberUri($workspace, $team['owner']), ['role' => 'viewer'], 'cannot_change_owner_role'],
             ['removeMember', 'DELETE', contractMemberUri($workspace, $team['owner']), [], 'owner_cannot_leave'],
-            ['transferOwnership', 'POST', "{$uri}/transfer", ['user_id' => $ids->of($workspace, $team['owner'])], 'already_owner'],
             ['createInvitation', 'POST', "{$uri}/invitations", ['email' => $team['viewer']->email, 'role' => 'viewer'], 'already_member'],
         ];
 
@@ -596,12 +590,6 @@ describe('the errors of the members and the invitations', function (): void {
             contractCheck($response, $operationId, 409);
             expect($response->json('code'))->toBe($code)->and(contractCodes($operationId, 409))->toContain($code);
         }
-
-        // A workspace that has two owners (leftover data) still refuses to remove the one who is not the person who asks.
-        WorkspaceMember::query()->where('workspace_id', $workspace->id)->where('user_id', $team['editor']->id)->update(['role' => WorkspaceRole::Owner->value]);
-        $removal = contractCall($this, $world['owner'], 'removeMember', 'DELETE', contractMemberUri($workspace, $team['editor']));
-        contractCheck($removal, 'removeMember', 409);
-        expect($removal->json('code'))->toBe('cannot_remove_owner')->and(contractCodes('removeMember', 409))->toContain('cannot_remove_owner');
     });
 
     it('answers 409 with the limit when the workspace is full or the person belongs to as many workspaces as they may', function (): void {
@@ -618,7 +606,7 @@ describe('the errors of the members and the invitations', function (): void {
         $accept = contractCall($this, $guest, 'acceptInvitation', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept");
         contractCheck($accept, 'acceptInvitation', 409);
 
-        config(['workspaces.max_members' => 50, 'workspaces.max_memberships_per_user' => 1]);
+        config(['workspaces.max_members' => 50, 'workspaces.max_per_user' => 1]);
         $joined = contractCall($this, $guest, 'acceptInvitation', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept");
         contractCheck($joined, 'acceptInvitation', 409);
 
@@ -639,10 +627,6 @@ describe('the errors of the members and the invitations', function (): void {
         $role = contractCall($this, $world['owner'], 'updateMemberRole', 'PATCH', contractMemberUri($workspace, $world['team']['editor']), ['role' => 'owner'], valid: false);
         contractCheck($role, 'updateMemberRole', 422);
         expect($role->json('errors'))->toHaveKey('role');
-
-        $transfer = contractCall($this, $world['owner'], 'transferOwnership', 'POST', "/api/v1/workspaces/{$workspace->ulid}/transfer", ['user_id' => '01j0000000000000000000000x']);
-        contractCheck($transfer, 'transferOwnership', 422);
-        expect($transfer->json('errors'))->toHaveKey('user_id');
     });
 
     it('answers 429 to a resend that comes too soon, with the code the document lists, retry_after and the Retry-After header', function (): void {

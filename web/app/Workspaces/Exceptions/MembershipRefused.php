@@ -28,14 +28,11 @@ final class MembershipRefused extends RuntimeException
     /** The workspace has as many members and waiting invitations as `workspaces.max_members` allows. (409) */
     public const MEMBER_LIMIT_REACHED = 'member_limit_reached';
 
-    /** The account already belongs to as many workspaces as `workspaces.max_memberships_per_user` allows. (409) */
+    /** The account already belongs to as many workspaces as `workspaces.max_per_user` allows. (409) */
     public const MEMBERSHIP_LIMIT_REACHED = 'membership_limit_reached';
 
     /** The role of the owner cannot be changed: ownership is handed over, which makes the old owner an editor. (409) */
     public const CANNOT_CHANGE_OWNER_ROLE = 'cannot_change_owner_role';
-
-    /** The owner cannot be removed from the workspace: ownership has to be handed over first. (409) */
-    public const CANNOT_REMOVE_OWNER = 'cannot_remove_owner';
 
     /** The owner cannot leave: ownership has to be handed over first. (409) */
     public const OWNER_CANNOT_LEAVE = 'owner_cannot_leave';

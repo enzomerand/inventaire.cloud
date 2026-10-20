@@ -229,7 +229,7 @@ describe('the migration for existing accounts', function (): void {
     it('handles more accounts than one batch', function (): void {
         $now = now();
         DB::table('users')->insert(array_map(fn (int $n): array => [
-            'name' => "User {$n}", 'email' => "user{$n}@example.test", 'remember_token' => null, 'created_at' => $now, 'updated_at' => $now,
+            'ulid' => User::newUlid(), 'name' => "User {$n}", 'email' => "user{$n}@example.test", 'remember_token' => null, 'created_at' => $now, 'updated_at' => $now,
         ], range(1, 250)));
 
         $this->backfill->up();

@@ -36,6 +36,12 @@ final class InstanceSettings
     public const REGISTRATION_OPEN = 'registration_open';
 
     /**
+     * Whether, while registration is closed, an address that a workspace invited can still create an account: "closed" then means "on
+     * invitation". Without effect while registration is open.
+     */
+    public const INVITATION_SIGN_UP = 'invitation_sign_up';
+
+    /**
      * The version ({@see SearchText::VERSION}) the stored search texts of the items were built with (a bookkeeping value of
      * `inventaire:upgrade`, not a choice of the administrator: it is not among {@see self::all()}).
      */
@@ -77,6 +83,34 @@ final class InstanceSettings
     }
 
     /**
+     * Whether, while registration is closed, an invitation to join a workspace lets its address sign up (the default, so that "closed"
+     * means "on invitation"). When an administrator turns it off, accounts come from the administrators alone, whatever invitations
+     * wait. It says nothing about open registration, where anybody may sign up.
+     *
+     * Open unless an administrator turned it off, which is the case when there is no row at all. A row that is there but unusable
+     * (not a boolean) counts as *off*, for the reason {@see self::registrationOpen()} gives: letting people in on the strength of a
+     * value nobody understands is the wrong way to fail.
+     */
+    public function invitationSignUp(): bool
+    {
+        $this->stored ??= $this->load();
+
+        if (! array_key_exists(self::INVITATION_SIGN_UP, $this->stored)) {
+            return true;
+        }
+
+        $value = $this->stored[self::INVITATION_SIGN_UP];
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        $this->reportUnusable(self::INVITATION_SIGN_UP);
+
+        return false;
+    }
+
+    /**
      * The version of the search text the items were last built with, or null when it was never recorded (or the row is
      * unusable: the texts are then built again, which is the safe thing to do).
      */
@@ -111,7 +145,7 @@ final class InstanceSettings
      * Changes the settings that are given, and only those, in one statement. A setting that is not in `$changes` keeps
      * what it holds.
      *
-     * @param  array{registration_open?: bool}  $changes  The new values by name.
+     * @param  array{registration_open?: bool, invitation_sign_up?: bool}  $changes  The new values by name.
      */
     public function update(array $changes): void
     {
@@ -144,11 +178,14 @@ final class InstanceSettings
     /**
      * Every setting with its current value, as the API shows them.
      *
-     * @return array{registration_open: bool}
+     * @return array{registration_open: bool, invitation_sign_up: bool}
      */
     public function all(): array
     {
-        return [self::REGISTRATION_OPEN => $this->registrationOpen()];
+        return [
+            self::REGISTRATION_OPEN => $this->registrationOpen(),
+            self::INVITATION_SIGN_UP => $this->invitationSignUp(),
+        ];
     }
 
     /**

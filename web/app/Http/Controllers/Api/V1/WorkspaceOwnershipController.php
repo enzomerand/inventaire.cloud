@@ -7,35 +7,34 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Workspaces\TransferOwnershipRequest;
 use App\Http\Resources\WorkspaceResource;
+use App\Models\User;
 use App\Models\Workspace;
-use App\Workspaces\MemberIds;
 use App\Workspaces\Members;
 use App\Workspaces\Workspaces;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\ValidationException;
 
 /**
- * Hands the ownership of a workspace over to another member.
+ * Hands the ownership of a workspace over to another member. A person at their browser does it, never a script: the route refuses an API
+ * token (see the routes), as the ones of the account and its tokens do.
  */
 final class WorkspaceOwnershipController extends Controller
 {
-    public function __construct(private readonly Members $members, private readonly Workspaces $workspaces, private readonly MemberIds $ids) {}
+    public function __construct(private readonly Members $members, private readonly Workspaces $workspaces) {}
 
     /**
      * Makes a member the owner of the workspace, and the person who asks (the request checks that they are the owner) an editor; both
      * at once. The answer is the workspace as the person sees it now, with their new role.
      *
-     * `422` when the identifier is not one of a member of the workspace (the way a workspace the person does not belong to is refused
-     * by `me.current-workspace`: a thing named in the body that is not there is a mistake in the body); `409` (`already_owner`) when
+     * `404` when `member_id` is not the `id` of a member of the workspace, as for a member named in a path; `409` (`already_owner`) when
      * the member is the owner already.
      *
-     * @throws ValidationException
+     * @throws ModelNotFoundException
      */
     public function __invoke(TransferOwnershipRequest $request, Workspace $workspace): JsonResponse
     {
         $user = $this->user($request);
-        $target = $this->ids->find($workspace, $request->memberId())
-            ?? throw ValidationException::withMessages(['user_id' => [__('This person is not a member of the workspace.')]]);
+        $target = $this->members->find($workspace, $request->memberId()) ?? throw (new ModelNotFoundException)->setModel(User::class);
 
         $this->members->transferOwnership($user, $workspace, $target);
 

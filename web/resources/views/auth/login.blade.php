@@ -32,7 +32,7 @@
                         <p class="text-secondary">{{ __('No password needed: we email you a 6-digit code. If you are new here, the same steps create your account.') }}</p>
                     @else
                         <p class="text-secondary">{{ __('No password needed: we email you a 6-digit code.') }}</p>
-                        <div class="alert alert-info" role="note">{{ __('Sign-ups are closed: only existing accounts and invited addresses can sign in.') }}</div>
+                        <div class="alert alert-info" role="note">{{ $settings->invitationSignUp() ? __('Sign-ups are closed: only existing accounts and invited addresses can sign in.') : __('Sign-ups are closed: only existing accounts can sign in.') }}</div>
                     @endif
 
                     <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>

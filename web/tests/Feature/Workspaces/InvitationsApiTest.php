@@ -6,7 +6,6 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use App\Models\WorkspaceMember;
-use App\Workspaces\MemberIds;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -100,14 +99,13 @@ describe('listing the invitations a workspace has sent', function (): void {
         $newer = invitationApiFor($team['workspace'], 'newer@example.test', ['invited_by_id' => $team['editor']->id]);
 
         $response = inventoryCall($this, $team['owner'], 'GET', invitationApiUri($team['workspace']))->assertOk();
-        $ids = app(MemberIds::class);
 
         expect($response->json('data'))->toBe([
             [
                 'id' => $newer->ulid,
                 'email' => 'newer@example.test',
                 'role' => 'editor',
-                'invited_by' => ['id' => $ids->of($team['workspace'], $team['editor']), 'name' => 'Editor'],
+                'invited_by' => ['id' => $team['editor']->ulid, 'name' => 'Editor'],
                 'expires_at' => $newer->expires_at->toIso8601String(),
                 'created_at' => $newer->created_at?->toIso8601String(),
             ],
@@ -115,7 +113,7 @@ describe('listing the invitations a workspace has sent', function (): void {
                 'id' => $older->ulid,
                 'email' => 'older@example.test',
                 'role' => 'viewer',
-                'invited_by' => ['id' => $ids->of($team['workspace'], $team['owner']), 'name' => 'Owner'],
+                'invited_by' => ['id' => $team['owner']->ulid, 'name' => 'Owner'],
                 'expires_at' => $older->expires_at->toIso8601String(),
                 'created_at' => $older->created_at?->toIso8601String(),
             ],
@@ -172,7 +170,7 @@ describe('inviting', function (): void {
             'id' => $stored->ulid,
             'email' => 'nouveau@example.test',
             'role' => 'editor',
-            'invited_by' => ['id' => app(MemberIds::class)->of($team['workspace'], $team['owner']), 'name' => 'Owner'],
+            'invited_by' => ['id' => $team['owner']->ulid, 'name' => 'Owner'],
             'expires_at' => now()->addDays(14)->toIso8601String(),
             'created_at' => now()->toIso8601String(),
         ])
@@ -324,6 +322,51 @@ describe('the pace of the invitations', function (): void {
         inventoryCall($this, $team['editor'], 'POST', invitationApiUri($other), ['email' => 'two@example.test', 'role' => 'viewer'])->assertCreated();
     });
 
+    it('lets an address receive workspaces.invitations_per_address_per_day of them a day, from everybody together, then answers 429 with Retry-After', function (): void {
+        $team = inventoryTeam();
+        config(['workspaces.invitations_per_address_per_day' => 2]);
+        $theirs = app(Workspaces::class)->create($team['editor'], 'Theirs');
+        $mine = app(Workspaces::class)->create($team['owner'], 'Mine');
+
+        invitationApiSend($this, $team, 'guest@example.test')->assertCreated();
+        // The same address in capitals and padded, sent by another owner: it is one address.
+        inventoryCall($this, $team['editor'], 'POST', invitationApiUri($theirs), ['email' => '  Guest@Example.TEST ', 'role' => 'viewer'])->assertCreated();
+        $refused = inventoryCall($this, $team['owner'], 'POST', invitationApiUri($mine), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertStatus(429);
+
+        expect($refused->json('code'))->toBe('too_many_requests')
+            ->and((int) $refused->headers->get('Retry-After'))->toBeGreaterThan(0)
+            ->and(WorkspaceInvitation::query()->where('workspace_id', $mine->id)->count())->toBe(0);
+
+        // Another address is another count, and the day passes.
+        invitationApiSend($this, $team, 'other@example.test')->assertCreated();
+        $this->travel(25)->hours();
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($mine), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertCreated();
+    });
+
+    it('counts the invitations sent again for their address, and keeps no address in the cache', function (): void {
+        $team = inventoryTeam();
+        config(['workspaces.invitations_per_address_per_day' => 1]);
+        $old = invitationApiFor($team['workspace'], 'guest@example.test', ['updated_at' => now()->subHour()]);
+
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($team['workspace'], $old, '/resend'))->assertOk();
+
+        // Ten minutes later the invitation could be sent again; the address has had its mail for the day.
+        $this->travel(11)->minutes();
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($team['workspace'], $old, '/resend'))->assertStatus(429)->assertJsonPath('code', 'too_many_requests');
+
+        $keys = json_encode(array_keys((fn (): array => $this->storage)->call(app('cache')->getStore())), JSON_THROW_ON_ERROR);
+        expect($keys)->not->toContain('guest@example.test')->and($keys)->not->toContain('guest%40example.test');
+    });
+
+    it('does not count a request that names no address, or an invitation that is not there', function (): void {
+        $team = inventoryTeam();
+        config(['workspaces.invitations_per_address_per_day' => 1]);
+
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($team['workspace']), ['role' => 'viewer'])->assertUnprocessable();
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($team['workspace']).'/01j0000000000000000000000x/resend')->assertNotFound();
+        invitationApiSend($this, $team, 'guest@example.test')->assertCreated();
+    });
+
     it('is not used up by a request that is refused before it gets that far', function (): void {
         $team = inventoryTeam();
         config(['workspaces.invitations_per_hour' => 1]);
@@ -351,7 +394,7 @@ describe('sending an invitation again', function (): void {
             'id' => $invitation->ulid,
             'email' => 'guest@example.test',
             'role' => 'editor',
-            'invited_by' => ['id' => app(MemberIds::class)->of($team['workspace'], $team['owner']), 'name' => 'Owner'],
+            'invited_by' => ['id' => $team['owner']->ulid, 'name' => 'Owner'],
             'expires_at' => now()->addDays(14)->toIso8601String(),
             'created_at' => $invitation->created_at?->toIso8601String(),
         ])->and(invitationApiMailsTo('guest@example.test'))->toBe([]);
@@ -582,7 +625,7 @@ describe('accepting an invitation', function (): void {
         $team = inventoryTeam();
         $guest = invitationApiPerson('guest@example.test');
         $invitation = invitationApiFor($team['workspace'], $guest->email);
-        config(['workspaces.max_memberships_per_user' => 1]);
+        config(['workspaces.max_per_user' => 1]);
 
         inventoryCall($this, $guest, 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept")
             ->assertStatus(409)

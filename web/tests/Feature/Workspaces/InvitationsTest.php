@@ -15,6 +15,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -52,6 +53,22 @@ function invitationNotFound(Closure $act): bool
     }
 
     return false;
+}
+
+/**
+ * Has something done right after the first read of the invitations table that follows: the moment the service has looked at an
+ * invitation and is about to act on it, which is where somebody who declines (that takes no lock) can get in.
+ */
+function afterInvitationsAreRead(Closure $then): void
+{
+    $done = false;
+
+    DB::listen(function (QueryExecuted $query) use ($then, &$done): void {
+        if (! $done && str_starts_with(strtolower($query->sql), 'select') && str_contains($query->sql, 'workspace_invitations')) {
+            $done = true;
+            $then();
+        }
+    });
 }
 
 /**
@@ -267,6 +284,35 @@ describe('sending an invitation again', function (): void {
             ->and($sent->fresh()->email)->toBe('nouveau@example.test');
     });
 
+    it('sends nothing for an invitation that was declined after it was read', function (): void {
+        $team = inventoryTeam();
+        $held = holdDeferred();
+        $invitation = invitations()->invite($team['owner'], $team['workspace'], 'nouveau@example.test', WorkspaceRole::Editor);
+        $held->release();
+        $mails = count(sentMails());
+        $this->travel(11)->minutes();
+        afterInvitationsAreRead(fn () => WorkspaceInvitation::query()->whereKey($invitation->id)->delete());
+
+        expect(invitationNotFound(fn () => invitations()->resend($team['owner'], $team['workspace'], $invitation)))->toBeTrue();
+
+        $held->release();
+
+        // (The invitation is not counted: the deletion that simulates the other person was made in the transaction that was rolled back.)
+        expect(count(sentMails()))->toBe($mails);
+    });
+
+    it('leaves the invitation as it was in the table, and says how many rows it changed: one', function (): void {
+        $team = inventoryTeam();
+        $invitation = invitations()->invite($team['owner'], $team['workspace'], 'nouveau@example.test', WorkspaceRole::Editor);
+        $this->travel(11)->minutes();
+
+        $sent = invitations()->resend($team['owner'], $team['workspace'], $invitation);
+
+        expect($sent->isDirty())->toBeFalse()
+            ->and(WorkspaceInvitation::query()->count())->toBe(1)
+            ->and($sent->fresh()->updated_at->equalTo(now()->startOfSecond()))->toBeTrue();
+    });
+
     it('is the owner\'s alone', function (string $who): void {
         $team = inventoryTeam();
         $invitation = invitations()->invite($team['owner'], $team['workspace'], 'nouveau@example.test', WorkspaceRole::Editor);
@@ -384,16 +430,40 @@ describe('the invitations a person has received', function (): void {
 
         expect(invitations()->pendingFor($ada)->all())->toBe([])
             ->and(WorkspaceInvitation::query()->count())->toBe(1)
-            ->and(invitations()->hasPendingFor('ada@example.test'))->toBeFalse();
+            ->and(invitations()->hasTicketFor('ada@example.test'))->toBeFalse();
     });
 
-    it('tell whether one waits for an address', function (): void {
+    it('tell whether one waits for an address that can serve as its ticket', function (): void {
         $team = inventoryTeam();
         invitations()->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Viewer);
 
-        expect(invitations()->hasPendingFor('ada@example.test'))->toBeTrue()
-            ->and(invitations()->hasPendingFor(' ADA@example.test '))->toBeTrue()
-            ->and(invitations()->hasPendingFor('bob@example.test'))->toBeFalse();
+        expect(invitations()->hasTicketFor('ada@example.test'))->toBeTrue()
+            ->and(invitations()->hasTicketFor(' ADA@example.test '))->toBeTrue()
+            ->and(invitations()->hasTicketFor('bob@example.test'))->toBeFalse();
+    });
+
+    it('are nobody\'s ticket when no account sent them, though the account of the address can still answer them', function (): void {
+        $team = inventoryTeam();
+        $ada = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.test']);
+        invitations()->invite($team['owner'], $team['workspace'], 'bob@example.test', WorkspaceRole::Viewer);
+        WorkspaceInvitation::factory()->create(['workspace_id' => $team['workspace']->id, 'email' => 'ada@example.test', 'invited_by_id' => null]);
+
+        expect(invitations()->hasTicketFor('bob@example.test'))->toBeTrue()
+            ->and(invitations()->hasTicketFor('ada@example.test'))->toBeFalse()
+            ->and(invitations()->pendingFor($ada)->all())->toHaveCount(1)
+            ->and(invitations()->countPendingFor('ada@example.test'))->toBe(1);
+    });
+
+    it('lose their ticket when the account that sent them is deleted', function (): void {
+        $team = inventoryTeam();
+        $sent = invitations()->invite($team['owner'], $team['workspace'], 'cora@example.test', WorkspaceRole::Viewer);
+        app(Members::class)->transferOwnership($team['owner'], $team['workspace'], $team['editor']);
+
+        expect(invitations()->hasTicketFor('cora@example.test'))->toBeTrue();
+
+        $team['owner']->delete();
+
+        expect($sent->fresh()->invited_by_id)->toBeNull()->and(invitations()->hasTicketFor('cora@example.test'))->toBeFalse();
     });
 
     it('still show who invited when that account is gone', function (): void {
@@ -515,12 +585,12 @@ describe('accepting', function (): void {
     });
 
     it('is refused to an account that belongs to as many workspaces as the configuration allows', function (): void {
-        config(['workspaces.max_memberships_per_user' => 2]);
         $team = inventoryTeam();
         $ada = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.test']);
         $other = app(Workspaces::class)->create($team['viewer'], 'Garage');
         $other->members()->attach($ada->id, ['role' => 'viewer']);
         $invitation = invitations()->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Viewer);
+        config(['workspaces.max_per_user' => 2]);
 
         $refusal = invitationRefusal(fn () => invitations()->accept($ada, $invitation));
 
@@ -529,9 +599,58 @@ describe('accepting', function (): void {
             ->and($refusal?->limit)->toBe(2)
             ->and(WorkspaceInvitation::query()->count())->toBe(1);
 
-        config(['workspaces.max_memberships_per_user' => 3]);
+        config(['workspaces.max_per_user' => 3]);
 
         expect(invitations()->accept($ada, $invitation)->is($team['workspace']))->toBeTrue();
+    });
+
+    it('never gives the rights of an owner, whatever the row says: a role that is not an editor\'s is a viewer\'s', function (string $stored, string $given): void {
+        $team = inventoryTeam();
+        $ada = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.test']);
+        $invitation = invitations()->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Editor);
+        // Written by hand: the model refuses to store an owner\'s invitation, the table does not.
+        WorkspaceInvitation::query()->whereKey($invitation->id)->update(['role' => $stored]);
+
+        invitations()->accept($ada, $invitation);
+
+        expect(app(Workspaces::class)->roleOf($ada, $team['workspace']))->toBe(WorkspaceRole::from($given))
+            ->and(WorkspaceMember::query()->where('workspace_id', $team['workspace']->id)->where('role', 'owner')->count())->toBe(1);
+    })->with(['owner' => ['owner', 'viewer'], 'unknown' => ['superuser', 'viewer'], 'editor' => ['editor', 'editor']]);
+
+    it('joins nobody when the invitation was declined after it was read: it is spent by the statement that counts', function (): void {
+        $team = inventoryTeam();
+        $ada = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.test']);
+        $invitation = invitations()->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Editor);
+        afterInvitationsAreRead(fn () => WorkspaceInvitation::query()->whereKey($invitation->id)->delete());
+
+        expect(invitationNotFound(fn () => invitations()->accept($ada, $invitation)))->toBeTrue()
+            ->and(app(Workspaces::class)->roleOf($ada, $team['workspace']))->toBeNull()
+            ->and(WorkspaceMember::query()->where('workspace_id', $team['workspace']->id)->count())->toBe(3);
+    });
+
+    it('joins nobody when the invitation lapsed after it was read', function (): void {
+        $team = inventoryTeam();
+        $ada = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.test']);
+        $invitation = invitations()->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Editor);
+        afterInvitationsAreRead(fn () => WorkspaceInvitation::query()->whereKey($invitation->id)->update(['expires_at' => now()->subSecond()]));
+
+        expect(invitationNotFound(fn () => invitations()->accept($ada, $invitation)))->toBeTrue()
+            ->and(app(Workspaces::class)->roleOf($ada, $team['workspace']))->toBeNull();
+    });
+
+    it('counts the workspaces of the account with the limit of creating them, and does not count the one it is invited to', function (): void {
+        $team = inventoryTeam();
+        $ada = User::factory()->create(['email' => 'ada@example.test']);
+        $invitation = invitations()->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Viewer);
+        $other = app(Workspaces::class)->create($team['viewer'], 'Garage');
+        $second = invitations()->invite($team['viewer'], $other, 'ada@example.test', WorkspaceRole::Viewer);
+        config(['workspaces.max_per_user' => 1]);
+
+        // An account that belongs to no workspace has room for one.
+        expect(invitations()->accept($ada, $invitation)->is($team['workspace']))->toBeTrue();
+
+        // Now it belongs to one, which is the limit: a second invitation is refused with the code that says so.
+        expect(invitationRefusal(fn () => invitations()->accept($ada, $second))?->reason)->toBe('membership_limit_reached');
     });
 
     it('is refused when the workspace was deleted meanwhile', function (): void {

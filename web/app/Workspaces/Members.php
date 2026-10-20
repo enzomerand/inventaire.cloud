@@ -70,6 +70,24 @@ final class Members
     }
 
     /**
+     * The member of a workspace that an identifier names, or null when it names nobody who belongs to it (made up, malformed, the
+     * `ulid` of somebody who left or of an account that never was in this workspace). The identifier is searched among the members of
+     * this workspace only, never among all the accounts, so that a guess says nothing about accounts that are not here.
+     *
+     * @param  string  $ulid  The `ulid` of an account, in any case.
+     */
+    public function find(Workspace $workspace, string $ulid): ?User
+    {
+        $ulid = strtolower($ulid);
+
+        if (preg_match('/^[0-7][0-9a-hjkmnp-tv-z]{25}$/', $ulid) !== 1) {
+            return null;
+        }
+
+        return $workspace->members()->where('users.ulid', $ulid)->first();
+    }
+
+    /**
      * Changes the role of a member to editor or viewer.
      *
      * @return MemberEntry The member as the owner sees them, with the new role.
@@ -101,10 +119,11 @@ final class Members
     }
 
     /**
-     * Removes a member from the workspace: they lose access at once. When the member is the actor, this is {@see self::leave()}.
+     * Removes a member from the workspace: they lose access at once. When the member is the actor, this is {@see self::leave()} (which is
+     * how the owner is refused: the owner is the only one the actor could not remove, and there is one).
      *
      * @throws AuthorizationException With status 404 when the actor does not belong to the workspace.
-     * @throws MembershipRefused With `not_owner` when the actor is not the owner, and `cannot_remove_owner` when the member is the owner.
+     * @throws MembershipRefused With `not_owner` when the actor is not the owner, `owner_cannot_leave` when it is the owner removing themselves.
      * @throws ModelNotFoundException When the member does not belong to the workspace (or the workspace is gone).
      */
     public function remove(User $actor, Workspace $workspace, User $target): void
@@ -118,13 +137,8 @@ final class Members
         DeadlockRetries::run(fn () => $this->db->transaction(function () use ($actor, $workspace, $target): void {
             $roster = Roster::lock($this->locks, $workspace, [$actor->getKey(), $target->getKey()]);
             $roster->owner($actor);
-            $member = $roster->target($target);
 
-            if ($member->role->canManage()) {
-                throw new MembershipRefused(MembershipRefused::CANNOT_REMOVE_OWNER);
-            }
-
-            $this->detach($roster, $member, $target);
+            $this->detach($roster, $roster->target($target), $target);
         }));
     }
 
@@ -182,8 +196,10 @@ final class Members
     /**
      * Ends a membership, under the locks of the caller.
      *
-     * The workspace is no longer the one the account works in, if it was. An account left with no workspace at all is given its personal one
-     * (reading its other memberships with a locking read, as the deletion of a workspace does for the people it leaves stranded).
+     * The workspace is no longer the one the account works in, if it was. An account left with no workspace at all is given its personal one.
+     * Whether it has another is a plain count of its memberships, not a locking read: the memberships of the workspace are locked already,
+     * and locking those of the account now would go back up the global order (see {@see Locks}). The account's row is locked, and everything
+     * that adds or removes one of its memberships takes that lock first, so the count cannot change under us.
      *
      * @param  User  $copy  The caller's copy of the account, brought in line with the locked one.
      */
@@ -198,7 +214,7 @@ final class Members
             $account->save();
         }
 
-        if ($this->locks->memberships('user_id', [$account->getKey()])->isEmpty()) {
+        if (! WorkspaceMember::query()->where('user_id', $account->getKey())->exists()) {
             $this->workspaces->createPersonal($account);
         }
 
@@ -215,6 +231,7 @@ final class Members
     {
         return new MemberEntry(
             id: (int) $account->getKey(),
+            ulid: $account->ulid,
             name: $account->name,
             email: $showEmail ? $account->email : null,
             role: $member->role,

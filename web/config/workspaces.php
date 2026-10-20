@@ -27,21 +27,25 @@ return [
     |
     | `max_members` caps the members of a workspace together with the invitations
     | that are waiting for an answer (the API answers 409 with
-    | `"code": "member_limit_reached"` beyond it). `max_memberships_per_user` caps
-    | the workspaces an account can join by accepting invitations (409,
-    | `"code": "membership_limit_reached"`). An invitation can be accepted for
+    | `"code": "member_limit_reached"` beyond it). The workspaces an account can
+    | belong to, the ones it joined by accepting invitations included, are capped
+    | by `max_per_user` above (409, `"code": "membership_limit_reached"` when an
+    | invitation is accepted beyond it). An invitation can be accepted for
     | `invitation_ttl_days` days; the owner can send it again (the mail), but not
     | more than once every ten minutes. `invitations_per_hour` is the number of
     | mails a person can have the application send as an owner, first sends and
     | resends together (429): an invitation mails an address the owner chooses.
+    | `invitations_per_address_per_day` is the number of those mails one address
+    | receives in a day from everybody on the instance together (429): the owners
+    | of many workspaces cannot make the application flood a mailbox.
     */
     'max_members' => (int) env('WORKSPACES_MAX_MEMBERS', 50),
-
-    'max_memberships_per_user' => (int) env('WORKSPACES_MAX_MEMBERSHIPS_PER_USER', 100),
 
     'invitation_ttl_days' => (int) env('WORKSPACES_INVITATION_TTL_DAYS', 14),
 
     'invitations_per_hour' => (int) env('WORKSPACES_INVITATIONS_PER_HOUR', 20),
+
+    'invitations_per_address_per_day' => (int) env('WORKSPACES_INVITATIONS_PER_ADDRESS_PER_DAY', 5),
 
     'invitation_resend_minutes' => 10,
 

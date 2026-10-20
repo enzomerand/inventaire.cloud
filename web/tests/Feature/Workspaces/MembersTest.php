@@ -96,6 +96,7 @@ describe('the list of members', function (): void {
 
         expect(array_map(fn (MemberEntry $entry): string => $entry->name.':'.$entry->role->value, $entries))->toBe(['Owner:owner', 'Editor:editor', 'Viewer:viewer'])
             ->and($entries[0]->id)->toBe($team['owner']->id)
+            ->and(array_map(fn (MemberEntry $entry): string => $entry->ulid, $entries))->toBe([$team['owner']->ulid, $team['editor']->ulid, $team['viewer']->ulid])
             ->and($entries[1]->joinedAt?->isToday())->toBeTrue();
     })->with(['the owner' => ['owner'], 'an editor' => ['editor'], 'a viewer' => ['viewer']]);
 
@@ -209,17 +210,6 @@ describe('removing a member', function (): void {
             ->and($workspaces[0]->workspace->name)->toBe('Espace personnel')
             ->and($workspaces[0]->role)->toBe(WorkspaceRole::Owner)
             ->and($workspaces[0]->current)->toBeTrue();
-    });
-
-    it('refuses to remove the owner', function (): void {
-        $team = inventoryTeam();
-        // Another owner (a hand-made state): an owner is still not removed by anybody.
-        $team['workspace']->members()->attach($team['stranger']->id, ['role' => 'owner']);
-
-        $refusal = memberRefusal(fn () => members()->remove($team['owner'], $team['workspace'], $team['stranger']));
-
-        expect($refusal?->reason)->toBe('cannot_remove_owner')->and($refusal?->status())->toBe(409)
-            ->and(roleWord($team['stranger'], $team['workspace']))->toBe('owner');
     });
 
     it('is the owner\'s alone', function (string $who): void {
@@ -420,6 +410,29 @@ describe('the order of the locks', function (): void {
         ];
 
         expect($locks)->toBe(array_fill_keys(array_keys($locks), $expected));
+    });
+
+    it('never locks the memberships of an account once those of the workspace are locked: what is left of the account is a plain count', function (): void {
+        $team = inventoryTeam();
+        $ada = User::factory()->withPersonalWorkspace()->create(['email' => 'ada@example.test']);
+        $invited = app(Invitations::class)->invite($team['owner'], $team['workspace'], 'ada@example.test', WorkspaceRole::Viewer);
+
+        $runs = [
+            'accept' => fn () => app(Invitations::class)->accept($ada, $invited),
+            'remove' => fn () => members()->remove($team['owner'], $team['workspace'], $ada),
+            'leave' => fn () => members()->leave($team['viewer'], $team['workspace']),
+        ];
+
+        foreach ($runs as $name => $run) {
+            $locking = array_values(array_filter(
+                statementsOf($run),
+                fn (string $statement): bool => stripos($statement, 'for update') !== false && stripos($statement, 'workspace_user') !== false,
+            ));
+
+            // One locking read of the memberships, and it is the workspace's (the account's own would filter on user_id).
+            expect($locking, $name)->toHaveCount(1)
+                ->and($locking[0], $name)->toContain('workspace_id')->not->toContain('user_id');
+        }
     });
 
     it('keeps the invitation in the workspace\'s lock: no locking read on the rows of the invitations', function (): void {

@@ -31,7 +31,10 @@ beforeEach(function (): void {
  */
 function ticketFor(string $email, array $state = []): WorkspaceInvitation
 {
-    return WorkspaceInvitation::factory()->create($state + ['email' => $email]);
+    // Sent by a person who has an account, as an invitation is: the ticket of an address needs somebody to answer for it.
+    $sender = array_key_exists('invited_by_id', $state) ? $state['invited_by_id'] : User::factory()->create()->id;
+
+    return WorkspaceInvitation::factory()->create(['invited_by_id' => $sender] + $state + ['email' => $email]);
 }
 
 /**
@@ -83,6 +86,33 @@ describe('asking for a code', function (): void {
         askForCode($this, 'new@example.test')->assertOk();
 
         expect(sentMails())->toBe([]);
+    });
+
+    it('sends nothing when no account sent the invitation: it is nobody\'s ticket', function (): void {
+        ticketFor('new@example.test', ['invited_by_id' => null]);
+
+        askForCode($this, 'new@example.test')->assertOk();
+
+        expect(sentMails())->toBe([]);
+    });
+
+    it('sends nothing when the administrator turned invitations off as a way to sign up', function (): void {
+        app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+        ticketFor('new@example.test');
+
+        askForCode($this, 'new@example.test')->assertOk();
+
+        expect(sentMails())->toBe([]);
+    });
+
+    it('still sends the code of an address that has an account, whatever the invitations do', function (): void {
+        app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+        User::factory()->create(['email' => 'ada@example.test']);
+        ticketFor('ada@example.test', ['invited_by_id' => null]);
+
+        askForCode($this, 'ada@example.test')->assertOk();
+
+        expect(sentMails())->toHaveCount(1);
     });
 
     it('answers an invited address exactly like one that is not: status, headers and body', function (): void {
@@ -174,7 +204,7 @@ describe('typing the code back', function (): void {
 
         typeCode($this, 'new@example.test', $code)->assertUnprocessable()->assertJsonPath('code', 'name_required');
 
-        expect(User::query()->count())->toBe(0)->and(LoginCode::query()->count())->toBe(1);
+        expect(User::query()->where('email', 'new@example.test')->exists())->toBeFalse()->and(LoginCode::query()->count())->toBe(1);
     });
 
     it('refuses the right code, as a wrong one, once the invitation expired or was withdrawn', function (string $how): void {
@@ -192,8 +222,39 @@ describe('typing the code back', function (): void {
             ->assertUnprocessable()
             ->assertJsonPath('code', 'login_code_wrong');
 
-        expect(User::query()->count())->toBe(0);
+        expect(User::query()->where('email', 'new@example.test')->exists())->toBeFalse();
     })->with(['expired' => ['expired'], 'withdrawn' => ['withdrawn']]);
+
+    it('refuses the right code, as a wrong one, when no account sent the invitation or invitations are turned off', function (string $why): void {
+        $invitation = ticketFor('new@example.test');
+        $code = receiveCode($this, 'new@example.test');
+        $this->flushSession();
+
+        if ($why === 'orphan') {
+            $invitation->forceFill(['invited_by_id' => null])->save();
+        } else {
+            app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+        }
+
+        typeCode($this, 'new@example.test', $code, ['name' => 'Grace Hopper'])
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'login_code_wrong');
+
+        expect(User::query()->where('email', 'new@example.test')->exists())->toBeFalse();
+    })->with(['the sender is gone' => ['orphan'], 'invitations are off' => ['off']]);
+
+    it('lets the invitation work again once invitations are turned back on', function (): void {
+        ticketFor('new@example.test');
+        $code = receiveCode($this, 'new@example.test');
+        $this->flushSession();
+        app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+        typeCode($this, 'new@example.test', $code, ['name' => 'Grace Hopper'])->assertUnprocessable();
+        $this->flushSession();
+
+        app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => true]);
+
+        typeCode($this, 'new@example.test', $code, ['name' => 'Grace Hopper'])->assertCreated();
+    });
 
     it('answers a wrong code for an invited address exactly as for an address with an account and for any other, attempt after attempt', function (): void {
         User::factory()->create(['email' => 'ada@example.test']);
@@ -237,6 +298,30 @@ describe('typing the code back', function (): void {
         $other = statementsOf(fn () => typeCode($this, 'other@example.test', '000000'));
 
         expect($invited)->toBe($known)->and($other)->toBe($known);
+    });
+
+    it('does the same work when the sender is gone or invitations are turned off, as for an address with an invitation that works or none', function (): void {
+        ticketFor('invited@example.test');
+        ticketFor('orphan@example.test', ['invited_by_id' => null]);
+        foreach (['invited@example.test', 'orphan@example.test', 'other@example.test'] as $email) {
+            receiveCode($this, $email);
+            $this->flushSession();
+        }
+
+        $working = statementsOf(fn () => typeCode($this, 'invited@example.test', '000000'));
+        $this->flushSession();
+        $orphan = statementsOf(fn () => typeCode($this, 'orphan@example.test', '000000'));
+        $this->flushSession();
+
+        // Changing a setting makes the next request read the settings again (the service is kept between the requests of a test): let it.
+        app(InstanceSettings::class)->update([InstanceSettings::INVITATION_SIGN_UP => false]);
+        typeCode($this, 'other@example.test', '000000');
+        $this->flushSession();
+        $off = statementsOf(fn () => typeCode($this, 'invited@example.test', '000000'));
+        $this->flushSession();
+        $none = statementsOf(fn () => typeCode($this, 'other@example.test', '000000'));
+
+        expect($orphan)->toBe($working)->and($off)->toBe($none)->and($none)->toBe($working);
     });
 
     it('is not needed while registration is open: the invitation changes nothing then', function (): void {

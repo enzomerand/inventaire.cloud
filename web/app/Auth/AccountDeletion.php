@@ -31,9 +31,10 @@ use Illuminate\Support\Facades\DB;
  * - its sessions (the rows of the `sessions` table, when sessions are kept in the database), the sign-in code that
  *   may be waiting for its address, its deletion code and its API tokens.
  *
- * The invitations to join a workspace are not the account's: the ones it sent stay (the database forgets who sent them) and the
- * ones addressed to its address stay too, since they are for the address and a new account can accept them. Those of a workspace
- * that goes with the account go with it.
+ * The invitations to join a workspace are not the account's: the ones it sent stay (the database forgets who sent them, and a workspace
+ * they were for goes on as it was) and the ones addressed to its address stay too, until they lapse (and are pruned): they are the data of
+ * whoever sent them, who chose the address, and a new account made with that address can accept them. Those of a workspace that goes
+ * with the account go with it.
  *
  * What stops it, so that nothing is left without anyone in charge (the person must act first; the deletion is
  * refused with an {@see AccountDeletionRefused} and nothing is changed):

@@ -6,6 +6,7 @@ use App\Auth\AccountExport;
 use App\Models\User;
 use App\Models\WorkspaceInvitation;
 use App\Workspaces\Invitations;
+use App\Workspaces\Members;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -36,6 +37,33 @@ describe('the invitations in the export of the account', function (): void {
             ['workspace' => ['id' => $workspace->ulid, 'name' => 'Shop'], 'email' => 'second@example.test', 'role' => 'viewer', 'created_at' => now()->toIso8601String(), 'expires_at' => now()->addDays(14)->toIso8601String()],
             ['workspace' => ['id' => $workspace->ulid, 'name' => 'Shop'], 'email' => 'first@example.test', 'role' => 'editor', 'created_at' => now()->toIso8601String(), 'expires_at' => now()->addDays(14)->toIso8601String()],
         ]);
+    });
+
+    it('list only the ones sent from the workspaces the account still owns: the address of a person invited is the owner\'s to see', function (): void {
+        $this->travelTo(now()->startOfSecond());
+        $owner = User::factory()->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);
+        $kept = app(Workspaces::class)->create($owner, 'Kept');
+        $handedOver = app(Workspaces::class)->create($owner, 'Handed over');
+        $successor = User::factory()->withPersonalWorkspace()->create();
+        $handedOver->members()->attach($successor->id, ['role' => 'editor']);
+        app(Invitations::class)->invite($owner, $kept, 'kept@example.test', WorkspaceRole::Viewer);
+        app(Invitations::class)->invite($owner, $handedOver, 'gone@example.test', WorkspaceRole::Viewer);
+        app(Members::class)->transferOwnership($owner, $handedOver, $successor);
+
+        $sent = app(AccountExport::class)->for($owner)['invitations']['sent'];
+
+        expect(array_column($sent, 'email'))->toBe(['kept@example.test'])
+            ->and($sent[0]['workspace']['name'])->toBe('Kept')
+            // The new owner did not send it: it is not theirs to export either.
+            ->and(app(AccountExport::class)->for($successor)['invitations']['sent'])->toBe([]);
+    });
+
+    it('give the identifier of the account among the members, and not its number alone', function (): void {
+        $user = User::factory()->create();
+
+        $export = app(AccountExport::class)->for($user);
+
+        expect($export['user']['ulid'])->toBe($user->ulid)->and($export['user']['ulid'])->toMatch('/^[0-7][0-9a-hjkmnp-tv-z]{25}$/');
     });
 
     it('list those the account received: the name of the workspace, who invited, the role and when it lapses, and no identifier', function (): void {

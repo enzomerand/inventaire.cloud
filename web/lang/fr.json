@@ -754,7 +754,6 @@
     "We sent a 6-digit code to your email address. It is valid for :minutes minutes.": "Nous avons envoyé un code à 6 chiffres à votre adresse e-mail. Il est valable :minutes minutes.",
     "Web Server is Down": "Le serveur Web est en panne",
     "Welcome! This address has no account yet. Tell us your name to create it.": "Bienvenue ! Cette adresse n'a pas encore de compte. Indiquez votre nom pour le créer.",
-    "When this is off, only people who already have an account, or who were invited to a workspace, can sign in: nobody else receives a code. You can still create accounts from the Users page.": "Lorsque cette option est désactivée, seules les personnes qui ont déjà un compte, ou qui ont été invitées dans un espace de travail, peuvent se connecter : personne d'autre ne reçoit de code. Vous pouvez toujours créer des comptes depuis la page Utilisateurs.",
     "Where uploaded files (photos, attachments, exports) are kept.": "Où sont conservés les fichiers téléversés (photos, pièces jointes, exports).",
     "Whoops!": "Oups !",
     "Work in this workspace": "Travailler dans cet espace",
@@ -1301,7 +1300,6 @@
     "An invitation to this address is already waiting for an answer.": "Une invitation à cette adresse attend déjà une réponse.",
     "A workspace cannot have more than :count member, counting the invitations waiting for an answer.|A workspace cannot have more than :count members, counting the invitations waiting for an answer.": "Un espace de travail ne peut pas avoir plus de :count membre, invitations en attente comprises.|Un espace de travail ne peut pas avoir plus de :count membres, invitations en attente comprises.",
     "The role of the owner cannot be changed: hand the ownership over to another member instead.": "Le rôle du propriétaire ne peut pas être modifié : transférez plutôt la propriété à un autre membre.",
-    "The owner cannot be removed from the workspace: hand the ownership over to another member first.": "Le propriétaire ne peut pas être retiré de l'espace de travail : transférez d'abord la propriété à un autre membre.",
     "The owner cannot leave the workspace: hand the ownership over to another member first.": "Le propriétaire ne peut pas quitter l'espace de travail : transférez d'abord la propriété à un autre membre.",
     "This member is already the owner of the workspace.": "Ce membre est déjà le propriétaire de l'espace de travail.",
     "This invitation was sent a moment ago: wait a few minutes before sending it again.": "Cette invitation a été envoyée à l'instant : attendez quelques minutes avant de la renvoyer.",
@@ -1360,5 +1358,12 @@
     "This workspace cannot take more members for now: ask its owner to make room.": "Cet espace de travail ne peut pas accueillir plus de membres pour le moment : demandez à son propriétaire de faire de la place.",
     "You already belong to as many workspaces as an account can (:count): leave one, then accept.": "Vous appartenez déjà au maximum d'espaces de travail permis par compte (:count) : quittez-en un, puis acceptez.",
     ":count invitation waiting": ":count invitation en attente",
-    ":count invitations waiting": ":count invitations en attente"
+    ":count invitations waiting": ":count invitations en attente",
+    "Sign-ups are closed.": "Les inscriptions sont fermées.",
+    "Invitations let new addresses create an account while sign-ups are closed.": "Les invitations permettent aux nouvelles adresses de créer un compte tant que les inscriptions sont fermées.",
+    "Invitations no longer let new addresses create an account.": "Les invitations ne permettent plus aux nouvelles adresses de créer un compte.",
+    "Sign-ups are closed: only existing accounts can sign in.": "Les inscriptions sont fermées : seuls les comptes existants peuvent se connecter.",
+    "An invitation to a workspace lets its address create an account": "Une invitation à un espace de travail permet à son adresse de créer un compte",
+    "Only while sign-ups are closed, which then means on invitation: an address that a person with an account invited to a workspace gets its code and can create its account. Turn it off for accounts to come from you alone.": "Uniquement tant que les inscriptions sont fermées, ce qui signifie alors « sur invitation » : une adresse qu'une personne ayant un compte a invitée à un espace de travail reçoit son code et peut créer son compte. Désactivez cette option pour que les comptes ne viennent que de vous.",
+    "When this is off, only people who already have an account can sign in, and the ones invited to a workspace as long as the switch below is on: nobody else receives a code. You can still create accounts from the Users page.": "Lorsque cette option est désactivée, seules les personnes qui ont déjà un compte peuvent se connecter, ainsi que celles invitées à un espace de travail tant que l'option ci-dessous est activée : personne d'autre ne reçoit de code. Vous pouvez toujours créer des comptes depuis la page Utilisateurs."
 }

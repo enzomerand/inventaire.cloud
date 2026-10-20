@@ -459,8 +459,8 @@ describe('the migration for existing accounts', function (): void {
         $kept = User::factory()->create(['remember_token' => 'kept-token']);
         $now = now();
         DB::table('users')->insert([
-            ['name' => 'A', 'email' => 'a@example.test', 'remember_token' => null, 'created_at' => $now, 'updated_at' => $now],
-            ['name' => 'B', 'email' => 'b@example.test', 'remember_token' => '', 'created_at' => $now, 'updated_at' => $now],
+            ['ulid' => User::newUlid(), 'name' => 'A', 'email' => 'a@example.test', 'remember_token' => null, 'created_at' => $now, 'updated_at' => $now],
+            ['ulid' => User::newUlid(), 'name' => 'B', 'email' => 'b@example.test', 'remember_token' => '', 'created_at' => $now, 'updated_at' => $now],
         ]);
 
         $migration->up();

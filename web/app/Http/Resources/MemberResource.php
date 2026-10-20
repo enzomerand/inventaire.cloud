@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Models\User;
 use App\Workspaces\MemberEntry;
-use App\Workspaces\MemberIds;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,7 +16,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * {"id", "name", "email", "role", "joined_at", "is_self"}
  * ```
  *
- * - `id` names the member in this workspace only ({@see MemberIds}); it is not the number of their account, which other people never see;
+ * - `id` is the `ulid` of the account ({@see User::newUlid()}), the same in every workspace; it is not the number of the account, which
+ *   other people never see;
  * - `email` is the address of the member for the owner of the workspace and for the member themselves, and `null` for anybody else
  *   (the key is always there);
  * - `is_self` is true on the line of the person who asks.
@@ -25,17 +26,6 @@ use Illuminate\Http\Resources\Json\JsonResource;
  */
 final class MemberResource extends JsonResource
 {
-    /**
-     * Remembers the line and the identifier the API gives the member.
-     *
-     * @param  MemberEntry  $resource
-     * @param  string  $memberId  See {@see MemberIds::of()}.
-     */
-    public function __construct($resource, private readonly string $memberId)
-    {
-        parent::__construct($resource);
-    }
-
     /**
      * The member as an array.
      *
@@ -46,7 +36,7 @@ final class MemberResource extends JsonResource
         $entry = $this->resource;
 
         return [
-            'id' => $this->memberId,
+            'id' => $entry->ulid,
             'name' => $entry->name,
             'email' => $entry->email,
             'role' => $entry->role->value,

@@ -36,6 +36,13 @@ describe('the table of invitations', function (): void {
             ->toEqualCanonicalizing(['id', 'ulid', 'workspace_id', 'email', 'role', 'invited_by_id', 'expires_at', 'created_at', 'updated_at']);
     });
 
+    it('is indexed for what reads it: the pair workspace and address, the invitations waiting for an address, and the pruning by date', function (): void {
+        expect(Schema::hasIndex('workspace_invitations', ['workspace_id', 'email'], 'unique'))->toBeTrue()
+            ->and(Schema::hasIndex('workspace_invitations', ['email', 'expires_at']))->toBeTrue()
+            ->and(Schema::hasIndex('workspace_invitations', ['expires_at']))->toBeTrue()
+            ->and(Schema::hasIndex('workspace_invitations', ['invited_by_id']))->toBeTrue();
+    });
+
     it('gives an invitation a ULID of its own, in lowercase, beside its numeric key', function (): void {
         $invitation = WorkspaceInvitation::factory()->create();
 

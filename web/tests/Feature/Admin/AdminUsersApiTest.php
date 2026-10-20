@@ -350,7 +350,7 @@ describe('creating an account', function (): void {
         DB::listen(function (QueryExecuted $query) use (&$raced): void {
             if (! $raced && str_starts_with($query->sql, 'select exists') && str_contains($query->sql, 'users')) {
                 $raced = true;
-                DB::table('users')->insert(['name' => 'Winner', 'email' => 'ada@example.com', 'created_at' => now(), 'updated_at' => now()]);
+                DB::table('users')->insert(['ulid' => User::newUlid(), 'name' => 'Winner', 'email' => 'ada@example.com', 'created_at' => now(), 'updated_at' => now()]);
             }
         });
 

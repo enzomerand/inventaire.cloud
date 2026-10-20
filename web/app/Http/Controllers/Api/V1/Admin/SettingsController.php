@@ -16,7 +16,9 @@ use Illuminate\Http\JsonResponse;
  *
  * `registration_open`: whether an address that has no account can create one by signing in. Closed, only the
  * addresses that already have an account get a code (see {@see RequestCodeController}), and a code issued earlier to
- * an address without one opens nothing; accounts then come from the administrators.
+ * an address without one opens nothing; accounts then come from the administrators. While it is closed, `invitation_sign_up` (on by
+ * default) lets an address that a workspace invited sign up anyway, so that "closed" means "on invitation"; turned off, invitations open
+ * nothing and accounts come from the administrators alone. It has no effect while registration is open.
  *
  * The answer also tells, read-only, where the e-signature service (Documenso) stands: `documenso.configured` (the instance has its
  * address and API token), `documenso.webhook_secret_configured` (the webhook is open) and `documenso.webhook_url`, the address to give

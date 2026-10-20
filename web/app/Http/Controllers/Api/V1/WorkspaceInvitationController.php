@@ -11,7 +11,6 @@ use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use App\Workspaces\Exceptions\MembershipRefused;
 use App\Workspaces\Invitations;
-use App\Workspaces\MemberIds;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -26,7 +25,7 @@ use Illuminate\Http\Response;
  */
 final class WorkspaceInvitationController extends Controller
 {
-    public function __construct(private readonly Invitations $invitations, private readonly MemberIds $ids) {}
+    public function __construct(private readonly Invitations $invitations) {}
 
     /**
      * The invitations of the workspace that wait for an answer, the newest first.
@@ -35,18 +34,19 @@ final class WorkspaceInvitationController extends Controller
     {
         $invitations = $this->invitations->sent($this->user($request), $workspace)->load('inviter');
 
-        return SentInvitationResource::collection($invitations->map(fn (WorkspaceInvitation $invitation): SentInvitationResource => $this->describe($workspace, $invitation)));
+        return SentInvitationResource::collection($invitations);
     }
 
     /**
      * Invites an address to the workspace as an editor or a viewer, and mails it after the answer (`201`). Throttled per person
-     * (`workspaces.invitations_per_hour`, sends and resends together).
+     * (`workspaces.invitations_per_hour`, sends and resends together) and per address
+     * (`workspaces.invitations_per_address_per_day`, from everybody together).
      */
     public function store(InviteMemberRequest $request, Workspace $workspace): JsonResponse
     {
         $invitation = $this->invitations->invite($this->user($request), $workspace, $request->email(), $request->role());
 
-        return $this->describe($workspace, $invitation->load('inviter'))->response()->setStatusCode(201);
+        return (new SentInvitationResource($invitation->load('inviter')))->response()->setStatusCode(201);
     }
 
     /**
@@ -57,7 +57,7 @@ final class WorkspaceInvitationController extends Controller
     {
         $sent = $this->invitations->resend($this->user($request), $workspace, $invitation);
 
-        return $this->describe($workspace, $sent->load('inviter'))->response();
+        return (new SentInvitationResource($sent->load('inviter')))->response();
     }
 
     /**
@@ -68,15 +68,5 @@ final class WorkspaceInvitationController extends Controller
         $this->invitations->cancel($this->user($request), $workspace, $invitation);
 
         return response()->noContent();
-    }
-
-    /**
-     * The invitation as the owner sees it, with the identifier of its sender in this workspace.
-     */
-    private function describe(Workspace $workspace, WorkspaceInvitation $invitation): SentInvitationResource
-    {
-        $inviter = $invitation->inviter;
-
-        return new SentInvitationResource($invitation, $inviter === null ? null : $this->ids->of($workspace, $inviter));
     }
 }
