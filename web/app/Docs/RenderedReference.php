@@ -18,10 +18,13 @@ use Throwable;
  * for each language under a fixed key, next to the version of what the HTML was made from: a new version replaces the entry, so nothing
  * has to be cleared and nothing piles up. A cache that cannot be reached does not fail the request: the HTML is drawn for this one.
  *
- * The version is made of what the HTML depends on: the content of the document, the address of the API (built from `APP_URL`), the files
- * that draw it (the classes of `App\Docs`, the views `docs.*` and the translations of the language: a new release changes the page without
- * changing the document, and must not be shown the old one). Their size and date are read rather than their content, which is cheap
- * enough for every request.
+ * The language is also the one of the texts of the document: they are drawn from the translation of the document into it when it has one
+ * (`resources/openapi/v1.<language>.yaml`, see {@see OpenApi::forLocale()}), from the English file otherwise.
+ *
+ * The version is made of what the HTML depends on: the content of the document and of its translation, the address of the API (built from
+ * `APP_URL`), the files that draw it (the classes of `App\Docs`, the views `docs.*` and the translations of the language: a new release
+ * changes the page without changing the document, and must not be shown the old one). Their size and date are read rather than their
+ * content, which is cheap enough for every request.
  */
 final class RenderedReference
 {
@@ -55,7 +58,7 @@ final class RenderedReference
             return new HtmlString($cached['html']);
         }
 
-        $html = view('docs.reference', ['reference' => $this->reference->page()])->render();
+        $html = view('docs.reference', ['reference' => $this->reference->forLocale($locale)->page()])->render();
 
         try {
             Cache::forever($key, ['version' => $version, 'html' => $html]);
@@ -85,7 +88,7 @@ final class RenderedReference
             $made[] = $file.':'.(is_file($file) ? filemtime($file).':'.filesize($file) : 'missing');
         }
 
-        return hash('xxh128', implode('|', [$this->api->hash(), $locale, $this->api->baseUrl(), ...$made]));
+        return hash('xxh128', implode('|', [$this->api->forLocale($locale)->hash(), $locale, $this->api->baseUrl(), ...$made]));
     }
 
     /**

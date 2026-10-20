@@ -16,7 +16,8 @@ use League\CommonMark\MarkdownConverter;
  * Everything the page `/docs/api` shows, drawn from the OpenAPI document and ready for the template: the introduction, then
  * the operations under their tags, then the schemas.
  *
- * The texts of the document (English, in Markdown) are rendered here, with HTML in them removed and unsafe links refused:
+ * The texts of the document (in Markdown, written in English and translated by {@see OpenApiTranslation} where a translation exists) are
+ * rendered here, with HTML in them removed and unsafe links refused:
  * the file is ours, but the rule is the same for any text that reaches a page. They come out as {@see HtmlString}, which the
  * template writes as they are; everything else is plain text, which the template escapes.
  *
@@ -39,22 +40,39 @@ final class ApiReference
 
     /**
      * Gets the document and the helpers that describe its schemas and write its commands.
+     *
+     * @param  OpenApi|null  $source  The document as the file writes it, when `$api` is a translation of it: the anchors of the
+     *                                introduction are made from its headings, so that a link to one leads to it in every language.
      */
     public function __construct(
         private readonly OpenApi $api,
         private readonly SchemaDescriber $schemas,
         private readonly CurlExample $curl,
+        private readonly ?OpenApi $source = null,
     ) {}
+
+    /**
+     * The same page drawn from the document read in a language ({@see OpenApi::forLocale()}): the texts are those of its
+     * translation, when it has one.
+     */
+    public function forLocale(string $language): self
+    {
+        $api = $this->api->forLocale($language);
+        $schemas = new SchemaDescriber($api);
+
+        return new self($api, $schemas, new CurlExample($api, $schemas), $this->api);
+    }
 
     /**
      * The whole page.
      *
      * @return array{
      *     version: string,
+     *     language: string,
      *     baseUrl: string,
      *     intro: HtmlString,
      *     introHeadings: list<array{id: string, text: string}>,
-     *     tags: list<array{id: string, name: string, description: HtmlString, operations: list<array<string, mixed>>}>,
+     *     tags: list<array{id: string, name: string, title: string, description: HtmlString, operations: list<array<string, mixed>>}>,
      *     schemas: list<array<string, mixed>>
      * }
      */
@@ -62,15 +80,18 @@ final class ApiReference
     {
         $document = $this->api->raw();
         $info = is_array($document['info'] ?? null) ? $document['info'] : [];
-        [$intro, $headings] = $this->introduction((string) ($info['description'] ?? ''));
+        $original = ($this->source ?? $this->api)->raw()['info']['description'] ?? '';
+        [$intro, $headings] = $this->introduction((string) ($info['description'] ?? ''), is_string($original) ? $original : '');
 
         $tags = [];
         $descriptions = array_column($this->api->tags(), 'description', 'name');
+        $titles = array_column($this->api->tags(), 'displayName', 'name');
 
         foreach ($this->api->operationsByTag() as $name => $operations) {
             $tags[] = [
                 'id' => 'tag-'.Str::slug($name),
                 'name' => $name,
+                'title' => $titles[$name] ?? $name,
                 'description' => $this->inline($descriptions[$name] ?? ''),
                 'operations' => array_map($this->operation(...), $operations),
             ];
@@ -94,6 +115,7 @@ final class ApiReference
 
         return [
             'version' => (string) ($info['version'] ?? ''),
+            'language' => $this->api->language(),
             'baseUrl' => $this->api->baseUrl(),
             'intro' => $intro,
             'introHeadings' => $headings,
@@ -249,21 +271,40 @@ final class ApiReference
     /**
      * The introduction: the description of the document as HTML, and the headings of its sections, which get an anchor.
      *
+     * The anchor is made from the heading of the same section in the original text, when this one is a translation of it: the
+     * page is one address for every language, so `#intro-rate-limits` must lead to the same section whatever the language of
+     * whoever follows the link.
+     *
+     * @param  string  $original  The description as the file writes it.
      * @return array{0: HtmlString, 1: list<array{id: string, text: string}>}
      */
-    private function introduction(string $markdown): array
+    private function introduction(string $markdown, string $original): array
     {
         $headings = [];
+        $sections = [];
 
-        $html = (string) preg_replace_callback('#<h2>(.*?)</h2>#s', function (array $match) use (&$headings): string {
-            $text = trim(html_entity_decode(strip_tags($match[1]), ENT_QUOTES | ENT_HTML5));
-            $id = 'intro-'.Str::slug($text);
+        if ($original !== $markdown) {
+            preg_match_all('#<h2>(.*?)</h2>#s', $this->markdown($original)->toHtml(), $titles);
+            $sections = array_map($this->plainText(...), $titles[1]);
+        }
+
+        $html = (string) preg_replace_callback('#<h2>(.*?)</h2>#s', function (array $match) use (&$headings, $sections): string {
+            $text = $this->plainText($match[1]);
+            $id = 'intro-'.Str::slug($sections[count($headings)] ?? $text);
             $headings[] = ['id' => $id, 'text' => $text];
 
             return '<h2 id="'.e($id).'">'.$match[1].'</h2>';
         }, $this->markdown($markdown)->toHtml());
 
         return [new HtmlString($html), $headings];
+    }
+
+    /**
+     * What a piece of HTML says, with no markup.
+     */
+    private function plainText(string $html): string
+    {
+        return trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5));
     }
 
     /**

@@ -2,8 +2,8 @@
     One operation of the API in the documentation: its method and path, the ability a token needs, then its parameters, its body,
     its answers (with the codes each can carry) and a command that calls it.
 
-    Everything that comes from the OpenAPI document is in English, so the elements that hold it say `lang="en"` while the labels
-    around it are in the language of the page. The texts are already HTML where they were Markdown (App\Docs\ApiReference).
+    The texts that come from the OpenAPI document are in the language `$textLang` (see docs.reference), the labels
+    around them in the language of the page. They are already HTML where they were Markdown (App\Docs\ApiReference).
 --}}
 @php
     $methodClass = match ($op['method']) {
@@ -16,7 +16,7 @@
 
 <article class="card mb-4" id="{{ $op['id'] }}" aria-labelledby="{{ $op['id'] }}-title">
     <div class="card-header flex-column align-items-start gap-2">
-        <h3 class="card-title" id="{{ $op['id'] }}-title" lang="en">{{ $op['summary'] }}</h3>
+        <h3 class="card-title" id="{{ $op['id'] }}-title" lang="{{ $textLang }}">{{ $op['summary'] }}</h3>
         <div class="d-flex flex-wrap align-items-center gap-2 w-100">
             <span class="badge {{ $methodClass }} font-monospace">{{ $op['method'] }}</span>
             <code class="text-break">{{ $op['path'] }}</code>
@@ -32,7 +32,7 @@
 
     <div class="card-body">
         @if ($op['description'] !== null)
-            <div class="markdown mb-3" lang="en">{{ $op['description'] }}</div>
+            <div class="markdown mb-3" lang="{{ $textLang }}">{{ $op['description'] }}</div>
         @endif
 
         @if ($op['parameters'] !== [])
@@ -56,7 +56,7 @@
                                 <td class="font-monospace text-nowrap">{{ $parameter['in'] }}</td>
                                 <td class="text-nowrap"><x-docs.type :tokens="$parameter['type']" /></td>
                                 <td class="text-nowrap">{{ $parameter['required'] ? __('Yes') : __('No') }}</td>
-                                <td class="app-docs-wide" lang="en">
+                                <td class="app-docs-wide" lang="{{ $textLang }}">
                                     {{ $parameter['description'] }}
                                     @foreach ($parameter['details'] as $detail)
                                         <div class="text-secondary small text-break">{{ $detail }}</div>
@@ -82,7 +82,7 @@
             </h4>
             @foreach ($op['body']['contents'] as $content)
                 <p class="mb-2"><code>{{ $content['mediaType'] }}</code> <x-docs.type :tokens="$content['type']" /></p>
-                <x-docs.rows :rows="$content['rows']" :label="$bodyLabel" />
+                <x-docs.rows :rows="$content['rows']" :label="$bodyLabel" :text-lang="$textLang" />
             @endforeach
         @endif
 
@@ -101,7 +101,7 @@
             <div class="mb-3">
                 <div class="d-flex flex-wrap align-items-baseline gap-2 mb-1">
                     <span class="badge {{ $statusClass }} font-monospace">{{ $response['status'] }}</span>
-                    <span lang="en">{{ $response['description'] }}</span>
+                    <span lang="{{ $textLang }}">{{ $response['description'] }}</span>
                 </div>
 
                 @if ($response['headers'] !== [])
@@ -115,7 +115,7 @@
 
                 @forelse ($response['contents'] as $content)
                     <div class="small mb-2"><code>{{ $content['mediaType'] }}</code> <x-docs.type :tokens="$content['type']" /></div>
-                    <x-docs.rows :rows="$content['rows']" :label="$responseLabel" />
+                    <x-docs.rows :rows="$content['rows']" :label="$responseLabel" :text-lang="$textLang" />
                 @empty
                     <div class="small text-secondary mb-2">{{ __('No body') }}</div>
                 @endforelse
@@ -134,7 +134,7 @@
                                 @foreach ($response['codes'] as $code)
                                     <tr>
                                         <th scope="row" class="fw-normal font-monospace text-nowrap">{{ $code['code'] }}</th>
-                                        <td class="app-docs-wide" lang="en">{{ $code['description'] }}</td>
+                                        <td class="app-docs-wide" lang="{{ $textLang }}">{{ $code['description'] }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>

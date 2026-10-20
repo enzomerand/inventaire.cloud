@@ -76,11 +76,14 @@ describe('the page', function (): void {
             ->and(templateTexts($page, '//h4'))->toContain('Responses', 'Example');
     });
 
-    it('says in which language the text of the document is written, whatever the one of the page', function (): void {
-        $page = templateDom(docsPage($this)->assertOk());
+    it('says in which language the text of the document is written: the one of the page, since the document is translated into it', function (): void {
+        $french = templateDom(docsPage($this)->assertOk());
+        $english = templateDom(docsPage($this, ['Accept-Language' => 'en'])->assertOk());
 
-        expect(templateAttributes($page, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['en'])
-            ->and(templateTexts($page, '//*[@id="createWorkspace-title"]'))->toBe(['Create a workspace']);
+        expect(templateAttributes($french, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['fr'])
+            ->and(templateTexts($french, '//*[@id="createWorkspace-title"]'))->toBe(['Créer un espace de travail'])
+            ->and(templateAttributes($english, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['en'])
+            ->and(templateTexts($english, '//*[@id="createWorkspace-title"]'))->toBe(['Create a workspace']);
     });
 
     it('has an anchor for every operation of the document, and one for every schema', function (): void {
@@ -138,14 +141,24 @@ describe('the page', function (): void {
         expect(templateTexts($page, '//dd/code'))->toContain('http://localhost/api/v1')
             ->and(templateAttributes($page, '//a[contains(., "spécification OpenAPI")]', 'href'))->toBe(['/api/v1/openapi.json'])
             ->and(templateTexts($page, '//a[contains(., "spécification OpenAPI")]'))->toBe(['Télécharger la spécification OpenAPI'])
-            ->and(templateAttributes($page, '//a[contains(., "jeton")]', 'href'))->toBe(['/app/account']);
+            ->and(templateAttributes($page, '//a[contains(., "jeton") and not(starts-with(@href, "#"))]', 'href'))->toBe(['/app/account']);
     });
 
-    it('shows the introduction of the document, its Markdown rendered', function (): void {
-        $page = templateDom(docsPage($this)->assertOk());
+    it('links the contents to the operations by their identifiers, whatever the words of their summaries', function (): void {
+        $page = templateDom(docsPage($this, ['Accept-Language' => 'fr'])->assertOk());
 
-        expect(templateTexts($page, '//h2[starts-with(@id, "intro-")]'))->toContain('Authentication', 'Abilities', 'Rate limits', 'Errors', 'Pagination')
-            ->and(templateTexts($page, '//section[@aria-label="Introduction"]//pre'))->toContain('Authorization: Bearer inv_…');
+        expect(templateAttributes($page, '//nav//a[normalize-space(.) = "Obtenir l\'utilisateur du jeton"]', 'href'))->toBe(['#getCurrentUser'])
+            ->and(templateAttributes($page, '//article[@id="getCurrentUser"]', 'id'))->toBe(['getCurrentUser']);
+    });
+
+    it('shows the introduction of the document, its Markdown rendered, in the language of the page', function (): void {
+        $english = templateDom(docsPage($this, ['Accept-Language' => 'en'])->assertOk());
+        $french = templateDom(docsPage($this, ['Accept-Language' => 'fr'])->assertOk());
+
+        expect(templateTexts($english, '//h2[starts-with(@id, "intro-")]'))->toContain('Authentication', 'Abilities', 'Rate limits', 'Errors', 'Pagination')
+            ->and(templateTexts($english, '//section[@aria-label="Introduction"]//pre'))->toContain('Authorization: Bearer inv_…')
+            ->and(templateTexts($french, '//h2[starts-with(@id, "intro-")]'))->toContain('Authentification', 'Permissions', 'Limites de débit', 'Erreurs', 'Pagination')
+            ->and(templateTexts($french, '//section[@aria-label="Introduction"]//pre'))->toContain('Authorization: Bearer inv_…');
     });
 
     it('keeps its tables and its commands inside their own container, so that the page itself never scrolls sideways', function (): void {
@@ -382,7 +395,7 @@ describe('the texts of the document', function (): void {
                           description: Gone
             YAML);
 
-        $html = view('docs.operation', ['op' => $reference['tags'][0]['operations'][0]])->render();
+        $html = view('docs.operation', ['op' => $reference['tags'][0]['operations'][0], 'textLang' => 'en'])->render();
 
         expect($html)->toContain('&lt;script&gt;alert(1)&lt;/script&gt; List')->toContain('/things/&lt;b&gt;')->toContain('&lt;em&gt;gone&lt;/em&gt;')
             ->toContain('&lt;u&gt;x&lt;/u&gt;')->toContain('&quot;&gt;&lt;i&gt;q&lt;/i&gt;')
