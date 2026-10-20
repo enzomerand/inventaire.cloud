@@ -1,0 +1,65 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Auth\AccountExport;
+use App\Models\User;
+use App\Models\WorkspaceInvitation;
+use App\Workspaces\Invitations;
+use App\Workspaces\WorkspaceRole;
+use App\Workspaces\Workspaces;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
+
+describe('the invitations in the export of the account', function (): void {
+    it('are empty lists for an account that sent and received none', function (): void {
+        $export = $this->actingAs(User::factory()->create())->getJson('/api/v1/me/export', frontend())->assertOk()->json();
+
+        expect($export)->toHaveKey('invitations')
+            ->and($export['invitations'])->toBe(['sent' => [], 'received' => []])
+            ->and($export['version'])->toBe(AccountExport::VERSION);
+    });
+
+    it('list those the account sent that wait for an answer: the workspace, the address, the role and the dates', function (): void {
+        $this->travelTo(now()->startOfSecond());
+        $owner = User::factory()->speaking('en')->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);
+        $workspace = app(Workspaces::class)->create($owner, 'Shop');
+        app(Invitations::class)->invite($owner, $workspace, 'first@example.test', WorkspaceRole::Editor);
+        app(Invitations::class)->invite($owner, $workspace, 'second@example.test', WorkspaceRole::Viewer);
+        WorkspaceInvitation::factory()->expired()->create(['workspace_id' => $workspace->id, 'invited_by_id' => $owner->id]);
+        WorkspaceInvitation::factory()->create(['invited_by_id' => null]);
+
+        $sent = app(AccountExport::class)->for($owner)['invitations']['sent'];
+
+        expect($sent)->toBe([
+            ['workspace' => ['id' => $workspace->ulid, 'name' => 'Shop'], 'email' => 'second@example.test', 'role' => 'viewer', 'created_at' => now()->toIso8601String(), 'expires_at' => now()->addDays(14)->toIso8601String()],
+            ['workspace' => ['id' => $workspace->ulid, 'name' => 'Shop'], 'email' => 'first@example.test', 'role' => 'editor', 'created_at' => now()->toIso8601String(), 'expires_at' => now()->addDays(14)->toIso8601String()],
+        ]);
+    });
+
+    it('list those the account received: the name of the workspace, who invited, the role and when it lapses, and no identifier', function (): void {
+        $this->travelTo(now()->startOfSecond());
+        $owner = User::factory()->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);
+        $workspace = app(Workspaces::class)->create($owner, 'Shop');
+        $grace = User::factory()->create(['email' => 'grace@example.test']);
+        app(Invitations::class)->invite($owner, $workspace, 'Grace@example.test', WorkspaceRole::Viewer);
+        app(Invitations::class)->invite($owner, $workspace, 'other@example.test', WorkspaceRole::Viewer);
+        WorkspaceInvitation::factory()->expired()->create(['email' => 'grace@example.test']);
+
+        $received = app(AccountExport::class)->for($grace)['invitations']['received'];
+
+        expect($received)->toBe([
+            ['workspace' => 'Shop', 'invited_by' => 'Ada Lovelace', 'role' => 'viewer', 'expires_at' => now()->addDays(14)->toIso8601String()],
+        ])->and(app(AccountExport::class)->for($grace)['invitations']['sent'])->toBe([]);
+    });
+
+    it('name nobody when the account that invited is gone', function (): void {
+        $grace = User::factory()->create(['email' => 'grace@example.test']);
+        WorkspaceInvitation::factory()->create(['email' => 'grace@example.test', 'invited_by_id' => null]);
+
+        $received = app(AccountExport::class)->for($grace)['invitations']['received'];
+
+        expect($received)->toHaveCount(1)->and($received[0]['invited_by'])->toBeNull();
+    });
+});

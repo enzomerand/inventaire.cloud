@@ -8,6 +8,7 @@ use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\InventoryVersion;
 use App\Models\User;
+use App\Models\WorkspaceInvitation;
 use App\Workspaces\Membership;
 use App\Workspaces\Workspaces;
 use Illuminate\Support\Carbon;
@@ -37,6 +38,11 @@ use stdClass;
  * `files_uploaded` the `count` and the total size in `bytes` of the files they uploaded and that are still attached, and
  * `official_versions_created` the number of official versions they froze that still exist (see {@see InventoryVersion}). All
  * are zero in a workspace where they wrote nothing. They are an addition to the document, which keeps its version.
+ *
+ * `invitations` are the invitations to join a workspace that still wait for an answer: the ones the account **sent** (the workspace, the
+ * address invited, the role, when it was sent and when it lapses) and the ones **received** (the name of the workspace, the name of who
+ * invited, the role, when it lapses). The ones that lapsed are not there: the application treats them as gone. An addition to the
+ * document, which keeps its version.
  *
  * Besides the profile and the workspaces it holds what the application keeps about the account's access: the
  * sessions it has in the database (network address, browser and last activity, never the session id, which is a
@@ -74,6 +80,7 @@ final class AccountExport
                 'updated_at' => $user->updated_at?->toIso8601String(),
             ],
             'workspaces' => $this->workspaces($user),
+            'invitations' => $this->invitations($user),
             'sessions' => $this->sessions($user),
             'tokens' => $this->tokens($user),
         ];
@@ -114,6 +121,33 @@ final class AccountExport
             'official_versions_created' => $versions[$membership->workspace->getKey()] ?? 0,
             'inventories' => $this->inventories($inventories->get($membership->workspace->getKey(), new Collection)),
         ], $memberships);
+    }
+
+    /**
+     * The invitations to join a workspace that wait for an answer, sent by the account and addressed to it, newest first.
+     *
+     * @return array{sent: list<array<string, mixed>>, received: list<array<string, mixed>>}
+     */
+    private function invitations(User $user): array
+    {
+        $sent = WorkspaceInvitation::query()->where('invited_by_id', $user->getKey())->pending()->with('workspace')->orderByDesc('id')->get();
+        $received = WorkspaceInvitation::query()->addressedTo($user->email)->pending()->with(['workspace', 'inviter'])->orderByDesc('id')->get();
+
+        return [
+            'sent' => array_values($sent->map(fn (WorkspaceInvitation $invitation): array => [
+                'workspace' => ['id' => $invitation->workspace->ulid, 'name' => $invitation->workspace->name],
+                'email' => $invitation->email,
+                'role' => $invitation->role->value,
+                'created_at' => $invitation->created_at?->toIso8601String(),
+                'expires_at' => $invitation->expires_at->toIso8601String(),
+            ])->all()),
+            'received' => array_values($received->map(fn (WorkspaceInvitation $invitation): array => [
+                'workspace' => $invitation->workspace->name,
+                'invited_by' => $invitation->inviter?->name,
+                'role' => $invitation->role->value,
+                'expires_at' => $invitation->expires_at->toIso8601String(),
+            ])->all()),
+        ];
     }
 
     /**
