@@ -307,7 +307,9 @@ describe('the search text', function (): void {
     it('is not in the settings the API gives', function (): void {
         app(InstanceSettings::class)->recordSearchTextVersion(SearchText::VERSION);
 
-        expect(app(InstanceSettings::class)->all())->toBe(['registration_open' => true])
+        // The choices of the administrator, and not the bookkeeping of the search text.
+        expect(app(InstanceSettings::class)->all())->toBe(['registration_open' => true, 'invitation_sign_up' => true])
+            ->and(app(InstanceSettings::class)->all())->not->toHaveKey(InstanceSettings::SEARCH_TEXT_VERSION)
             ->and(app(InstanceSettings::class)->searchTextVersion())->toBe(SearchText::VERSION);
     });
 });

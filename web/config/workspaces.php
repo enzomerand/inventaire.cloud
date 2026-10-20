@@ -37,7 +37,9 @@ return [
     | resends together (429): an invitation mails an address the owner chooses.
     | `invitations_per_address_per_day` is the number of those mails one address
     | receives in a day from everybody on the instance together (429): the owners
-    | of many workspaces cannot make the application flood a mailbox.
+    | of many workspaces cannot make the application flood a mailbox. Only a mail
+    | that is sent counts for it: a request that is refused (not the owner, an
+    | address that is not valid, a member already...) leaves it alone.
     */
     'max_members' => (int) env('WORKSPACES_MAX_MEMBERS', 50),
 

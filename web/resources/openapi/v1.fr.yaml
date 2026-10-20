@@ -369,7 +369,7 @@ paths:
       summary: 'Inviter une adresse dans un espace de travail'
       description: |-
         Invite une adresse dans l'espace de travail, comme `editor` ou `viewer`, et lui envoie un e-mail. Réservé aux propriétaires. L'invitation est liée à l'adresse, pas à un lien : la personne se connecte avec cette adresse, trouve l'invitation parmi les siennes (`GET /me/invitations`) et l'accepte ou la refuse ; tant que les inscriptions sont fermées, une invitation en attente permet aussi à son adresse de s'inscrire, sauf si l'administrateur l'a désactivé ou si la personne qui l'a envoyée a supprimé son compte. L'e-mail part après la réponse, dans la langue du compte de cette adresse s'il y en a un, sinon dans celle de la requête. L'invitation expire au bout de 14 jours par défaut ; la renvoyer lui donne un nouveau délai.
-        Un espace de travail compte 50 membres et invitations en attente ensemble par défaut (`member_limit_reached`), et un propriétaire peut envoyer 20 e-mails par heure par défaut, invitations et invitations renvoyées ensemble, et une même adresse en reçoit 5 par jour par défaut de la part de tous les utilisateurs de l'instance ensemble (`429` au-delà, avec `Retry-After`).
+        Un espace de travail compte 50 membres et invitations en attente ensemble par défaut (`member_limit_reached`), et un propriétaire peut envoyer 20 e-mails par heure par défaut, invitations et invitations renvoyées ensemble, et une même adresse en reçoit 5 par jour par défaut de la part de tous les utilisateurs de l'instance ensemble ; seul un e-mail effectivement envoyé compte pour l'adresse, pas une requête refusée (`429` au-delà, avec `Retry-After`).
       requestBody:
         content:
           application/json:

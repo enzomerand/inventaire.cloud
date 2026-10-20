@@ -846,7 +846,7 @@ paths:
 
         A workspace holds 50 members and waiting invitations together by default (`member_limit_reached`), and an
         owner can send 20 mails an hour by default, invitations and invitations sent again together, and one address
-        receives 5 a day by default from everybody on the instance together (`429` beyond, with `Retry-After`).
+        receives 5 a day by default from everybody on the instance together; only a mail that is sent counts for the address, not a request that is refused (`429` beyond, with `Retry-After`).
       x-ability: manage
       requestBody:
         required: true

@@ -16,6 +16,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -51,6 +52,7 @@ final class Invitations
         private readonly Locks $locks,
         private readonly Workspaces $workspaces,
         private readonly InvitationMailer $mailer,
+        private readonly InvitationPace $pace,
     ) {}
 
     /**
@@ -65,6 +67,7 @@ final class Invitations
      * @throws ValidationException When the address is not valid or the role is the owner's.
      * @throws AuthorizationException With status 404 when the actor does not belong to the workspace.
      * @throws MembershipRefused With `not_owner`, `already_member`, `already_invited` or `member_limit_reached`.
+     * @throws ThrottleRequestsException When the address has already received as many invitations as it may today ({@see InvitationPace}).
      * @throws ModelNotFoundException When the workspace or the actor's account is gone.
      */
     public function invite(User $actor, Workspace $workspace, string $email, WorkspaceRole $role): WorkspaceInvitation
@@ -96,6 +99,9 @@ final class Invitations
                 throw new MembershipRefused(MembershipRefused::MEMBER_LIMIT_REACHED, limit: $limit);
             }
 
+            // Everything else has been judged: the last thing that can refuse is the pace of the address (nothing is counted yet).
+            $this->pace->ensureRoom($email);
+
             // Its place is taken by the new one (the pair workspace and address is unique, and the new one is a new invitation).
             $existing?->delete();
 
@@ -112,6 +118,7 @@ final class Invitations
             return $invitation;
         }));
 
+        $this->pace->record($email);
         $this->mailer->send($invitation, $actor);
 
         return $invitation;
@@ -123,6 +130,7 @@ final class Invitations
      *
      * @throws AuthorizationException With status 404 when the actor does not belong to the workspace.
      * @throws MembershipRefused With `not_owner`, or `resend_too_soon` (and the seconds to wait).
+     * @throws ThrottleRequestsException When the address has already received as many invitations as it may today ({@see InvitationPace}).
      * @throws ModelNotFoundException When the invitation is not one of this workspace, or lapsed, or the workspace or the account is gone.
      */
     public function resend(User $actor, Workspace $workspace, WorkspaceInvitation $invitation): WorkspaceInvitation
@@ -137,6 +145,8 @@ final class Invitations
             if ($available !== null && $available->isFuture()) {
                 throw new MembershipRefused(MembershipRefused::RESEND_TOO_SOON, retryAfter: max(1, $available->getTimestamp() - now()->getTimestamp()));
             }
+
+            $this->pace->ensureRoom($current->email);
 
             // The row is judged by the statement itself: declining does not take the workspace's lock, so the invitation read above may have been
             // deleted since, and a mail must not go out for one that is gone. This statement always changes the row (the pause between two
@@ -159,6 +169,7 @@ final class Invitations
             return $current;
         }));
 
+        $this->pace->record($sent->email);
         $this->mailer->send($sent, $actor);
 
         return $sent;

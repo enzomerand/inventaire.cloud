@@ -343,6 +343,93 @@ describe('the pace of the invitations', function (): void {
         inventoryCall($this, $team['owner'], 'POST', invitationApiUri($mine), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertCreated();
     });
 
+    it('lets an address receive five of them a day by default, then answers 429 with the headers of any pace', function (): void {
+        $team = inventoryTeam();
+        $owner = $team['owner'];
+        $workspaces = [$team['workspace'], ...array_map(fn (int $n): Workspace => app(Workspaces::class)->create($owner, "Shop {$n}"), range(1, 5))];
+
+        expect(config('workspaces.invitations_per_address_per_day'))->toBe(5);
+
+        foreach (array_slice($workspaces, 0, 5) as $workspace) {
+            inventoryCall($this, $owner, 'POST', invitationApiUri($workspace), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertCreated();
+        }
+
+        $refused = inventoryCall($this, $owner, 'POST', invitationApiUri($workspaces[5]), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertStatus(429);
+
+        expect($refused->json())->toBe(['message' => 'Too many attempts. Please wait a moment before trying again.', 'code' => 'too_many_requests'])
+            ->and((int) $refused->headers->get('Retry-After'))->toBeGreaterThan(0)->toBeLessThanOrEqual(86400)
+            ->and($refused->headers->get('X-RateLimit-Limit'))->toBe('5')
+            ->and($refused->headers->get('X-RateLimit-Remaining'))->toBe('0')
+            ->and((int) $refused->headers->get('X-RateLimit-Reset'))->toBeGreaterThan(time())
+            ->and(WorkspaceInvitation::query()->where('email', 'guest@example.test')->count())->toBe(5);
+    });
+
+    it('is not used up by attempts that are refused: a member who is not the owner, a workspace that is not there, a fault in the body, a rule', function (): void {
+        $team = inventoryTeam();
+        config(['workspaces.invitations_per_address_per_day' => 1]);
+        $uri = invitationApiUri($team['workspace']);
+        $guest = ['email' => 'guest@example.test', 'role' => 'viewer'];
+
+        for ($try = 0; $try < 4; $try++) {
+            // 403: members who may not invite.
+            inventoryCall($this, $team['editor'], 'POST', $uri, $guest)->assertForbidden()->assertJsonPath('code', 'not_owner');
+            inventoryCall($this, $team['viewer'], 'POST', $uri, $guest)->assertForbidden()->assertJsonPath('code', 'not_owner');
+            // 404: a person who does not belong to the workspace.
+            inventoryCall($this, $team['stranger'], 'POST', $uri, $guest)->assertNotFound();
+            // 422: a role that is not an editor's or a viewer's, an address that is not one.
+            inventoryCall($this, $team['owner'], 'POST', $uri, ['email' => 'guest@example.test', 'role' => 'owner'])->assertUnprocessable();
+            inventoryCall($this, $team['owner'], 'POST', $uri, ['email' => 'guest@example.test'])->assertUnprocessable();
+            // 409: a member already, an invitation that waits already.
+            inventoryCall($this, $team['owner'], 'POST', $uri, ['email' => $team['viewer']->email, 'role' => 'viewer'])->assertStatus(409)->assertJsonPath('code', 'already_member');
+        }
+
+        expect(WorkspaceInvitation::query()->count())->toBe(0);
+
+        // The address has not been mailed once: the real invitation goes out, and only then is the day used up.
+        inventoryCall($this, $team['owner'], 'POST', $uri, $guest)->assertCreated();
+        inventoryCall($this, $team['owner'], 'POST', $uri, $guest)->assertStatus(409)->assertJsonPath('code', 'already_invited');
+        $mine = app(Workspaces::class)->create($team['owner'], 'Mine');
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($mine), $guest)->assertStatus(429)->assertJsonPath('code', 'too_many_requests');
+    });
+
+    it('is not used up by a member who may not send an invitation again, an invitation that is not there, or a resend that comes too soon', function (): void {
+        $team = inventoryTeam();
+        config(['workspaces.invitations_per_address_per_day' => 1]);
+        $old = invitationApiFor($team['workspace'], 'guest@example.test', ['updated_at' => now()->subHour()]);
+        $resend = invitationApiUri($team['workspace'], $old, '/resend');
+
+        for ($try = 0; $try < 3; $try++) {
+            inventoryCall($this, $team['editor'], 'POST', $resend)->assertForbidden()->assertJsonPath('code', 'not_owner');
+            inventoryCall($this, $team['stranger'], 'POST', $resend)->assertNotFound();
+            inventoryCall($this, $team['owner'], 'POST', invitationApiUri($team['workspace']).'/01j0000000000000000000000x/resend')->assertNotFound();
+        }
+
+        // The first real resend is the one that counts; a second, too soon, is refused for its own reason and costs nothing.
+        inventoryCall($this, $team['owner'], 'POST', $resend)->assertOk();
+        inventoryCall($this, $team['owner'], 'POST', $resend)->assertStatus(429)->assertJsonPath('code', 'resend_too_soon');
+
+        // The day of the address is used up by the one resend, not by the attempts: a new invitation from another workspace is refused now.
+        $mine = app(Workspaces::class)->create($team['owner'], 'Mine');
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($mine), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertStatus(429)->assertJsonPath('code', 'too_many_requests');
+    });
+
+    it('does not mail, nor leave anything behind, for an address that has had its day', function (): void {
+        $team = inventoryTeam();
+        config(['workspaces.invitations_per_address_per_day' => 1]);
+        $mine = app(Workspaces::class)->create($team['owner'], 'Mine');
+        $held = holdDeferred();
+
+        invitationApiSend($this, $team, 'guest@example.test')->assertCreated();
+        $held->release();
+        $sent = count(invitationApiMailsTo('guest@example.test'));
+        inventoryCall($this, $team['owner'], 'POST', invitationApiUri($mine), ['email' => 'guest@example.test', 'role' => 'viewer'])->assertStatus(429);
+        $held->release();
+
+        expect($sent)->toBe(1)
+            ->and(invitationApiMailsTo('guest@example.test'))->toHaveCount(1)
+            ->and(WorkspaceInvitation::query()->where('workspace_id', $mine->id)->count())->toBe(0);
+    });
+
     it('counts the invitations sent again for their address, and keeps no address in the cache', function (): void {
         $team = inventoryTeam();
         config(['workspaces.invitations_per_address_per_day' => 1]);

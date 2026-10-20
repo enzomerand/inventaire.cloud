@@ -13,7 +13,6 @@ use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Jobs\GenerateExport;
 use App\Models\User;
-use App\Models\WorkspaceInvitation;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
 use Illuminate\Auth\Events\Login;
@@ -146,45 +145,11 @@ class AppServiceProvider extends ServiceProvider
             ->by('workspace-creation:'.$this->signedInKey($request)));
 
         // Inviting and sending an invitation again mail an address the owner chooses (`invitations_per_hour`, both together), keyed on the
-        // owner; and the address itself is not mailed more than `invitations_per_address_per_day` times a day by anybody on the instance
-        // (keyed on a hash of the normalized address, so that the cache holds no address): a script of owners cannot make the application
-        // flood one mailbox.
-        RateLimiter::for('workspace-invitations', function (Request $request): array {
-            $limits = [Limit::perHour(config()->integer('workspaces.invitations_per_hour'))->by('workspace-invitations:'.$this->signedInKey($request))];
-            $address = $this->invitedAddress($request);
-
-            if ($address !== null) {
-                $limits[] = Limit::perDay(config()->integer('workspaces.invitations_per_address_per_day'))->by('workspace-invitations-address:'.hash('sha256', $address));
-            }
-
-            return $limits;
-        });
-    }
-
-    /**
-     * The address a request to invite or to send an invitation again mails, normalized; null when it names none (a mistake in the body,
-     * an invitation that does not exist: the request is refused further on, and mails nobody).
-     *
-     * To invite it is the `email` of the body; to send again it is the address of the invitation of the path, which costs one query
-     * on a unique index (the binding of the route has not run yet when the limiter does).
-     */
-    private function invitedAddress(Request $request): ?string
-    {
-        $invitation = $request->route('invitation');
-
-        if ($invitation instanceof WorkspaceInvitation) {
-            return $invitation->email;
-        }
-
-        if (is_string($invitation)) {
-            $address = WorkspaceInvitation::query()->where('ulid', strtolower($invitation))->value('email');
-
-            return is_string($address) && $address !== '' ? $address : null;
-        }
-
-        $address = $request->input('email');
-
-        return is_string($address) && trim($address) !== '' ? EmailAddress::normalize($address) : null;
+        // owner. The address has a pace of its own too (`invitations_per_address_per_day`), but it is held by the service, once the request
+        // has been judged and only for a mail that is sent: a throttle runs before anything is judged, so it would count the attempts of a
+        // member who may not invite, or of a workspace that is not there, against the address (see App\Workspaces\InvitationPace).
+        RateLimiter::for('workspace-invitations', fn (Request $request): Limit => Limit::perHour(config()->integer('workspaces.invitations_per_hour'))
+            ->by('workspace-invitations:'.$this->signedInKey($request)));
     }
 
     /**
