@@ -28,6 +28,7 @@
         x-data="adminSettings"
         data-url="{{ route('api.v1.admin.settings.show', absolute: false) }}"
         data-registration-open="{{ $settings->registrationOpen() ? '1' : '0' }}"
+        data-invitation-sign-up="{{ $settings->invitationSignUp() ? '1' : '0' }}"
         data-documenso-configured="{{ $documenso['configured'] ? '1' : '0' }}"
         data-documenso-secret="{{ $documenso['webhook_secret_configured'] ? '1' : '0' }}"
         data-webhook-url="{{ $documenso['webhook_url'] }}"
@@ -51,7 +52,24 @@
                         <span class="form-check-label">{{ __('Anybody can create an account') }}</span>
                     </label>
                     <div class="form-hint mt-2">
-                        {{ __('When this is off, only people who already have an account, or who were invited to a workspace, can sign in: nobody else receives a code. You can still create accounts from the Users page.') }}
+                        {{ __('When this is off, only people who already have an account can sign in, and the ones invited to a workspace as long as the switch below is on: nobody else receives a code. You can still create accounts from the Users page.') }}
+                    </div>
+
+                    <label class="form-check form-switch mt-4">
+                        <input
+                            id="admin-settings-invitation-sign-up"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="invitationSignUp"
+                            :disabled="busy"
+                            aria-describedby="admin-settings-invitation-sign-up-hint"
+                            @change="toggleInvitationSignUp"
+                        >
+                        <span class="form-check-label">{{ __('An invitation to a workspace lets its address create an account') }}</span>
+                    </label>
+                    <div class="form-hint mt-2" id="admin-settings-invitation-sign-up-hint">
+                        {{ __('Only while sign-ups are closed, which then means on invitation: an address that a person with an account invited to a workspace gets its code and can create its account. Turn it off for accounts to come from you alone.') }}
                     </div>
                 </div>
             </div>

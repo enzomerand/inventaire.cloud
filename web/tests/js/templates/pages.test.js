@@ -172,6 +172,8 @@ const MESSAGES = {
     'tokens.error.limit': 'You already have :count API tokens.',
     'admin.settings.notice.opened': 'Sign-ups are open',
     'admin.settings.notice.closed': 'Sign-ups are closed',
+    'admin.settings.notice.invitations_on': 'Invitations are on',
+    'admin.settings.notice.invitations_off': 'Invitations are off',
     'admin.users.workspace_count': 'Workspaces: :count',
     'admin.users.created_on': 'Created on :date',
     'admin.users.promote': 'Make administrator',
@@ -265,6 +267,7 @@ function render(path) {
 
         const values = {
             "$settings->registrationOpen() ? '1' : '0'": '1',
+            "$settings->invitationSignUp() ? '1' : '0'": '1',
             "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
             $maxSigners: String(PAGE.maxSigners),
             "$documenso['configured'] ? '1' : '0'": PAGE.documenso.configured ? '1' : '0',
@@ -1499,6 +1502,25 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(notify).toHaveBeenCalledWith('success', 'Sign-ups are closed');
             expect(registrationSwitch().checked).toBe(false);
             expect(registrationSwitch().disabled).toBe(false);
+        });
+
+        it('has a second switch for the invitations, on as the page was rendered, that saves apart from the first', async () => {
+            const invitations = document.querySelector('#admin-settings-invitation-sign-up');
+            http.put.mockResolvedValue({ data: { registration_open: true, invitation_sign_up: false } });
+
+            expect(invitations.checked).toBe(true);
+            expect(document.body.textContent).toContain(
+                'An invitation to a workspace lets its address create an account',
+            );
+
+            invitations.checked = false;
+            invitations.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/admin/settings', { invitation_sign_up: false });
+            expect(notify).toHaveBeenCalledWith('success', 'Invitations are off');
+            expect(invitations.checked).toBe(false);
+            expect(registrationSwitch().checked).toBe(true);
         });
 
         it('turns the switch back on when the change could not be saved', async () => {
