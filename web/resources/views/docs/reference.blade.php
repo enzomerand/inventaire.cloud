@@ -2,10 +2,15 @@
     The part of the page of the documentation that is drawn from the OpenAPI document and nothing else: the column of links and the
     column of the text (getting started, introduction, every operation, the schemas). It is the same for everybody who reads the
     same language, so App\Docs\RenderedReference keeps its HTML in the cache and the page includes it as it is (see api.blade.php).
-    See App\Docs\ApiReference for what `$reference` holds.
+    See App\Docs\ApiReference for what `$reference` holds. The texts of the document are in the language `$textLang`: the language
+    of their translation when the document has one into the language of the page, English otherwise. The operations and the schemas
+    included below read the same variable.
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
+@php
+    $textLang = $reference['language'];
+@endphp
 <div class="row row-cards">
     <div class="col-lg-3">
         <button class="btn btn-outline-secondary w-100 d-inline-flex align-items-center justify-content-center gap-1 d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#api-docs-contents" aria-expanded="false" aria-controls="api-docs-contents">
@@ -17,15 +22,15 @@
             <div class="fw-bold mb-1">{{ __('Introduction') }}</div>
             <ul class="list-unstyled mb-3">
                 @foreach ($reference['introHeadings'] as $heading)
-                    <li><a class="d-block py-1 text-break" href="#{{ $heading['id'] }}" lang="en">{{ $heading['text'] }}</a></li>
+                    <li><a class="d-block py-1 text-break" href="#{{ $heading['id'] }}" lang="{{ $textLang }}">{{ $heading['text'] }}</a></li>
                 @endforeach
             </ul>
 
             @foreach ($reference['tags'] as $tag)
-                <div class="fw-bold mb-1"><a class="text-reset" href="#{{ $tag['id'] }}" lang="en">{{ $tag['name'] }}</a></div>
+                <div class="fw-bold mb-1"><a class="text-reset" href="#{{ $tag['id'] }}" lang="{{ $textLang }}">{{ $tag['name'] }}</a></div>
                 <ul class="list-unstyled mb-3">
                     @foreach ($tag['operations'] as $op)
-                        <li><a class="d-block py-1 text-break" href="#{{ $op['id'] }}" lang="en">{{ $op['summary'] }}</a></li>
+                        <li><a class="d-block py-1 text-break" href="#{{ $op['id'] }}" lang="{{ $textLang }}">{{ $op['summary'] }}</a></li>
                     @endforeach
                 </ul>
             @endforeach
@@ -61,13 +66,13 @@
         </section>
 
         <section class="card mb-4" aria-label="{{ __('Introduction') }}">
-            <div class="card-body markdown" lang="en">{{ $reference['intro'] }}</div>
+            <div class="card-body markdown" lang="{{ $textLang }}">{{ $reference['intro'] }}</div>
         </section>
 
         @foreach ($reference['tags'] as $tag)
             <section class="mb-5" aria-labelledby="{{ $tag['id'] }}">
-                <h2 class="h2 mb-1" id="{{ $tag['id'] }}" lang="en">{{ $tag['name'] }}</h2>
-                <div class="text-secondary mb-3" lang="en">{{ $tag['description'] }}</div>
+                <h2 class="h2 mb-1" id="{{ $tag['id'] }}" lang="{{ $textLang }}">{{ $tag['name'] }}</h2>
+                <div class="text-secondary mb-3" lang="{{ $textLang }}">{{ $tag['description'] }}</div>
 
                 @foreach ($tag['operations'] as $op)
                     @include('docs.operation', ['op' => $op])

@@ -15,9 +15,10 @@ use Illuminate\Http\Response;
  * `/docs/api`: the documentation of the public API, public and rendered by the server from the OpenAPI document
  * ({@see OpenApi}), the same one `/api/v1/openapi.json` serves.
  *
- * The page exists once, at one address: the text of the document is English whatever the visitor's language, so a copy for
- * each language would only translate the labels around it. Those follow the language of the request, like every page that is not
- * a template.
+ * The page exists once, at one address, and follows the language of the request, like every page that is not a template: the labels
+ * around the document, and the texts of the document itself when it has a translation into that language (French: see
+ * {@see OpenApi::localized()}), English otherwise. The JSON the API serves does not follow it: `/api/v1/openapi.json` is English in
+ * every language.
  *
  * The long part of the page is drawn once for each language and kept in the cache ({@see RenderedReference}), so that a request
  * only draws the frame around it. The page is about 700 KB, and is revalidated rather than sent again: it answers with an `ETag` and a

@@ -1,0 +1,1883 @@
+# French text of the API reference (/docs/api): an overlay of v1.yaml, nothing else.
+#
+# It repeats the tree of v1.yaml and holds only its summary, description and title strings, translated; everything that is
+# not text (paths, schemas, examples, enums, defaults) stays in v1.yaml, and /api/v1/openapi.json stays in English. A list keeps
+# the positions of v1.yaml, and an empty list stands for an item that has no text. Code spans, Markdown headings and link
+# targets must be the same as in v1.yaml.
+#
+# tests/Feature/Docs/OpenApiTranslationTest.php checks it against v1.yaml: change a text there, change it here.
+info:
+  title: 'API inventaire.cloud'
+  summary: "L'API JSON publique d'inventaire.cloud."
+  description: |
+    L'API publique d'inventaire.cloud : espaces de travail, inventaires, champs, articles et leurs fichiers, exports, imports et versions officielles.
+    La plupart de ce que l'application web fait avec vos données peut se faire ici, avec un jeton d'accès personnel.
+
+    ## Authentification
+
+    Créez un jeton d'accès personnel depuis la page Compte de l'application web (carte « Jetons d'API ») : choisissez un nom,
+    les permissions qu'il porte et une expiration (7, 30, 90 ou 365 jours, ou jamais). La valeur commence par `inv_` et n'est
+    affichée qu'une seule fois, à la création du jeton : copiez-la à ce moment-là. Envoyez-la avec chaque requête :
+
+        Authorization: Bearer inv_…
+
+    Un jeton absent, mal formé, expiré ou révoqué reçoit la réponse `401`. Se déconnecter partout depuis la page Compte
+    révoque tous les jetons du compte. La connexion, le compte lui-même, l'administration et la gestion des jetons
+    relèvent de l'application web et ne font pas partie de cette API : ils refusent une requête faite avec un jeton (`403`,
+    `session_required`).
+
+    Envoyez le jeton seul. Une requête qui porte aussi le cookie de session de l'application web reçoit la réponse `403`
+    avec le code `token_with_session`, quelles que soient les permissions du jeton : avec les deux, on ne saurait pas lequel des deux décide.
+
+    ## Permissions
+
+    Un jeton porte une ou plusieurs permissions, et chaque opération de ce document indique celle dont elle a besoin dans `x-ability` :
+
+    - `read` : toutes les opérations `GET` ;
+    - `write` : le contenu d'un inventaire, c'est-à-dire les articles, les pièces jointes, les exports, les imports et les versions officielles (création, modification, suppression) ;
+    - `manage` : la structure, c'est-à-dire les espaces de travail, les inventaires et les champs (création, modification, suppression).
+
+    Les permissions sont indépendantes : `write` et `manage` n'incluent pas `read`. Un jeton qui ne peut pas lire est difficilement
+    utilisable, puisque les identifiants dont les autres opérations ont besoin se trouvent avec `GET` : donnez `read` en plus
+    des autres. Ce que répond une opération `write` est la ressource qu'elle a écrite (l'article, la pièce jointe, l'export,
+    l'import ou la version), donc `write` voit ce qu'il écrit. `manage` peut supprimer un espace de travail ou un inventaire
+    avec toutes les données qu'il contient : ne le donnez qu'à ce qui en a besoin. Une requête faite avec un jeton qui n'a pas
+    la permission requise reçoit la réponse `403` avec le code `token_ability_missing`.
+
+    Un jeton ne dépasse jamais son propriétaire. Quelles que soient ses permissions, il ne peut faire que ce que le propriétaire a le
+    droit de faire dans chaque espace de travail, selon son rôle : `owner`, `editor` ou `viewer`. Une ressource d'un espace de
+    travail auquel le propriétaire n'appartient pas reçoit la réponse `404`, comme si elle n'existait pas ; un membre dont le
+    rôle n'autorise pas l'opération reçoit la réponse `403` (sans `code`).
+
+    ## Limites de débit
+
+    Chaque jeton peut faire 120 requêtes par minute par défaut (l'administrateur de l'instance peut modifier cette valeur).
+    Toute requête faite avec un jeton compte, y compris celles qui sont refusées. Au-delà de la limite, la réponse est `429`
+    avec le code `too_many_requests` et un en-tête `Retry-After`, le nombre de secondes à attendre.
+
+    Certaines opérations ont leur propre limite, plus stricte, comptée par utilisateur : créer un espace de travail, téléverser
+    un fichier, demander un export, envoyer ou relire un fichier à importer, figer un inventaire en version officielle. Une requête
+    refusée avant d'en arriver là (un jeton sans la permission requise, par exemple) ne la consomme pas. Au-delà, la réponse est aussi
+    `429`, avec `Retry-After`. Le catalogue public de modèles a sa propre limite, par adresse réseau.
+
+    Les réponses portent `X-RateLimit-Limit` et `X-RateLimit-Remaining`. Quand plusieurs limites s'appliquent à une requête (celle
+    du jeton et celle de l'opération), les en-têtes décrivent celle qui a le moins de requêtes restantes : pour un export, ce sont
+    ceux de la limite d'export dès qu'elle est plus proche que celle du jeton. Sur une `429`, ce sont ceux de la limite dépassée,
+    avec `Retry-After`.
+
+    ## Erreurs
+
+    Une erreur a toujours un corps JSON, quel que soit l'en-tête `Accept` :
+
+    - `{"message": "…"}` pour `401`, `403` et `404` ; le message s'adresse aux humains et peut changer. `403` porte un `code` quand une
+      raison lisible par une machine existe (`token_ability_missing`, `token_with_session`, `session_required`), `404` en porte un pour les rares cas qui
+      ne sont pas un simple « introuvable » ;
+    - `{"message": "…", "code": "…"}` pour `409`, `429` et `503`, où `code` est la raison à tester dans votre code. Une `409` qui
+      vient d'un quota porte aussi une `limit`, le nombre qui a été franchi ;
+    - `{"message": "…", "errors": {"<field>": ["…"]}}` pour `422`, avec les clés du corps de la requête (`values.<field id>`,
+      `options.max`, `query.filter.<field id>.min`…) ; quelques refus ajoutent un `code` et les éléments qui l'expliquent.
+
+    Chaque réponse d'erreur d'une opération liste, dans `x-codes`, les valeurs de `code` qu'elle peut porter.
+
+    ## Identifiants et dates
+
+    Les ressources sont identifiées par des ULID en minuscules (26 caractères, chiffres et lettres), dans les chemins et dans les
+    corps. Les clés numériques de la base de données ne sont jamais exposées ; la seule exception est l'`id` du compte dans `GET /me`.
+    Les dates sont au format ISO 8601 en UTC (`2026-10-15T12:30:00+00:00`).
+
+    ## Articles et leurs valeurs
+
+    Les `values` d'un article forment un objet JSON indexé par l'identifiant du champ. Un champ qui ne contient aucune valeur est
+    absent. Le type JSON dépend du type du champ (`GET /field-types`) : texte, texte long, URL, e-mail, téléphone, couleur,
+    code-barres, date (`YYYY-MM-DD`), date et heure (UTC, `2026-10-15T12:30:00Z`), heure (`HH:MM`) et choix unique (l'identifiant du
+    choix) sont des chaînes ; nombre, montant et pourcentage sont des **chaînes décimales** (`"12.50"`, jamais un nombre JSON, afin que
+    rien ne soit perdu) ; oui / non est un booléen ; note est un entier ; choix multiple et mots clés sont des tableaux de chaînes ; fichier
+    et photo sont des tableaux d'identifiants de pièces jointes, écrits en téléversant des fichiers, jamais en envoyant des valeurs.
+
+    Pour écrire, envoyez les mêmes formes (les nombres peuvent aussi être envoyés comme nombres JSON, mais envoyez-les sous forme de texte
+    lorsqu'ils ont beaucoup de chiffres). Envoyer `null`, un texte vide ou une liste vide pour un champ l'efface.
+
+    ## Pagination
+
+    Les listes qui peuvent être longues sont paginées avec le paramètre de requête `page` (1 par défaut) : 50 articles, 25 révisions ou 20 versions par
+    page. La réponse est `{"data": […], "links": {"first", "last", "prev", "next"}, "meta": {"current_page", "last_page",
+    "per_page", "total", "from", "to", "path", "links"}}` ; les liens des pages conservent vos autres paramètres de requête.
+    Les autres listes (espaces de travail, inventaires, types de champ, modèles) sont renvoyées d'un seul bloc, dans `data` ; les listes d'exports
+    et d'imports contiennent les 20 plus récents.
+
+    ## Langue
+
+    Les messages et les libellés (le nom d'un type de champ, l'erreur d'un export échoué) sont dans la langue de l'en-tête
+    `Accept-Language` (`fr` ou `en`) ; la langue par défaut de l'instance s'applique en son absence. Les identifiants, les codes et les données
+    que vous avez enregistrées ne sont jamais traduits.
+servers:
+  -
+    description: "Cette instance. Les chemins ci-dessous sont relatifs à celle-ci."
+tags:
+  -
+    description: "L'utilisateur auquel appartient un jeton."
+  -
+    description: 'Les types que peut avoir un champ, avec leurs noms dans la langue de la requête.'
+  -
+    description: "Les espaces de travail auxquels appartient l'utilisateur, avec son rôle dans chacun."
+  -
+    description: "Les inventaires d'un espace de travail, avec leurs champs et ce que l'utilisateur peut en faire."
+  -
+    description: "Les colonnes typées d'un inventaire (ajouter, modifier, ordonner, supprimer)."
+  -
+    description: "Les lignes d'un inventaire, avec tri, filtres, recherche et totaux."
+  -
+    description: "L'historique d'un article, de la modification la plus récente à la plus ancienne."
+  -
+    description: "Fichiers joints à un article, ou renseignant l'un de ses champs de type fichier ou photo."
+  -
+    description: "Fichiers des articles d'un inventaire (XLSX, ODS, CSV, JSON, PDF, zip), générés en arrière-plan."
+  -
+    description: "Feuilles de calcul et fichiers CSV importés dans un inventaire, avec une correspondance de leurs colonnes, traités en arrière-plan."
+  -
+    description: "L'inventaire figé en versions numérotées et datées, chacune avec ses données (JSON), son PDF et, sur demande, des signatures par e-mail."
+  -
+    description: "Le catalogue public des modèles d'inventaire. Aucun jeton requis."
+paths:
+  /me:
+    get:
+      summary: "Obtenir l'utilisateur du jeton"
+      description: "À qui appartient le jeton. Pratique pour vérifier qu'un jeton fonctionne."
+      responses:
+        200:
+          description: "L'utilisateur."
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  /field-types:
+    get:
+      summary: 'Lister les types de champ'
+      description: "Tous les types qu'un champ peut avoir, dans l'ordre où l'application web les propose. `type` est le mot à envoyer pour ajouter un champ."
+      responses:
+        200:
+          description: 'Les types.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  /workspaces:
+    get:
+      summary: 'Lister les espaces de travail'
+      description: "Tous les espaces de travail auxquels appartient le propriétaire du jeton, l'adhésion la plus ancienne en premier, avec son rôle dans chacun."
+      responses:
+        200:
+          description: 'Les espaces de travail.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: 'Créer un espace de travail'
+      description: "Crée un espace de travail dont l'utilisateur est propriétaire. Tout le monde peut le faire, dans la limite du nombre d'espaces de travail auxquels un compte peut appartenir (50 par défaut) et d'un rythme de 20 créations par heure par défaut."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                name:
+                  description: 'Le nom. Les espaces autour sont supprimés.'
+      responses:
+        201:
+          description: "L'espace de travail qui a été créé."
+        403:
+          description: "Le jeton n'a pas la permission `manage`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "Le compte appartient déjà au nombre maximal d'espaces de travail autorisé. `limit` indique combien."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des créations par heure de l'utilisateur, est atteinte."
+  '/workspaces/{workspace}':
+    patch:
+      summary: 'Renommer un espace de travail'
+      description: 'Réservé aux propriétaires.'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                name:
+                  description: 'Le nouveau nom. Les espaces autour sont supprimés.'
+      responses:
+        200:
+          description: "L'espace de travail."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: 'Supprimer un espace de travail'
+      description: "Supprime l'espace de travail et tout ce qu'il contient : inventaires, articles, fichiers. Réservé aux propriétaires. Le dernier espace de travail d'un utilisateur ne peut pas être supprimé. Si c'était celui dans lequel l'utilisateur travaillait, un autre prend sa place."
+      responses:
+        204:
+          description: "L'espace de travail est supprimé."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "C'est le dernier espace de travail de l'utilisateur. Créez-en d'abord un autre."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/workspaces/{workspace}/inventories':
+    get:
+      summary: "Lister les inventaires d'un espace de travail"
+      description: "Tous les inventaires de l'espace de travail, par nom, avec le nombre de leurs champs et de leurs articles. Les champs eux-mêmes ne sont pas listés : lisez un inventaire pour les obtenir."
+      responses:
+        200:
+          description: 'Les inventaires.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: 'Créer un inventaire'
+      description: "Ajoute un inventaire à l'espace de travail. Réservé aux éditeurs et aux propriétaires. Avec `template` (un slug de `GET /templates`), l'inventaire reçoit les champs du modèle, nommés dans la langue de la requête. Un espace de travail contient 100 inventaires par défaut."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                name:
+                  description: 'Une seule ligne.'
+                template:
+                  description: "Le slug d'un modèle. Un slug inconnu donne une `422`."
+      responses:
+        201:
+          description: "L'inventaire qui a été créé. `fields` n'est pas fourni : lisez l'inventaire pour les obtenir."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'espace de travail contient déjà le nombre maximal d'inventaires autorisé. `limit` indique combien."
+            -
+              description: "Le modèle compte plus de champs qu'un inventaire n'en admet. `limit` indique combien."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}':
+    get:
+      summary: 'Obtenir un inventaire'
+      description: "L'inventaire avec ses champs dans l'ordre et ce que l'utilisateur peut en faire."
+      responses:
+        200:
+          description: "L'inventaire."
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    patch:
+      summary: 'Modifier un inventaire'
+      description: "Modifie le nom et/ou la description ; ce qui n'est pas envoyé reste inchangé. Réservé aux éditeurs et aux propriétaires. `null` ou un texte vide efface la description."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                name:
+                  description: 'Une seule ligne.'
+      responses:
+        200:
+          description: "L'inventaire, avec ses champs."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: 'Supprimer un inventaire'
+      description: "Supprime l'inventaire avec ses champs, ses articles et ses fichiers. Réservé aux propriétaires de l'espace de travail."
+      responses:
+        204:
+          description: "L'inventaire est supprimé."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/fields':
+    post:
+      summary: 'Ajouter un champ'
+      description: "Ajoute un champ à la fin de l'inventaire. Réservé aux éditeurs et aux propriétaires. Le type ne peut pas être modifié ensuite. Un nom ne peut pas être utilisé deux fois dans un inventaire (la casse et la façon d'écrire les accents sont ignorées). Un inventaire compte 100 champs au plus par défaut. Un champ `file` ou `photo` ne peut pas être obligatoire."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                name:
+                  description: 'Une seule ligne.'
+                options:
+                  description: 'Les options du type. Chaque type renseigne ses valeurs par défaut.'
+      responses:
+        201:
+          description: 'Le champ qui a été créé.'
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'inventaire a déjà le nombre maximal de champs autorisé. `limit` indique combien."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/fields/order':
+    put:
+      summary: 'Ordonner les champs'
+      description: "Place les champs dans l'ordre indiqué. `fields` doit être exactement la liste des identifiants des champs de l'inventaire, chacun une seule fois, sinon c'est une `422` sur `fields`. Réservé aux éditeurs et aux propriétaires."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                fields:
+                  description: "Les identifiants de tous les champs, dans l'ordre où ils doivent être affichés."
+      responses:
+        200:
+          description: 'Les champs dans leur nouvel ordre.'
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/fields/{field}':
+    patch:
+      summary: 'Modifier un champ'
+      description: "Modifie le nom, le caractère obligatoire du champ et/ou ses options ; ce qui n'est pas envoyé reste inchangé. Les options envoyées sont fusionnées avec les options existantes (une option envoyée à `null` revient à sa valeur par défaut), sauf `choices`, qui est remplacé en bloc. Supprimer un choix, ou abaisser le maximum d'une note, retire des articles les valeurs qui ne conviennent plus. Les autres modifications laissent les valeurs enregistrées telles quelles. Envoyer un autre `type` donne une `422`. Réservé aux éditeurs et aux propriétaires."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                type:
+                  description: "Accepté seulement si c'est le type que le champ a déjà."
+                name:
+                  description: 'Une seule ligne.'
+      responses:
+        200:
+          description: 'Le champ.'
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: 'Supprimer un champ'
+      description: "Supprime le champ et ses valeurs dans chaque article de l'inventaire. Les fichiers d'un champ `file` ou `photo` partent avec lui. Réservé aux éditeurs et aux propriétaires."
+      responses:
+        204:
+          description: 'Le champ est supprimé.'
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/items':
+    get:
+      summary: "Lister les articles d'un inventaire"
+      description: |-
+        Une page de 50 articles, les plus récents d'abord sauf si `sort` indique autre chose.
+
+        - `q` garde les articles qui contiennent tous les mots, quelles que soient la casse et les accents.
+        - `filter[<field id>][<operator>]` garde les articles qui remplissent toutes les conditions. `empty` (`true` ou `false`) fonctionne
+          sur tous les champs. Un champ nombre, note ou date accepte `min` et `max` (tous deux inclus, écrits comme la
+          valeur est stockée), un champ oui / non `is`, un champ choix unique ou multiple `in` (identifiants de choix, l'un d'eux
+          suffit : `filter[<field id>][in][]=<choice id>`). Le texte et les mots clés se recherchent avec `q`, ils ne se filtrent pas.
+        - `sort` vaut `created_at`, `updated_at` ou l'identifiant d'un champ, avec `direction`. Les articles sans valeur viennent en dernier.
+          Les champs choix multiple, mots clés, fichier et photo ne peuvent pas être triés. La nature de chaque champ est dans `query_kind`.
+        - `totals[]` additionne les champs nombre et montant sur **tous** les articles qui correspondent, pas seulement sur la page. C'est
+          facultatif parce que cela coûte un parcours des valeurs : sans lui, `meta.totals` est absent.
+
+        La chaîne de requête est vérifiée dans son ensemble : chaque erreur est signalée d'un coup dans une `422`, sous des clés telles que `sort`,
+        `direction`, `filter.<field id>.<operator>` et `totals.<position>`.
+      parameters:
+        - []
+        -
+          description: 'Les mots à rechercher. 200 caractères au plus ; des espaces seuls ne constituent pas une recherche.'
+        -
+          description: "Ce sur quoi trier. Sans lui, l'article le plus récent vient en premier et `direction` ne change rien."
+        -
+          description: 'Le sens du tri, sans distinction de casse.'
+        -
+          description: "Conditions sur les champs : `filter[<field id>][<operator>]=<value>`, par exemple `filter[01k8…][min]=10` ou `filter[01k8…][empty]=false`. Les opérateurs qu'un champ accepte dépendent de son `query_kind`."
+          schema:
+            additionalProperties:
+              properties:
+                empty:
+                  description: 'Indique si le champ ne contient aucune valeur. Toutes les natures de champ.'
+                min:
+                  description: 'Plus petite valeur, incluse. Natures `number` et `temporal`.'
+                max:
+                  description: 'Plus grande valeur, incluse. Natures `number` et `temporal`.'
+                is:
+                  description: 'Le oui ou le non à trouver. Nature `boolean`.'
+                in:
+                  description: "Identifiants de choix, l'un quelconque suffit. Natures `choice` et `choices`."
+        -
+          description: "Les identifiants des champs nombre et montant à additionner : `totals[]=<field id>`, répété pour chaque champ. Un champ qui n'existe pas ou qui ne peut pas être additionné donne une `422` sur `totals.<position>`."
+      responses:
+        200:
+          description: "Une page d'articles."
+          content:
+            application/json:
+              schema:
+                properties:
+                  meta:
+                    allOf:
+                      - []
+                      -
+                        properties:
+                          limits:
+                            description: "Les limites des pièces jointes, pour qu'un client puisse vérifier un fichier avant de l'envoyer."
+                            properties:
+                              attachment_size:
+                                description: 'Le plus gros fichier, en octets (20 Mo par défaut).'
+                              attachments_per_item:
+                                description: "Le nombre maximal de fichiers qu'un article peut contenir (20 par défaut)."
+                          totals:
+                            description: 'La somme de chaque champ demandé dans `totals[]`, sur tous les articles correspondants, indexée par l''identifiant du champ, sous forme de chaînes décimales. Zéro (`"0.00"`) quand aucun article n''a de valeur.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: 'Ajouter un article'
+      description: "Ajoute un article. Réservé aux éditeurs et aux propriétaires. `values` est indexé par l'identifiant du champ. Une clé qui n'est pas un champ de l'inventaire, une valeur que le champ refuse et un champ obligatoire sans valeur donnent des `422` sur `values.<field id>` ; toutes les erreurs sont signalées d'un coup. Un champ `file` ou `photo` se renseigne en téléversant des fichiers, pas en envoyant des valeurs. Un inventaire contient 10000 articles par défaut."
+      responses:
+        201:
+          description: "L'article qui a été créé."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'inventaire contient déjà le nombre maximal d'articles autorisé. `limit` indique combien."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/items/{item}':
+    get:
+      summary: 'Obtenir un article'
+      responses:
+        200:
+          description: "L'article."
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    patch:
+      summary: 'Modifier un article'
+      description: "Seules les clés de `values` envoyées changent ; le reste de l'article est conservé. Une valeur vide efface son champ (une `422` pour un champ obligatoire). `values` doit être présent, même vide. Réservé aux éditeurs et aux propriétaires. Chaque modification écrit une révision."
+      responses:
+        200:
+          description: "L'article."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: 'Supprimer un article'
+      description: "Supprime l'article, son historique et ses fichiers. Réservé aux éditeurs et aux propriétaires."
+      responses:
+        204:
+          description: "L'article est supprimé."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/items/{item}/revisions':
+    get:
+      summary: "Lister l'historique d'un article"
+      description: "Qui a modifié quoi et quand, du plus récent au plus ancien, 25 par page. Un article conserve ses 100 dernières révisions par défaut. Les valeurs sont présentées comme l'article les présente actuellement."
+      responses:
+        200:
+          description: 'Une page de révisions.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/items/{item}/attachments':
+    post:
+      summary: 'Téléverser un fichier sur un article'
+      description: "Joint la partie `file` à l'article. Avec `field` (l'identifiant d'un champ `file` ou `photo` de l'inventaire), le fichier renseigne ce champ et son identifiant est ajouté à la valeur du champ ; sans lui, le fichier est une simple pièce jointe. Le type du fichier est détecté d'après son contenu. Un champ `photo` n'accepte que des images JPEG, PNG, WebP et GIF. Un fichier pèse 20 Mo au plus par défaut (`meta.limits` de la liste des articles l'indique), un article contient 20 fichiers par défaut, un espace de travail 1 Go de fichiers par défaut, et un utilisateur téléverse 30 fichiers par minute par défaut. Réservé aux éditeurs et aux propriétaires."
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              properties:
+                file:
+                  description: 'Le fichier.'
+                field:
+                  description: "L'identifiant du champ `file` ou `photo` que le fichier renseigne."
+      responses:
+        201:
+          description: "L'article tel qu'il est maintenant, avec le fichier dans `attachments`."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'article contient déjà le nombre maximal de fichiers autorisé. `limit` indique combien."
+            -
+              description: 'Le champ contient déjà autant de fichiers que son `max_files`. `limit` indique combien.'
+            -
+              description: "Les fichiers de l'espace de travail pèseraient plus que ce qui est autorisé. `limit` est en octets."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des téléversements par minute de l'utilisateur, est atteinte."
+  '/inventories/{inventory}/items/{item}/attachments/{attachment}':
+    get:
+      summary: 'Télécharger un fichier'
+      description: "Le fichier en téléchargement. Avec `inline=1`, une image (JPEG, PNG, WebP, GIF) ou un PDF est affiché dans la page à la place. L'`ETag` est l'identifiant du fichier : renvoyez-le dans `If-None-Match` pour obtenir une `304`."
+      parameters:
+        -
+          description: 'Valeur `1` pour afficher une image ou un PDF au lieu de le télécharger. Ignoré pour les autres types.'
+      responses:
+        200:
+          description: 'Le contenu du fichier, avec le type détecté lors du téléversement.'
+          headers:
+            Content-Disposition:
+              description: '`attachment` (ou `inline`) avec le nom du fichier.'
+            Content-Length:
+              description: 'Octets.'
+            ETag:
+              description: "L'identifiant du fichier, entre guillemets."
+            Cache-Control:
+              description: 'Toujours `private, no-cache`.'
+          content:
+            application/octet-stream:
+              description: 'Tout autre type de fichier, avec son propre `Content-Type`.'
+        304:
+          description: 'Le client a déjà ce fichier (`If-None-Match`).'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "L'enregistrement existe, mais son fichier n'est plus sur le stockage."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: 'Le fichier ne peut pas être lu pour le moment (le stockage est indisponible). Réessayez dans un instant.'
+          x-codes:
+            -
+              description: 'Le stockage ne peut pas être lu pour le moment.'
+    delete:
+      summary: "Retirer un fichier d'un article"
+      description: "Supprime le fichier ; s'il renseignait un champ `file` ou `photo`, son identifiant sort de la valeur du champ. Réservé aux éditeurs et aux propriétaires."
+      responses:
+        200:
+          description: "L'article tel qu'il est maintenant."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/items/{item}/attachments/{attachment}/thumbnail':
+    get:
+      summary: "Obtenir la miniature d'un fichier"
+      description: "La miniature d'une image, au format JPEG. `has_thumbnail` de la pièce jointe indique s'il y en a une."
+      responses:
+        200:
+          description: 'La miniature.'
+          headers:
+            Content-Disposition:
+              description: 'Toujours `inline; filename=thumbnail.jpg`.'
+            Cache-Control:
+              description: 'Toujours `private, max-age=3600`.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "Le fichier n'a pas de miniature."
+            -
+              description: "L'enregistrement existe, mais son fichier n'est plus sur le stockage."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: 'Le fichier ne peut pas être lu pour le moment (le stockage est indisponible). Réessayez dans un instant.'
+          x-codes:
+            -
+              description: 'Le stockage ne peut pas être lu pour le moment.'
+  '/inventories/{inventory}/exports':
+    get:
+      summary: "Lister vos exports d'un inventaire"
+      description: "Les exports du propriétaire du jeton pour cet inventaire qui n'ont pas expiré, du plus récent au plus ancien, 20 au plus. Un export n'appartient qu'à son auteur : personne d'autre ne le voit, quel que soit son rôle."
+      responses:
+        200:
+          description: 'Les exports.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: 'Demander un export'
+      description: |-
+        Met en file d'attente la génération d'un fichier des articles. Tout membre de l'espace de travail peut exporter, lecteurs compris. La réponse est l'export, `pending` ; interrogez `GET /inventories/{inventory}/exports/{export}` jusqu'à ce que son `status` soit `completed` (ou `failed`), puis téléchargez-le. Le fichier est conservé 24 heures par défaut.
+        Un PDF contient 500 articles au plus par défaut (`pdf_too_large`). Un zip a besoin d'au moins un fichier à y mettre (`zip_without_files`). Un utilisateur peut avoir 10 exports d'un inventaire à la fois, et l'ensemble de ses exports pèse 2 Go au plus par défaut.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                scope:
+                  description: 'Avec `view`, les articles que sélectionne `query` ; `query` est refusé avec `all`.'
+                query:
+                  description: "La vue à exporter, pour la portée `view`. Les mêmes paramètres que la liste des articles, sous forme d'objet JSON."
+                  properties:
+                    direction:
+                      description: '`asc` ou `desc`.'
+                    filter:
+                      description: 'Par identifiant de champ, puis par opérateur : `{"<field id>": {"min": "10"}}`. Voir la liste des articles pour les opérateurs.'
+                delimiter:
+                  description: '`csv` uniquement. Le séparateur, qui fixe aussi le signe décimal (une virgule avec le point-virgule, un point avec les autres). Par défaut, un point-virgule quand la langue de la requête est le français, sinon une virgule.'
+                files:
+                  description: '`zip` uniquement. `photos` (par défaut) ou `all` (tous les fichiers des articles).'
+      responses:
+        202:
+          description: "L'export, `pending`."
+        403:
+          description: "Le jeton n'a pas la permission `write`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'utilisateur a déjà le nombre maximal d'exports de cet inventaire autorisé. `limit` indique combien."
+            -
+              description: 'Ses exports, celui-ci compris, pèseraient plus que ce qui est autorisé. `limit` est en octets.'
+        422:
+          description: "Le corps ou la chaîne de requête est refusé. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+          x-codes:
+            -
+              description: "Un PDF ne peut pas contenir autant d'articles (sur `format`). `limit` indique combien il peut en contenir."
+            -
+              description: "Aucun des articles n'a de fichier à mettre dans le zip (sur `format`)."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des exports par minute de l'utilisateur, est atteinte."
+  '/inventories/{inventory}/exports/{export}':
+    get:
+      summary: 'Obtenir un export'
+      description: "L'avancement d'un export. L'export d'une autre personne donne une `404`."
+      responses:
+        200:
+          description: "L'export."
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: 'Supprimer un export'
+      description: "Supprime l'export et son fichier. Un export en cours de génération est supprimé de la même façon."
+      responses:
+        204:
+          description: "L'export est supprimé."
+        403:
+          description: "Le jeton n'a pas la permission `write`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/exports/{export}/download':
+    get:
+      summary: 'Télécharger un export'
+      description: "Le fichier d'un export terminé, toujours en téléchargement. Il n'est jamais conservé par un cache."
+      responses:
+        200:
+          description: 'Le fichier, avec le type de son format.'
+          headers:
+            Content-Disposition:
+              description: '`attachment` avec le nom du fichier.'
+            Content-Length:
+              description: 'Octets.'
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              description: 'Format `xlsx`.'
+            application/vnd.oasis.opendocument.spreadsheet:
+              description: 'Format `ods`.'
+            text/csv:
+              description: '`csv`, en UTF-8.'
+            application/json:
+              description: 'Format `json`.'
+            application/pdf:
+              description: 'Format `pdf`.'
+            application/zip:
+              description: 'Format `zip`.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "L'export a expiré et son fichier est supprimé ou sur le point de l'être."
+            -
+              description: "L'export existe, mais son fichier n'est plus sur le stockage."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'export est encore en cours de génération, ou il a échoué. Vérifiez son `status`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: 'Le fichier ne peut pas être lu pour le moment (le stockage est indisponible). Réessayez dans un instant.'
+          x-codes:
+            -
+              description: 'Le stockage ne peut pas être lu pour le moment.'
+  '/inventories/{inventory}/imports':
+    get:
+      summary: "Lister vos imports d'un inventaire"
+      description: "Les imports du propriétaire du jeton pour cet inventaire dont le délai n'est pas écoulé, du plus récent au plus ancien, 20 au plus. Importer modifie les articles : les lecteurs ne peuvent donc pas voir les imports. Un import n'appartient qu'à son auteur."
+      responses:
+        200:
+          description: 'Les imports.'
+        403:
+          description: "Le jeton n'a pas la permission `read`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: 'Envoyer un fichier à importer'
+      description: "Envoie une feuille de calcul (XLSX, ODS) ou un fichier texte (CSV, TSV, TXT) de 10 Mo au plus par défaut. Il est lu immédiatement : la réponse liste les colonnes, une estimation du type de champ auquel chacune ressemble et une proposition de `mapping`. Rien n'est ajouté à l'inventaire tant que vous ne lancez pas l'import. Un jeton sans `manage` ne se voit pas proposer de nouveaux champs (les colonnes qui ne correspondent à aucun champ sont `ignore`). Réservé aux éditeurs et aux propriétaires. Un utilisateur peut avoir 3 imports non terminés d'un inventaire à la fois par défaut, et envoie 10 fichiers par minute par défaut."
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              properties:
+                file:
+                  description: 'Le fichier.'
+                has_header:
+                  description: 'Indique si la première ligne contient les noms des colonnes.'
+                delimiter:
+                  description: "Le séparateur d'un fichier texte. Détecté s'il n'est pas fourni."
+                encoding:
+                  description: "L'encodage d'un fichier texte. Détecté s'il n'est pas fourni."
+      responses:
+        201:
+          description: "L'import, `uploaded`."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'utilisateur a déjà le nombre maximal d'imports non terminés de cet inventaire autorisé. `limit` indique combien."
+        422:
+          description: "Le corps ou la chaîne de requête est refusé. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+          x-codes:
+            -
+              description: "Le fichier n'est ni une feuille de calcul ni un fichier texte lisible par l'import (sur `file`)."
+            -
+              description: 'Le fichier ne peut pas être lu (sur `file`).'
+            -
+              description: 'Le fichier est vide (sur `file`).'
+            -
+              description: 'La feuille de calcul est trop volumineuse une fois décompressée (sur `file`).'
+            -
+              description: 'Le fichier utilise plus de colonnes que ce qui est autorisé (sur `file`).'
+            -
+              description: 'Le fichier a plus de lignes que ce qui est autorisé (sur `file`).'
+            -
+              description: 'La feuille a plus de cellules que ce qui est autorisé (sur `file`).'
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des fichiers par minute de l'utilisateur, est atteinte."
+  '/inventories/{inventory}/imports/{import}':
+    get:
+      summary: 'Obtenir un import'
+      description: "L'avancement d'un import, et son rapport une fois terminé. Interrogez-le après avoir lancé l'import jusqu'à ce que `status` soit `completed` ou `failed`. L'import d'une autre personne donne une `404`."
+      responses:
+        200:
+          description: "L'import."
+        403:
+          description: "Le jeton n'a pas la permission `read`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    patch:
+      summary: "Relire le fichier avec d'autres options"
+      description: "Modifie la façon dont le fichier est lu (`has_header`, `delimiter`, `encoding`) : les colonnes et la proposition de mapping reviennent recalculées. Les options non envoyées sont conservées. `decimal`, `date_order` et `on_error` sont conservés avec l'import pour son lancement. Uniquement tant que l'import est `uploaded`. Réservé aux éditeurs et aux propriétaires."
+      responses:
+        200:
+          description: "L'import, avec ses colonnes et son mapping recalculés."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "Le délai de l'import est écoulé et son fichier a disparu. Envoyez de nouveau le fichier."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'import a été lancé et ne peut plus être modifié."
+        422:
+          description: "Le corps ou la chaîne de requête est refusé. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+          x-codes:
+            -
+              description: 'Le fichier ne peut pas être lu de cette façon (sur `file`).'
+            -
+              description: 'Le fichier ne peut pas être lu (sur `file`).'
+            -
+              description: 'Le fichier est vide (sur `file`).'
+            -
+              description: 'La feuille de calcul est trop volumineuse une fois décompressée (sur `file`).'
+            -
+              description: 'Le fichier utilise plus de colonnes que ce qui est autorisé (sur `file`).'
+            -
+              description: 'Le fichier a plus de lignes que ce qui est autorisé (sur `file`).'
+            -
+              description: 'La feuille a plus de cellules que ce qui est autorisé (sur `file`).'
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des fichiers par minute de l'utilisateur, est atteinte."
+    delete:
+      summary: 'Annuler un import'
+      description: "Annule un import ou efface son rapport, et supprime son fichier. Impossible pendant qu'un worker l'exécute."
+      responses:
+        204:
+          description: "L'import est supprimé (ou avait déjà disparu)."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "Un worker est en train d'ajouter les lignes. Attendez qu'il ait terminé."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/imports/{import}/start':
+    post:
+      summary: 'Lancer un import'
+      description: "Indique où va chaque colonne et lance l'import : un worker convertit, vérifie et ajoute les lignes en une seule transaction, et crée les nouveaux champs. `mapping` comporte une entrée par colonne à utiliser ; une colonne omise est ignorée. Un champ obligatoire de l'inventaire doit être associé à une colonne. Créer des champs (`target: new`) demande le droit de modifier les champs (éditeurs et propriétaires) et, pour un jeton, la permission `manage` en plus de `write` : avec `write` seul, le mapping ne peut viser que des champs existants (`cannot_manage_fields` sinon). La réponse est l'import, `pending` ; interrogez-le. Un inventaire contient 10000 articles par défaut et un fichier 10000 lignes."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                mapping:
+                  items:
+                    properties:
+                      column:
+                        description: "L'`index` d'une colonne."
+                      field:
+                        description: "L'identifiant du champ. Obligatoire pour la cible `field`."
+                      type:
+                        description: 'Le type du nouveau champ. Obligatoire pour la cible `new`.'
+                      name:
+                        description: 'Le nom du nouveau champ. Obligatoire pour la cible `new`.'
+                decimal:
+                  description: "Conservé depuis l'import s'il n'est pas envoyé."
+                date_order:
+                  description: "Conservé depuis l'import s'il n'est pas envoyé."
+                on_error:
+                  description: "Conservé depuis l'import s'il n'est pas envoyé."
+      responses:
+        202:
+          description: "L'import, `pending`."
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "Le délai de l'import est écoulé et son fichier a disparu. Envoyez de nouveau le fichier."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'import a déjà été lancé."
+            -
+              description: "Les nouveaux champs feraient dépasser à l'inventaire le nombre de champs qu'il peut avoir. `limit` indique combien."
+        422:
+          description: "Le corps ou la chaîne de requête est refusé. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+          x-codes:
+            -
+              description: "Le fichier n'a pas cette colonne (sur `mapping`, avec `column`)."
+            -
+              description: 'Une colonne est indiquée deux fois (avec `column`).'
+            -
+              description: "Le champ n'existe pas dans cet inventaire (avec `column`)."
+            -
+              description: 'Le champ se renseigne en téléversant des fichiers (avec `column` et `field`).'
+            -
+              description: 'Deux colonnes vont vers le même champ (avec `column` et `field`).'
+            -
+              description: 'Un champ de ce type ne peut pas être créé par un import (avec `column`).'
+            -
+              description: "Le nom d'un nouveau champ est vide, trop long ou sur plusieurs lignes (avec `column`)."
+            -
+              description: 'Deux nouveaux champs ont le même nom (avec `column`).'
+            -
+              description: "L'inventaire a déjà un champ portant ce nom (avec `column`)."
+            -
+              description: "L'utilisateur n'a pas le droit de créer des champs, ou le jeton n'a pas `manage`, que demande la création d'un champ (avec `column`)."
+            -
+              description: "Un champ obligatoire n'a pas de colonne (avec `field`)."
+            -
+              description: "Aucune colonne n'est associée à un champ."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/versions':
+    get:
+      summary: "Lister les versions officielles d'un inventaire"
+      description: "Les versions officielles de l'inventaire, de la plus récente à la plus ancienne, 20 par page. Une version appartient à l'inventaire, pas à la personne qui l'a figée : tout membre de l'espace de travail voit toutes les versions."
+      responses:
+        200:
+          description: 'Une page de versions.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: "Figer l'inventaire en version officielle"
+      description: |-
+        Fige l'inventaire en sa prochaine version officielle, numérotée 1, 2, 3... Réservé aux éditeurs et aux propriétaires. L'état de l'inventaire à ce moment est écrit dans un fichier JSON canonique (`snapshot`, avec son SHA-256) pendant que l'inventaire est verrouillé en écriture, ce qui prend une ou deux secondes pour des milliers d'articles ; un PDF est ensuite généré en arrière-plan à partir de ce fichier. La réponse est la version, `pending` : interrogez `GET /inventories/{inventory}/versions/{version}` jusqu'à ce que son `status` soit `completed` (ou `failed`), puis téléchargez les fichiers.
+        `signers` demande au service de signature de l'instance (Documenso) de faire signer le PDF par chaque personne : il ajoute une page de signatures au PDF et envoie un e-mail à chaque signataire. L'instance doit en avoir un (`signature_unavailable`). Les personnes sont fixées pour la version : pour en solliciter d'autres, figez de nouveau l'inventaire.
+        Un inventaire contient 200 versions par défaut (`version_limit_reached`), un utilisateur peut figer 10 fois par heure par défaut, un PDF contient 500 articles au plus par défaut (`pdf_too_large`) et les fichiers d'une version comptent dans le stockage de l'espace de travail (`storage_limit_reached`). Un espace de travail peut demander des signatures 20 fois par jour par défaut, une version figée avec des signataires ou une demande échouée renvoyée comptant pour une (`429` au-delà, avec `Retry-After`).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                label:
+                  description: 'Le nom que vous donnez à la version, sur une seule ligne. Aucun quand il est absent, null ou vide.'
+                signers:
+                  description: "Les personnes dont demander la signature, 10 au plus (l'administrateur de l'instance peut abaisser cette limite). Leurs e-mails doivent être différents. Absent pour une version que personne n'a à signer."
+      responses:
+        202:
+          description: 'La version, `pending`.'
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'inventaire contient déjà le nombre maximal de versions autorisé. `limit` indique combien."
+            -
+              description: "Les fichiers de l'espace de travail pèsent déjà autant que ce qui est autorisé. `limit` est en octets."
+            -
+              description: "Des signataires ont été indiqués et l'instance n'a pas de service de signature."
+        422:
+          description: "Le corps est refusé, ou l'inventaire contient plus d'articles qu'un PDF ne peut en contenir. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+          x-codes:
+            -
+              description: "Un PDF ne peut pas contenir autant d'articles, ou les données de l'inventaire sont trop lourdes pour être figées (sur `inventory`, 64 Mo par défaut). `limit` indique combien d'articles un PDF peut contenir ; il est absent quand ce sont les données qui sont trop lourdes."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des versions par heure de l'utilisateur, est atteinte ; ou l'espace de travail a déjà fait aujourd'hui autant de demandes de signature qu'il peut en faire (20 par jour par défaut, avec signataires). Attendez `Retry-After` secondes."
+  '/inventories/{inventory}/versions/{version}':
+    get:
+      summary: 'Obtenir une version officielle'
+      description: "L'avancement d'une version, avec le SHA-256 de ses fichiers et ce qu'ont fait ses signataires."
+      responses:
+        200:
+          description: 'La version.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: 'Supprimer une version officielle'
+      description: "Réservé aux propriétaires. Supprime la version et ses fichiers, et rend leur taille au stockage de l'espace de travail. Une demande de signatures qui attend encore ses signataires est annulée auprès du service de signature en arrière-plan. Une version en cours de génération est supprimée de la même façon. La version suivante est numérotée à la suite de la plus élevée qui reste."
+      responses:
+        204:
+          description: 'La version est supprimée.'
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/inventories/{inventory}/versions/{version}/pdf':
+    get:
+      summary: "Télécharger le PDF d'une version"
+      description: "Le PDF officiel d'une version terminée, toujours en téléchargement. Il est généré à partir des données figées, jamais à partir de l'inventaire courant, et porte sur chaque page le numéro, la date, l'auteur et le SHA-256 des données, ainsi que la page de signatures lorsque des signataires ont été sollicités. Il n'est jamais conservé par un cache."
+      responses:
+        200:
+          description: 'Le PDF.'
+          headers:
+            Content-Disposition:
+              description: '`attachment` avec le nom du fichier.'
+            Content-Length:
+              description: 'Octets.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "La version existe, mais son fichier n'est plus sur le stockage."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: 'La version est encore en cours de génération, ou elle a échoué. Vérifiez son `status`.'
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: 'Le fichier ne peut pas être lu pour le moment (le stockage est indisponible). Réessayez dans un instant.'
+          x-codes:
+            -
+              description: 'Le stockage ne peut pas être lu pour le moment.'
+  '/inventories/{inventory}/versions/{version}/snapshot':
+    get:
+      summary: "Télécharger les données d'une version"
+      description: "Les données figées avec une version terminée, sous forme de fichier JSON (`format` `inventaire.cloud/official-version`) : l'inventaire, ses champs, ses articles et la liste de leurs fichiers, avec des clés triées et sans espace non significatif. Le SHA-256 de ces octets exacts est celui que la version indique sous `snapshot.sha256` (`shasum -a 256` sur le fichier). C'est toujours un téléchargement, jamais conservé par un cache."
+      responses:
+        200:
+          description: 'Les données.'
+          headers:
+            Content-Disposition:
+              description: '`attachment` avec le nom du fichier.'
+            Content-Length:
+              description: 'Octets.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "La version existe, mais son fichier n'est plus sur le stockage."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: 'La version est encore en cours de génération, ou elle a échoué. Vérifiez son `status`.'
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: 'Le fichier ne peut pas être lu pour le moment (le stockage est indisponible). Réessayez dans un instant.'
+          x-codes:
+            -
+              description: 'Le stockage ne peut pas être lu pour le moment.'
+  '/inventories/{inventory}/versions/{version}/signed-pdf':
+    get:
+      summary: "Télécharger le PDF signé d'une version"
+      description: "Le PDF avec les signatures, une fois que chaque signataire a signé : le service de signature (Documenso) le renvoie avec les signatures et le certificat d'achèvement, et il est conservé avec la version. C'est toujours un téléchargement, jamais conservé par un cache. Son SHA-256 et sa taille se trouvent sous `signature.signed_pdf` de la version. Il répond `409` jusque-là, et pour une version que personne n'a été invité à signer."
+      responses:
+        200:
+          description: 'Le PDF signé.'
+          headers:
+            Content-Disposition:
+              description: '`attachment` avec le nom du fichier.'
+            Content-Length:
+              description: 'Octets.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "La version existe, mais son fichier n'est plus sur le stockage."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "Au moins un signataire n'a pas encore signé, ou personne n'a été invité à signer. Vérifiez `signature.status`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: 'Le fichier ne peut pas être lu pour le moment (le stockage est indisponible). Réessayez dans un instant.'
+          x-codes:
+            -
+              description: 'Le stockage ne peut pas être lu pour le moment.'
+  '/inventories/{inventory}/versions/{version}/signature/cancel':
+    post:
+      summary: "Annuler la demande de signature d'une version"
+      description: |-
+        Réservé aux éditeurs et aux propriétaires. Annule la demande de signatures tant que ses signataires sont attendus (`signature.status` vaut `awaiting`) : le service de signature (Documenso) est sollicité immédiatement, prévient les signataires, et la demande passe à `cancelled`. La version, son PDF et ses données ne sont pas touchés ; pour redemander des signatures, figez de nouveau l'inventaire. La réponse est la version.
+        Si Documenso indique que la demande n'est plus en attente (le dernier signataire a signé, ou quelqu'un a refusé, un instant plus tôt), rien n'est annulé : la demande est relue en arrière-plan et la réponse est `409` (`signature_not_pending`). Si Documenso est injoignable, la réponse est `503` (`documenso_unavailable`) et rien n'a changé : réessayez.
+      responses:
+        200:
+          description: 'La version, avec une demande `cancelled`.'
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "La demande n'attend pas ses signataires (elle n'a jamais été envoyée, ou elle est terminée), ou Documenso indique qu'elle n'est pas en attente."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+        503:
+          description: "Le service de signature n'est pas utilisable pour le moment. Rien n'a été annulé."
+          x-codes:
+            -
+              description: "Documenso est injoignable, en panne, ou refuse le jeton de l'instance."
+  '/inventories/{inventory}/versions/{version}/signature/retry':
+    post:
+      summary: "Renvoyer la demande de signature d'une version"
+      description: |-
+        Réservé aux éditeurs et aux propriétaires. Renvoie une demande de signatures qui a échoué (`signature.status` vaut `failed`) sur une version terminée : elle passe à `requested` et un worker la reprend là où elle s'était arrêtée, avec le même PDF (une enveloppe qui existe chez Documenso n'est pas créée deux fois). La réponse est la version ; interrogez-la jusqu'à ce que `signature.status` soit `awaiting` (ou de nouveau `failed`, avec l'`error`).
+        Renvoyer est une demande de signatures comme la première : l'espace de travail peut en faire 20 par jour par défaut, celles d'une version figée avec des signataires comprises (`429` au-delà, avec `Retry-After`).
+      responses:
+        202:
+          description: 'La version, avec une demande `requested`.'
+        403:
+          description: "Le jeton n'a pas la permission `write`, ou l'utilisateur est lecteur de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `write`."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "La demande n'a pas échoué, ou sa version n'est pas terminée."
+            -
+              description: "L'instance n'a pas de service de signature."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton est atteinte, ou l'espace de travail a déjà fait aujourd'hui autant de demandes de signature qu'il peut en faire (20 par jour par défaut). Attendez `Retry-After` secondes."
+  /templates:
+    get:
+      summary: "Lister les modèles d'inventaire"
+      description: "Le catalogue public, par catégorie puis par nom, dans la langue de la requête. Aucun jeton n'est nécessaire. Pour créer un inventaire à partir d'un modèle, envoyez son `slug` comme `template` à `POST /workspaces/{workspace}/inventories`. Limité à 60 requêtes par minute par défaut, comptées par utilisateur lorsqu'il est connecté, sinon par adresse réseau."
+      responses:
+        200:
+          description: 'Les modèles.'
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du catalogue est atteinte.'
+  '/templates/{slug}':
+    get:
+      summary: "Obtenir un modèle d'inventaire"
+      description: "Un modèle avec sa description, les champs qu'il créerait et des lignes d'exemple, dans la langue de la requête. Aucun jeton n'est nécessaire."
+      responses:
+        200:
+          description: 'Le modèle.'
+        404:
+          description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+          x-codes:
+            -
+              description: "Aucun modèle n'a ce slug."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du catalogue est atteinte.'
+components:
+  securitySchemes:
+    bearer:
+      description: "Un jeton d'accès personnel créé depuis la page Compte de l'application web. Il commence par `inv_`."
+  parameters:
+    Page:
+      description: 'La page à lire, à partir de 1.'
+    WorkspaceId:
+      description: "L'identifiant de l'espace de travail."
+    InventoryId:
+      description: "L'identifiant de l'inventaire."
+    FieldId:
+      description: "L'identifiant du champ. Il doit appartenir à l'inventaire du chemin."
+    ItemId:
+      description: "L'identifiant de l'article. Il doit appartenir à l'inventaire du chemin."
+    AttachmentId:
+      description: "L'identifiant de la pièce jointe. Elle doit appartenir à l'article du chemin."
+    ExportId:
+      description: "L'identifiant de l'export. Seule la personne qui l'a demandé peut le voir."
+    ImportId:
+      description: "L'identifiant de l'import. Seule la personne qui a envoyé le fichier peut le voir."
+    VersionId:
+      description: "L'identifiant de la version officielle. Elle doit appartenir à l'inventaire du chemin."
+    TemplateSlug:
+      description: 'Le slug du modèle, tel que listé par `GET /templates`.'
+    AcceptLanguage:
+      description: "La langue des noms et des résumés (`fr` ou `en`). La langue par défaut de l'instance s'applique en son absence."
+  headers:
+    RetryAfter:
+      description: 'Secondes à attendre avant de réessayer.'
+    RateLimitLimit:
+      description: 'Requêtes autorisées dans la fenêtre de la limite atteinte.'
+    RateLimitRemaining:
+      description: 'Requêtes restantes dans la fenêtre.'
+    RateLimitReset:
+      description: 'Horodatage Unix auquel la fenêtre se termine.'
+  responses:
+    Unauthenticated:
+      description: 'Le jeton est absent, mal formé, expiré ou révoqué.'
+    NotFound:
+      description: "Cette ressource n'existe pas, ou elle appartient à un espace de travail dont le propriétaire du jeton n'est pas membre (les deux cas ne sont pas distingués)."
+    ValidationFailed:
+      description: "Le corps ou la chaîne de requête est refusé. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+  schemas:
+    Ulid:
+      description: "L'identifiant d'une ressource, un ULID en minuscules."
+    Error:
+      description: "L'enveloppe d'une erreur."
+      properties:
+        message:
+          description: "Ce qui s'est passé, à destination d'une personne, dans la langue de la requête. Il peut changer."
+        code:
+          description: "Pourquoi, à destination d'un programme. Pas sur toutes les erreurs, voir `x-codes` de chaque opération."
+    ValidationError:
+      description: 'Une requête refusée (`422`).'
+      properties:
+        message:
+          description: "Le premier message, avec le nombre des autres erreurs lorsqu'il y en a davantage."
+        errors:
+          description: 'Les messages de chaque erreur, par clé de la requête concernée.'
+        code:
+          description: "Une raison à tester dans votre code, pour les erreurs qui en ont une. Voir `x-codes` de l'opération."
+    CodedError:
+      description: 'Une erreur qui porte toujours un `code` (`409`, `429`, `503`).'
+    ConflictError:
+      description: "Une requête refusée à cause de l'état des données ou d'un quota (`409`)."
+      allOf:
+        - []
+        -
+          properties:
+            limit:
+              description: 'Le quota atteint, lorsque le conflit est un quota.'
+    PaginationLinks:
+      description: 'Les adresses des pages. Elles conservent les paramètres de requête envoyés.'
+      properties:
+        prev:
+          description: 'Null sur la première page.'
+        next:
+          description: 'Null sur la dernière page.'
+    PaginationMeta:
+      description: 'Position de la page dans la liste.'
+      properties:
+        from:
+          description: 'Le rang de la première entrée de la page, null quand la page est vide.'
+        to:
+          description: 'Le rang de la dernière entrée de la page, null quand la page est vide.'
+        total:
+          description: "Le nombre d'entrées dans toute la liste."
+        path:
+          description: "L'adresse de la liste, sans la page."
+        links:
+          description: "La pagination de l'application web, prête à afficher. Préférez `links` de l'enveloppe."
+    Timestamp:
+      description: 'Un instant, ISO 8601 en UTC.'
+    User:
+      description: "L'utilisateur auquel appartient un jeton."
+      properties:
+        id:
+          description: "Le numéro du compte. La seule clé numérique que l'API communique."
+        locale:
+          description: "La langue que suit le compte (`fr`, `en`), null tant qu'elle n'est pas connue."
+        is_admin:
+          description: "Indique si l'utilisateur administre l'instance."
+    FieldType:
+      description: 'Un type que peut avoir un champ.'
+      properties:
+        label:
+          description: 'Le nom du type dans la langue de la requête.'
+    FieldTypeKey:
+      description: 'Le mot qui identifie un type de champ.'
+    Role:
+      description: "Ce qu'un utilisateur peut faire dans un espace de travail. Les lecteurs lisent, les éditeurs modifient aussi les articles, les champs et les inventaires, les propriétaires suppriment aussi les inventaires et gèrent l'espace de travail."
+    Workspace:
+      description: "Un espace de travail, vu par l'un de ses membres."
+      properties:
+        is_current:
+          description: "Indique si c'est l'espace de travail dans lequel l'utilisateur travaille dans l'application web."
+    InventoryAbilities:
+      description: "Ce que l'utilisateur peut faire avec l'inventaire, d'après son rôle dans son espace de travail."
+      properties:
+        update:
+          description: 'Modifier le nom et la description.'
+        delete:
+          description: "Supprimer l'inventaire et tout ce qu'il contient."
+        manage_fields:
+          description: 'Ajouter, modifier, ordonner et supprimer des champs.'
+        edit_items:
+          description: 'Ajouter, modifier et supprimer des articles, téléverser des fichiers, importer.'
+    Inventory:
+      description: "Un inventaire. `fields` n'est fourni que lorsqu'un seul inventaire est lu ou modifié."
+      properties:
+        fields:
+          description: "Les champs dans l'ordre."
+    Choice:
+      description: "Un choix d'un champ à choix unique ou multiple. Les valeurs contiennent l'`id`, de sorte qu'un choix peut être renommé sans toucher aux articles."
+      properties:
+        id:
+          description: "Créé par le serveur et conservé tant que le choix existe. Quand vous envoyez les choix d'un champ, indiquez l'`id` de ceux qui existent déjà et omettez-le pour les nouveaux : un identifiant que le champ n'a jamais eu est remplacé."
+        label:
+          description: 'Une seule ligne. Deux choix ne peuvent pas avoir le même libellé (la casse et les accents sont ignorés).'
+    ChoiceInput:
+      description: "Un choix d'un champ à choix unique ou multiple tel que vous l'envoyez, sans `id` pour un nouveau."
+      properties:
+        id:
+          description: "Créé par le serveur et conservé tant que le choix existe. Quand vous envoyez les choix d'un champ, indiquez l'`id` de ceux qui existent déjà et omettez-le pour les nouveaux : un identifiant que le champ n'a jamais eu est remplacé."
+        label:
+          description: 'Une seule ligne. Deux choix ne peuvent pas avoir le même libellé (la casse et les accents sont ignorés).'
+    FieldOptions:
+      description: "Les options d'un champ, telles qu'elles sont renvoyées. Celles qui existent dépendent de son type ; un type sans options a un objet vide. Ce que vous envoyez est `FieldOptionsInput`."
+      properties:
+        max_length:
+          description: '`text` : la valeur la plus longue, en caractères. 255 par défaut.'
+        decimals:
+          description: "`number` : les décimales qu'une valeur peut avoir (0 à 6, aucune par défaut). `percentage` : 0 à 4, 2 par défaut. Pour `money`, elles sont données par la devise et ne peuvent pas être envoyées."
+        min:
+          description: '`number` : la plus petite valeur, une chaîne décimale.'
+        max:
+          description: '`number` : la plus grande valeur, une chaîne décimale. `rating` : la note maximale, un entier de 3 à 10 (5 par défaut).'
+        unit:
+          description: '`number` : une unité affichée à côté de la valeur, comme `kg`.'
+        currency:
+          description: '`money` : un code ISO 4217 comme `EUR` (par défaut) ou `USD`.'
+        format:
+          description: "`barcode` : le format de code exigé pour une valeur (`any` : jusqu'à 64 lettres, chiffres, tirets et points ; les autres vérifient le chiffre de contrôle)."
+        max_files:
+          description: '`file` et `photo` : le nombre de fichiers que le champ accepte (1 par défaut).'
+        choices:
+          description: '`select` et `multiselect` : les choix, au moins un. La liste que vous envoyez remplace la liste existante.'
+    FieldOptionsInput:
+      description: "Les options que vous envoyez pour un champ : celles de `FieldOptions`, avec les choix sous forme de `ChoiceInput`. Celles qui existent dépendent de son type, et une option que le type n'a pas est refusée avec une `422`. Quand vous modifiez un champ, les options envoyées sont fusionnées avec les options existantes, et une option envoyée à `null` revient à sa valeur par défaut."
+      properties:
+        max_length:
+          description: '`text` : la valeur la plus longue, en caractères. 255 par défaut.'
+        decimals:
+          description: "`number` : les décimales qu'une valeur peut avoir (0 à 6, aucune par défaut). `percentage` : 0 à 4, 2 par défaut. Pour `money`, elles sont données par la devise et ne peuvent pas être envoyées."
+        min:
+          description: '`number` : la plus petite valeur, une chaîne décimale.'
+        max:
+          description: '`number` : la plus grande valeur, une chaîne décimale. `rating` : la note maximale, un entier de 3 à 10 (5 par défaut).'
+        unit:
+          description: '`number` : une unité affichée à côté de la valeur, comme `kg`.'
+        currency:
+          description: '`money` : un code ISO 4217 comme `EUR` (par défaut) ou `USD`.'
+        format:
+          description: "`barcode` : le format de code exigé pour une valeur (`any` : jusqu'à 64 lettres, chiffres, tirets et points ; les autres vérifient le chiffre de contrôle)."
+        max_files:
+          description: '`file` et `photo` : le nombre de fichiers que le champ accepte (1 par défaut).'
+        choices:
+          description: '`select` et `multiselect` : les choix, au moins un. La liste que vous envoyez remplace la liste existante.'
+    Field:
+      description: "Une colonne typée d'un inventaire."
+      properties:
+        type:
+          description: "L'une des valeurs de `FieldTypeKey`. Il ne peut pas être modifié. Un type que cette version ne connaît pas est donné tel qu'il est stocké."
+        required:
+          description: 'Indique si un article doit avoir une valeur pour ce champ. Jamais vrai pour `file` et `photo`.'
+        position:
+          description: "La position du champ dans l'inventaire, à partir de 0."
+        query_kind:
+          description: 'La façon dont la liste des articles trie et filtre le champ. `text`, `number`, `temporal` (date, instant, heure), `boolean` et `choice` peuvent être triés. Toutes les natures peuvent être filtrées avec `empty` ; `number` et `temporal` acceptent aussi `min` et `max`, `boolean` accepte `is`, `choice` et `choices` acceptent `in`. Null pour un type que cette version ne connaît pas.'
+        summable:
+          description: 'Indique si les totaux de la liste des articles peuvent additionner les valeurs (`number` et `money`).'
+    ItemValue:
+      description: "La valeur d'un champ. Une chaîne pour texte, texte long, URL, e-mail, téléphone, couleur, code-barres, date, date et heure, heure et choix unique ; une chaîne décimale pour nombre, montant et pourcentage ; un booléen pour oui / non ; un entier pour note ; un tableau de chaînes pour choix multiple, mots clés et les identifiants des pièces jointes de fichier et photo."
+    ItemValues:
+      description: "Les valeurs d'un article, indexées par l'identifiant du champ. Un champ sans valeur est absent."
+    ItemValuesInput:
+      description: "Les valeurs à écrire, indexées par l'identifiant du champ. Une clé qui n'est pas un champ de l'inventaire, ainsi qu'un champ `file` ou `photo`, sont refusés. `null`, un texte vide ou une liste vide efface un champ (refusé pour un champ obligatoire)."
+    Item:
+      description: "Une ligne d'un inventaire."
+      properties:
+        attachments:
+          description: "Tous les fichiers de l'article, y compris ceux de ses champs fichier et photo."
+    FieldRef:
+      description: "Un champ, tel que l'historique le nomme."
+    RevisionChange:
+      description: "Ce qui a changé. Pour `created` et `updated`, c'est une entrée par champ, avec les valeurs telles que l'article les présente actuellement. Pour `attachment_added` et `attachment_removed`, c'est une entrée qui nomme le fichier."
+      oneOf:
+        -
+          title: 'Changement de valeur'
+          properties:
+            before:
+              description: "La valeur avant, null s'il n'y en avait pas."
+            after:
+              description: 'La valeur après, null quand le champ a été effacé.'
+        -
+          title: 'Changement de fichier'
+          properties:
+            field:
+              description: 'Le champ fichier ou photo auquel appartenait le fichier, null pour une simple pièce jointe ou si le champ a été supprimé depuis.'
+    Revision:
+      description: "Une ligne de l'historique d'un article."
+      properties:
+        user:
+          description: "Qui l'a fait, null quand son compte a été supprimé depuis."
+    Attachment:
+      description: 'Un fichier joint à un article.'
+      properties:
+        field:
+          description: 'Le champ fichier ou photo que le fichier renseigne, null pour une simple pièce jointe.'
+        mime:
+          description: "Le type détecté d'après le contenu lors du téléversement du fichier."
+        size:
+          description: 'Octets.'
+        width:
+          description: 'Pixels, pour une image.'
+        height:
+          description: 'Pixels, pour une image.'
+        uploaded_by:
+          description: 'Null quand le compte de la personne qui a téléversé le fichier a été supprimé depuis.'
+        url:
+          description: "Le chemin du fichier, relatif à l'hôte (il commence déjà par `/api/v1`). Appelez-le avec votre jeton."
+        thumbnail_url:
+          description: "Le chemin de la miniature, un JPEG. Null quand le fichier n'en a pas."
+    ExportScope:
+      description: "`all` : tous les articles. `view` : les articles qu'afficherait une liste avec le `query` donné."
+    Export:
+      description: "Un fichier des articles d'un inventaire, généré en arrière-plan pour la personne qui l'a demandé."
+      properties:
+        error:
+          description: "Pour un export échoué, ce qui s'est mal passé, dans la langue de la requête. Null sinon."
+        file_name:
+          description: "Null tant que l'export n'est pas terminé."
+        size:
+          description: "Octets. Null tant que l'export n'est pas terminé."
+        items_count:
+          description: "Le nombre d'articles dans le fichier. Null tant que l'export n'est pas terminé."
+        expires_at:
+          description: "Quand le fichier est supprimé (24 heures après la fin de l'export par défaut). Null tant qu'il n'est pas terminé."
+        download_url:
+          description: "Le chemin du fichier, relatif à l'hôte. Null tant que l'export n'est pas terminé et après son expiration."
+    ImportStatus:
+      description: "`uploaded` : le fichier a été lu et attend que vous le lanciez. `pending` : lancé, en attente d'un worker. `running`. `completed` ou `failed` : le rapport est conservé 24 heures par défaut."
+    ImportOptions:
+      description: 'La façon dont le fichier est lu et dont ses cellules sont interprétées.'
+      properties:
+        has_header:
+          description: 'Indique si la première ligne contient les noms des colonnes.'
+        delimiter:
+          description: "Le séparateur d'un fichier texte. Null pour une feuille de calcul."
+        encoding:
+          description: "L'encodage d'un fichier texte. Null pour une feuille de calcul."
+        decimal:
+          description: 'Le signe décimal des nombres du fichier.'
+        date_order:
+          description: "L'ordre du jour, du mois et de l'année dans les dates écrites en chiffres."
+        on_error:
+          description: "`abort` : rien n'est importé si une ligne est refusée. `skip` : les lignes refusées sont écartées et signalées."
+    ImportColumn:
+      description: 'Une colonne du fichier.'
+      properties:
+        index:
+          description: 'La position de la colonne, à partir de 0.'
+        header:
+          description: "Le nom de la colonne, ou une lettre quand elle n'en a pas."
+        samples:
+          description: 'Quelques valeurs de la colonne.'
+        fraction_like:
+          description: "Indique si les valeurs sont des nombres compris entre -1 et 1 qui ne sont pas tous entiers, comme un tableur stocke les pourcentages (12.5 % vaut 0.125) : vérifiez avant d'associer la colonne à un champ pourcentage."
+    ImportMappingEntry:
+      description: 'Où va une colonne.'
+      properties:
+        column:
+          description: "L'`index` de la colonne."
+        target:
+          description: '`ignore` : la colonne est écartée. `field` : elle renseigne le champ existant `field`. `new` : un champ de type `type` nommé `name` est créé pour elle (demande le droit de modifier les champs).'
+        field:
+          description: "L'identifiant du champ, pour la cible `field`."
+        type:
+          description: 'Le type du nouveau champ, pour la cible `new`. Pas `file`, `photo` ni `multiselect`.'
+        name:
+          description: 'Le nom du nouveau champ, pour la cible `new`.'
+    ImportRowError:
+      description: 'Une ligne qui a été refusée.'
+      properties:
+        row:
+          description: 'Le numéro de la ligne dans le fichier.'
+        column:
+          description: "Le nom de la colonne concernée par l'erreur, null quand elle concerne la ligne."
+    Import:
+      description: "Un fichier importé dans un inventaire. Il est lu à l'envoi (colonnes, estimation de leurs types et proposition de mapping), puis vous le lancez et un worker ajoute les articles."
+      properties:
+        error:
+          description: "Pour un import échoué, ce qui s'est mal passé, dans la langue de la requête. Null sinon."
+        size:
+          description: 'Octets.'
+        mapping:
+          description: "La proposition tant que l'import est `uploaded`, puis ce qui a été lancé."
+        rows_total:
+          description: "Les lignes qui contiennent quelque chose. Null tant que l'import n'est pas terminé."
+        rows_imported:
+          description: "Null tant que l'import n'est pas terminé."
+        rows_failed:
+          description: "Null tant que l'import n'est pas terminé."
+        fields_created:
+          description: "Null tant que l'import n'est pas terminé."
+        errors:
+          description: "Les 100 premières lignes refusées. Null tant que l'import n'est pas terminé."
+        expires_at:
+          description: "Quand le rapport, ou un fichier envoyé et jamais lancé, est supprimé. Null tant que l'import est lancé et n'est pas terminé."
+    VersionStatus:
+      description: "L'avancement de la génération du PDF. `pending` : figée, en attente d'un worker. `running`. `completed` : le PDF et les données peuvent être téléchargés. `failed` : rien n'a été conservé, l'`error` dit pourquoi, et la version ne peut plus qu'être supprimée."
+    SignatureStatus:
+      description: "L'avancement de la demande de signatures. `requested` : demandée, pas encore envoyée au service de signature. `sending`. `awaiting` : les signataires ont reçu leurs e-mails et tous n'ont pas signé. `completed` : tout le monde a signé et le PDF signé est conservé. `rejected` : un signataire a refusé. `cancelled` : annulée ici ou auprès du service de signature. `failed` : la demande n'a pas pu être envoyée ou a été perdue, l'`error` dit pourquoi."
+    SignerStatus:
+      description: "L'avancement d'un signataire. `pending` : n'a pas encore signé. `signed`. `rejected` : a refusé de signer."
+    SignerInput:
+      description: 'Une personne dont demander la signature.'
+      properties:
+        name:
+          description: "Le nom, tel qu'il apparaît sur la page de signatures et dans l'e-mail que la personne reçoit."
+        email:
+          description: "L'adresse e-mail à laquelle le service de signature écrit."
+    Signer:
+      description: "Une personne invitée à signer une version, et ce qu'elle a fait."
+      properties:
+        signed_at:
+          description: "Quand elle a signé. Null tant qu'elle ne l'a pas fait."
+        rejection_reason:
+          description: "Pourquoi elle a refusé de signer, quand elle l'a dit."
+    InventoryVersion:
+      description: 'Un inventaire figé à une date : numéroté inventaire par inventaire, avec les données figées, le PDF officiel généré à partir de celles-ci et, lorsque des signatures ont été demandées, leur avancement.'
+      properties:
+        number:
+          description: "1 pour la première version de l'inventaire, puis 2, 3... Une nouvelle version est numérotée à la suite de la plus élevée qui reste."
+        label:
+          description: "Le nom que la personne qui a figé l'inventaire a donné à la version."
+        error:
+          description: "Pour une version échouée, ce qui s'est mal passé, dans la langue de la requête. Null sinon."
+        author:
+          description: "Qui a figé l'inventaire. Le nom est conservé avec la version quand le compte est supprimé."
+        items_count:
+          description: "Le nombre d'articles qui ont été figés."
+        fields_count:
+          description: 'Le nombre de champs qui ont été figés.'
+        snapshot:
+          description: 'Les données figées, un fichier JSON canonique. Tout le reste est généré à partir de lui.'
+          properties:
+            sha256:
+              description: 'Le SHA-256 des octets du fichier, en hexadécimal.'
+            size:
+              description: 'Octets.'
+            download_url:
+              description: "Le chemin du fichier, relatif à l'hôte. Null tant que la version n'est pas terminée (`status` vaut `completed`), car le téléchargement répond `409` (`version_not_ready`) avant cela."
+        pdf:
+          description: "Le PDF officiel. Null tant que la version n'est pas terminée."
+          oneOf:
+            -
+              properties:
+                size:
+                  description: 'Octets.'
+                download_url:
+                  description: "Le chemin du fichier, relatif à l'hôte."
+            - []
+        signature:
+          description: "La demande de signatures. Null pour une version que personne n'a été invité à signer."
+          oneOf:
+            -
+              properties:
+                error:
+                  description: "Pour une demande échouée ou perdue, ce qui s'est mal passé, dans la langue de la requête. Null sinon."
+                requested_at:
+                  description: "Quand le service de signature a envoyé les e-mails. Null tant qu'il ne l'a pas fait."
+                completed_at:
+                  description: 'Quand le dernier signataire a signé et que le PDF signé a été conservé. Null jusque-là.'
+                signed_pdf:
+                  description: "Le PDF avec les signatures. Null tant que chaque signataire n'a pas signé."
+                  oneOf:
+                    -
+                      properties:
+                        size:
+                          description: 'Octets.'
+                        download_url:
+                          description: "Le chemin du fichier, relatif à l'hôte."
+                    - []
+            - []
+        abilities:
+          description: "Ce que le propriétaire du jeton peut faire avec cette version en ce moment, d'après son rôle et l'état de la version."
+          properties:
+            delete:
+              description: "Les propriétaires de l'espace de travail."
+            cancel_signature:
+              description: 'Les éditeurs et les propriétaires, tant que les signataires sont attendus.'
+            retry_signature:
+              description: 'Les éditeurs et les propriétaires, pour une version terminée dont la demande de signatures a échoué.'
+    TemplateBase:
+      description: "Comment s'appelle un modèle et où en lire la présentation. La liste et le détail le partagent."
+      properties:
+        category_label:
+          description: 'Le nom de la catégorie dans la langue de la requête.'
+        icon:
+          description: "Le nom d'une icône Tabler."
+        name:
+          description: "Le nom de l'inventaire que le modèle crée."
+        summary:
+          description: 'Une phrase.'
+        url:
+          description: 'La page publique du modèle, dans la langue de la requête.'
+    TemplateSummary:
+      description: 'Un modèle, de quoi afficher une carte.'
+    TemplateChoice:
+      description: "Un choix d'un champ de modèle. La `key` est le nom sous lequel les exemples le désignent ; les identifiants sont créés à la création d'un inventaire."
+    TemplateField:
+      description: 'Un champ que le modèle créerait.'
+      properties:
+        key:
+          description: 'Ce par quoi les exemples sont indexés.'
+        type_label:
+          description: 'Le nom du type dans la langue de la requête.'
+        options:
+          description: 'Les options du champ telles que le fichier du modèle les donne (voir `FieldOptions` pour la signification de chacune) ; `choices` liste des `TemplateChoice`.'
+    Template:
+      description: "Un modèle avec sa description, ses champs et ses lignes d'exemple."
+      allOf:
+        - []
+        -
+          properties:
+            description:
+              description: 'Les paragraphes de la description.'
+            examples:
+              description: "Des lignes d'exemple, indexées par la `key` des champs, avec des valeurs écrites comme l'API les écrit. Elles ne sont jamais enregistrées dans un inventaire."

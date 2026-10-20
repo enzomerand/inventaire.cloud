@@ -4,8 +4,9 @@
     schemas; a column of links follows the reader on a wide screen and folds into a button on a narrow one (Bootstrap's collapse,
     driven by its data attributes: without script the links are simply not shown and the page is read in order).
 
-    The text of the document is English whatever the language of the page: the elements that hold it say `lang="en"`. The
-    labels around it are translated. What the document draws (the long part) is the view docs.reference, rendered once for each
+    The text of the document is in the language of the page when the document has a translation into it (French), English
+    otherwise: the elements that hold it say which with `lang`. The labels around it are always in the language of the page. What
+    the document draws (the long part) is the view docs.reference, rendered once for each
     language and kept in the cache by App\Docs\RenderedReference: `$reference` here is its HTML.
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
