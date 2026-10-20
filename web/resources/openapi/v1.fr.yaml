@@ -10,7 +10,7 @@ info:
   title: 'API inventaire.cloud'
   summary: "L'API JSON publique d'inventaire.cloud."
   description: |
-    L'API publique d'inventaire.cloud : espaces de travail, inventaires, champs, articles et leurs fichiers, exports, imports et versions officielles.
+    L'API publique d'inventaire.cloud : espaces de travail, leurs membres et invitations, inventaires, champs, articles et leurs fichiers, exports, imports et versions officielles.
     La plupart de ce que l'application web fait avec vos données peut se faire ici, avec un jeton d'accès personnel.
 
     ## Authentification
@@ -35,7 +35,8 @@ info:
 
     - `read` : toutes les opérations `GET` ;
     - `write` : le contenu d'un inventaire, c'est-à-dire les articles, les pièces jointes, les exports, les imports et les versions officielles (création, modification, suppression) ;
-    - `manage` : la structure, c'est-à-dire les espaces de travail, les inventaires et les champs (création, modification, suppression).
+    - `manage` : la structure, c'est-à-dire les espaces de travail, les inventaires et les champs (création, modification, suppression), et les personnes d'un espace de travail, c'est-à-dire ses membres,
+      leurs rôles, sa propriété et ses invitations.
 
     Les permissions sont indépendantes : `write` et `manage` n'incluent pas `read`. Un jeton qui ne peut pas lire est difficilement
     utilisable, puisque les identifiants dont les autres opérations ont besoin se trouvent avec `GET` : donnez `read` en plus
@@ -47,7 +48,7 @@ info:
     Un jeton ne dépasse jamais son propriétaire. Quelles que soient ses permissions, il ne peut faire que ce que le propriétaire a le
     droit de faire dans chaque espace de travail, selon son rôle : `owner`, `editor` ou `viewer`. Une ressource d'un espace de
     travail auquel le propriétaire n'appartient pas reçoit la réponse `404`, comme si elle n'existait pas ; un membre dont le
-    rôle n'autorise pas l'opération reçoit la réponse `403` (sans `code`).
+    rôle n'autorise pas l'opération reçoit la réponse `403` (sans `code`, sauf quand seul le propriétaire de l'espace de travail le peut, comme pour ses membres et ses invitations : `not_owner`).
 
     ## Limites de débit
 
@@ -56,7 +57,7 @@ info:
     avec le code `too_many_requests` et un en-tête `Retry-After`, le nombre de secondes à attendre.
 
     Certaines opérations ont leur propre limite, plus stricte, comptée par utilisateur : créer un espace de travail, téléverser
-    un fichier, demander un export, envoyer ou relire un fichier à importer, figer un inventaire en version officielle. Une requête
+    un fichier, demander un export, envoyer ou relire un fichier à importer, figer un inventaire en version officielle, envoyer une invitation à un espace de travail (ou la renvoyer). Une requête
     refusée avant d'en arriver là (un jeton sans la permission requise, par exemple) ne la consomme pas. Au-delà, la réponse est aussi
     `429`, avec `Retry-After`. Le catalogue public de modèles a sa propre limite, par adresse réseau.
 
@@ -70,7 +71,7 @@ info:
     Une erreur a toujours un corps JSON, quel que soit l'en-tête `Accept` :
 
     - `{"message": "…"}` pour `401`, `403` et `404` ; le message s'adresse aux humains et peut changer. `403` porte un `code` quand une
-      raison lisible par une machine existe (`token_ability_missing`, `token_with_session`, `session_required`), `404` en porte un pour les rares cas qui
+      raison lisible par une machine existe (`token_ability_missing`, `token_with_session`, `session_required`, `not_owner`), `404` en porte un pour les rares cas qui
       ne sont pas un simple « introuvable » ;
     - `{"message": "…", "code": "…"}` pour `409`, `429` et `503`, où `code` est la raison à tester dans votre code. Une `409` qui
       vient d'un quota porte aussi une `limit`, le nombre qui a été franchi ;
@@ -82,7 +83,7 @@ info:
     ## Identifiants et dates
 
     Les ressources sont identifiées par des ULID en minuscules (26 caractères, chiffres et lettres), dans les chemins et dans les
-    corps. Les clés numériques de la base de données ne sont jamais exposées ; la seule exception est l'`id` du compte dans `GET /me`.
+    corps. Les clés numériques de la base de données ne sont jamais exposées ; la seule exception est l'`id` du compte dans `GET /me`. Un membre d'un espace de travail est désigné par un identifiant de même forme, valable dans cet espace de travail seulement.
     Les dates sont au format ISO 8601 en UTC (`2026-10-15T12:30:00+00:00`).
 
     ## Articles et leurs valeurs
@@ -102,7 +103,7 @@ info:
     Les listes qui peuvent être longues sont paginées avec le paramètre de requête `page` (1 par défaut) : 50 articles, 25 révisions ou 20 versions par
     page. La réponse est `{"data": […], "links": {"first", "last", "prev", "next"}, "meta": {"current_page", "last_page",
     "per_page", "total", "from", "to", "path", "links"}}` ; les liens des pages conservent vos autres paramètres de requête.
-    Les autres listes (espaces de travail, inventaires, types de champ, modèles) sont renvoyées d'un seul bloc, dans `data` ; les listes d'exports
+    Les autres listes (espaces de travail, membres, invitations, inventaires, types de champ, modèles) sont renvoyées d'un seul bloc, dans `data` ; les listes d'exports
     et d'imports contiennent les 20 plus récents.
 
     ## Langue
@@ -123,6 +124,12 @@ tags:
   -
     x-displayName: 'Espaces de travail'
     description: "Les espaces de travail auxquels appartient l'utilisateur, avec son rôle dans chacun."
+  -
+    x-displayName: 'Membres'
+    description: "Les personnes qui appartiennent à un espace de travail, avec leur rôle, et la propriété de l'espace de travail."
+  -
+    x-displayName: 'Invitations'
+    description: 'Les invitations à rejoindre un espace de travail, envoyées par son propriétaire et auxquelles répond la personne concernée.'
   -
     x-displayName: 'Inventaires'
     description: "Les inventaires d'un espace de travail, avec leurs champs et ce que l'utilisateur peut en faire."
@@ -270,6 +277,262 @@ paths:
           x-codes:
             -
               description: "C'est le dernier espace de travail de l'utilisateur. Créez-en d'abord un autre."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/workspaces/{workspace}/members':
+    get:
+      summary: "Lister les membres d'un espace de travail"
+      description: "Tous les membres de l'espace de travail, le propriétaire en premier, puis dans l'ordre où ils ont rejoint l'espace. N'importe quel membre peut le demander. L'`email` d'un membre n'est donné qu'au propriétaire de l'espace de travail et à ce membre, et vaut `null` pour tous les autres (la clé est toujours présente). `id` désigne le membre dans cet espace de travail ; ce n'est pas le numéro de son compte et il ne signifie rien dans un autre espace de travail."
+      responses:
+        200:
+          description: 'Les membres.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/workspaces/{workspace}/members/{member}':
+    patch:
+      summary: "Modifier le rôle d'un membre"
+      description: "Fait d'un membre un `editor` ou un `viewer`. Réservé aux propriétaires. Le rôle du propriétaire ne peut pas être modifié : transférez la propriété avec `POST /workspaces/{workspace}/transfer`."
+      responses:
+        200:
+          description: 'Le membre, avec son nouveau rôle.'
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: 'Le membre est le propriétaire, dont le rôle ne peut pas être modifié. Transférez plutôt la propriété.'
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    delete:
+      summary: "Retirer un membre d'un espace de travail, ou le quitter"
+      description: "Retire un membre : il perd l'accès à l'espace de travail aussitôt. Les propriétaires peuvent retirer n'importe quel membre sauf eux-mêmes. Un membre peut se retirer lui-même, ce qui revient à quitter l'espace de travail ; une personne dont c'était le dernier espace de travail en reçoit un personnel. Le propriétaire ne peut pas le quitter : il doit d'abord transférer la propriété."
+      responses:
+        204:
+          description: "Le membre n'est plus dans l'espace de travail."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur retire quelqu'un d'autre sans être propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire, et retire quelqu'un d'autre : seul son propriétaire retire des membres."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "Le membre est le propriétaire, qui ne peut pas être retiré. Transférez d'abord la propriété."
+            -
+              description: "L'utilisateur est le propriétaire et se retire lui-même : le propriétaire ne peut pas quitter l'espace de travail. Il doit d'abord transférer la propriété."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/workspaces/{workspace}/transfer':
+    post:
+      summary: "Transférer la propriété d'un espace de travail"
+      description: "Fait d'un membre le propriétaire de l'espace de travail, et de l'utilisateur, qui doit en être le propriétaire, un éditeur ; les deux changements ont lieu ensemble. `user_id` est l'`id` du membre, tel que le donne `GET /workspaces/{workspace}/members`. Un espace de travail a toujours un seul propriétaire."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                user_id:
+                  description: "L'`id` du membre qui devient propriétaire."
+      responses:
+        200:
+          description: "L'espace de travail tel que l'utilisateur le voit désormais, avec son nouveau rôle."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: 'Le membre est déjà le propriétaire.'
+        422:
+          description: "Le corps est refusé, ou `user_id` n'est pas un membre de l'espace de travail. `errors` nomme chaque erreur sous la clé qu'elle concerne."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/workspaces/{workspace}/invitations':
+    get:
+      summary: 'Lister les invitations envoyées par un espace de travail'
+      description: "Les invitations de l'espace de travail qui attendent une réponse, de la plus récente à la plus ancienne. Réservé aux propriétaires. Une invitation expirée n'est pas listée."
+      responses:
+        200:
+          description: 'Les invitations.'
+        403:
+          description: "Le jeton n'a pas la permission `read`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+    post:
+      summary: 'Inviter une adresse dans un espace de travail'
+      description: |-
+        Invite une adresse dans l'espace de travail, comme `editor` ou `viewer`, et lui envoie un e-mail. Réservé aux propriétaires. L'invitation est liée à l'adresse, pas à un lien : la personne se connecte avec cette adresse, trouve l'invitation parmi les siennes (`GET /me/invitations`) et l'accepte ou la refuse ; tant que les inscriptions sont fermées, une invitation en attente permet aussi à son adresse de s'inscrire. L'e-mail part après la réponse, dans la langue du compte de cette adresse s'il y en a un, sinon dans celle de la requête. L'invitation expire au bout de 14 jours par défaut ; la renvoyer lui donne un nouveau délai.
+        Un espace de travail compte 50 membres et invitations en attente ensemble par défaut (`member_limit_reached`), et un propriétaire peut envoyer 20 e-mails par heure par défaut, invitations et invitations renvoyées ensemble (`429` au-delà, avec `Retry-After`).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                email:
+                  description: "L'adresse à inviter. Elle est mise en minuscules, et un domaine avec des accents est converti."
+      responses:
+        201:
+          description: "L'invitation qui a été créée."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'adresse appartient déjà à un membre de l'espace de travail, propriétaire compris."
+            -
+              description: 'Une invitation à cette adresse attend déjà une réponse. Renvoyez-la, ou retirez-la, plutôt.'
+            -
+              description: "L'espace de travail contient déjà le nombre maximal de membres et d'invitations en attente autorisé. `limit` indique combien."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des invitations par heure de l'utilisateur, est atteinte."
+  '/workspaces/{workspace}/invitations/{invitation}':
+    delete:
+      summary: 'Retirer une invitation'
+      description: "Supprime l'invitation : elle ne peut plus être acceptée. Réservé aux propriétaires."
+      responses:
+        204:
+          description: "L'invitation est retirée."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/workspaces/{workspace}/invitations/{invitation}/resend':
+    post:
+      summary: 'Renvoyer une invitation'
+      description: "Envoie l'invitation par e-mail une fois de plus et lui donne un nouveau délai (14 jours par défaut). Réservé aux propriétaires. Une invitation peut être renvoyée une fois toutes les 10 minutes (`resend_too_soon`, avec `Retry-After`), et l'envoi compte dans la même limite horaire que l'invitation."
+      responses:
+        200:
+          description: "L'invitation, avec sa nouvelle expiration."
+        403:
+          description: "Le jeton n'a pas la permission `manage`, ou l'utilisateur n'est pas propriétaire de l'espace de travail."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+            -
+              description: "L'utilisateur appartient à l'espace de travail sans en être propriétaire : seul son propriétaire décide de qui en fait partie."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: "La limite de débit du jeton, ou celle des invitations par heure de l'utilisateur, est atteinte."
+            -
+              description: "L'invitation a été envoyée il y a moins de 10 minutes. `retry_after`, comme `Retry-After`, indique combien de secondes attendre."
+  /me/invitations:
+    get:
+      summary: 'Lister mes invitations'
+      description: "Les invitations qui attendent une réponse de l'adresse de l'utilisateur, de la plus récente à la plus ancienne, chacune avec l'espace de travail auquel elle donne accès. Une invitation expirée n'est pas listée."
+      responses:
+        200:
+          description: 'Les invitations.'
+        403:
+          description: "Le jeton n'a pas la permission `read`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `read`."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/me/invitations/{invitation}':
+    delete:
+      summary: 'Refuser une invitation'
+      description: "Supprime l'invitation. Seule la personne à qui elle est adressée le peut."
+      responses:
+        204:
+          description: "L'invitation est refusée."
+        403:
+          description: "Le jeton n'a pas la permission `manage`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        404:
+          description: "Cette invitation n'existe pas, ou elle n'est pas adressée à l'adresse de l'utilisateur, ou elle a expiré ou a été retirée (les cas ne sont pas distingués)."
+        429:
+          description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
+          x-codes:
+            -
+              description: 'La limite de débit du jeton est atteinte.'
+  '/me/invitations/{invitation}/accept':
+    post:
+      summary: 'Accepter une invitation'
+      description: "L'utilisateur rejoint l'espace de travail avec le rôle de l'invitation, et l'invitation est consommée. Elle doit être adressée à l'adresse du compte de l'utilisateur : toute autre reçoit la réponse `404`. La réponse est l'espace de travail tel que l'utilisateur le voit désormais ; il ne devient pas celui dans lequel il travaille, ce qu'il choisit dans son navigateur. Accepter une invitation à un espace de travail auquel l'utilisateur appartient déjà la consomme simplement."
+      responses:
+        200:
+          description: "L'espace de travail que l'utilisateur a rejoint."
+        403:
+          description: "Le jeton n'a pas la permission `manage`."
+          x-codes:
+            -
+              description: "Le jeton n'a pas la permission `manage`."
+        404:
+          description: "Cette invitation n'existe pas, ou elle n'est pas adressée à l'adresse de l'utilisateur, ou elle a expiré ou a été retirée (les cas ne sont pas distingués)."
+        409:
+          description: "La requête est bien formée, mais l'état des données ne la permet pas, ou un quota est atteint."
+          x-codes:
+            -
+              description: "L'espace de travail a déjà le nombre maximal de membres autorisé. `limit` indique combien."
+            -
+              description: "L'utilisateur appartient déjà au nombre maximal d'espaces de travail autorisé. `limit` indique combien."
         429:
           description: 'Trop de requêtes. Attendez `Retry-After` secondes.'
           x-codes:
@@ -1455,6 +1718,10 @@ components:
       description: "L'identifiant de l'import. Seule la personne qui a envoyé le fichier peut le voir."
     VersionId:
       description: "L'identifiant de la version officielle. Elle doit appartenir à l'inventaire du chemin."
+    MemberId:
+      description: "L'identifiant du membre, tel que le donne `GET /workspaces/{workspace}/members`. Il désigne la personne dans cet espace de travail seulement."
+    InvitationId:
+      description: "L'identifiant de l'invitation, tel que le donnent les listes d'invitations. Une invitation qui n'est pas celle de l'espace de travail du chemin (ou pas adressée à l'utilisateur), qui a expiré ou qui a été retirée reçoit la réponse `404`."
     TemplateSlug:
       description: 'Le slug du modèle, tel que listé par `GET /templates`.'
     AcceptLanguage:
@@ -1549,6 +1816,43 @@ components:
       properties:
         is_current:
           description: "Indique si c'est l'espace de travail dans lequel l'utilisateur travaille dans l'application web."
+    InvitableRole:
+      description: 'Le rôle que donne une invitation, ou que prend un membre dont on change le rôle : éditeur ou lecteur. Un espace de travail a un seul propriétaire, qui transfère la propriété à la place.'
+    Member:
+      description: "Un membre d'un espace de travail, vu par la personne qui le demande."
+      properties:
+        id:
+          description: "Désigne le membre dans cet espace de travail seulement. Ce n'est pas le numéro de son compte."
+        email:
+          description: "L'adresse du membre, pour le propriétaire de l'espace de travail et pour le membre lui-même ; null pour tous les autres."
+        joined_at:
+          description: "Quand le membre a rejoint l'espace de travail, null si la date n'est pas connue."
+        is_self:
+          description: "Indique si c'est la personne qui le demande."
+    SentInvitation:
+      description: 'Une invitation envoyée par un espace de travail qui attend une réponse, vue par son propriétaire.'
+      properties:
+        email:
+          description: "L'adresse à laquelle elle est adressée, en minuscules."
+        invited_by:
+          description: "Le membre qui l'a envoyée en dernier, null quand son compte a été supprimé depuis."
+        expires_at:
+          description: "Jusqu'à quand elle peut être acceptée."
+    ReceivedInvitation:
+      description: "Une invitation adressée à l'utilisateur, avec l'espace de travail auquel elle donne accès."
+      properties:
+        inviter:
+          description: "Qui l'a envoyée, null quand son compte a été supprimé depuis. Seulement le nom : l'utilisateur n'est pas encore membre de l'espace de travail."
+        expires_at:
+          description: "Jusqu'à quand elle peut être acceptée."
+    TooSoonError:
+      description: 'Une requête refusée pour le moment (`429`), avec le nombre de secondes à attendre quand le refus le précise.'
+      allOf:
+        - []
+        -
+          properties:
+            retry_after:
+              description: "Secondes à attendre avant de réessayer, avec `resend_too_soon`. C'est le nombre que porte `Retry-After`."
     InventoryAbilities:
       description: "Ce que l'utilisateur peut faire avec l'inventaire, d'après son rôle dans son espace de travail."
       properties:
