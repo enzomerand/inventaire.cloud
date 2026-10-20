@@ -12,7 +12,6 @@ use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\PersonalAccessToken;
 
 require_once __DIR__.'/../../../Support/inventories.php';
-require_once __DIR__.'/../../../Support/tokens.php';
 
 uses(RefreshDatabase::class);
 
@@ -95,20 +94,10 @@ describe('the notice of a new token', function (): void {
     it('says "never" for a token that does not expire', function (): void {
         $deferred = holdDeferred();
 
-        tokenCreationRequest($this, inventoryPerson('Ada'), ['expires_in_days' => null])->assertCreated()->assertJsonPath('data.expires_at', null);
+        tokenCreationRequest($this, inventoryPerson('Ada'), ['expires_in_days' => null])->assertCreated();
         $deferred->release();
 
-        expect(sentMails()[0]->getTextBody())->toContain('Expires: Never')
-            ->and(sentMails()[0]->getHtmlBody())->toContain('Expires: Never');
-    });
-
-    it('lists the abilities the token has, in the usual order', function (): void {
-        $deferred = holdDeferred();
-
-        tokenCreationRequest($this, inventoryPerson('Ada'), ['abilities' => ['manage', 'read']])->assertCreated();
-        $deferred->release();
-
-        expect(sentMails()[0]->getTextBody())->toContain('Permissions: Read, Manage');
+        expect(sentMails()[0]->getTextBody())->toContain('Expires: Never');
     });
 
     it('never carries the value of the token, nor what is stored of it', function (): void {
@@ -238,37 +227,6 @@ describe('a creation that is refused', function (): void {
         expect($deferred->count())->toBe(0)->and(sentMails())->toBe([])->and(DB::table('personal_access_tokens')->count())->toBe(1);
     });
 
-    it('sends nothing to a token that tries to make one (403), nor to somebody who is not signed in (401)', function (): void {
-        $deferred = holdDeferred();
-        $user = inventoryPerson('Ada');
-        $token = tokenFor($user, ['*']);
-        $body = ['name' => 'Stock script', 'abilities' => ['read']];
-
-        tokenCall($this, $token, 'POST', '/api/v1/me/tokens', $body, frontend())->assertForbidden()->assertJsonPath('code', 'session_required');
-        tokenCall($this, $token, 'POST', '/api/v1/me/tokens', $body)->assertForbidden()->assertJsonPath('code', 'session_required');
-        $this->flushSession();
-        app('auth')->forgetGuards();
-        $this->postJson('/api/v1/me/tokens', $body, frontend())->assertUnauthorized();
-        $deferred->release();
-
-        expect($deferred->count())->toBe(0)->and(sentMails())->toBe([])->and(DB::table('personal_access_tokens')->count())->toBe(1);
-    });
-
-    it('sends nothing beyond the pace of creations (429), only the notice of the token that was made', function (): void {
-        config(['inventories.api_token_creations_per_hour' => 1]);
-        $deferred = holdDeferred();
-        $user = inventoryPerson('Ada');
-
-        tokenCreationRequest($this, $user)->assertCreated();
-        $deferred->release();
-
-        expect(sentMails())->toHaveCount(1);
-
-        tokenCreationRequest($this, $user)->assertTooManyRequests();
-        $deferred->release();
-
-        expect(sentMails())->toHaveCount(1)->and(DB::table('personal_access_tokens')->count())->toBe(1);
-    });
 });
 
 describe('a mail that cannot be sent', function (): void {

@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Auth\ApiTokens;
 use App\Auth\Exceptions\ApiTokenLimitReachedException;
-use App\Auth\TokenAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Account\StoreApiTokenRequest;
 use App\Http\Resources\ApiTokenResource;
@@ -50,10 +49,6 @@ final class ApiTokenController extends Controller
     /**
      * Makes a token (`201`). Its value, `plain_text_token`, is in this answer and nowhere else.
      *
-     * The person is told by email, after the answer ({@see AfterResponse}), that a token was made: with its name, abilities and
-     * expiry, where the request came from and where to revoke it, never its value. Only a token that was made is announced, once; a
-     * mail that cannot be sent is logged and does not undo anything.
-     *
      * `422` for a mistake in the request; `409` (`token_limit_reached`, with the `limit`) when the person already has as many
      * tokens as they may; `429` beyond the pace of creations.
      */
@@ -92,12 +87,11 @@ final class ApiTokenController extends Controller
      */
     private function announce(Request $request, User $user, PersonalAccessToken $token): void
     {
-        $email = $user->email;
         $locale = $user->locale ?? app()->getLocale();
         $mail = new ApiTokenCreatedMail(
             name: $user->name,
             tokenName: $token->name,
-            abilities: array_values(array_intersect(TokenAbility::values(), $token->abilities ?? [])),
+            abilities: array_values($token->abilities ?? []),
             createdAt: $token->created_at ?? now(),
             expiresAt: $token->expires_at,
             ipAddress: $request->ip() ?? '',
@@ -105,8 +99,8 @@ final class ApiTokenController extends Controller
             accountUrl: PublicUrls::to(route('app.account', absolute: false)),
         );
 
-        AfterResponse::run('an API token notice', function () use ($email, $locale, $mail): void {
-            Mail::to($email)->locale($locale)->send($mail);
+        AfterResponse::run('an API token notice', function () use ($user, $locale, $mail): void {
+            Mail::to($user->email)->locale($locale)->send($mail);
         });
     }
 

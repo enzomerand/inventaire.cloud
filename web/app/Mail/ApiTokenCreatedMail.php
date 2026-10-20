@@ -19,19 +19,10 @@ use Illuminate\Support\Str;
  * Sent once the response has gone ({@see AfterResponse}), in the language of the account, as plain text plus a simple HTML
  * version with no external image, font or tracking. It never carries the value of the token, nor its hash: whoever reads the
  * mailbox must not be able to use the token.
- *
- * The abilities, the dates and the fallbacks are turned into text when the mail is rendered, not before: the language of the
- * account is applied only while it is sent.
  */
 final class ApiTokenCreatedMail extends Mailable
 {
-    /** Longest user agent kept, in characters: it is only there to be recognised. */
-    public const USER_AGENT_MAX_LENGTH = 200;
-
     /**
-     * Every text that came with the request is kept as plain strings and values: nothing here holds the request, which has
-     * ended when the mail is sent.
-     *
      * @param  string  $name  The name of the person, for the greeting.
      * @param  string  $tokenName  The name the person gave to the token.
      * @param  list<string>  $abilities  Values of {@see TokenAbility}.
@@ -83,7 +74,7 @@ final class ApiTokenCreatedMail extends Mailable
                 'createdLabel' => self::moment($this->createdAt),
                 'expiresLabel' => $this->expiresAt === null ? __('Never') : self::moment($this->expiresAt),
                 'ipLabel' => $this->ipAddress === '' ? __('Unknown') : $this->ipAddress,
-                'agentLabel' => $agent === '' ? __('Unknown') : Str::limit($agent, self::USER_AGENT_MAX_LENGTH),
+                'agentLabel' => $agent === '' ? __('Unknown') : Str::limit($agent, 200),
             ],
         );
     }
