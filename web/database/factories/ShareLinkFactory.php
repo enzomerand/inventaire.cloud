@@ -52,12 +52,4 @@ class ShareLinkFactory extends Factory
     {
         return $this->state(fn (): array => ['expires_at' => now()->subSecond()]);
     }
-
-    /**
-     * Indicate that the link does not show the files.
-     */
-    public function withoutFiles(): static
-    {
-        return $this->state(fn (): array => ['include_files' => false]);
-    }
 }

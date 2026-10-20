@@ -96,21 +96,13 @@ final class ShareFileController extends Controller
 
     /**
      * The answer of {@see StoredFileResponse}, made fit for a visitor of the public page: the JSON `404` of the API (the file or its
-     * thumbnail is not there) becomes the `404` page every other refusal shows, and the rest is revalidated on every request.
+     * thumbnail is not there) becomes the `404` page every other refusal shows, and a cache has to ask again before it uses a copy (the
+     * link may be revoked between two requests): `no-cache` allows a stored copy, but only after it was revalidated.
      */
     private function served(Response $response): Response
     {
         abort_if($response instanceof JsonResponse && $response->getStatusCode() === 404, 404);
 
-        return $this->revalidated($response);
-    }
-
-    /**
-     * Has a cache ask again before it uses a copy (the link may be revoked between two requests): `no-cache` allows a stored copy, but only
-     * after it was revalidated.
-     */
-    private function revalidated(Response $response): Response
-    {
         $response->headers->set('Cache-Control', 'private, no-cache');
 
         return $response;

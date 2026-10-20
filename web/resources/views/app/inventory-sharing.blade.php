@@ -152,7 +152,7 @@
             </ul>
 
             <div class="card-body border-top" :hidden="!enabled">
-                <button type="button" class="btn btn-primary" data-focus="open" :hidden="!canOpen" :disabled="atLimit" @click="open">
+                <button type="button" class="btn btn-primary" data-focus="open" :hidden="creating" :disabled="atLimit" @click="open">
                     <x-tabler-plus aria-hidden="true" />
                     {{ __('Create a share link') }}
                 </button>

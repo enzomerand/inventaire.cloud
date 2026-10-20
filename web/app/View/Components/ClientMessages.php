@@ -96,7 +96,6 @@ class ClientMessages extends Component
             'sharing.copy_named' => __('Copy the address of the link :name'),
             'sharing.revoke_named' => __('Revoke the link :name'),
             'sharing.confirm_revoke' => __('Revoke the link :name? Its address stops working at once.'),
-            'sharing.select_hint' => __('The address is selected: copy it with your keyboard.'),
             'sharing.notice.created' => __('Link created.'),
             'sharing.notice.revoked' => __('Link revoked.'),
             'sharing.error.limit' => __('This inventory already has :count share links that work: revoke one to make another.'),

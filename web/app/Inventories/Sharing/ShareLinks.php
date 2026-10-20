@@ -11,7 +11,6 @@ use App\Models\Inventory;
 use App\Models\ShareLink;
 use App\Models\User;
 use App\Models\WorkspaceMember;
-use App\Rules\SingleLineText;
 use App\Settings\InstanceSettings;
 use App\Support\PublicUrls;
 use App\Workspaces\Locks;
@@ -22,7 +21,6 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use InvalidArgumentException;
 
 /**
  * Making, listing, revoking and resolving the share links of an inventory: secret addresses that show it, read-only, to anybody who
@@ -110,19 +108,11 @@ final class ShareLinks
     }
 
     /**
-     * The path of the public page of the link with this token (`/s/{token}`).
-     */
-    public static function pagePath(string $token): string
-    {
-        return str_replace('{token}', $token, self::PAGE_PATH);
-    }
-
-    /**
      * The absolute address of the public page of the link with this token, built from `APP_URL`.
      */
     public static function addressOf(string $token): string
     {
-        return PublicUrls::to(self::pagePath($token));
+        return PublicUrls::to(str_replace('{token}', $token, self::PAGE_PATH));
     }
 
     /**
@@ -141,31 +131,20 @@ final class ShareLinks
      * Retried when the database picks it as the loser of a deadlock ({@see DeadlockRetries}). The account of the author is locked before
      * the inventory, the order of {@see Locks}.
      *
-     * @param  string|null  $label  What the owner calls the link, on one line; none when null or empty.
+     * @param  string|null  $label  What the owner calls the link, already trimmed and at most {@see self::LABEL_MAX_LENGTH} characters; none when null.
      * @param  bool  $includeFiles  Whether the files and photos of the items are shown and served through the link.
-     * @param  int|null  $expiresInDays  One of {@see self::LIFETIMES}, or null for a link that never expires.
+     * @param  int|null  $expiresInDays  One of {@see self::LIFETIMES}, or null for a link that never expires. The label and the lifetime are
+     *                                   validated by the request, not here.
      * @return array{link: ShareLink, token: string}
      *
      * @throws ShareLinksDisabledException When the administrator turned sharing off.
      * @throws ShareLinkLimitReachedException When the inventory already has as many links as it may.
      * @throws ModelNotFoundException When the inventory or the account was deleted in the meantime.
-     * @throws InvalidArgumentException When the label is too long or the lifetime is not one of those offered.
      */
     public function create(User $author, Inventory $inventory, ?string $label, bool $includeFiles, ?int $expiresInDays): array
     {
         if (! $this->settings->shareLinksEnabled()) {
             throw new ShareLinksDisabledException;
-        }
-
-        if ($expiresInDays !== null && ! in_array($expiresInDays, self::LIFETIMES, true)) {
-            throw new InvalidArgumentException('A share link lives for '.implode(', ', self::LIFETIMES).' days, or for ever.');
-        }
-
-        $label = $label === null ? null : SingleLineText::normalize($label);
-        $label = $label === '' ? null : $label;
-
-        if ($label !== null && mb_strlen($label) > self::LABEL_MAX_LENGTH) {
-            throw new InvalidArgumentException('The label of a share link has at most '.self::LABEL_MAX_LENGTH.' characters.');
         }
 
         $limit = config()->integer('inventories.max_share_links');
@@ -275,18 +254,12 @@ final class ShareLinks
     {
         $now = now();
 
-        $written = ShareLink::query()
+        return ShareLink::query()
             ->whereKey($link->getKey())
             ->where(fn (Builder $query): Builder => $query->whereNull('last_used_at')->orWhere('last_used_at', '<=', $now->copy()->subMinutes(self::USE_INTERVAL_MINUTES)))
             // Not through the model's builder, which would move `updated_at` too: the link did not change.
             ->toBase()
             ->update(['last_used_at' => $now]) > 0;
-
-        if ($written) {
-            $link->setAttribute('last_used_at', $now)->syncOriginalAttribute('last_used_at');
-        }
-
-        return $written;
     }
 
     /**

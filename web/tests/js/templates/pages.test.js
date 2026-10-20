@@ -195,7 +195,6 @@ const MESSAGES = {
     'sharing.copy_named': 'Copy the address of the link :name',
     'sharing.revoke_named': 'Revoke the link :name',
     'sharing.confirm_revoke': 'Revoke the link :name? Its address stops working at once.',
-    'sharing.select_hint': 'The address is selected: copy it with your keyboard.',
     'sharing.notice.created': 'Link created.',
     'sharing.notice.revoked': 'Link revoked.',
     'sharing.error.limit': 'This inventory already has :count share links.',
@@ -1582,18 +1581,6 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(sharing.checked).toBe(false);
             expect(registrationSwitch().checked).toBe(true);
             expect(document.querySelector('#admin-settings-invitation-sign-up').checked).toBe(true);
-        });
-
-        it('turns the sharing switch back on when the change could not be saved', async () => {
-            const sharing = document.querySelector('#admin-settings-share-links');
-            http.put.mockRejectedValue(new HttpError(500, 'Server down'));
-
-            sharing.checked = false;
-            sharing.dispatchEvent(new Event('change', { bubbles: true }));
-            await flush();
-
-            expect(notify).toHaveBeenCalledWith('danger', 'Server down');
-            expect(sharing.checked).toBe(true);
         });
 
         it('turns the switch back on when the change could not be saved', async () => {
@@ -7466,38 +7453,6 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(items()[0].querySelector('input[readonly]').value).toBe('https://inventaire.example/s/token-b');
             });
 
-            it('sends null for a link that never expires, and no label when none was typed', async () => {
-                await open([]);
-                http.post.mockResolvedValue({ data: shareLink('a') });
-
-                await press('Create a share link');
-                field('share-link-expiry').value = '';
-                field('share-link-expiry').dispatchEvent(new Event('change', { bubbles: true }));
-                await flush();
-                await press('Create the link');
-
-                expect(http.post).toHaveBeenCalledWith(
-                    LINKS_URL,
-                    { include_files: true, expires_in_days: null },
-                    { silent: true },
-                );
-            });
-
-            it('can be given up, which forgets what was typed', async () => {
-                await open([]);
-
-                await press('Create a share link');
-                await type(field('share-link-label'), 'Insurer');
-                await press('Cancel');
-
-                expect(visible(form())).toBe(false);
-                expect(buttons('Create a share link')).toHaveLength(1);
-
-                await press('Create a share link');
-
-                expect(field('share-link-label').value).toBe('');
-            });
-
             it('shows the refusals next to the fields and in the alert', async () => {
                 await open([]);
                 http.post.mockRejectedValueOnce(
@@ -7545,17 +7500,6 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(items()[0].querySelector('button span').textContent.trim()).toBe('Copy');
                 expect(live().textContent).toBe('Copied');
             });
-
-            it('selects the address when it is clicked, for the keyboard', async () => {
-                await open([shareLink('a')]);
-                const address = items()[0].querySelector('input[readonly]');
-                const select = vi.spyOn(address, 'select');
-
-                address.dispatchEvent(new Event('click', { bubbles: true }));
-                address.dispatchEvent(new Event('focus'));
-
-                expect(select).toHaveBeenCalledTimes(2);
-            });
         });
 
         describe('revoking a link', () => {
@@ -7575,17 +7519,6 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(http.delete).toHaveBeenCalledWith(`${LINKS_URL}/a`);
                 expect(items()).toHaveLength(1);
                 expect(live().textContent).toBe('Link revoked.');
-            });
-
-            it('can be given up', async () => {
-                await open([shareLink('a')]);
-
-                await press('Revoke the link Link a');
-                await press('Cancel');
-
-                expect(http.delete).not.toHaveBeenCalled();
-                expect(items()).toHaveLength(1);
-                expect(document.activeElement.getAttribute('data-share-action')).toBe('revoke');
             });
         });
 

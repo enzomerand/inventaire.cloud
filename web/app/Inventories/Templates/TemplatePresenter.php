@@ -24,7 +24,7 @@ use NumberFormatter;
 final class TemplatePresenter
 {
     /** The Tabler badge of each color of a choice, written out so that the stylesheet keeps them (see resources/js/fields/palette.js). */
-    public const BADGES = [
+    private const BADGES = [
         'gray' => 'badge bg-secondary-lt',
         'red' => 'badge bg-red-lt',
         'orange' => 'badge bg-orange-lt',
@@ -65,7 +65,7 @@ final class TemplatePresenter
                 'name' => $field->name,
                 'type' => $this->types->find($field->type)?->label() ?? $field->type,
                 'required' => $field->required,
-                'badges' => array_map(fn (array $choice): array => ['text' => $choice['label'], 'class' => $this->badge($choice['color'])], $field->choices),
+                'badges' => array_map(fn (array $choice): array => ['text' => $choice['label'], 'class' => self::badge($choice['color'])], $field->choices),
                 'details' => $details,
             ];
         }, $template->fields($locale));
@@ -109,8 +109,8 @@ final class TemplatePresenter
 
         return match ($field->type) {
             'select', 'multiselect' => ['kind' => 'badges', 'badges' => $this->choiceBadges($field, is_array($value) ? $value : [$value])],
-            'tags' => ['kind' => 'badges', 'badges' => array_map(fn (mixed $tag): array => ['text' => is_scalar($tag) ? (string) $tag : '', 'class' => $this->badge(null)], is_array($value) ? $value : [])],
-            'boolean' => ['kind' => 'badges', 'badges' => [$value === true ? ['text' => __('Yes'), 'class' => $this->badge('green')] : ['text' => __('No'), 'class' => $this->badge('gray')]]],
+            'tags' => ['kind' => 'badges', 'badges' => array_map(fn (mixed $tag): array => ['text' => is_scalar($tag) ? (string) $tag : '', 'class' => self::badge(null)], is_array($value) ? $value : [])],
+            'boolean' => ['kind' => 'badges', 'badges' => [$value === true ? ['text' => __('Yes'), 'class' => self::badge('green')] : ['text' => __('No'), 'class' => self::badge('gray')]]],
             'rating' => $this->stars((int) $text, (int) ($field->options['max'] ?? RatingType::DEFAULT_MAX)),
             'color' => ['kind' => 'swatch', 'text' => $text],
             'barcode' => ['kind' => 'mono', 'text' => $text],
@@ -136,7 +136,7 @@ final class TemplatePresenter
         foreach ($keys as $key) {
             foreach ($field->choices as $choice) {
                 if ($choice['key'] === $key) {
-                    $badges[] = ['text' => $choice['label'], 'class' => $this->badge($choice['color'])];
+                    $badges[] = ['text' => $choice['label'], 'class' => self::badge($choice['color'])];
                 }
             }
         }
@@ -157,9 +157,9 @@ final class TemplatePresenter
     }
 
     /**
-     * The badge classes of a color of the palette (gray for none).
+     * The Tabler badge classes of a color of the palette of choices (gray for none, or for a name that is not in it).
      */
-    private function badge(?string $color): string
+    public static function badge(?string $color): string
     {
         return self::BADGES[$color ?? 'gray'] ?? self::BADGES['gray'];
     }

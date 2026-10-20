@@ -101,11 +101,6 @@ export default function inventorySharing() {
             return this.limit > 0 && this.links.filter((link) => !this.isExpired(link)).length >= this.limit;
         },
 
-        /** Whether the button that opens the creation form is shown: sharing is on, and the form is not open. */
-        get canOpen() {
-            return this.enabled && !this.creating;
-        },
-
         /** Whether the creation form can be submitted: nothing is in flight and there is room for another link. */
         get canCreate() {
             return !this.busy && !this.atLimit;
@@ -241,7 +236,7 @@ export default function inventorySharing() {
             return copyValue(this, link.url ?? '', {
                 select: () => this.focusRow('url', link.id, true),
                 copied: t('tokens.copied'),
-                hint: t('sharing.select_hint'),
+                hint: t('admin.settings.select_hint'),
             });
         },
 

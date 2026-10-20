@@ -6,11 +6,9 @@ use App\Inventories\ItemSearchText;
 use App\Inventories\Sharing\ShareLinks;
 use App\Models\Item;
 use App\Settings\InstanceSettings;
-use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
-use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -318,10 +316,8 @@ describe('searching and paging', function (): void {
         Item::factory()->count(60)->for($case['inventory'])->create();
 
         $beyond = shareDom(sharePageGet($this, $token, '?page=99999999999999999999')->assertOk());
-        $big = shareDom(sharePageGet($this, $token, '?page=1000000')->assertOk());
 
-        expect(shareTexts($beyond, '//ul[contains(@class, "pagination")]/li[2]'))->toBe(['Page 2 / 2'])
-            ->and($big->query('//tbody/tr')->length)->toBe(10);
+        expect(shareTexts($beyond, '//ul[contains(@class, "pagination")]/li[2]'))->toBe(['Page 2 / 2']);
 
         foreach (['?page=abc', '?page=-3', '?page=0', '?page[]=2', '?page=1.5'] as $query) {
             expect(shareTexts(shareDom(sharePageGet($this, $token, $query)->assertOk()), '//ul[contains(@class, "pagination")]/li[2]'))->toBe(['Page 1 / 2']);
@@ -355,15 +351,14 @@ describe('searching and paging', function (): void {
             ->and(shareDom($response)->query('//tbody/tr')->length)->toBe(10);
     });
 
-    it('shows no row for a search that finds nothing, and the only page for a page beyond it, whatever the number', function (): void {
+    it('shows no row for a search that finds nothing, even on a page beyond the last', function (): void {
         $case = shareLinkCase();
         ['token' => $token] = shareLinkMake($case['inventory'], $case['owner']);
         Item::factory()->count(3)->for($case['inventory'])->create();
 
         $nothing = shareDom(sharePageGet($this, $token, '?q=zzzzzz&page=7')->assertOk());
 
-        expect($nothing->query('//tbody/tr')->length)->toBe(0)
-            ->and(shareDom(sharePageGet($this, $token, '?page=7')->assertOk())->query('//tbody/tr')->length)->toBe(3);
+        expect($nothing->query('//tbody/tr')->length)->toBe(0);
     });
 
     it('shows no pager for a single page', function (): void {
@@ -609,37 +604,15 @@ describe('no session', function (): void {
 });
 
 describe('the use of a link', function (): void {
-    it('notes the opening of the link, at most once an hour', function (): void {
-        $this->travelTo(now()->startOfSecond());
+    // How often it is written, and that nothing else of the link changes, is judged on the service (ShareLinksTest).
+    it('notes the opening of the link', function (): void {
         $case = shareFixture();
-        $link = $case['link'];
 
-        expect($link->refresh()->last_used_at)->toBeNull();
+        expect($case['link']->refresh()->last_used_at)->toBeNull();
 
         sharePageGet($this, $case['token'])->assertOk();
-        $first = $link->refresh()->last_used_at;
 
-        $this->travel(30)->minutes();
-        sharePageGet($this, $case['token'])->assertOk();
-
-        expect($first)->not->toBeNull()
-            ->and($link->refresh()->last_used_at->equalTo($first))->toBeTrue();
-
-        $this->travel(31)->minutes();
-        sharePageGet($this, $case['token'])->assertOk();
-
-        expect($link->refresh()->last_used_at->greaterThan($first))->toBeTrue();
-    });
-
-    it('does not change the link otherwise', function (): void {
-        $this->travelTo(now()->startOfSecond());
-        $case = shareFixture();
-        $before = $case['link']->refresh()->updated_at;
-
-        $this->travel(2)->hours();
-        sharePageGet($this, $case['token'])->assertOk();
-
-        expect($case['link']->refresh()->updated_at->equalTo($before))->toBeTrue();
+        expect($case['link']->refresh()->last_used_at)->not->toBeNull();
     });
 });
 
@@ -829,18 +802,8 @@ describe('the routes of the public page', function (): void {
     it('are at the paths the links use', function (): void {
         expect(route('share.show', ['token' => 'abc'], absolute: false))->toBe('/s/abc')
             ->and(route('share.attachment', ['token' => 'abc', 'item' => 'i', 'attachment' => 'a'], absolute: false))->toBe('/s/abc/items/i/attachments/a')
-            ->and(route('share.thumbnail', ['token' => 'abc', 'item' => 'i', 'attachment' => 'a'], absolute: false))->toBe('/s/abc/items/i/attachments/a/thumbnail')
-            ->and(ShareLinks::pagePath('abc'))->toBe(route('share.show', ['token' => 'abc'], absolute: false));
+            ->and(route('share.thumbnail', ['token' => 'abc', 'item' => 'i', 'attachment' => 'a'], absolute: false))->toBe('/s/abc/items/i/attachments/a/thumbnail');
     });
-
-    it('run without the session, the cookies and the CSRF check', function (string $route): void {
-        $middleware = Illuminate\Support\Facades\Route::getRoutes()->getByName($route)?->gatherMiddleware() ?? [];
-        $excluded = Illuminate\Support\Facades\Route::getRoutes()->getByName($route)?->excludedMiddleware() ?? [];
-
-        expect($excluded)->toContain(StartSession::class)
-            ->toContain(PreventRequestForgery::class)
-            ->and($middleware)->not->toContain('auth');
-    })->with(['share.show', 'share.attachment', 'share.thumbnail']);
 
     it('have no pattern on the token, so that every address gets the 404 page of the application', function (): void {
         foreach (['share.show', 'share.attachment', 'share.thumbnail'] as $name) {

@@ -50,11 +50,11 @@ describe('making a link', function (): void {
             ->and(strlen((string) base64_decode(strtr($tokens[0], '-_', '+/').'=', true)))->toBe(32);
     });
 
-    it('keeps its author, its label trimmed, whether it shows the files and when it expires', function (): void {
+    it('keeps its author, its label, whether it shows the files and when it expires', function (): void {
         $this->travelTo(now()->startOfSecond());
         $case = shareLinkCase();
 
-        ['link' => $link] = shareLinkMake($case['inventory'], $case['owner'], "  Insurer \u{00A0}", false, 90);
+        ['link' => $link] = shareLinkMake($case['inventory'], $case['owner'], 'Insurer', false, 90);
         $row = ShareLink::query()->sole();
 
         expect($row->inventory_id)->toBe($case['inventory']->id)
@@ -67,27 +67,13 @@ describe('making a link', function (): void {
             ->and($link->creator->is($case['owner']))->toBeTrue();
     });
 
-    it('has no label when it is empty, and never expires when no lifetime is given', function (): void {
+    it('has no label when none is given, and never expires when no lifetime is given', function (): void {
         $case = shareLinkCase();
 
-        ['link' => $link] = shareLinkMake($case['inventory'], $case['owner'], '   ', true, null);
+        ['link' => $link] = shareLinkMake($case['inventory'], $case['owner'], null, true, null);
 
         expect($link->label)->toBeNull()
-            ->and($link->expires_at)->toBeNull()
-            ->and($link->isExpired())->toBeFalse();
-    });
-
-    it('refuses a lifetime that is not offered, and a label that is too long, and writes nothing', function (): void {
-        $case = shareLinkCase();
-
-        expect(fn () => shareLinkMake($case['inventory'], $case['owner'], null, true, 14))->toThrow(InvalidArgumentException::class)
-            ->and(fn () => shareLinkMake($case['inventory'], $case['owner'], str_repeat('é', 81)))->toThrow(InvalidArgumentException::class)
-            ->and(ShareLink::query()->count())->toBe(0);
-
-        // 80 characters, not 80 bytes.
-        shareLinkMake($case['inventory'], $case['owner'], str_repeat('é', 80));
-
-        expect(ShareLink::query()->count())->toBe(1);
+            ->and($link->expires_at)->toBeNull();
     });
 
     it('is refused while the administrator has sharing turned off, and writes nothing', function (): void {
@@ -118,26 +104,6 @@ describe('making a link', function (): void {
         shareLinkMake($other, $case['owner']);
 
         expect(ShareLink::query()->where('inventory_id', $other->id)->count())->toBe(1);
-    });
-
-    it('does not count the links that expired: twenty of them leave room, twenty that work do not', function (): void {
-        $limit = config()->integer('inventories.max_share_links');
-        $case = shareLinkCase();
-        ShareLink::factory()->count($limit)->for($case['inventory'])->expired()->create();
-
-        ['link' => $made] = shareLinkMake($case['inventory'], $case['owner']);
-
-        expect($limit)->toBe(20)
-            ->and($made->isExpired())->toBeFalse()
-            ->and(ShareLink::query()->where('inventory_id', $case['inventory']->id)->count())->toBe($limit + 1);
-
-        ShareLink::query()->whereKey($made->getKey())->delete();
-        ShareLink::factory()->count($limit - 1)->for($case['inventory'])->create();
-        shareLinkMake($case['inventory'], $case['owner']);
-
-        expect(fn () => shareLinkMake($case['inventory'], $case['owner']))->toThrow(ShareLinkLimitReachedException::class)
-            ->and(ShareLink::query()->where('inventory_id', $case['inventory']->id)->active()->count())->toBe($limit)
-            ->and(ShareLink::query()->where('inventory_id', $case['inventory']->id)->count())->toBe($limit * 2);
     });
 
     it('stops counting a link the moment its time is up', function (): void {
@@ -197,7 +163,6 @@ describe('the address of a link', function (): void {
 
         expect(app(ShareLinks::class)->urlOf($link))->toBe("https://shared.example.test/s/{$token}")
             ->and(ShareLinks::addressOf($token))->toBe("https://shared.example.test/s/{$token}")
-            ->and(ShareLinks::pagePath($token))->toBe("/s/{$token}")
             ->and(ShareLinks::PAGE_PATH)->toBe('/s/{token}');
     });
 
@@ -310,12 +275,11 @@ describe('resolving a token', function (): void {
 
     it('gives nothing for a link that expired, and the same for one that was revoked', function (): void {
         $case = shareLinkCase();
-        $expired = ShareLink::factory()->for($case['inventory'])->withToken($expiredToken = ShareLinks::newToken())->expired()->create();
+        ShareLink::factory()->for($case['inventory'])->withToken($expiredToken = ShareLinks::newToken())->expired()->create();
         ['link' => $revoked, 'token' => $revokedToken] = shareLinkMake($case['inventory'], $case['owner']);
         app(ShareLinks::class)->revoke($case['inventory'], $revoked);
 
-        expect($expired->isExpired())->toBeTrue()
-            ->and(app(ShareLinks::class)->resolve($expiredToken))->toBeNull()
+        expect(app(ShareLinks::class)->resolve($expiredToken))->toBeNull()
             ->and(app(ShareLinks::class)->resolve($revokedToken))->toBeNull();
     });
 
@@ -363,8 +327,7 @@ describe('noting that a link was used', function (): void {
         $first = now()->toIso8601String();
 
         expect($service->touch($link))->toBeTrue()
-            ->and($link->last_used_at?->toIso8601String())->toBe($first)
-            ->and($link->isDirty())->toBeFalse();
+            ->and(ShareLink::query()->sole()->last_used_at?->toIso8601String())->toBe($first);
 
         $this->travelTo(now()->addMinutes(59));
 

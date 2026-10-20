@@ -47,12 +47,6 @@ final class SharedInventory
     /** Most characters of a search; the rest of what was typed is ignored. */
     public const SEARCH_MAX_LENGTH = 100;
 
-    /** The last page a visitor can ask for (a larger number is the last one). */
-    public const MAX_PAGE = 1_000_000;
-
-    /** The images a photo field takes: the ones that have an icon of their own when no thumbnail could be made. */
-    private const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-
     /**
      * Gets the registry that names the types, the checks of values and the search of items.
      */
@@ -61,14 +55,6 @@ final class SharedInventory
         private readonly ItemValues $values,
         private readonly ItemSearchText $search,
     ) {}
-
-    /**
-     * The text of a search as it is used: valid UTF-8 and at most {@see self::SEARCH_MAX_LENGTH} characters.
-     */
-    public static function cleanSearch(string $typed): string
-    {
-        return mb_substr(trim(mb_scrub($typed)), 0, self::SEARCH_MAX_LENGTH);
-    }
 
     /**
      * A page of the items of the inventory of a link.
@@ -88,7 +74,8 @@ final class SharedInventory
         }
 
         $table = new ExportTable($fields, $this->types, $this->values);
-        $search = self::cleanSearch($search);
+        // Valid UTF-8 and at most SEARCH_MAX_LENGTH characters.
+        $search = mb_substr(trim(mb_scrub($search)), 0, self::SEARCH_MAX_LENGTH);
 
         $items = $inventory->items()->orderByDesc('items.id');
 
@@ -138,7 +125,7 @@ final class SharedInventory
             search: $search,
             total: $paginator->total(),
             page: $paginator->currentPage(),
-            lastPage: max(1, $paginator->lastPage()),
+            lastPage: $paginator->lastPage(),
             first: (int) ($paginator->firstItem() ?? 0),
             last: (int) ($paginator->lastItem() ?? 0),
         );
@@ -204,7 +191,7 @@ final class SharedInventory
     private function stars(ExportValue $value): SharedCell
     {
         $max = $value->maximum ?? 0;
-        $grade = max(0, min((int) $value->numberText(), $max));
+        $grade = (int) $value->numberText();
 
         return new SharedCell(
             SharedCellKind::Stars,
@@ -225,7 +212,7 @@ final class SharedInventory
         foreach ($chosen as $id) {
             if (is_string($id) && isset($known[$id])) {
                 $color = $known[$id]['color'] ?? null;
-                $badges[] = ['text' => $known[$id]['label'], 'class' => $this->badge(is_string($color) ? $color : null)];
+                $badges[] = ['text' => $known[$id]['label'], 'class' => TemplatePresenter::badge(is_string($color) ? $color : null)];
             }
         }
 
@@ -241,19 +228,11 @@ final class SharedInventory
 
         foreach (is_array($presented) ? $presented : [] as $tag) {
             if (is_string($tag) && $tag !== '') {
-                $badges[] = ['text' => $tag, 'class' => $this->badge(null)];
+                $badges[] = ['text' => $tag, 'class' => TemplatePresenter::badge(null)];
             }
         }
 
         return $badges === [] ? SharedCell::empty() : new SharedCell(SharedCellKind::Badges, badges: $badges);
-    }
-
-    /**
-     * The Tabler badge of a color of the palette of choices (gray for none, or for a name that is not in it).
-     */
-    private function badge(?string $color): string
-    {
-        return TemplatePresenter::BADGES[$color ?? 'gray'] ?? TemplatePresenter::BADGES['gray'];
     }
 
     /**
@@ -288,7 +267,7 @@ final class SharedInventory
             name: $attachment->name,
             href: route('share.attachment', $displayable ? $path + ['inline' => 1] : $path, absolute: false),
             thumbnail: $attachment->hasThumbnail() ? route('share.thumbnail', $path, absolute: false) : null,
-            icon: in_array($attachment->mime, self::IMAGE_TYPES, true) ? 'image' : ($attachment->mime === 'application/pdf' ? 'pdf' : 'file'),
+            icon: $attachment->mime === 'application/pdf' ? 'pdf' : ($displayable ? 'image' : 'file'),
             size: Number::fileSize($attachment->size, maxPrecision: 1),
             displayable: $displayable,
         );

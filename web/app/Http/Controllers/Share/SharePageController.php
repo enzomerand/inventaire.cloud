@@ -53,7 +53,7 @@ final class SharePageController extends Controller
             $link,
             $token,
             is_string($search) ? $search : '',
-            is_string($page) && ctype_digit($page) ? (int) min((int) $page, SharedInventory::MAX_PAGE) : 1,
+            is_string($page) && ctype_digit($page) ? (int) $page : 1,
         );
 
         return response()

@@ -24,7 +24,7 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
             'sharing.copy_named': 'Copy the address of the link :name',
             'sharing.revoke_named': 'Revoke the link :name',
             'sharing.confirm_revoke': 'Revoke the link :name?',
-            'sharing.select_hint': 'Selected: copy it with the keyboard',
+            'admin.settings.select_hint': 'Selected: copy it with the keyboard',
             'sharing.notice.created': 'Link created.',
             'sharing.notice.revoked': 'Link revoked.',
             'sharing.error.limit': 'At most :count links',
@@ -122,7 +122,6 @@ describe('share links page of an inventory', () => {
             await component.init();
 
             expect(component.enabled).toBe(false);
-            expect(component.canOpen).toBe(false);
             expect(component.limit).toBe(0);
             expect(component.atLimit).toBe(false);
         });
@@ -259,12 +258,9 @@ describe('share links page of an inventory', () => {
 
     describe('the creation form', () => {
         it('opens on the label, with the usual lifetime and the files shown', () => {
-            expect(component.canOpen).toBe(true);
-
             component.open();
 
             expect(component.creating).toBe(true);
-            expect(component.canOpen).toBe(false);
             expect(log).toEqual(['label']);
             expect(component.form).toEqual({ label: '', includeFiles: true, expires: '30' });
         });
@@ -418,7 +414,6 @@ describe('share links page of an inventory', () => {
 
             expect(component.enabled).toBe(false);
             expect(component.creating).toBe(false);
-            expect(component.canOpen).toBe(false);
             expect(component.form.label).toBe('');
             expect(notify).toHaveBeenCalledWith('warning', 'Sharing is off');
         });

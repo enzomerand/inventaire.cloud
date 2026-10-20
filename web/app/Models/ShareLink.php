@@ -17,12 +17,7 @@ use Illuminate\Support\Carbon;
 /**
  * A share link: a secret address that shows an inventory, read-only, to anybody who holds it.
  *
- * What is stored is never the token itself. `token_hash` is its SHA-256, the only way a visitor's link is looked up, and
- * `token_encrypted` the token encrypted with the application key, so that the owner can copy the address again. Both are hidden from the
- * array and JSON forms of the model, and nothing but {@see ShareLinks} reads or writes them. A link past `expires_at` (null: never) is
- * refused everywhere and kept a while, listed to its owner as expired, until `inventaire:prune-share-links` clears it away.
- * `last_used_at` is moved at most once an hour. `ulid` is the identifier the outside world uses ({@see HasUlidRouteKey}); the token is
- * the secret a visitor holds, and is not it.
+ * @see ShareLinks
  *
  * @property int $id
  * @property string $ulid
@@ -102,13 +97,5 @@ final class ShareLink extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where(fn (Builder $active): Builder => $active->whereNull('expires_at')->orWhere('expires_at', '>', now()));
-    }
-
-    /**
-     * Whether the time of the link is up (it may not have been pruned yet).
-     */
-    public function isExpired(): bool
-    {
-        return $this->expires_at !== null && ! $this->expires_at->isFuture();
     }
 }

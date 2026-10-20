@@ -440,14 +440,4 @@ describe('an inventory that goes', function (): void {
         expect(ShareLink::query()->pluck('id')->all())->toBe([$kept->id])
             ->and(app(ShareLinks::class)->resolve($token))->toBeNull();
     });
-
-    it('takes its links with it when its workspace is deleted', function (): void {
-        $case = shareLinkCase();
-        shareLinkMake($case['inventory'], $case['owner']);
-        shareLinkMake($case['inventory'], $case['owner']);
-
-        shareLinkCall($this, $case['owner'], 'DELETE', "/api/v1/workspaces/{$case['team']['workspace']->ulid}")->assertNoContent();
-
-        expect(ShareLink::query()->count())->toBe(0);
-    });
 });

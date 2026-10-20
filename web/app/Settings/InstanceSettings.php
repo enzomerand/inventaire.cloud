@@ -68,7 +68,7 @@ final class InstanceSettings
      */
     public function registrationOpen(): bool
     {
-        return $this->flag(self::REGISTRATION_OPEN, whenMissing: true, whenUnusable: false);
+        return $this->flag(self::REGISTRATION_OPEN);
     }
 
     /**
@@ -82,7 +82,7 @@ final class InstanceSettings
      */
     public function invitationSignUp(): bool
     {
-        return $this->flag(self::INVITATION_SIGN_UP, whenMissing: true, whenUnusable: false);
+        return $this->flag(self::INVITATION_SIGN_UP);
     }
 
     /**
@@ -95,7 +95,7 @@ final class InstanceSettings
      */
     public function shareLinksEnabled(): bool
     {
-        return $this->flag(self::SHARE_LINKS_ENABLED, whenMissing: true, whenUnusable: false);
+        return $this->flag(self::SHARE_LINKS_ENABLED);
     }
 
     /**
@@ -178,18 +178,15 @@ final class InstanceSettings
     }
 
     /**
-     * The value of a setting that holds a boolean: what it is when it has a row, else its default, and the safe value (reported once in
-     * the log) when the row holds something else.
-     *
-     * @param  bool  $whenMissing  The default: what the setting holds when it has no row.
-     * @param  bool  $whenUnusable  The safe value: what it holds when its row is not a boolean.
+     * The value of a setting that holds a boolean: what it is when it has a row, else true (every flag is on until the administrator
+     * turns it off), and false (reported once in the log) when the row holds something else.
      */
-    private function flag(string $key, bool $whenMissing, bool $whenUnusable): bool
+    private function flag(string $key): bool
     {
         $this->stored ??= $this->load();
 
         if (! array_key_exists($key, $this->stored)) {
-            return $whenMissing;
+            return true;
         }
 
         $value = $this->stored[$key];
@@ -200,7 +197,7 @@ final class InstanceSettings
 
         $this->reportUnusable($key);
 
-        return $whenUnusable;
+        return false;
     }
 
     /**
