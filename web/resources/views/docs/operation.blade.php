@@ -2,12 +2,10 @@
     One operation of the API in the documentation: its method and path, the ability a token needs, then its parameters, its body,
     its answers (with the codes each can carry) and a command that calls it.
 
-    Everything that comes from the OpenAPI document is in the language of its translation when it has one, English otherwise
-    (`$textLang`, the same for the whole reference, set by docs.reference), so the elements that hold it say `lang` while the
-    labels around it are in the language of the page. The texts are already HTML where they were Markdown (App\Docs\ApiReference).
+    The texts that come from the OpenAPI document are in the language `$textLang` (see docs.reference), the labels
+    around them in the language of the page. They are already HTML where they were Markdown (App\Docs\ApiReference).
 --}}
 @php
-    $textLang ??= 'en';
     $methodClass = match ($op['method']) {
         'GET' => 'bg-blue-lt',
         'POST' => 'bg-green-lt',

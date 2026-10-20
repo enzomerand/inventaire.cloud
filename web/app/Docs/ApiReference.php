@@ -60,7 +60,7 @@ final class ApiReference
         $api = $this->api->forLocale($language);
         $schemas = new SchemaDescriber($api);
 
-        return new self($api, $schemas, new CurlExample($api, $schemas), $this->source ?? $this->api);
+        return new self($api, $schemas, new CurlExample($api, $schemas), $this->api);
     }
 
     /**
@@ -279,7 +279,12 @@ final class ApiReference
     private function introduction(string $markdown, string $original): array
     {
         $headings = [];
-        $sections = $original === $markdown ? [] : $this->sectionTitles($this->markdown($original)->toHtml());
+        $sections = [];
+
+        if ($original !== $markdown) {
+            preg_match_all('#<h2>(.*?)</h2>#s', $this->markdown($original)->toHtml(), $titles);
+            $sections = array_map($this->plainText(...), $titles[1]);
+        }
 
         $html = (string) preg_replace_callback('#<h2>(.*?)</h2>#s', function (array $match) use (&$headings, $sections): string {
             $text = $this->plainText($match[1]);
@@ -290,18 +295,6 @@ final class ApiReference
         }, $this->markdown($markdown)->toHtml());
 
         return [new HtmlString($html), $headings];
-    }
-
-    /**
-     * The titles of the sections of a text (its `<h2>`), in order, as plain text.
-     *
-     * @return list<string>
-     */
-    private function sectionTitles(string $html): array
-    {
-        preg_match_all('#<h2>(.*?)</h2>#s', $html, $matches);
-
-        return array_map($this->plainText(...), $matches[1]);
     }
 
     /**

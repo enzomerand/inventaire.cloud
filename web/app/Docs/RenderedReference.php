@@ -88,7 +88,7 @@ final class RenderedReference
             $made[] = $file.':'.(is_file($file) ? filemtime($file).':'.filesize($file) : 'missing');
         }
 
-        return hash('xxh128', implode('|', [$this->api->localizedHash($locale), $locale, $this->api->baseUrl(), ...$made]));
+        return hash('xxh128', implode('|', [$this->api->forLocale($locale)->hash(), $locale, $this->api->baseUrl(), ...$made]));
     }
 
     /**

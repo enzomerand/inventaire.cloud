@@ -24,10 +24,7 @@ use Throwable;
  * Two consumers read it: `GET /api/v1/openapi.json` ({@see self::document()}) and the page `/docs/api` (the operations, and
  * the helpers that follow a `$ref` for rendering).
  *
- * The file is English, and so is the JSON the API serves, in every language. The page can be read in another language when the
- * file has a translation next to it (`v1.fr.yaml`: only the texts, see {@see OpenApiTranslation}): {@see self::localized()} is the
- * document with those texts, kept in the cache the same way under a key of its own, and {@see self::forLocale()} reads that
- * document instead of the English one.
+ * The page can read the document in another language ({@see self::forLocale()}); the JSON the API serves stays English.
  */
 #[Singleton]
 final class OpenApi
@@ -38,7 +35,7 @@ final class OpenApi
     /** The language the file is written in: the one of every text of the document that has no translation. */
     public const SOURCE_LANGUAGE = 'en';
 
-    /** The key of the cache entry: a pair `['hash' => hash of the content of the file, 'document' => the parsed file]`. A translation has its own, with the language added. */
+    /** The key of the cache entry: a pair `['hash' => hash of the content of the file, 'document' => the parsed file]`. */
     private const CACHE_KEY = 'openapi:v1';
 
     /** What a language must look like to be part of the name of a file (`fr`, `pt-BR`): nothing that could lead elsewhere. */
@@ -102,7 +99,7 @@ final class OpenApi
 
     /**
      * The hash of the content of the file, which says whether what was made of the document (the page that shows it, for one) is still
-     * what the file says. Of a document read in another language ({@see self::forLocale()}), the hash of both files.
+     * what the file says.
      */
     public function hash(): string
     {
@@ -140,29 +137,12 @@ final class OpenApi
     }
 
     /**
-     * The document with its texts in a language: the specification with the texts of the translation in place of the English ones, or
-     * the specification itself when the language is the one of the file or has no translation.
-     *
-     * @return array<string, mixed>
-     */
-    public function localized(string $language): array
-    {
-        return $this->translation($language)['document'];
-    }
-
-    /**
-     * The hash of what {@see self::localized()} is made from: the one of the specification, and the one of the translation (with the
-     * version of the rule that applies it, {@see OpenApiTranslation::VERSION}) when there is one. It changes when either file does.
-     */
-    public function localizedHash(string $language): string
-    {
-        return $this->translation($language)['hash'];
-    }
-
-    /**
-     * The same specification, read in a language: what {@see self::raw()}, {@see self::operations()}, {@see self::resolve()} and the
-     * other readers answer is {@see self::localized()}, and {@see self::language()} says which language the texts are in. Meant for
-     * the page that shows the document; the JSON the API serves comes from the shared instance, which stays English.
+     * The same specification, read in a language: the specification with the texts of its translation into it
+     * (`v1.<language>.yaml`, see {@see OpenApiTranslation}) in place of the English ones, or the specification itself when
+     * the language is the one of the file or has no translation. {@see self::raw()}, {@see self::hash()} (the hash of both files,
+     * and of the version of the rule that applies the translation), {@see self::operations()}, {@see self::resolve()} and the
+     * other readers answer for that document, and {@see self::language()} says which language its texts are in. Meant for the
+     * page that shows the document; the JSON the API serves comes from the shared instance, which stays English.
      */
     public function forLocale(string $language): self
     {
@@ -419,10 +399,11 @@ final class OpenApi
         }
 
         $document = $this->raw();
+        $fallback = ['hash' => $this->hash(), 'document' => $document, 'translated' => false];
         $path = $language === self::SOURCE_LANGUAGE ? null : $this->translationPath($language);
 
         if ($path === null || ! is_file($path)) {
-            return $this->translations[$language] = ['hash' => $this->hash(), 'document' => $document, 'translated' => false];
+            return $this->translations[$language] = $fallback;
         }
 
         try {
@@ -437,7 +418,7 @@ final class OpenApi
         } catch (Throwable $exception) {
             Log::warning('The translation of the OpenAPI document into '.$language.' cannot be used: the page is in English until it can.', ['path' => $path, 'exception' => $exception]);
 
-            return $this->translations[$language] = ['hash' => $this->hash(), 'document' => $document, 'translated' => false];
+            return $this->translations[$language] = $fallback;
         }
 
         /** @var array<string, mixed> $localized */

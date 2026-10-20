@@ -2,9 +2,11 @@
     The part of the page of the documentation that is drawn from the OpenAPI document and nothing else: the column of links and the
     column of the text (getting started, introduction, every operation, the schemas). It is the same for everybody who reads the
     same language, so App\Docs\RenderedReference keeps its HTML in the cache and the page includes it as it is (see api.blade.php).
-    See App\Docs\ApiReference for what `$reference` holds. The texts of the document are in the language `$textLang`: the language
-    of their translation when the document has one into the language of the page, English otherwise. The operations and the schemas
-    included below read the same variable.
+    See App\Docs\ApiReference for what `$reference` holds.
+
+    `$textLang` is the language the texts of the document are in: the language of the page when the document has a
+    translation into it, English otherwise. It is the same for the whole reference, so every element that holds a text
+    says it with `lang`, and the operations and schemas included below (and the rows they pass it to) read it from here.
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}

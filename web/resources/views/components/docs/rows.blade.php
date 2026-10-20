@@ -1,11 +1,11 @@
 {{--
-    The table of the properties of an object in the documentation of the API: name, type, whether it is required, and what the
-    document says about it. `rows` are those of App\Docs\SchemaDescriber::rows(); their descriptions are already HTML (rendered
-    from the Markdown of the document, which is not always in the language of the page: `textLang` is the one it is in, English or
-    the language of its translation). The table scrolls inside its own container, which a keyboard can focus. The name, the type and the "required" stay on one line (the table scrolls rather than breaking
-    `inventory` in the middle), the description is given room.
+    The table of the properties of an object in the documentation of the API: name, type, whether it is required, and
+    what the document says about it. `rows` are those of App\Docs\SchemaDescriber::rows(); their descriptions are
+    already HTML (rendered from the Markdown of the document, in the language `textLang`). The table scrolls inside its
+    own container, which a keyboard can focus. The name, the type and the "required" stay on one line (the table scrolls
+    rather than breaking `inventory` in the middle), the description is given room.
 --}}
-@props(['rows', 'label', 'textLang' => 'en'])
+@props(['rows', 'label', 'textLang'])
 @if ($rows !== [])
     <div class="table-responsive border rounded mb-3" tabindex="0" role="region" aria-label="{{ $label }}">
         <table class="table table-sm table-vcenter mb-0">

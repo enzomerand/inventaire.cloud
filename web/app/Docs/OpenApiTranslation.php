@@ -18,9 +18,9 @@ final class OpenApiTranslation
     /**
      * The version of the rule: what {@see self::texts()} and {@see self::apply()} take for a text, and how they put it in place.
      *
-     * The document made of a translation is kept in the cache ({@see OpenApi::localized()}) under the hash of the two files it
-     * is made from, and this number: a change of the rule changes the document without changing either file, so bump it with the
-     * change, or the old document keeps being served.
+     * The document made of a translation is kept in the cache under the hash of the two files it is made from, and this number: a
+     * change of the rule changes the document without changing either file, so bump it with the change, or the old document keeps
+     * being served.
      */
     public const VERSION = 1;
 

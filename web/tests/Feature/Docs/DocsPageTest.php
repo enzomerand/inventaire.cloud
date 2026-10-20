@@ -395,7 +395,7 @@ describe('the texts of the document', function (): void {
                           description: Gone
             YAML);
 
-        $html = view('docs.operation', ['op' => $reference['tags'][0]['operations'][0]])->render();
+        $html = view('docs.operation', ['op' => $reference['tags'][0]['operations'][0], 'textLang' => 'en'])->render();
 
         expect($html)->toContain('&lt;script&gt;alert(1)&lt;/script&gt; List')->toContain('/things/&lt;b&gt;')->toContain('&lt;em&gt;gone&lt;/em&gt;')
             ->toContain('&lt;u&gt;x&lt;/u&gt;')->toContain('&quot;&gt;&lt;i&gt;q&lt;/i&gt;')

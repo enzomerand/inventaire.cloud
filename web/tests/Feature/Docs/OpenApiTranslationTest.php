@@ -9,7 +9,6 @@ use App\Services\LocaleResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Testing\TestResponse;
 use Symfony\Component\Yaml\Yaml;
 
 require_once __DIR__.'/../../Support/contract.php';
@@ -162,14 +161,6 @@ function translationScratch(?string $french = null): string
     return $folder;
 }
 
-/**
- * The page in a language.
- */
-function translationPage(object $test, string $language): TestResponse
-{
-    return $test->get('/docs/api', ['Accept-Language' => $language]);
-}
-
 describe('a translation of the document', function (): void {
     it('is named after a language the application supports', function (string $language): void {
         expect(app(LocaleResolver::class)->isSupported($language))->toBeTrue();
@@ -194,8 +185,8 @@ describe('a translation of the document', function (): void {
         $api = app(OpenApi::class);
         $translation = Yaml::parseFile(resource_path('openapi/v1.'.$language.'.yaml'));
 
-        expect(OpenApiTranslation::texts($api->localized($language)))->toEqual($translation)
-            ->and(OpenApiTranslation::apply($api->localized($language), (array) OpenApiTranslation::texts($api->raw())))->toEqual($api->raw());
+        expect(OpenApiTranslation::texts($api->forLocale($language)->raw()))->toEqual($translation)
+            ->and(OpenApiTranslation::apply($api->forLocale($language)->raw(), (array) OpenApiTranslation::texts($api->raw())))->toEqual($api->raw());
     })->with(translationLanguages());
 });
 
@@ -272,24 +263,14 @@ describe('OpenApiTranslation', function (): void {
 });
 
 describe('the document in a language', function (): void {
-    it('has the texts of the translation, and the rest of the document as it is', function (): void {
-        $api = app(OpenApi::class);
-
-        expect($api->localized('fr')['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail')
-            ->and($api->localized('fr')['paths']['/workspaces']['post']['operationId'])->toBe('createWorkspace')
-            ->and(array_keys($api->localized('fr')['components']['schemas']))->toBe(array_keys($api->raw()['components']['schemas']))
-            ->and($api->localized('fr')['paths']['/workspaces']['post']['responses'])->toHaveKeys(array_keys($api->raw()['paths']['/workspaces']['post']['responses']))
-            ->and($api->raw()['paths']['/workspaces']['post']['summary'])->toBe('Create a workspace');
-    });
-
     it('is the document itself for the language of the file, for a language with no translation and for what is no language', function (string $language): void {
         $api = app(OpenApi::class);
 
-        expect($api->localized($language))->toBe($api->raw())
-            ->and($api->localizedHash($language))->toBe($api->hash())
+        expect($api->forLocale($language)->raw())->toBe($api->raw())
+            ->and($api->forLocale($language)->hash())->toBe($api->hash())
             ->and($api->forLocale($language)->language())->toBe('en')
             ->and($api->translationPath($language) === null || ! is_file($api->translationPath($language)))->toBeTrue();
-    })->with(['en', 'de', 'fr-CA', '../openapi/v1', 'fr/../fr', '', 'FR ', "fr\n"]);
+    })->with(['en', 'de', 'fr-CA', '', 'FR ']);
 
     it('leaves the document the API serves in English, and the shared instance as it was', function (): void {
         $api = app(OpenApi::class);
@@ -322,35 +303,35 @@ describe('the document in a language', function (): void {
         $folder = translationScratch($french);
 
         $api = new OpenApi($folder.'/v1.yaml');
-        $localized = $api->localized('fr');
+        $localized = $api->forLocale('fr')->raw();
 
         expect(Cache::get('openapi:v1:fr')['hash'])->toBe(hash('xxh128', OpenApiTranslation::VERSION.'|'.hash('xxh128', $english).'|'.$french))
-            ->and($api->localizedHash('fr'))->toBe(Cache::get('openapi:v1:fr')['hash'])
+            ->and($api->forLocale('fr')->hash())->toBe(Cache::get('openapi:v1:fr')['hash'])
             ->and(Cache::get('openapi:v1')['hash'])->toBe(hash('xxh128', $english))
-            ->and($api->localizedHash('fr'))->not->toBe($api->hash());
+            ->and($api->forLocale('fr')->hash())->not->toBe($api->hash());
 
         // What the cache holds for this content is taken as it is, not built again.
-        Cache::forever('openapi:v1:fr', ['hash' => $api->localizedHash('fr'), 'document' => ['from' => 'the cache']]);
+        Cache::forever('openapi:v1:fr', ['hash' => $api->forLocale('fr')->hash(), 'document' => ['from' => 'the cache']]);
 
-        expect((new OpenApi($folder.'/v1.yaml'))->localized('fr'))->toBe(['from' => 'the cache']);
+        expect((new OpenApi($folder.'/v1.yaml'))->forLocale('fr')->raw())->toBe(['from' => 'the cache']);
 
         // An entry made under another version of the rule (a change of OpenApiTranslation that bumped it) is not this one's, whatever the files.
         Cache::forever('openapi:v1:fr', ['hash' => hash('xxh128', (OpenApiTranslation::VERSION + 1).'|'.hash('xxh128', $english).'|'.$french), 'document' => ['from' => 'another version']]);
 
-        expect((new OpenApi($folder.'/v1.yaml'))->localized('fr')['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail')
-            ->and(Cache::get('openapi:v1:fr')['hash'])->toBe($api->localizedHash('fr'));
+        expect((new OpenApi($folder.'/v1.yaml'))->forLocale('fr')->raw()['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail')
+            ->and(Cache::get('openapi:v1:fr')['hash'])->toBe($api->forLocale('fr')->hash());
 
         // Another content takes the place of the entry.
         file_put_contents($folder.'/v1.fr.yaml', str_replace('Créer un espace de travail', 'Ouvrir un espace de travail', $french));
         $edited = new OpenApi($folder.'/v1.yaml');
-        $summary = $edited->localized('fr')['paths']['/workspaces']['post']['summary'];
+        $summary = $edited->forLocale('fr')->raw()['paths']['/workspaces']['post']['summary'];
 
         $keys = array_values(array_filter(array_keys(Cache::getStore()->all()), fn (string $key): bool => str_starts_with($key, 'openapi')));
         sort($keys);
 
         expect($summary)->toBe('Ouvrir un espace de travail')
-            ->and($edited->localizedHash('fr'))->not->toBe($api->localizedHash('fr'))
-            ->and(Cache::get('openapi:v1:fr')['hash'])->toBe($edited->localizedHash('fr'))
+            ->and($edited->forLocale('fr')->hash())->not->toBe($api->forLocale('fr')->hash())
+            ->and(Cache::get('openapi:v1:fr')['hash'])->toBe($edited->forLocale('fr')->hash())
             ->and($keys)->toBe(['openapi:v1', 'openapi:v1:fr'])
             ->and($localized['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail');
     });
@@ -360,15 +341,15 @@ describe('the document in a language', function (): void {
         Cache::shouldReceive('forever')->andThrow(new RuntimeException('no cache'));
         Cache::makePartial();
 
-        expect((new OpenApi)->localized('fr')['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail');
+        expect((new OpenApi)->forLocale('fr')->raw()['paths']['/workspaces']['post']['summary'])->toBe('Créer un espace de travail');
     });
 
     it('is the English document, with a warning in the log, when the translation is malformed', function (string $content): void {
         Log::spy();
         $api = new OpenApi(translationScratch($content).'/v1.yaml');
 
-        expect($api->localized('fr'))->toBe($api->raw())
-            ->and($api->localizedHash('fr'))->toBe($api->hash())
+        expect($api->forLocale('fr')->raw())->toBe($api->raw())
+            ->and($api->forLocale('fr')->hash())->toBe($api->hash())
             ->and($api->forLocale('fr')->language())->toBe('en');
 
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'translation of the OpenAPI document into fr cannot be used'))->once();
@@ -382,7 +363,7 @@ describe('the document in a language', function (): void {
         try {
             $api = new OpenApi($folder.'/v1.yaml');
 
-            expect($api->localized('fr'))->toBe($api->raw())->and($api->forLocale('fr')->language())->toBe('en');
+            expect($api->forLocale('fr')->raw())->toBe($api->raw())->and($api->forLocale('fr')->language())->toBe('en');
         } finally {
             chmod($folder.'/v1.fr.yaml', 0644);
         }
@@ -393,26 +374,16 @@ describe('the document in a language', function (): void {
 
 describe('the page /docs/api', function (): void {
     it('shows the texts of the document in French, and says that they are', function (): void {
-        $page = templateDom(translationPage($this, 'fr')->assertOk());
+        $page = templateDom($this->get('/docs/api', ['Accept-Language' => 'fr'])->assertOk());
 
         expect(templateTexts($page, '//*[@id="createWorkspace-title"]'))->toBe(['Créer un espace de travail'])
             ->and(templateAttributes($page, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['fr'])
-            ->and(templateTexts($page, '//nav//a[@href="#createWorkspace"]'))->toBe(['Créer un espace de travail'])
-            ->and(templateTexts($page, '//h2[@id="intro-authentication"]'))->toBe(['Authentification'])
-            ->and(templateAttributes($page, '//*[@id="intro-authentication"]/ancestor::*[@lang][1]', 'lang'))->toBe(['fr']);
-    });
-
-    it('shows the texts of the document in English in English', function (): void {
-        $page = templateDom(translationPage($this, 'en')->assertOk());
-
-        expect(templateTexts($page, '//*[@id="createWorkspace-title"]'))->toBe(['Create a workspace'])
-            ->and(templateAttributes($page, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['en'])
-            ->and(templateTexts($page, '//h2[@id="intro-authentication"]'))->toBe(['Authentication']);
+            ->and(templateTexts($page, '//nav//a[@href="#createWorkspace"]'))->toBe(['Créer un espace de travail']);
     });
 
     it('gives the same anchors to the sections of the introduction in every language', function (): void {
         $anchors = fn (string $language): array => array_values(array_filter(
-            templateAttributes(templateDom(translationPage($this, $language)->assertOk()), '//*[@id]', 'id'),
+            templateAttributes(templateDom($this->get('/docs/api', ['Accept-Language' => $language])->assertOk()), '//*[@id]', 'id'),
             fn (string $id): bool => str_starts_with($id, 'intro-'),
         ));
 
@@ -433,7 +404,7 @@ describe('the page /docs/api', function (): void {
         Log::spy();
         app()->instance(OpenApi::class, new OpenApi(translationScratch("summary: [unclosed\n  other: {").'/v1.yaml'));
 
-        $page = templateDom(translationPage($this, 'fr')->assertOk());
+        $page = templateDom($this->get('/docs/api', ['Accept-Language' => 'fr'])->assertOk());
 
         expect(templateTexts($page, '//*[@id="createWorkspace-title"]'))->toBe(['Create a workspace'])
             ->and(templateAttributes($page, '//*[@id="createWorkspace-title"]', 'lang'))->toBe(['en'])

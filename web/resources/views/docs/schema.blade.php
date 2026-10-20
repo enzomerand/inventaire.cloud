@@ -1,11 +1,8 @@
 {{--
     One schema of the API in the documentation: what it is, the schemas it is made of, its properties, and, for a schema that is
-    one of several shapes, each shape. The anchor `schema-<Name>` is what the links of the types point to. The texts are in the
-    language `$textLang` (the same for the whole reference, set by docs.reference).
+    one of several shapes, each shape. The anchor `schema-<Name>` is what the links of the types point to.
+    The texts are in the language `$textLang` (see docs.reference).
 --}}
-@php
-    $textLang ??= 'en';
-@endphp
 <article class="card mb-3" id="{{ $schema['id'] }}" aria-labelledby="{{ $schema['id'] }}-title">
     <div class="card-header">
         <h3 class="card-title font-monospace" id="{{ $schema['id'] }}-title">{{ $schema['name'] }}</h3>
