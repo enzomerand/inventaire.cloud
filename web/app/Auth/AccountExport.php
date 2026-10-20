@@ -7,6 +7,7 @@ namespace App\Auth;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\InventoryVersion;
+use App\Models\ShareLink;
 use App\Models\User;
 use App\Models\WorkspaceInvitation;
 use App\Models\WorkspaceMember;
@@ -52,6 +53,12 @@ use stdClass;
  * invitations and to nobody else, and an account that handed a workspace over (or was removed from it) no longer sees them in the
  * application, so its export does not give them either. An addition to the document, which keeps its version.
  *
+ * `share_links` are the share links the account made, from the inventories of the workspaces it still owns (those it can still see in the
+ * application, as for the invitations): the inventory (`id` and `name`), the label, whether the files are shown, and when the link was made, expires
+ * and was last opened, the ones that expired and were not deleted yet included. Never the token, nor the hash and the ciphertext that
+ * the database keeps of it: the address is a secret, and the account's export can end up anywhere. An addition to the document, which keeps its
+ * version.
+ *
  * Besides the profile and the workspaces it holds what the application keeps about the account's access: the
  * sessions it has in the database (network address, browser and last activity, never the session id, which is a
  * credential) and the metadata of its API tokens (name, abilities, dates, never the token or its hash).
@@ -90,6 +97,7 @@ final class AccountExport
             ],
             'workspaces' => $this->workspaces($user),
             'invitations' => $this->invitations($user),
+            'share_links' => $this->shareLinks($user),
             'sessions' => $this->sessions($user),
             'tokens' => $this->tokens($user),
         ];
@@ -158,6 +166,32 @@ final class AccountExport
                 'expires_at' => $invitation->expires_at->toIso8601String(),
             ])->all()),
         ];
+    }
+
+    /**
+     * The share links the account made, from the inventories of the workspaces it still owns, newest first. Never the token.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function shareLinks(User $user): array
+    {
+        $owned = WorkspaceMember::query()->where('user_id', $user->getKey())->where('role', WorkspaceRole::Owner->value)->select('workspace_id');
+        $inventories = Inventory::query()->whereIn('workspace_id', $owned)->select('id');
+
+        return array_values(ShareLink::query()
+            ->where('created_by_id', $user->getKey())
+            ->whereIn('inventory_id', $inventories)
+            ->with('inventory')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (ShareLink $link): array => [
+                'inventory' => ['id' => $link->inventory->ulid, 'name' => $link->inventory->name],
+                'label' => $link->label,
+                'include_files' => $link->include_files,
+                'created_at' => $link->created_at?->toIso8601String(),
+                'expires_at' => $link->expires_at?->toIso8601String(),
+                'last_used_at' => $link->last_used_at?->toIso8601String(),
+            ])->all());
     }
 
     /**
