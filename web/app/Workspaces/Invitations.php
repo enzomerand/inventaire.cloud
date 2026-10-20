@@ -38,11 +38,8 @@ use Illuminate\Validation\ValidationException;
  * cannot belong to more than `workspaces.max_per_user` workspaces, the ones it was invited to included (the limit of creating them).
  *
  * Whatever changes the members runs in one transaction under the row locks of {@see Locks}, in their order (the accounts, the workspace,
- * its memberships: see {@see Roster}), and the person who acts is judged again there. The invitations are not locked row by row: every
- * writer of the invitations of a workspace holds the workspace's lock, which keeps them one after the other, and a locking read on
- * `workspace_invitations (workspace_id, email)` would lock the gap after its last row on MySQL and MariaDB, where the first invitation
- * of the next workspace is inserted. Declining is the exception: it deletes one row by its key, without the workspace's lock.
- * Refusals are {@see MembershipRefused}, except what is not there for the caller (an `AuthorizationException` with status 404,
+ * its memberships: see {@see Roster}), and the person who acts is judged again there. How the invitations themselves are read and written
+ * is in {@see Locks}. Refusals are {@see MembershipRefused}, except what is not there for the caller (an `AuthorizationException` with status 404,
  * a `ModelNotFoundException`) and what the rules of a role or an address do not allow (a `ValidationException`).
  */
 final class Invitations
@@ -282,9 +279,7 @@ final class Invitations
                 throw new MembershipRefused(MembershipRefused::MEMBER_LIMIT_REACHED, limit: $limit);
             }
 
-            // A plain count, not a locking read of the account's memberships: the workspace's memberships are locked already, and taking
-            // those of the account now would go back up the global order (see Locks). The account's row is locked, and everything that adds
-            // or removes one of its memberships takes that lock first, so the count cannot change under us.
+            // A plain count, not a locking read of the account's memberships (see Locks).
             $joined = config()->integer('workspaces.max_per_user');
 
             if (WorkspaceMember::query()->where('user_id', $account->getKey())->count() >= $joined) {

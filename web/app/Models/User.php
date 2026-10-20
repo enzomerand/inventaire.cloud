@@ -11,6 +11,7 @@ use App\Database\DeadlockRetries;
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exports\ExportCleanup;
 use App\Inventories\Imports\ImportCleanup;
+use App\Models\Concerns\HasUlidRouteKey;
 use App\Workspaces\Workspaces;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
@@ -156,8 +157,8 @@ class User extends Authenticatable implements HasLocalePreference
     }
 
     /**
-     * Looks an account up by the `ulid` of a path, whatever its case (they are stored in lowercase, and MySQL and MariaDB compare
-     * them without regard to case while PostgreSQL does not): lowering it here makes every engine answer the same.
+     * Looks an account up by the `ulid` of a path, whatever its case, as {@see HasUlidRouteKey::resolveRouteBindingQuery()} does for
+     * the models that use it (an account is bound by its `ulid` only where a route says so: `{member:ulid}`).
      *
      * @param  Model|BuilderContract|Relation<*, *, *>  $query
      * @param  mixed  $value

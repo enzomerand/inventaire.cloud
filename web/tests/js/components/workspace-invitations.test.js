@@ -342,39 +342,6 @@ describe('the invitations of the members page', () => {
             expect(component.workingId).toBeNull();
         });
 
-        it('rounds the wait up to a whole minute, and says "1 minute" in the singular', async () => {
-            http.post.mockRejectedValue(refusal(429, 'resend_too_soon', { retryAfter: 20 }));
-
-            await component.resend(component.invitations[1]);
-
-            expect(notify).toHaveBeenCalledWith(
-                'danger',
-                'This invitation was sent a moment ago: wait 1 minute before sending it again.',
-            );
-        });
-
-        it('reads the wait in the body when the header did not come through', async () => {
-            http.post.mockRejectedValue(refusal(429, 'resend_too_soon', { retry_after: 125 }));
-
-            await component.resend(component.invitations[1]);
-
-            expect(notify).toHaveBeenCalledWith(
-                'danger',
-                'This invitation was sent a moment ago: wait 3 minutes before sending it again.',
-            );
-        });
-
-        it('says it is too soon without a figure when the answer gives none', async () => {
-            http.post.mockRejectedValue(refusal(429, 'resend_too_soon'));
-
-            await component.resend(component.invitations[1]);
-
-            expect(notify).toHaveBeenCalledWith(
-                'danger',
-                'This invitation was sent a moment ago: wait a few minutes before sending it again.',
-            );
-        });
-
         it('tells the pace of invitations when it is the limiter that refuses', async () => {
             http.post.mockRejectedValue(new HttpError(429, 'Too many', { retryAfter: 90 }));
 

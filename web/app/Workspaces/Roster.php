@@ -53,11 +53,9 @@ final class Roster
     /**
      * The membership of an account, or null when it does not belong to the workspace.
      */
-    public function membershipOf(User|int $user): ?WorkspaceMember
+    public function membershipOf(User $user): ?WorkspaceMember
     {
-        $id = $user instanceof User ? (int) $user->getKey() : $user;
-
-        return $this->members->first(fn (WorkspaceMember $member): bool => (int) $member->user_id === $id);
+        return $this->members->first(fn (WorkspaceMember $member): bool => (int) $member->user_id === (int) $user->getKey());
     }
 
     /**

@@ -95,7 +95,6 @@ describe('the list of members', function (): void {
         $entries = members()->list($team[$viewer], $team['workspace']);
 
         expect(array_map(fn (MemberEntry $entry): string => $entry->name.':'.$entry->role->value, $entries))->toBe(['Owner:owner', 'Editor:editor', 'Viewer:viewer'])
-            ->and($entries[0]->id)->toBe($team['owner']->id)
             ->and(array_map(fn (MemberEntry $entry): string => $entry->ulid, $entries))->toBe([$team['owner']->ulid, $team['editor']->ulid, $team['viewer']->ulid])
             ->and($entries[1]->joinedAt?->isToday())->toBeTrue();
     })->with(['the owner' => ['owner'], 'an editor' => ['editor'], 'a viewer' => ['viewer']]);

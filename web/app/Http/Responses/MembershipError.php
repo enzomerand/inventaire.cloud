@@ -51,7 +51,6 @@ final class MembershipError
             MembershipRefused::OWNER_CANNOT_LEAVE => __('The owner cannot leave the workspace: hand the ownership over to another member first.'),
             MembershipRefused::ALREADY_OWNER => __('This member is already the owner of the workspace.'),
             MembershipRefused::RESEND_TOO_SOON => __('This invitation was sent a moment ago: wait a few minutes before sending it again.'),
-            default => __('The change is refused.'),
         };
     }
 }

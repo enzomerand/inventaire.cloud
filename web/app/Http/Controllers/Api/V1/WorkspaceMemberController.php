@@ -18,10 +18,9 @@ use Illuminate\Http\Response;
 /**
  * The members of a workspace: who they are, and for its owner, their roles and who stays.
  *
- * What may be done is decided by {@see Members}, which answers as if the workspace was not there to somebody who does not belong to
- * it (`404`), and refuses a member who is not its owner with the code `not_owner` (`403`, see {@see MembershipRefused}). A member is
- * named in the path by the `ulid` of their account, never by its number (`{member:ulid}`, bound among the members of the workspace: see
- * the routes); one that is not (or no longer) a member of the workspace is a `404`.
+ * What may be done is decided by {@see Members}, whose refusals are {@see MembershipRefused}. A member is named in the path by the
+ * `ulid` of their account, never by its number (`{member:ulid}`, bound among the members of the workspace: see the routes); one that
+ * is not (or no longer) a member of the workspace is a `404`.
  */
 final class WorkspaceMemberController extends Controller
 {

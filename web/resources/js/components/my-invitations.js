@@ -18,12 +18,7 @@ import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo } from '../lib/page.js';
 import { refusalText } from '../members/refusals.js';
-
-/** The badge colors of the roles an invitation gives (Tabler's light variants; a badge always says the role in words as well). */
-const BADGE_CLASSES = {
-    editor: 'bg-azure-lt',
-    viewer: 'bg-secondary-lt',
-};
+import { roleClass, roleLabel } from '../members/roles.js';
 
 /**
  * @typedef {object} ReceivedInvitation An invitation addressed to the person, as `ReceivedInvitationResource` describes it.
@@ -111,25 +106,9 @@ export default function myInvitations() {
             }
         },
 
-        /**
-         * The name of the role an invitation gives, in the language of the page.
-         *
-         * @param {ReceivedInvitation} invitation
-         * @returns {string}
-         */
-        roleLabel(invitation) {
-            return t(`workspaces.role.${invitation.role}`);
-        },
-
-        /**
-         * The classes of the badge of the role an invitation gives.
-         *
-         * @param {ReceivedInvitation} invitation
-         * @returns {string}
-         */
-        roleClass(invitation) {
-            return BADGE_CLASSES[invitation.role] ?? 'bg-secondary-lt';
-        },
+        /** The name of a role and the classes of its badge (see `members/roles.js`), for the template to call. */
+        roleLabel,
+        roleClass,
 
         /**
          * Who invited the person, as a sentence ("" when that account was deleted).

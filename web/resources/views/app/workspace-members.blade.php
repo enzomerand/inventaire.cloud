@@ -109,7 +109,7 @@
                                                     data-member-action="transfer"
                                                     :data-member-id="member.id"
                                                     :aria-label="transferLabel(member)"
-                                                    @click="askTransfer(member)"
+                                                    @click="ask(member, 'transfer')"
                                                     :disabled="busy"
                                                 >
                                                     <x-tabler-crown aria-hidden="true" />
@@ -122,7 +122,7 @@
                                                     :data-member-id="member.id"
                                                     :aria-label="removeLabel(member)"
                                                     :title="removeLabel(member)"
-                                                    @click="askRemove(member)"
+                                                    @click="ask(member, 'remove')"
                                                     :disabled="busy"
                                                 >
                                                     <x-tabler-user-minus aria-hidden="true" />

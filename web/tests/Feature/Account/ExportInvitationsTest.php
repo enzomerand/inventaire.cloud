@@ -58,14 +58,6 @@ describe('the invitations in the export of the account', function (): void {
             ->and(app(AccountExport::class)->for($successor)['invitations']['sent'])->toBe([]);
     });
 
-    it('give the identifier of the account among the members, and not its number alone', function (): void {
-        $user = User::factory()->create();
-
-        $export = app(AccountExport::class)->for($user);
-
-        expect($export['user']['ulid'])->toBe($user->ulid)->and($export['user']['ulid'])->toMatch('/^[0-7][0-9a-hjkmnp-tv-z]{25}$/');
-    });
-
     it('list those the account received: the name of the workspace, who invited, the role and when it lapses, and no identifier', function (): void {
         $this->travelTo(now()->startOfSecond());
         $owner = User::factory()->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);

@@ -145,9 +145,7 @@ class AppServiceProvider extends ServiceProvider
             ->by('workspace-creation:'.$this->signedInKey($request)));
 
         // Inviting and sending an invitation again mail an address the owner chooses (`invitations_per_hour`, both together), keyed on the
-        // owner. The address has a pace of its own too (`invitations_per_address_per_day`), but it is held by the service, once the request
-        // has been judged and only for a mail that is sent: a throttle runs before anything is judged, so it would count the attempts of a
-        // member who may not invite, or of a workspace that is not there, against the address (see App\Workspaces\InvitationPace).
+        // owner. The address has a pace of its own too (`invitations_per_address_per_day`), held by the service: only a mail that is sent counts (see App\Workspaces\InvitationPace).
         RateLimiter::for('workspace-invitations', fn (Request $request): Limit => Limit::perHour(config()->integer('workspaces.invitations_per_hour'))
             ->by('workspace-invitations:'.$this->signedInKey($request)));
     }

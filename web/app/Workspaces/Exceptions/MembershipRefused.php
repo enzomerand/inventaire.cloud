@@ -44,7 +44,7 @@ final class MembershipRefused extends RuntimeException
     public const RESEND_TOO_SOON = 'resend_too_soon';
 
     /**
-     * @param  string  $reason  One of the constants above.
+     * @param  self::*  $reason  One of the constants above.
      * @param  int|null  $limit  For {@see self::MEMBER_LIMIT_REACHED} and {@see self::MEMBERSHIP_LIMIT_REACHED}: the limit that was reached.
      * @param  int|null  $retryAfter  For {@see self::RESEND_TOO_SOON}: the seconds to wait.
      */

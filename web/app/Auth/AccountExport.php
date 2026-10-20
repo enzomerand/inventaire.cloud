@@ -10,6 +10,7 @@ use App\Models\InventoryVersion;
 use App\Models\User;
 use App\Models\WorkspaceInvitation;
 use App\Models\WorkspaceMember;
+use App\Workspaces\Invitations;
 use App\Workspaces\Membership;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
@@ -63,7 +64,7 @@ final class AccountExport
     /** Version of the structure of the document. */
     public const VERSION = 1;
 
-    public function __construct(private readonly Workspaces $workspaces) {}
+    public function __construct(private readonly Workspaces $workspaces, private readonly Invitations $invitations) {}
 
     /**
      * The export of an account.
@@ -141,7 +142,6 @@ final class AccountExport
     {
         $owned = WorkspaceMember::query()->where('user_id', $user->getKey())->where('role', WorkspaceRole::Owner->value)->select('workspace_id');
         $sent = WorkspaceInvitation::query()->where('invited_by_id', $user->getKey())->whereIn('workspace_id', $owned)->pending()->with('workspace')->orderByDesc('id')->get();
-        $received = WorkspaceInvitation::query()->addressedTo($user->email)->pending()->with(['workspace', 'inviter'])->orderByDesc('id')->get();
 
         return [
             'sent' => array_values($sent->map(fn (WorkspaceInvitation $invitation): array => [
@@ -151,7 +151,7 @@ final class AccountExport
                 'created_at' => $invitation->created_at?->toIso8601String(),
                 'expires_at' => $invitation->expires_at->toIso8601String(),
             ])->all()),
-            'received' => array_values($received->map(fn (WorkspaceInvitation $invitation): array => [
+            'received' => array_values($this->invitations->pendingFor($user)->map(fn (WorkspaceInvitation $invitation): array => [
                 'workspace' => $invitation->workspace->name,
                 'invited_by' => $invitation->inviter?->name,
                 'role' => $invitation->role->value,

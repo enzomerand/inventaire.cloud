@@ -16,7 +16,6 @@ use Carbon\CarbonInterface;
 final readonly class MemberEntry
 {
     /**
-     * @param  int  $id  The account's id (internal: it never leaves the application).
      * @param  string  $ulid  The identifier the API gives the member ({@see User::$ulid}).
      * @param  string  $name  The name of the member.
      * @param  string|null  $email  The address, or null when the person who asks is not allowed to see it.
@@ -25,7 +24,6 @@ final readonly class MemberEntry
      * @param  bool  $self  Whether this line is the person who asks.
      */
     public function __construct(
-        public int $id,
         public string $ulid,
         public string $name,
         public ?string $email,

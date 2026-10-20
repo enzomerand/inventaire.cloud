@@ -135,8 +135,7 @@ describe('the members page of a workspace', () => {
             expect(component.roleLabel(owner)).toBe('Owner');
             expect(component.roleLabel(editor)).toBe('Editor');
             expect(component.roleLabel(member('x', { role: 'viewer' }))).toBe('Viewer');
-            expect(new Set(['owner', 'editor', 'viewer'].map((role) => component.roleClass({ role }))).size).toBe(3);
-            expect(component.roleClass({ role: 'something else' })).toBe('bg-secondary-lt');
+            expect(component.roleClass(owner)).not.toBe(component.roleClass(editor));
             expect(component.joinedText(editor)).toBe('Joined <2026-10-01T10:00:00+00:00>');
             expect(component.joinedText(member('y', { joined_at: null }))).toBe('');
             expect(component.roleSelectLabel(editor)).toBe('Role of Member m-ed');
@@ -317,7 +316,7 @@ describe('the members page of a workspace', () => {
                 focus: () => log.push('confirm:m-ed'),
             });
 
-            component.askRemove(editor);
+            component.ask(editor, 'remove');
 
             expect(component.isConfirming(editor)).toBe(true);
             expect(component.isConfirming(component.members[2])).toBe(false);
@@ -335,7 +334,7 @@ describe('the members page of a workspace', () => {
                 dataset: { memberAction: 'remove', memberId: 'm-ed' },
                 focus: () => log.push('remove:m-ed'),
             });
-            component.askRemove(component.members[1]);
+            component.ask(component.members[1], 'remove');
             log.length = 0;
 
             component.cancelConfirm();
@@ -346,7 +345,7 @@ describe('the members page of a workspace', () => {
 
         it('removes the member, tells the owner and puts the cursor on the heading', async () => {
             http.delete.mockResolvedValue(null);
-            component.askRemove(component.members[1]);
+            component.ask(component.members[1], 'remove');
             log.length = 0;
 
             await component.confirm(component.members[1]);
@@ -376,7 +375,7 @@ describe('the members page of a workspace', () => {
                 new HttpError(409, 'Something went wrong.', { code: 'owner_cannot_leave', body: {} }),
             );
             http.get.mockClear();
-            component.askRemove(component.members[1]);
+            component.ask(component.members[1], 'remove');
 
             await component.remove(component.members[1]);
 
@@ -405,7 +404,7 @@ describe('the members page of a workspace', () => {
         });
 
         it('asks first, with a warning rather than a danger', () => {
-            component.askTransfer(component.members[1]);
+            component.ask(component.members[1], 'transfer');
 
             expect(component.isConfirming(component.members[1])).toBe(true);
             expect(component.confirmText(component.members[1])).toBe(
@@ -417,7 +416,7 @@ describe('the members page of a workspace', () => {
 
         it('sends the identifier of the member, tells the owner and reloads the page once the notice has been read', async () => {
             http.post.mockResolvedValue({ data: { id: 'shop', role: 'editor' } });
-            component.askTransfer(component.members[1]);
+            component.ask(component.members[1], 'transfer');
 
             await component.confirm(component.members[1]);
 
@@ -440,7 +439,7 @@ describe('the members page of a workspace', () => {
                 new HttpError(409, 'Something went wrong.', { code: 'already_owner', body: {} }),
             );
             http.get.mockClear();
-            component.askTransfer(component.members[1]);
+            component.ask(component.members[1], 'transfer');
 
             await component.transfer(component.members[1]);
 

@@ -16,12 +16,7 @@ import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
 import { reloadPage } from '../lib/page.js';
 import { refusalText } from '../members/refusals.js';
-
-/** The badge colors of the roles an invitation gives (Tabler's light variants; a badge always says the role in words as well). */
-const BADGE_CLASSES = {
-    editor: 'bg-azure-lt',
-    viewer: 'bg-secondary-lt',
-};
+import { roleClass, roleLabel } from '../members/roles.js';
 
 /**
  * @typedef {object} SentInvitation An invitation the workspace sent, as `SentInvitationResource` describes it.
@@ -258,25 +253,9 @@ export default function workspaceInvitations() {
             return this.workingId === invitation.id;
         },
 
-        /**
-         * The name of the role an invitation gives, in the language of the page.
-         *
-         * @param {SentInvitation} invitation
-         * @returns {string}
-         */
-        roleLabel(invitation) {
-            return t(`workspaces.role.${invitation.role}`);
-        },
-
-        /**
-         * The classes of the badge of the role an invitation gives.
-         *
-         * @param {SentInvitation} invitation
-         * @returns {string}
-         */
-        roleClass(invitation) {
-            return BADGE_CLASSES[invitation.role] ?? 'bg-secondary-lt';
-        },
+        /** The name of a role and the classes of its badge (see `members/roles.js`), for the template to call. */
+        roleLabel,
+        roleClass,
 
         /**
          * Who sent an invitation and until when it is good, as a sentence.
@@ -460,24 +439,15 @@ export default function workspaceInvitations() {
         },
 
         /**
-         * An element the cursor can be put on, by the name its markup gives it (`data-focus`). It is looked up from the root
-         * rather than with `$refs`, which is empty once the element that started the call has left the page.
+         * Puts the cursor on an element, by the name its markup gives it (`data-focus`), once what was changed has been rendered.
+         * It is looked up from the root rather than with `$refs`, which is empty once the element that started the call has left
+         * the page.
          *
          * @param {'email' | 'heading'} name
-         * @returns {HTMLElement | null}
-         */
-        target(name) {
-            return this.rootElement.querySelector(`[data-focus="${name}"]`);
-        },
-
-        /**
-         * Puts the cursor on an element once what was changed has been rendered.
-         *
-         * @param {'email' | 'heading'} name Name of the element (see {@link target}).
          * @returns {void}
          */
         focus(name) {
-            this.$nextTick(() => this.target(name)?.focus());
+            this.$nextTick(() => this.rootElement.querySelector(`[data-focus="${name}"]`)?.focus());
         },
 
         /**

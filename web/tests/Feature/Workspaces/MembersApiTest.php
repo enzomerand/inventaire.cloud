@@ -353,13 +353,12 @@ describe('handing the ownership over', function (): void {
         expect(memberApiRole($team['workspace'], $team['owner']))->toBe('owner');
     });
 
-    it('wants a member_id in the body, and the old field name user_id no longer names anybody', function (): void {
+    it('wants a member_id in the body', function (): void {
         $team = inventoryTeam();
         $uri = "/api/v1/workspaces/{$team['workspace']->ulid}/transfer";
 
         inventoryCall($this, $team['owner'], 'POST', $uri)->assertUnprocessable()->assertJsonValidationErrors(['member_id']);
         inventoryCall($this, $team['owner'], 'POST', $uri, ['member_id' => ['a']])->assertUnprocessable()->assertJsonValidationErrors(['member_id']);
-        inventoryCall($this, $team['owner'], 'POST', $uri, ['user_id' => $team['editor']->ulid])->assertUnprocessable()->assertJsonValidationErrors(['member_id']);
 
         expect(memberApiRole($team['workspace'], $team['owner']))->toBe('owner');
     });

@@ -18,13 +18,7 @@ import { t } from '../lib/i18n.js';
 import { notify } from '../lib/notify.js';
 import { redirectTo, reloadPage } from '../lib/page.js';
 import { refusalText } from '../members/refusals.js';
-
-/** The badge colors of the roles (Tabler's light variants; a badge always says the role in words as well). */
-const BADGE_CLASSES = {
-    owner: 'bg-primary-lt',
-    editor: 'bg-azure-lt',
-    viewer: 'bg-secondary-lt',
-};
+import { roleClass, roleLabel } from '../members/roles.js';
 
 /**
  * @typedef {object} Member A member, as `MemberResource` describes it.
@@ -150,6 +144,10 @@ export default function workspaceMembers() {
             }
         },
 
+        /** The name of a role and the classes of its badge (see `members/roles.js`), for the template to call. */
+        roleLabel,
+        roleClass,
+
         /**
          * Whether the owner may act on a member: any member but the owner (their role is not theirs to change, they are not removed).
          *
@@ -158,26 +156,6 @@ export default function workspaceMembers() {
          */
         canManage(member) {
             return this.isOwner && member.role !== 'owner';
-        },
-
-        /**
-         * The name of a role, in the language of the page.
-         *
-         * @param {{ role: string }} member A member, or an invitation.
-         * @returns {string}
-         */
-        roleLabel(member) {
-            return t(`workspaces.role.${member.role}`);
-        },
-
-        /**
-         * The classes of the badge of a role.
-         *
-         * @param {{ role: string }} member A member, or an invitation.
-         * @returns {string}
-         */
-        roleClass(member) {
-            return BADGE_CLASSES[member.role] ?? 'bg-secondary-lt';
         },
 
         /**
@@ -263,26 +241,6 @@ export default function workspaceMembers() {
          */
         confirmTextId(member) {
             return `member-confirm-text-${member.id}`;
-        },
-
-        /**
-         * Asks for the confirmation of the removal of a member.
-         *
-         * @param {Member} member
-         * @returns {void}
-         */
-        askRemove(member) {
-            this.ask(member, 'remove');
-        },
-
-        /**
-         * Asks for the confirmation of the handing over of the ownership to a member.
-         *
-         * @param {Member} member
-         * @returns {void}
-         */
-        askTransfer(member) {
-            this.ask(member, 'transfer');
         },
 
         /**
@@ -545,25 +503,15 @@ export default function workspaceMembers() {
         },
 
         /**
-         * An element of the card the cursor can be put on, by the name its markup gives it (`data-focus`). It is looked up from
-         * the root rather than with `$refs`, which is empty once the element that started the call (the button of a row that
-         * was just removed) has left the page.
+         * Puts the cursor on an element of the card, by the name its markup gives it (`data-focus`), once what was changed has been
+         * rendered. It is looked up from the root rather than with `$refs`, which is empty once the element that started the call
+         * (the button of a row that was just removed) has left the page.
          *
          * @param {'heading' | 'leave' | 'confirmLeave'} name
-         * @returns {HTMLElement | null}
-         */
-        target(name) {
-            return this.rootElement.querySelector(`[data-focus="${name}"]`);
-        },
-
-        /**
-         * Puts the cursor on an element of the card once what was changed has been rendered.
-         *
-         * @param {'heading' | 'leave' | 'confirmLeave'} name Name of the element (see {@link target}).
          * @returns {void}
          */
         focus(name) {
-            this.$nextTick(() => this.target(name)?.focus());
+            this.$nextTick(() => this.rootElement.querySelector(`[data-focus="${name}"]`)?.focus());
         },
 
         /**

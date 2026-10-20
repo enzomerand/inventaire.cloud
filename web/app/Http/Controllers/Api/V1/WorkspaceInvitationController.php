@@ -19,9 +19,8 @@ use Illuminate\Http\Response;
 /**
  * The invitations a workspace has sent that wait for an answer: for its owner, who invites, sends again and withdraws them.
  *
- * What may be done is decided by {@see Invitations}: somebody who does not belong to the workspace is answered as if it was not there
- * (`404`), a member who is not its owner is refused with the code `not_owner` (`403`, see {@see MembershipRefused}). An invitation that
- * is not one of this workspace, has lapsed or was withdrawn is a `404`.
+ * What may be done is decided by {@see Invitations}, whose refusals are {@see MembershipRefused}. An invitation that is not one of
+ * this workspace, has lapsed or was withdrawn is a `404`.
  */
 final class WorkspaceInvitationController extends Controller
 {

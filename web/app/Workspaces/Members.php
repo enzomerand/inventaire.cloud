@@ -197,9 +197,7 @@ final class Members
      * Ends a membership, under the locks of the caller.
      *
      * The workspace is no longer the one the account works in, if it was. An account left with no workspace at all is given its personal one.
-     * Whether it has another is a plain count of its memberships, not a locking read: the memberships of the workspace are locked already,
-     * and locking those of the account now would go back up the global order (see {@see Locks}). The account's row is locked, and everything
-     * that adds or removes one of its memberships takes that lock first, so the count cannot change under us.
+     * Whether it has another is a plain count of its memberships, not a locking read (see {@see Locks}).
      *
      * @param  User  $copy  The caller's copy of the account, brought in line with the locked one.
      */
@@ -230,7 +228,6 @@ final class Members
     private function entry(WorkspaceMember $member, User $account, bool $showEmail, User $viewer): MemberEntry
     {
         return new MemberEntry(
-            id: (int) $account->getKey(),
             ulid: $account->ulid,
             name: $account->name,
             email: $showEmail ? $account->email : null,

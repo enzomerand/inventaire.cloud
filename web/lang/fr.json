@@ -1303,7 +1303,6 @@
     "The owner cannot leave the workspace: hand the ownership over to another member first.": "Le propriétaire ne peut pas quitter l'espace de travail : transférez d'abord la propriété à un autre membre.",
     "This member is already the owner of the workspace.": "Ce membre est déjà le propriétaire de l'espace de travail.",
     "This invitation was sent a moment ago: wait a few minutes before sending it again.": "Cette invitation a été envoyée à l'instant : attendez quelques minutes avant de la renvoyer.",
-    "The change is refused.": "Le changement est refusé.",
     "This person is not a member of the workspace.": "Cette personne n'est pas membre de l'espace de travail.",
     "Members": "Membres",
     "Members of :name": "Membres de :name",

@@ -65,8 +65,8 @@ final class WorkspaceInvitationMail extends Mailable
             view: 'mail.workspace-invitation-html',
             text: 'mail.workspace-invitation',
             with: [
-                'inviter' => self::oneLine($this->inviterName),
-                'workspace' => self::oneLine($this->workspaceName),
+                'inviter' => PlainText::oneLine($this->inviterName),
+                'workspace' => PlainText::oneLine($this->workspaceName),
                 'roleLabel' => match ($this->role) {
                     WorkspaceRole::Owner => __('Owner'),
                     WorkspaceRole::Editor => __('Editor'),
@@ -75,14 +75,5 @@ final class WorkspaceInvitationMail extends Mailable
                 'expiresLabel' => DisplayTime::of($this->expiresAt)->locale(app()->getLocale())->isoFormat('LL'),
             ],
         );
-    }
-
-    /**
-     * The text on one line: what a user wrote (a name) cannot add lines to the plain-text body, nor reorder what is around it with
-     * direction characters (control and format characters, and every kind of space, become a single space).
-     */
-    private static function oneLine(string $text): string
-    {
-        return trim(preg_replace('/[\p{C}\p{Z}]+/u', ' ', $text) ?? '');
     }
 }
