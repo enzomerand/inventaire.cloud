@@ -241,7 +241,9 @@ final class OpenApi
             if (is_array($tag) && isset($tag['name'])) {
                 $tags[] = [
                     'name' => (string) $tag['name'],
-                    'displayName' => (string) ($tag['x-displayName'] ?? $tag['name']),
+                    'displayName' => is_string($tag['x-displayName'] ?? null) && $tag['x-displayName'] !== ''
+                        ? $tag['x-displayName']
+                        : (string) $tag['name'],
                     'description' => (string) ($tag['description'] ?? ''),
                 ];
             }
