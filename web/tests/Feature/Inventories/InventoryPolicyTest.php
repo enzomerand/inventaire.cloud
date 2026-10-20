@@ -18,15 +18,15 @@ describe('what each role may do', function (): void {
     it('follows the role of the member in the workspace', function (WorkspaceRole $role, array $expected): void {
         expect(InventoryPolicy::abilities($role))->toBe($expected);
     })->with([
-        'an owner' => [WorkspaceRole::Owner, ['view' => true, 'create' => true, 'update' => true, 'delete' => true, 'manage_fields' => true, 'edit_items' => true]],
-        'an editor' => [WorkspaceRole::Editor, ['view' => true, 'create' => true, 'update' => true, 'delete' => false, 'manage_fields' => true, 'edit_items' => true]],
-        'a viewer' => [WorkspaceRole::Viewer, ['view' => true, 'create' => false, 'update' => false, 'delete' => false, 'manage_fields' => false, 'edit_items' => false]],
+        'an owner' => [WorkspaceRole::Owner, ['view' => true, 'create' => true, 'update' => true, 'delete' => true, 'manage_fields' => true, 'edit_items' => true, 'share' => true]],
+        'an editor' => [WorkspaceRole::Editor, ['view' => true, 'create' => true, 'update' => true, 'delete' => false, 'manage_fields' => true, 'edit_items' => true, 'share' => false]],
+        'a viewer' => [WorkspaceRole::Viewer, ['view' => true, 'create' => false, 'update' => false, 'delete' => false, 'manage_fields' => false, 'edit_items' => false, 'share' => false]],
     ]);
 
     it('is what the gate answers for the members, action by action', function (): void {
         $team = inventoryTeam();
         $inventory = inventoryIn($team['workspace']);
-        $actions = ['view' => 'view', 'update' => 'update', 'delete' => 'delete', 'manageFields' => 'manage_fields', 'editItems' => 'edit_items'];
+        $actions = ['view' => 'view', 'update' => 'update', 'delete' => 'delete', 'manageFields' => 'manage_fields', 'editItems' => 'edit_items', 'share' => 'share'];
 
         foreach (['owner' => WorkspaceRole::Owner, 'editor' => WorkspaceRole::Editor, 'viewer' => WorkspaceRole::Viewer] as $who => $role) {
             $abilities = InventoryPolicy::abilities($role);
@@ -47,9 +47,10 @@ describe('what each role may do', function (): void {
         $editor = Gate::forUser($team['editor'])->inspect('delete', $inventory);
 
         expect($viewer->allowed())->toBeFalse()->and($viewer->message())->not->toBe('')->and($viewer->status())->toBeNull()
-            ->and($editor->allowed())->toBeFalse()->and($editor->message())->toBe('Seul un propriétaire de cet espace de travail peut supprimer un inventaire.');
+            ->and($editor->allowed())->toBeFalse()->and($editor->message())->toBe('Seul un propriétaire de cet espace de travail peut supprimer un inventaire.')
+            ->and(Gate::forUser($team['editor'])->inspect('share', $inventory)->message())->toBe('Seul un propriétaire de cet espace de travail peut partager un inventaire.');
 
-        foreach (['view', 'update', 'delete', 'manageFields', 'editItems'] as $ability) {
+        foreach (['view', 'update', 'delete', 'manageFields', 'editItems', 'share'] as $ability) {
             $stranger = Gate::forUser($team['stranger'])->inspect($ability, $inventory);
 
             expect($stranger->allowed())->toBeFalse()->and($stranger->status())->toBe(404, $ability);

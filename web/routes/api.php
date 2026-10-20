@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\MyInvitationController;
 use App\Http\Controllers\Api\V1\OpenApiController;
+use App\Http\Controllers\Api\V1\ShareLinkController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\TemplateController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
@@ -196,6 +197,15 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::put('/inventories/{inventory}/fields/order', [InventoryFieldController::class, 'reorder'])->name('inventories.fields.order');
             Route::patch('/inventories/{inventory}/fields/{field}', [InventoryFieldController::class, 'update'])->name('inventories.fields.update');
             Route::delete('/inventories/{inventory}/fields/{field}', [InventoryFieldController::class, 'destroy'])->name('inventories.fields.destroy');
+        });
+
+        // Share links: the secret read-only addresses of an inventory, for its owners. Every operation asks for `manage`, the listing included:
+        // the list holds the addresses, which are secrets. Making one is counted per person (a link is a public door), and refused while the
+        // administrator has sharing turned off.
+        Route::scopeBindings()->middleware('token:manage')->group(function (): void {
+            Route::get('/inventories/{inventory}/share-links', [ShareLinkController::class, 'index'])->name('inventories.share-links.index');
+            Route::post('/inventories/{inventory}/share-links', [ShareLinkController::class, 'store'])->middleware('throttle:share-link-creation')->name('inventories.share-links.store');
+            Route::delete('/inventories/{inventory}/share-links/{shareLink}', [ShareLinkController::class, 'destroy'])->name('inventories.share-links.destroy');
         });
 
         // The administration of the instance: its administrators only (the "admin" gate), and the web front only (a

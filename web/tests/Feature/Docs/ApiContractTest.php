@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Inventories\Exports\ExportFormat;
 use App\Inventories\Versions\SignatureError;
 use App\Inventories\Versions\SignatureStatus;
+use App\Models\ShareLink;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -425,6 +426,31 @@ function contractScenarios(): array
             Queue::fake();
 
             contractCheck(contractCall($test, $world['owner'], 'retryVersionSignature', 'POST', contractUri($world['inventory'], "/versions/{$version->ulid}/signature/retry")), 'retryVersionSignature', 202);
+        },
+
+        'listShareLinks' => function (object $test): void {
+            $world = contractWorld();
+            shareLinkMake($world['inventory'], $world['owner'], 'Insurer', false, 7);
+            shareLinkMake($world['inventory'], $world['owner'], null, true, null);
+            // One that expired and whose author is gone.
+            ShareLink::factory()->for($world['inventory'])->expired()->create(['created_by_id' => null]);
+
+            contractCheck(contractCall($test, $world['owner'], 'listShareLinks', 'GET', contractUri($world['inventory'], '/share-links')), 'listShareLinks', 200);
+        },
+
+        'createShareLink' => function (object $test): void {
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'createShareLink', 'POST', contractUri($world['inventory'], '/share-links'), ['label' => 'Insurer', 'include_files' => false, 'expires_in_days' => 30]), 'createShareLink', 201);
+            contractCheck(contractCall($test, $world['owner'], 'createShareLink', 'POST', contractUri($world['inventory'], '/share-links'), ['expires_in_days' => null]), 'createShareLink', 201);
+            contractCheck(contractCall($test, $world['owner'], 'createShareLink', 'POST', contractUri($world['inventory'], '/share-links')), 'createShareLink', 201);
+        },
+
+        'deleteShareLink' => function (object $test): void {
+            $world = contractWorld();
+            ['link' => $link] = shareLinkMake($world['inventory'], $world['owner']);
+
+            contractCheck(contractCall($test, $world['owner'], 'deleteShareLink', 'DELETE', contractUri($world['inventory'], "/share-links/{$link->ulid}")), 'deleteShareLink', 204);
         },
 
         'listTemplates' => function (object $test): void {

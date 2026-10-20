@@ -4,7 +4,7 @@ info:
   version: '1'
   summary: The public JSON API of inventaire.cloud.
   description: |
-    The public API of inventaire.cloud: workspaces, their members and invitations, inventories, fields, items and their files, exports, imports and official versions.
+    The public API of inventaire.cloud: workspaces, their members and invitations, inventories, fields, items and their files, exports, imports, official versions and share links.
     Most of what the web application does with your data can be done here, with a personal access token.
 
     ## Authentication
@@ -30,7 +30,7 @@ info:
     - `read`: every `GET` operation;
     - `write`: the content of an inventory, that is items, attachments, exports, imports and official versions (create, change, delete);
     - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete), and the people of a workspace, that is its members,
-      their roles and its invitations.
+      their roles and its invitations, and the share links of an inventory.
 
     The abilities are independent: `write` and `manage` do not include `read`. A token that cannot read can hardly be
     used, since the ids that the other operations need are found with `GET`: give `read` along with the others. What a
@@ -51,7 +51,7 @@ info:
     `too_many_requests` and a `Retry-After` header, the number of seconds to wait.
 
     Some operations have a stricter limit of their own, counted per user: creating a workspace, uploading a file,
-    asking for an export, sending or re-reading a file to import, freezing an inventory as an official version, sending an invitation to a workspace (or sending it again). A request that is refused before it gets that far (a
+    asking for an export, sending or re-reading a file to import, freezing an inventory as an official version, sending an invitation to a workspace (or sending it again), making a share link. A request that is refused before it gets that far (a
     token that lacks the ability, for instance) does not use it up. Past it the answer is `429` as well, with
     `Retry-After`. The public template catalogue has its own limit, per network address.
 
@@ -99,7 +99,7 @@ info:
     Lists that can be long are paginated with the `page` query parameter (1 by default): 50 items, 25 revisions or 20 versions per
     page. The answer is `{"data": […], "links": {"first", "last", "prev", "next"}, "meta": {"current_page", "last_page",
     "per_page", "total", "from", "to", "path", "links"}}`; the links of the pages keep your other query parameters.
-    The other lists (workspaces, members, invitations, inventories, field types, templates) are answered in one piece, in `data`; the lists of
+    The other lists (workspaces, members, invitations, inventories, field types, share links, templates) are answered in one piece, in `data`; the lists of
     exports and imports hold the 20 newest.
 
     ## Language
@@ -156,6 +156,10 @@ tags:
     x-displayName: Official versions
     description: >-
       The inventory frozen as numbered, dated versions, each with its data (JSON), its PDF and, if asked for, signatures by email.
+  - name: Share links
+    x-displayName: Share links
+    description: >-
+      Secret read-only addresses that show an inventory to anybody who holds them, made and revoked by the owners of its workspace.
   - name: Templates
     x-displayName: Templates
     description: The public catalogue of inventory templates. No token needed.
@@ -4665,6 +4669,258 @@ paths:
               description: >-
                 The rate limit of the token is reached, or the workspace has already made as many requests for signatures today as it
                 may (20 a day by default). Wait `Retry-After` seconds.
+  /inventories/{inventory}/share-links:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+    get:
+      tags:
+        - Share links
+      operationId: listShareLinks
+      summary: List the share links of an inventory
+      description: >-
+        The share links of the inventory, newest first, the ones that expired included (they are deleted 30 days after they expire).
+        Owners of the workspace only.
+
+        A link is a secret address, its `url`, that shows the inventory read-only (its name, description, fields and items, and their
+        files when `include_files` is true) to anybody who holds it, whoever they are and whether they have an account. So the answer is
+        never kept by a cache (`Cache-Control: no-store`), and this operation asks for `manage`, not `read`. `url` is null for a link whose
+        address can no longer be read back (the application key of the instance was changed): make a new link. Listing still works while
+        the administrator of the instance has sharing turned off, so that the owner can see what is there and revoke it.
+      x-ability: manage
+      responses:
+        '200':
+          description: The links.
+          headers:
+            Cache-Control:
+              description: 'Always `no-store, private`: the answer holds secret addresses, and nothing may keep a copy of it.'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ShareLink'
+              example:
+                data:
+                  - id: 01k8gv2d9m3x5r7qn4p6t8w0yb
+                    label: Insurer
+                    url: https://inventaire.example/s/V3q7Kc1bXz9mP4rT8yL2nH6dF5sJ_wE-AuGoIe0QkMb
+                    include_files: true
+                    expires_at: '2026-11-19T12:30:00+00:00'
+                    last_used_at: null
+                    created_at: '2026-10-20T12:30:00+00:00'
+                    created_by:
+                      id: 01k8gv2d9m3x5r7qn4p6t8w0yc
+                      name: Ada Lovelace
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Share links
+      operationId: createShareLink
+      summary: Make a share link
+      description: >-
+        Makes a read-only link to the inventory. Owners of the workspace only. The answer is the link, with its `url`: the address to give
+        out, which is also given by the list for as long as the application key of the instance stays the same. Whoever holds it sees
+        the name, the description, the fields and the items of the inventory, and their files and photos when `include_files` is true;
+        nothing about the workspace, its members or who made the link. Revoke it (`DELETE`) to close it at once.
+
+        `expires_in_days` is 7, 30, 90 or 365, or null for a link that never expires; it is 30 when left out. `include_files` is true
+        when left out.
+
+        An inventory can have 20 links by default, the ones that expired counting until they are deleted (`share_link_limit_reached`), a
+        user can make 20 an hour by default (`429` beyond, with `Retry-After`), and the administrator of the instance can turn sharing
+        off (`share_links_disabled`).
+      x-ability: manage
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type:
+                    - string
+                    - 'null'
+                  maxLength: 80
+                  description: What you call the link, on one line, to tell the links apart. None when absent, null or empty.
+                include_files:
+                  type: boolean
+                  default: true
+                  description: Whether the files and photos of the items are shown, and can be downloaded, through the link.
+                expires_in_days:
+                  type:
+                    - integer
+                    - 'null'
+                  enum:
+                    - 7
+                    - 30
+                    - 90
+                    - 365
+                    - null
+                  default: 30
+                  description: Days the link works for. Null makes a link that never expires.
+      responses:
+        '201':
+          description: The link that was made.
+          headers:
+            Cache-Control:
+              description: 'Always `no-store, private`: the answer holds secret addresses, and nothing may keep a copy of it.'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ShareLink'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: share_link_limit_reached
+              description: The inventory already has as many links as allowed. `limit` says how many.
+            - code: share_links_disabled
+              description: The administrator of the instance turned sharing by link off.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, or the share links an hour of the user, is reached.
+  /inventories/{inventory}/share-links/{shareLink}:
+    parameters:
+      - $ref: '#/components/parameters/InventoryId'
+      - $ref: '#/components/parameters/ShareLinkId'
+    delete:
+      tags:
+        - Share links
+      operationId: deleteShareLink
+      summary: Revoke a share link
+      description: >-
+        Deletes the link: its address stops working at once, for everybody who holds it, and the files it served stop being served. Owners of
+        the workspace only.
+      x-ability: manage
+      responses:
+        '204':
+          description: The link is revoked.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
   /templates:
     get:
       tags:
@@ -4843,6 +5099,13 @@ components:
       in: path
       required: true
       description: The id of the official version. It must belong to the inventory of the path.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    ShareLinkId:
+      name: shareLink
+      in: path
+      required: true
+      description: The id of the share link, as the list gives it. It must belong to the inventory of the path.
       schema:
         $ref: '#/components/schemas/Ulid'
     MemberId:
@@ -5302,6 +5565,7 @@ components:
         - delete
         - manage_fields
         - edit_items
+        - share
       properties:
         update:
           type: boolean
@@ -5315,6 +5579,9 @@ components:
         edit_items:
           type: boolean
           description: Add, change and delete items, upload files, import.
+        share:
+          type: boolean
+          description: Make, list and revoke share links.
     Inventory:
       type: object
       description: An inventory. `fields` is only given when a single inventory is read or changed.
@@ -6348,6 +6615,66 @@ components:
             retry_signature:
               type: boolean
               description: Editors and owners, for a completed version whose request for signatures failed.
+    ShareLink:
+      type: object
+      description: A secret read-only address to an inventory, as seen by its owners.
+      required:
+        - id
+        - label
+        - url
+        - include_files
+        - expires_at
+        - last_used_at
+        - created_at
+        - created_by
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        label:
+          type:
+            - string
+            - 'null'
+          maxLength: 80
+          description: What the owner calls the link. Null when they gave none.
+        url:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: >-
+            The address to give out (`https://<instance>/s/<token>`): the token in it is the secret, so anybody who holds the address sees
+            the inventory. Null when it can no longer be read back, because the application key of the instance was changed since the link
+            was made: make a new link.
+        include_files:
+          type: boolean
+          description: Whether the files and photos of the items are shown, and can be downloaded, through the link.
+        expires_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+          description: >-
+            When the link stops working. Null for a link that never expires. A link past it is refused, and stays listed until it is deleted,
+            30 days later.
+        last_used_at:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+          description: When the link was last opened, to the hour. Null until it is.
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+        created_by:
+          description: Who made the link, as the id they have among the members, null once their account was deleted.
+          oneOf:
+            - type: object
+              required:
+                - id
+                - name
+              properties:
+                id:
+                  $ref: '#/components/schemas/Ulid'
+                name:
+                  type: string
+            - type: 'null'
     TemplateBase:
       type: object
       description: What a template is called and where to read about it. The list and the detail share it.

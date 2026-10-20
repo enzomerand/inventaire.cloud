@@ -21,6 +21,7 @@ use Illuminate\Testing\TestResponse;
 
 require_once __DIR__.'/contract.php';
 require_once __DIR__.'/imports.php';
+require_once __DIR__.'/sharing.php';
 require_once __DIR__.'/templates.php';
 require_once __DIR__.'/tokens.php';
 require_once __DIR__.'/versions.php';

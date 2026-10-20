@@ -55,6 +55,7 @@ final class InventoryResource extends JsonResource
                 'delete' => $abilities['delete'],
                 'manage_fields' => $abilities['manage_fields'],
                 'edit_items' => $abilities['edit_items'],
+                'share' => $abilities['share'],
             ],
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

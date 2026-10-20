@@ -83,9 +83,9 @@ describe('listing the inventories of a workspace', function (): void {
             ->and($response->json('data.0'))->toMatchArray(['fields_count' => 0, 'items_count' => 0])
             ->and($response->json('data.1'))->not->toHaveKey('fields');
     })->with([
-        'an owner' => ['owner', ['update' => true, 'delete' => true, 'manage_fields' => true, 'edit_items' => true]],
-        'an editor' => ['editor', ['update' => true, 'delete' => false, 'manage_fields' => true, 'edit_items' => true]],
-        'a viewer' => ['viewer', ['update' => false, 'delete' => false, 'manage_fields' => false, 'edit_items' => false]],
+        'an owner' => ['owner', ['update' => true, 'delete' => true, 'manage_fields' => true, 'edit_items' => true, 'share' => true]],
+        'an editor' => ['editor', ['update' => true, 'delete' => false, 'manage_fields' => true, 'edit_items' => true, 'share' => false]],
+        'a viewer' => ['viewer', ['update' => false, 'delete' => false, 'manage_fields' => false, 'edit_items' => false, 'share' => false]],
     ]);
 
     it('is a 404 for somebody who does not belong to the workspace', function (): void {
@@ -260,7 +260,7 @@ describe('reading an inventory', function (): void {
             'name' => 'Tools',
             'fields_count' => 2,
             'items_count' => 1,
-            'abilities' => ['update' => $canEdit, 'delete' => $role === 'owner', 'manage_fields' => $canEdit, 'edit_items' => $canEdit],
+            'abilities' => ['update' => $canEdit, 'delete' => $role === 'owner', 'manage_fields' => $canEdit, 'edit_items' => $canEdit, 'share' => $role === 'owner'],
         ])->and(array_column($response->json('data.fields'), 'id'))->toBe([$second->ulid, $first->ulid])
             // MySQL keeps the keys of a JSON object in an order of its own: the options are compared as a set.
             ->and($response->json('data.fields.0'))->toEqual([

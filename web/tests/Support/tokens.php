@@ -38,6 +38,7 @@ function tokenRouteClassification(): array
         'inventories.destroy', 'inventories.fields.store', 'inventories.fields.order', 'inventories.fields.update', 'inventories.fields.destroy',
         'workspaces.members.update', 'workspaces.members.destroy', 'workspaces.invitations.store',
         'workspaces.invitations.resend', 'workspaces.invitations.destroy', 'me.invitations.accept', 'me.invitations.destroy',
+        'inventories.share-links.index', 'inventories.share-links.store', 'inventories.share-links.destroy',
     ];
 
     $classification = [];

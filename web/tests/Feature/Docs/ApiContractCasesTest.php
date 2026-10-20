@@ -11,6 +11,7 @@ use App\Inventories\Versions\VersionError;
 use App\Inventories\Versions\VersionStatus;
 use App\Models\Import;
 use App\Models\InventoryVersion;
+use App\Settings\InstanceSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -658,5 +659,115 @@ describe('the errors of the members and the invitations', function (): void {
         foreach (contractHeaders('createInvitation', 429) as $header) {
             expect($response->headers->has($header))->toBeTrue("the header {$header}");
         }
+    });
+});
+
+describe('the errors of the share links', function (): void {
+    it('answers 403 with no code to a member who does not own the workspace, as the document says, and 403 with the code to a token that lacks the ability', function (): void {
+        $world = contractWorld();
+        ['link' => $link] = shareLinkMake($world['inventory'], $world['owner']);
+        $uri = contractUri($world['inventory'], '/share-links');
+
+        foreach ([
+            ['editor', 'listShareLinks', 'GET', $uri],
+            ['viewer', 'createShareLink', 'POST', $uri],
+            ['editor', 'deleteShareLink', 'DELETE', "{$uri}/{$link->ulid}"],
+        ] as [$role, $operationId, $method, $path]) {
+            $response = tokenCall($this, tokenFor($world['team'][$role], ['manage']), $method, $path);
+
+            contractCheck($response, $operationId, 403);
+            expect($response->json())->not->toHaveKey('code', "{$role} {$operationId}");
+        }
+
+        foreach ([['listShareLinks', 'GET', $uri], ['createShareLink', 'POST', $uri], ['deleteShareLink', 'DELETE', "{$uri}/{$link->ulid}"]] as [$operationId, $method, $path]) {
+            $response = tokenCall($this, tokenFor($world['owner'], ['read', 'write']), $method, $path);
+
+            contractCheck($response, $operationId, 403);
+            expect($response->json('code'))->toBe('token_ability_missing')->and(contractCodes($operationId, 403))->toContain('token_ability_missing');
+        }
+    });
+
+    it('answers 404 to a stranger, and to a link that is not of the inventory of the path', function (): void {
+        $world = contractWorld();
+        $other = inventoryIn($world['team']['workspace'], 'Other');
+        ['link' => $theirs] = shareLinkMake($other, $world['owner']);
+        $uri = contractUri($world['inventory'], '/share-links');
+
+        contractCheck(contractCall($this, $world['team']['stranger'], 'listShareLinks', 'GET', $uri), 'listShareLinks', 404);
+        contractCheck(contractCall($this, $world['team']['stranger'], 'createShareLink', 'POST', $uri), 'createShareLink', 404);
+        contractCheck(contractCall($this, $world['owner'], 'deleteShareLink', 'DELETE', "{$uri}/{$theirs->ulid}"), 'deleteShareLink', 404);
+        contractCheck(contractCall($this, $world['owner'], 'deleteShareLink', 'DELETE', "{$uri}/01j0000000000000000000000x"), 'deleteShareLink', 404);
+    });
+
+    it('answers 409 with the codes the document lists, and the quota that was reached', function (): void {
+        config(['inventories.max_share_links' => 1]);
+        $world = contractWorld();
+        $uri = contractUri($world['inventory'], '/share-links');
+        shareLinkMake($world['inventory'], $world['owner']);
+
+        $full = contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri);
+
+        contractCheck($full, 'createShareLink', 409);
+        expect($full->json('code'))->toBe('share_link_limit_reached')
+            ->and($full->json('limit'))->toBe(1)
+            ->and(contractCodes('createShareLink', 409))->toContain('share_link_limit_reached');
+
+        app(InstanceSettings::class)->update([InstanceSettings::SHARE_LINKS_ENABLED => false]);
+        $off = contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri);
+
+        contractCheck($off, 'createShareLink', 409);
+        expect($off->json('code'))->toBe('share_links_disabled')->and(contractCodes('createShareLink', 409))->toContain('share_links_disabled');
+    });
+
+    it('answers 422 with the faults of the body under their keys', function (): void {
+        $world = contractWorld();
+        $uri = contractUri($world['inventory'], '/share-links');
+
+        $lifetime = contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri, ['expires_in_days' => 14], valid: false);
+        $label = contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri, ['label' => str_repeat('a', 81)], valid: false);
+
+        contractCheck($lifetime, 'createShareLink', 422);
+        contractCheck($label, 'createShareLink', 422);
+        expect($lifetime->json('errors'))->toHaveKey('expires_in_days')->and($label->json('errors'))->toHaveKey('label');
+    });
+
+    it('answers 429 to a person who makes links too often, with the headers and the code the document lists', function (): void {
+        config(['inventories.share_link_creations_per_hour' => 1]);
+        $world = contractWorld();
+        $uri = contractUri($world['inventory'], '/share-links');
+
+        contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri)->assertCreated();
+        $response = contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri);
+
+        contractCheck($response, 'createShareLink', 429);
+        expect($response->json('code'))->toBe('too_many_requests')->and(contractCodes('createShareLink', 429))->toContain('too_many_requests');
+
+        foreach (contractHeaders('createShareLink', 429) as $header) {
+            expect($response->headers->has($header))->toBeTrue("the header {$header}");
+        }
+    });
+
+    it('documents that the answers which hold addresses are never cached, and the answer does carry it', function (): void {
+        $world = contractWorld();
+        $uri = contractUri($world['inventory'], '/share-links');
+
+        $made = contractCall($this, $world['owner'], 'createShareLink', 'POST', $uri);
+        $listed = contractCall($this, $world['owner'], 'listShareLinks', 'GET', $uri);
+
+        foreach ([['createShareLink', 201, $made], ['listShareLinks', 200, $listed]] as [$operationId, $status, $response]) {
+            expect(contractHeaders($operationId, $status))->toContain('Cache-Control')
+                ->and((string) $response->headers->get('Cache-Control'))->toContain('no-store');
+        }
+    });
+
+    it('fit the schema of the inventory, which now says what the user may share', function (): void {
+        $world = contractWorld();
+
+        $owner = contractCall($this, $world['owner'], 'getInventory', 'GET', contractUri($world['inventory']));
+        $editor = tokenCall($this, tokenFor($world['team']['editor'], ['read']), 'GET', contractUri($world['inventory']));
+
+        contractCheck($owner, 'getInventory', 200);
+        contractCheck($editor, 'getInventory', 200);
+        expect($owner->json('data.abilities.share'))->toBeTrue()->and($editor->json('data.abilities.share'))->toBeFalse();
     });
 });
