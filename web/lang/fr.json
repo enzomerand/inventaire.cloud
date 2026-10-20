@@ -1401,5 +1401,7 @@
     "Revoke the link :name? Its address stops working at once.": "Révoquer le lien :name ? Son adresse cesse de fonctionner immédiatement.",
     "Link created.": "Lien créé.",
     "Link revoked.": "Lien révoqué.",
-    "This inventory already has :count share links: revoke one to make another.": "Cet inventaire a déjà :count liens de partage : révoquez-en un pour en créer un autre."
+    "This inventory already has :count share links that work: revoke one to make another.": "Cet inventaire a déjà :count liens de partage actifs : révoquez-en un pour en créer un autre.",
+    "Created by a former member": "Créé par un ancien membre",
+    "Its author is no longer an owner of this workspace, but the link works until it expires or you revoke it.": "Son auteur n'est plus propriétaire de cet espace de travail, mais le lien fonctionne jusqu'à son expiration ou jusqu'à ce que vous le révoquiez."
 }

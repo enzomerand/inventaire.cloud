@@ -1661,7 +1661,7 @@ paths:
       description: |-
         Crée un lien en lecture seule vers l'inventaire. Réservé aux propriétaires de l'espace de travail. La réponse est le lien, avec son `url` : l'adresse à communiquer, que la liste donne aussi tant que la clé d'application de l'instance ne change pas. Quiconque la détient voit le nom, la description, les champs et les articles de l'inventaire, et leurs fichiers et photos quand `include_files` vaut true ; rien de l'espace de travail, de ses membres ni de la personne qui a créé le lien. Révoquez-le (`DELETE`) pour le fermer aussitôt.
         `expires_in_days` vaut 7, 30, 90 ou 365, ou null pour un lien qui n'expire jamais ; 30 s'il est omis. `include_files` vaut true s'il est omis.
-        Un inventaire peut avoir 20 liens par défaut, ceux qui ont expiré comptant jusqu'à ce qu'ils soient supprimés (`share_link_limit_reached`), un utilisateur peut en créer 20 par heure par défaut (`429` au-delà, avec `Retry-After`), et l'administrateur de l'instance peut désactiver le partage (`share_links_disabled`).
+        Un inventaire peut avoir 20 liens qui fonctionnent par défaut, ceux qui ont expiré ne comptant pas (`share_link_limit_reached`), un utilisateur peut en créer 20 par heure par défaut (`429` au-delà, avec `Retry-After`), et l'administrateur de l'instance peut désactiver le partage (`share_links_disabled`).
       requestBody:
         content:
           application/json:
@@ -2226,7 +2226,13 @@ components:
         last_used_at:
           description: "Quand le lien a été ouvert pour la dernière fois, à l'heure près. Null tant qu'il ne l'a pas été."
         created_by:
-          description: "Qui a créé le lien, avec l'identifiant qu'il a parmi les membres, null quand son compte a été supprimé depuis."
+          description: "Qui a créé le lien, avec l'identifiant qu'il a parmi les membres, null quand son compte a été supprimé depuis. Un lien appartient à l'inventaire, pas à son auteur : il fonctionne jusqu'à son expiration ou sa révocation, même quand son auteur n'est plus propriétaire."
+          oneOf:
+            -
+              properties:
+                is_owner:
+                  description: "Indique si ce compte est toujours propriétaire de l'espace de travail. Faux quand il l'a quitté ou qu'il est devenu éditeur ou lecteur : le lien n'est plus le sien, et un propriétaire voudra peut-être le révoquer."
+            - []
     TemplateBase:
       description: "Comment s'appelle un modèle et où en lire la présentation. La liste et le détail le partagent."
       properties:

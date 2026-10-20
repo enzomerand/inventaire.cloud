@@ -7282,7 +7282,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 expires_at: '2999-01-01T10:00:00+00:00',
                 last_used_at: null,
                 created_at: '2026-10-01T10:00:00+00:00',
-                created_by: { id: 'u1', name: 'Ada' },
+                created_by: { id: 'u1', name: 'Ada', is_owner: true },
                 ...overrides,
             };
         }
@@ -7394,6 +7394,26 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(visible(items()[0].querySelector('input[readonly]'))).toBe(false);
                 expect(items()[0].textContent).toContain('can no longer be read');
+            });
+
+            it('marks the links made by somebody who is no longer an owner, or whose account is gone', async () => {
+                await open([
+                    shareLink('c', { created_by: null }),
+                    shareLink('b', { created_by: { id: 'u2', name: 'Bob', is_owner: false } }),
+                    shareLink('a'),
+                ]);
+
+                const [deleted, demoted, owner] = items();
+                const mark = 'Created by a former member';
+                const hint = 'no longer an owner of this workspace';
+
+                for (const row of [deleted, demoted]) {
+                    expect(shown(row, '.badge')).toEqual(['Active', 'Photos and files shown', mark]);
+                    expect(shown(row, '.text-secondary.small').join(' ')).toContain(hint);
+                }
+
+                expect(shown(owner, '.badge')).toEqual(['Active', 'Photos and files shown']);
+                expect(shown(owner, '.text-secondary.small').join(' ')).not.toContain(hint);
             });
 
             it('shows what people typed as text', async () => {

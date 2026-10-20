@@ -7,8 +7,8 @@ namespace App\Inventories\Exceptions;
 use RuntimeException;
 
 /**
- * An inventory already has as many share links as `inventories.max_share_links` allows (the ones that expired count until they are deleted):
- * one has to be revoked before another can be made. The API answers it with a 409.
+ * An inventory already has as many share links that still work as `inventories.max_share_links` allows (the ones that expired do not
+ * count): one has to be revoked before another can be made. The API answers it with a 409.
  */
 final class ShareLinkLimitReachedException extends RuntimeException
 {

@@ -99,13 +99,11 @@ final class SharedInventory
 
         $this->search->restrict($items, $search);
 
-        $requested = max(1, min($page, self::MAX_PAGE));
-        $paginator = (clone $items)->paginate(Items::PER_PAGE, Items::LIST_COLUMNS, 'page', $requested);
-
-        // A page past the end shows the last one, not an empty table.
-        if ($paginator->total() > 0 && $requested > $paginator->lastPage()) {
-            $paginator = $items->paginate(Items::PER_PAGE, Items::LIST_COLUMNS, 'page', $paginator->lastPage());
-        }
+        // The items are counted once and the page is brought back to the last one before anything is read: a page past the end shows the
+        // last one, not an empty table, and asking for page 1000000 never makes the database skip fifty million rows.
+        $total = $items->toBase()->getCountForPagination();
+        $lastPage = max(1, (int) ceil($total / Items::PER_PAGE));
+        $paginator = $items->paginate(Items::PER_PAGE, Items::LIST_COLUMNS, 'page', min(max(1, $page), $lastPage), $total);
 
         return $this->shape($table, $paginator, $search, $token);
     }

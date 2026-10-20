@@ -60,7 +60,7 @@ function link(id, overrides = {}) {
         expires_at: '2999-01-01T10:00:00+00:00',
         last_used_at: null,
         created_at: '2026-10-01T10:00:00+00:00',
-        created_by: { id: 'u1', name: 'Ada' },
+        created_by: { id: 'u1', name: 'Ada', is_owner: true },
         ...overrides,
     };
 }
@@ -223,6 +223,37 @@ describe('share links page of an inventory', () => {
             expect(component.atLimit).toBe(false);
             expect(component.canCreate).toBe(true);
             expect(component.limitText).toBe('');
+        });
+    });
+
+    describe('the links that outlive their author', () => {
+        it('tells a link made by somebody who is no longer an owner, or whose account is gone, from the others', () => {
+            const owner = link('a');
+            const demoted = link('b', { created_by: { id: 'u2', name: 'Bob', is_owner: false } });
+            const deleted = link('c', { created_by: null });
+
+            expect(component.byFormerMember(owner)).toBe(false);
+            expect(component.byFormerMember(demoted)).toBe(true);
+            expect(component.byFormerMember(deleted)).toBe(true);
+            // An answer that does not say is not taken for an owner.
+            expect(component.byFormerMember(link('d', { created_by: { id: 'u3', name: 'Cy' } }))).toBe(true);
+        });
+
+        it('does not count the links that expired towards the limit', async () => {
+            const expired = (id) => link(id, { expires_at: '2000-01-01T00:00:00+00:00' });
+            http.get.mockResolvedValue({ data: [expired('e'), expired('d'), link('c'), link('b'), expired('a')] });
+            await component.init();
+
+            expect(component.links).toHaveLength(5);
+            expect(component.atLimit).toBe(false);
+            expect(component.canCreate).toBe(true);
+            expect(component.limitText).toBe('');
+
+            component.links = [link('f'), ...component.links];
+
+            expect(component.atLimit).toBe(true);
+            expect(component.canCreate).toBe(false);
+            expect(component.limitText).toBe('At most 3 links');
         });
     });
 

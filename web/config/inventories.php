@@ -327,10 +327,10 @@ return [
     | The owner of an inventory shares it, read-only, through a secret link
     | (see App\Inventories\Sharing\ShareLinks).
     |
-    | - `max_share_links`: links one inventory may have (`INVENTORIES_MAX_SHARE_LINKS`,
-    |   20), the ones that expired included until they are deleted: the API
-    |   answers 409 (`share_link_limit_reached`) beyond. Counted under the lock
-    |   of the inventory's row.
+    | - `max_share_links`: links one inventory may have that still work
+    |   (`INVENTORIES_MAX_SHARE_LINKS`, 20), the ones that expired not counting:
+    |   the API answers 409 (`share_link_limit_reached`) beyond. Counted under
+    |   the lock of the inventory's row.
     | - `share_link_creations_per_hour`: links one person may make in an hour
     |   (`INVENTORIES_SHARE_LINK_CREATIONS_PER_HOUR`, 20), `429` beyond.
     | - `share_page_per_minute`: requests per minute the public page of a link

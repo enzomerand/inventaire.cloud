@@ -78,6 +78,7 @@
                                     <span class="fw-bold text-break" x-text="linkName(link)"></span>
                                     <span class="badge" :class="stateClass(link)" x-text="stateLabel(link)"></span>
                                     <span class="badge bg-secondary-lt" x-text="filesLabel(link)"></span>
+                                    <span class="badge bg-yellow-lt" :hidden="!byFormerMember(link)">{{ __('Created by a former member') }}</span>
                                 </div>
                                 <div class="text-secondary small">
                                     <span x-text="createdText(link)"></span>
@@ -85,6 +86,10 @@
                                     <span x-text="lastUsedText(link)"></span>
                                     &middot;
                                     <span x-text="expiresText(link)"></span>
+                                </div>
+
+                                <div class="text-secondary small mt-1" :hidden="!byFormerMember(link)">
+                                    {{ __('Its author is no longer an owner of this workspace, but the link works until it expires or you revoke it.') }}
                                 </div>
 
                                 <div class="input-group input-group-sm mt-2" :hidden="!showsUrl(link)">

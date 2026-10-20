@@ -32,7 +32,7 @@ const DEFAULT_EXPIRY = '30';
  * @property {string | null} expires_at ISO 8601; null for a link that never expires.
  * @property {string | null} last_used_at ISO 8601; null for a link nobody opened.
  * @property {string | null} created_at ISO 8601.
- * @property {{ id: string, name: string } | null} created_by
+ * @property {{ id: string, name: string, is_owner: boolean } | null} created_by `is_owner`: whether that account is still an owner of the workspace; null once the account was deleted.
  */
 
 /**
@@ -96,9 +96,9 @@ export default function inventorySharing() {
             return this.rootElement.dataset.url;
         },
 
-        /** Whether the inventory has as many links as it may (the API refuses the next one). */
+        /** Whether the inventory has as many links as it may (the API refuses the next one): the expired ones do not count. */
         get atLimit() {
-            return this.limit > 0 && this.links.length >= this.limit;
+            return this.limit > 0 && this.links.filter((link) => !this.isExpired(link)).length >= this.limit;
         },
 
         /** Whether the button that opens the creation form is shown: sharing is on, and the form is not open. */
@@ -388,6 +388,17 @@ export default function inventorySharing() {
          */
         linkName(link) {
             return link.label ? link.label : t('sharing.untitled');
+        },
+
+        /**
+         * Whether a link was made by somebody who is no longer an owner of the workspace: they left it, were given another role, or deleted
+         * their account. The link outlives them, so the owners are told.
+         *
+         * @param {ShareLink} link
+         * @returns {boolean}
+         */
+        byFormerMember(link) {
+            return !link.created_by || link.created_by.is_owner !== true;
         },
 
         /**

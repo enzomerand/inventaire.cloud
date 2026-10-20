@@ -98,12 +98,12 @@ describe('making a link', function (): void {
             ->and(ShareLink::query()->count())->toBe(0);
     });
 
-    it('is refused beyond the links an inventory may have, the expired ones counting, and not for another inventory', function (): void {
+    it('is refused beyond the links an inventory may have, and not for another inventory', function (): void {
         config(['inventories.max_share_links' => 2]);
         $case = shareLinkCase();
         $other = inventoryIn($case['team']['workspace'], 'Other');
         shareLinkMake($case['inventory'], $case['owner']);
-        ShareLink::factory()->for($case['inventory'])->expired()->create();
+        shareLinkMake($case['inventory'], $case['owner']);
 
         try {
             shareLinkMake($case['inventory'], $case['owner']);
@@ -118,6 +118,39 @@ describe('making a link', function (): void {
         shareLinkMake($other, $case['owner']);
 
         expect(ShareLink::query()->where('inventory_id', $other->id)->count())->toBe(1);
+    });
+
+    it('does not count the links that expired: twenty of them leave room, twenty that work do not', function (): void {
+        $limit = config()->integer('inventories.max_share_links');
+        $case = shareLinkCase();
+        ShareLink::factory()->count($limit)->for($case['inventory'])->expired()->create();
+
+        ['link' => $made] = shareLinkMake($case['inventory'], $case['owner']);
+
+        expect($limit)->toBe(20)
+            ->and($made->isExpired())->toBeFalse()
+            ->and(ShareLink::query()->where('inventory_id', $case['inventory']->id)->count())->toBe($limit + 1);
+
+        ShareLink::query()->whereKey($made->getKey())->delete();
+        ShareLink::factory()->count($limit - 1)->for($case['inventory'])->create();
+        shareLinkMake($case['inventory'], $case['owner']);
+
+        expect(fn () => shareLinkMake($case['inventory'], $case['owner']))->toThrow(ShareLinkLimitReachedException::class)
+            ->and(ShareLink::query()->where('inventory_id', $case['inventory']->id)->active()->count())->toBe($limit)
+            ->and(ShareLink::query()->where('inventory_id', $case['inventory']->id)->count())->toBe($limit * 2);
+    });
+
+    it('stops counting a link the moment its time is up', function (): void {
+        config(['inventories.max_share_links' => 1]);
+        $case = shareLinkCase();
+        $link = ShareLink::factory()->for($case['inventory'])->create(['expires_at' => now()->addMinute()]);
+
+        expect(fn () => shareLinkMake($case['inventory'], $case['owner']))->toThrow(ShareLinkLimitReachedException::class);
+
+        $link->forceFill(['expires_at' => now()])->save();
+        shareLinkMake($case['inventory'], $case['owner']);
+
+        expect(ShareLink::query()->where('inventory_id', $case['inventory']->id)->count())->toBe(2);
     });
 
     it('leaves room again when a link is revoked', function (): void {

@@ -99,7 +99,7 @@ class ClientMessages extends Component
             'sharing.select_hint' => __('The address is selected: copy it with your keyboard.'),
             'sharing.notice.created' => __('Link created.'),
             'sharing.notice.revoked' => __('Link revoked.'),
-            'sharing.error.limit' => __('This inventory already has :count share links: revoke one to make another.'),
+            'sharing.error.limit' => __('This inventory already has :count share links that work: revoke one to make another.'),
             'sharing.error.disabled' => __('Sharing by link is turned off on this instance.'),
             'admin.users.workspace_count' => __('Workspaces: :count'),
             'admin.users.created_on' => __('Created on :date'),

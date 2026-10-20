@@ -4718,6 +4718,7 @@ paths:
                     created_by:
                       id: 01k8gv2d9m3x5r7qn4p6t8w0yc
                       name: Ada Lovelace
+                      is_owner: true
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -4769,7 +4770,7 @@ paths:
         `expires_in_days` is 7, 30, 90 or 365, or null for a link that never expires; it is 30 when left out. `include_files` is true
         when left out.
 
-        An inventory can have 20 links by default, the ones that expired counting until they are deleted (`share_link_limit_reached`), a
+        An inventory can have 20 links that work by default, the ones that expired not counting (`share_link_limit_reached`), a
         user can make 20 an hour by default (`429` beyond, with `Retry-After`), and the administrator of the instance can turn sharing
         off (`share_links_disabled`).
       x-ability: manage
@@ -6663,17 +6664,25 @@ components:
         created_at:
           $ref: '#/components/schemas/Timestamp'
         created_by:
-          description: Who made the link, as the id they have among the members, null once their account was deleted.
+          description: >-
+            Who made the link, as the id they have among the members, null once their account was deleted. A link belongs to the inventory,
+            not to its author: it keeps working until it expires or is revoked, even when its author is no longer an owner.
           oneOf:
             - type: object
               required:
                 - id
                 - name
+                - is_owner
               properties:
                 id:
                   $ref: '#/components/schemas/Ulid'
                 name:
                   type: string
+                is_owner:
+                  type: boolean
+                  description: >-
+                    Whether that account is still an owner of the workspace. False once they left it or became an editor or a viewer: the link
+                    is theirs no more, and an owner may want to revoke it.
             - type: 'null'
     TemplateBase:
       type: object

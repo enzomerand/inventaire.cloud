@@ -11,6 +11,7 @@ use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Fields\UploadedFilesType;
 use App\Inventories\Sharing\ShareLinks;
 use App\Models\Attachment;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -21,10 +22,11 @@ use Symfony\Component\HttpFoundation\Response;
  * Each request judges the link again, so that a link revoked a moment ago serves nothing: the link must work ({@see ShareLinks::resolve()}) and
  * show the files (`include_files`); the item must belong to the inventory of the link and the file to the item; and the file must be one the
  * page shows, that of a photo or file field of the inventory (a file attached to an item with no field is not shown anywhere on the page, so
- * it is not served either). Anything else is a `404` page, the same whatever the reason. The file itself is answered by
- * {@see StoredFileResponse}, as the API does (a download, a sandbox for whatever it holds, `nosniff`), and nothing is kept by a cache: not even
- * the thumbnail, which the API lets a browser keep for an hour, since a revocation must take effect at once. Like the page, these routes
- * keep no session.
+ * it is not served either), and the file must still be on its disk. Anything else is a `404` page, the same whatever the reason (a file
+ * that is gone gets the page too, not the JSON of the API). The file itself is answered by {@see StoredFileResponse}, as the API does (a
+ * download, a sandbox for whatever it holds, `nosniff`), and every answer is revalidated on every request (`private, no-cache`: a browser
+ * may keep a copy but must ask before using it), the thumbnail too, which the API lets a browser use for an hour without asking, since a
+ * revocation must take effect at once. Like the page, these routes keep no session.
  */
 final class ShareFileController extends Controller
 {
@@ -42,7 +44,7 @@ final class ShareFileController extends Controller
      */
     public function show(Request $request, string $token, string $item, string $attachment): Response
     {
-        return $this->uncached(StoredFileResponse::file($this->find($token, $item, $attachment), $this->storage, $request));
+        return $this->served(StoredFileResponse::file($this->find($token, $item, $attachment), $this->storage, $request));
     }
 
     /**
@@ -50,7 +52,7 @@ final class ShareFileController extends Controller
      */
     public function thumbnail(string $token, string $item, string $attachment): Response
     {
-        return $this->uncached(StoredFileResponse::thumbnail($this->find($token, $item, $attachment), $this->storage));
+        return $this->served(StoredFileResponse::thumbnail($this->find($token, $item, $attachment), $this->storage));
     }
 
     /**
@@ -93,9 +95,21 @@ final class ShareFileController extends Controller
     }
 
     /**
-     * Has a cache revalidate the answer each time (the link may be revoked between two requests).
+     * The answer of {@see StoredFileResponse}, made fit for a visitor of the public page: the JSON `404` of the API (the file or its
+     * thumbnail is not there) becomes the `404` page every other refusal shows, and the rest is revalidated on every request.
      */
-    private function uncached(Response $response): Response
+    private function served(Response $response): Response
+    {
+        abort_if($response instanceof JsonResponse && $response->getStatusCode() === 404, 404);
+
+        return $this->revalidated($response);
+    }
+
+    /**
+     * Has a cache ask again before it uses a copy (the link may be revoked between two requests): `no-cache` allows a stored copy, but only
+     * after it was revalidated.
+     */
+    private function revalidated(Response $response): Response
     {
         $response->headers->set('Cache-Control', 'private, no-cache');
 

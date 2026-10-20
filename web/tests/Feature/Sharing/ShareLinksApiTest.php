@@ -6,6 +6,7 @@ use App\Inventories\Sharing\ShareLinks;
 use App\Models\ShareLink;
 use App\Models\User;
 use App\Settings\InstanceSettings;
+use App\Workspaces\WorkspaceRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -43,7 +44,7 @@ describe('listing the links', function (): void {
                 'expires_at' => null,
                 'last_used_at' => null,
                 'created_at' => now()->toIso8601String(),
-                'created_by' => ['id' => $case['owner']->ulid, 'name' => 'Owner'],
+                'created_by' => ['id' => $case['owner']->ulid, 'name' => 'Owner', 'is_owner' => true],
             ],
             [
                 'id' => $first->ulid,
@@ -53,7 +54,7 @@ describe('listing the links', function (): void {
                 'expires_at' => now()->subMinute()->addDays(7)->toIso8601String(),
                 'last_used_at' => now()->subMinute()->toIso8601String(),
                 'created_at' => now()->subMinute()->toIso8601String(),
-                'created_by' => ['id' => $case['owner']->ulid, 'name' => 'Owner'],
+                'created_by' => ['id' => $case['owner']->ulid, 'name' => 'Owner', 'is_owner' => true],
             ],
         ]]);
     });
@@ -108,6 +109,35 @@ describe('listing the links', function (): void {
         expect($data)->toHaveCount(1)->and($data[0]['created_by'])->toBeNull();
     });
 
+    it('says whether the author is still an owner of the workspace: a link outlives the ownership of its author', function (): void {
+        $case = shareLinkCase();
+        $workspace = $case['team']['workspace'];
+        $coOwner = inventoryPerson('Co-owner');
+        $demoted = inventoryPerson('Demoted');
+        $gone = inventoryPerson('Gone');
+        $workspace->members()->attach($coOwner->id, ['role' => WorkspaceRole::Owner->value]);
+        $workspace->members()->attach($demoted->id, ['role' => WorkspaceRole::Owner->value]);
+        $workspace->members()->attach($gone->id, ['role' => WorkspaceRole::Owner->value]);
+        shareLinkMake($case['inventory'], $case['owner'], 'By the owner');
+        shareLinkMake($case['inventory'], $coOwner, 'By a co-owner');
+        shareLinkMake($case['inventory'], $demoted, 'By one made an editor');
+        shareLinkMake($case['inventory'], $gone, 'By one who left');
+        shareLinkMake($case['inventory'], $case['team']['editor'], 'By an editor');
+        $workspace->members()->updateExistingPivot($demoted->id, ['role' => WorkspaceRole::Editor->value]);
+        $workspace->members()->detach($gone->id);
+
+        $data = collect(shareLinkCall($this, $case['owner'], 'GET', shareLinkUri($case['inventory']))->assertOk()->json('data'))->keyBy('label');
+
+        expect($data->map(fn (array $link): bool => $link['created_by']['is_owner'])->all())->toEqual([
+            'By the owner' => true,
+            'By a co-owner' => true,
+            'By one made an editor' => false,
+            'By one who left' => false,
+            'By an editor' => false,
+        ])
+            ->and($data['By one who left']['created_by']['name'])->toBe('Gone');
+    });
+
     it('gives neither the hash nor the encrypted token, and the token only inside the address', function (): void {
         $case = shareLinkCase();
         ['token' => $token] = shareLinkMake($case['inventory'], $case['owner']);
@@ -147,7 +177,7 @@ describe('making a link', function (): void {
             'expires_at' => now()->addDays(90)->toIso8601String(),
             'last_used_at' => null,
             'created_at' => now()->toIso8601String(),
-            'created_by' => ['id' => $case['owner']->ulid, 'name' => 'Owner'],
+            'created_by' => ['id' => $case['owner']->ulid, 'name' => 'Owner', 'is_owner' => true],
         ]])
             ->and($token)->toMatch('/^[A-Za-z0-9_-]{43}$/')
             ->and($link->token_hash)->toBe(hash('sha256', $token))
@@ -228,18 +258,19 @@ describe('making a link', function (): void {
         shareLinkCall($this, $case['owner'], 'POST', shareLinkUri($case['inventory']), ['label' => str_repeat('é', 80)])->assertCreated();
     });
 
-    it('answers 409 with the limit when the inventory has as many links as it may, the expired ones counting', function (): void {
+    it('answers 409 with the limit when the inventory has as many links that work as it may, the expired ones not counting', function (): void {
         config(['inventories.max_share_links' => 2]);
         $case = shareLinkCase();
         shareLinkMake($case['inventory'], $case['owner']);
         ShareLink::factory()->for($case['inventory'])->expired()->create();
+        shareLinkMake($case['inventory'], $case['owner']);
 
         $response = shareLinkCall($this, $case['owner'], 'POST', shareLinkUri($case['inventory']))->assertStatus(409);
 
         expect($response->json('code'))->toBe('share_link_limit_reached')
             ->and($response->json('limit'))->toBe(2)
             ->and($response->json('message'))->toBe('An inventory can have 2 share links at a time: delete one to make another.')
-            ->and(ShareLink::query()->count())->toBe(2);
+            ->and(ShareLink::query()->count())->toBe(3);
 
         // Another inventory has its own count.
         shareLinkCall($this, $case['owner'], 'POST', shareLinkUri(inventoryIn($case['team']['workspace'], 'Other')))->assertCreated();

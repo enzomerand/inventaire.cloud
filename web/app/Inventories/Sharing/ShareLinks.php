@@ -10,10 +10,12 @@ use App\Inventories\Exceptions\ShareLinksDisabledException;
 use App\Models\Inventory;
 use App\Models\ShareLink;
 use App\Models\User;
+use App\Models\WorkspaceMember;
 use App\Rules\SingleLineText;
 use App\Settings\InstanceSettings;
 use App\Support\PublicUrls;
 use App\Workspaces\Locks;
+use App\Workspaces\WorkspaceRole;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Database\DatabaseManager;
@@ -31,8 +33,8 @@ use InvalidArgumentException;
  * up ({@see self::resolve()}), and the token encrypted with the application key, so that the owner can copy the address again
  * ({@see self::urlOf()}). When the key was changed and the token cannot be read back, the address is null and the owner makes a new link.
  *
- * An inventory may have `inventories.max_share_links` links, the ones that expired included until they are deleted; the count is made
- * under the lock of the inventory's row, so that requests made at the same moment cannot cross it together. A link past its expiry is
+ * An inventory may have `inventories.max_share_links` links that still work: the ones that expired do not count, they only wait to be
+ * deleted. The count is made under the lock of the inventory's row, so that requests made at the same moment cannot cross it together. A link past its expiry is
  * refused by {@see self::resolve()}, as are all the links while the administrator has sharing turned off
  * ({@see InstanceSettings::shareLinksEnabled()}); unknown, malformed, expired and disabled all answer null, so a visitor cannot tell
  * them apart. Expired links stay listed to their owner, then `inventaire:prune-share-links` deletes them ({@see self::prune()}).
@@ -173,7 +175,7 @@ final class ShareLinks
             $this->locks->author($author);
             $locked = $this->locks->inventory($inventory->getKey());
 
-            if (ShareLink::query()->where('inventory_id', $locked->getKey())->count() >= $limit) {
+            if (ShareLink::query()->where('inventory_id', $locked->getKey())->active()->count() >= $limit) {
                 throw new ShareLinkLimitReachedException($limit);
             }
 
@@ -199,6 +201,22 @@ final class ShareLinks
     public function list(Inventory $inventory): Collection
     {
         return ShareLink::query()->where('inventory_id', $inventory->getKey())->with('creator')->orderByDesc('id')->get();
+    }
+
+    /**
+     * The keys of the accounts that are owners of the workspace of the inventory now, to tell the links made by one of them from those made
+     * by somebody who has left or is no longer an owner (a link outlives the ownership of its author).
+     *
+     * @return list<int>
+     */
+    public function ownerIds(Inventory $inventory): array
+    {
+        return array_values(WorkspaceMember::query()
+            ->where('workspace_id', $inventory->workspace_id)
+            ->where('role', WorkspaceRole::Owner->value)
+            ->pluck('user_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all());
     }
 
     /**

@@ -87,7 +87,7 @@ describe('the files of a link that shows them', function (): void {
             ->and($response->headers->get('Content-Disposition'))->not->toContain("\n");
     });
 
-    it('is never kept by a cache for longer than it takes to revoke the link: the thumbnail neither', function (): void {
+    it('is revalidated on every request, so that a revoked link serves nothing from a copy: the thumbnail too, which the API lets a browser keep', function (): void {
         $case = shareFilesCase();
 
         foreach ([true, false] as $thumbnail) {
@@ -179,11 +179,34 @@ describe('the files of a link that shows them', function (): void {
         $this->get('/s/'.$case['token'].'/items/'.strtoupper($case['drill']->ulid).'/attachments/'.strtoupper($case['pdf']->ulid))->assertOk();
     });
 
-    it('answers a 404 for a file that is gone from its disk', function (): void {
+    it('answers the 404 page, not the JSON of the API, for a file that is gone from its disk and for a thumbnail that is', function (): void {
         $case = shareFilesCase();
+        $unknown = $this->get('/s/'.ShareLinks::newToken().'/items/'.$case['drill']->ulid.'/attachments/'.$case['pdf']->ulid);
         Storage::disk(ATTACHMENT_TEST_DISK)->delete($case['pdf']->path);
+        Storage::disk(ATTACHMENT_TEST_DISK)->delete($case['photo']->thumbnail_path);
 
-        $this->get(shareFileUri($case['token'], $case['drill'], $case['pdf']))->assertNotFound();
+        foreach ([
+            shareFileUri($case['token'], $case['drill'], $case['pdf']),
+            shareFileUri($case['token'], $case['drill'], $case['photo'], true),
+        ] as $uri) {
+            $response = $this->get($uri)->assertNotFound();
+
+            expect($response->headers->get('Content-Type'))->toContain('text/html')
+                ->and($response->getContent())->toBe($unknown->getContent())
+                ->and($response->getContent())->not->toContain('file_not_found');
+        }
+    });
+
+    it('answers the 404 page for the thumbnail of a photo that has none', function (): void {
+        $case = shareFilesCase();
+        $webp = attachmentTo($case['inventory'], $case['items']['formulas'], attachmentUploadedAs('anim.webp', attachmentAnimatedWebpBytes(), 'image/webp'), null, $case['fields']['photos']);
+        $unknown = $this->get('/s/'.ShareLinks::newToken().'/items/'.$case['drill']->ulid.'/attachments/'.$case['pdf']->ulid);
+
+        $response = $this->get(shareFileUri($case['token'], $case['items']['formulas'], $webp, true))->assertNotFound();
+
+        expect($webp->hasThumbnail())->toBeFalse()
+            ->and($response->getContent())->toBe($unknown->getContent())
+            ->and($response->getContent())->not->toContain('thumbnail_not_found');
     });
 });
 

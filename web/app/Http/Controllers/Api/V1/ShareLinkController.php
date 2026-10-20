@@ -40,9 +40,15 @@ final class ShareLinkController extends Controller
     {
         Gate::authorize('share', $inventory);
 
+        $owners = $this->links->ownerIds($inventory);
+
         // Mapped here, one resource at a time: `collection()` would not give each one its address.
         return ShareLinkResource::collection($this->links->list($inventory)->map(
-            fn (ShareLink $link): ShareLinkResource => new ShareLinkResource($link, $this->links->urlOf($link)),
+            fn (ShareLink $link): ShareLinkResource => new ShareLinkResource(
+                $link,
+                $this->links->urlOf($link),
+                $link->created_by_id !== null && in_array((int) $link->created_by_id, $owners, true),
+            ),
         ))->response()->header('Cache-Control', 'no-store, private');
     }
 
@@ -73,7 +79,8 @@ final class ShareLinkController extends Controller
             );
         }
 
-        return (new ShareLinkResource($link, ShareLinks::addressOf($token)))->response()
+        // The author passed the `share` check of the policy a moment ago: they are an owner.
+        return (new ShareLinkResource($link, ShareLinks::addressOf($token), true))->response()
             ->setStatusCode(201)
             ->header('Cache-Control', 'no-store, private');
     }

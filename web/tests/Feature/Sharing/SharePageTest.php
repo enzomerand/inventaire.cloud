@@ -328,6 +328,44 @@ describe('searching and paging', function (): void {
         }
     });
 
+    it('counts the items once and reads the last page for a page far beyond it, with no offset of millions of rows', function (): void {
+        $case = shareLinkCase();
+        ['token' => $token] = shareLinkMake($case['inventory'], $case['owner']);
+        Item::factory()->count(60)->for($case['inventory'])->create();
+
+        // The first request of the process reads what the next ones find ready.
+        sharePageGet($this, $token)->assertOk();
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        sharePageGet($this, $token, '?page=2')->assertOk();
+        $last = collect(DB::getQueryLog())->pluck('query');
+        DB::flushQueryLog();
+        $response = sharePageGet($this, $token, '?page=1000000')->assertOk();
+        $beyond = collect(DB::getQueryLog())->pluck('query');
+        DB::disableQueryLog();
+
+        $offsets = fn ($queries) => $queries->flatMap(fn (string $sql): array => preg_match_all('/\boffset (\d+)/i', $sql, $found) > 0 ? array_map('intval', $found[1]) : [])->all();
+
+        // As many queries as for the last page itself: one count and one read of the items, whatever the page asked for.
+        expect($beyond)->toHaveCount($last->count())
+            ->and($beyond->filter(fn (string $sql): bool => str_contains($sql, 'count(*)'))->count())->toBe($last->filter(fn (string $sql): bool => str_contains($sql, 'count(*)'))->count())
+            ->and($offsets($last))->toBe([50])
+            ->and($offsets($beyond))->toBe([50])
+            ->and(shareTexts(shareDom($response), '//ul[contains(@class, "pagination")]/li[2]'))->toBe(['Page 2 / 2'])
+            ->and(shareDom($response)->query('//tbody/tr')->length)->toBe(10);
+    });
+
+    it('shows no row for a search that finds nothing, and the only page for a page beyond it, whatever the number', function (): void {
+        $case = shareLinkCase();
+        ['token' => $token] = shareLinkMake($case['inventory'], $case['owner']);
+        Item::factory()->count(3)->for($case['inventory'])->create();
+
+        $nothing = shareDom(sharePageGet($this, $token, '?q=zzzzzz&page=7')->assertOk());
+
+        expect($nothing->query('//tbody/tr')->length)->toBe(0)
+            ->and(shareDom(sharePageGet($this, $token, '?page=7')->assertOk())->query('//tbody/tr')->length)->toBe(3);
+    });
+
     it('shows no pager for a single page', function (): void {
         $case = shareFixture();
 
