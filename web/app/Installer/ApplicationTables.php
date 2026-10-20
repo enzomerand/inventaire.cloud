@@ -41,6 +41,7 @@ final class ApplicationTables
         'exports',
         'imports',
         'inventory_versions',
+        'workspace_invitations',
     ];
 
     /**

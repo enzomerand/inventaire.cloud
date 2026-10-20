@@ -136,13 +136,17 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * The rate limiter of the workspace endpoints that create rows for anybody who is signed in (limit in
-     * config/workspaces.php, `create_per_hour`), keyed on the user.
+     * The rate limiters of the workspace endpoints that create rows or send a mail for anybody who is signed in (limits in
+     * config/workspaces.php, `create_per_hour` and `invitations_per_hour`), keyed on the user.
      */
     private function registerWorkspaceLimiters(): void
     {
         RateLimiter::for('workspace-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('workspaces.create_per_hour'))
             ->by('workspace-creation:'.$this->signedInKey($request)));
+
+        // Inviting and sending an invitation again mail an address the owner chooses (`invitations_per_hour`, both together), keyed on the owner.
+        RateLimiter::for('workspace-invitations', fn (Request $request): Limit => Limit::perHour(config()->integer('workspaces.invitations_per_hour'))
+            ->by('workspace-invitations:'.$this->signedInKey($request)));
     }
 
     /**
