@@ -1,0 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Requests\Workspaces;
+
+use App\Workspaces\Members;
+
+/**
+ * The member the ownership of the workspace is handed over to: the `id` `GET /workspaces/{workspace}/members` gives them, sent as `member_id`.
+ *
+ * Whether it is one of the members is for the controller to find out (it looks the identifier up among them, see {@see Members::find()},
+ * and answers `404` for one that is not, as the path of a member does); this checks that there is one.
+ */
+final class TransferOwnershipRequest extends ManagesMembersRequest
+{
+    /**
+     * @return array<string, list<mixed>>
+     */
+    public function rules(): array
+    {
+        return [
+            'member_id' => ['required', 'string', 'max:64'],
+        ];
+    }
+
+    /**
+     * The identifier of the member, as it was sent.
+     */
+    public function memberId(): string
+    {
+        return $this->string('member_id')->toString();
+    }
+}

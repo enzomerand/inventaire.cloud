@@ -70,6 +70,7 @@ const ROUTES = {
 /** Routes with parameters: `{name}` stands for a parameter the template gives (a literal, or a variable of PAGE). */
 const ROUTE_PATTERNS = {
     'app.workspace': '/app/w/{workspace}',
+    'app.workspace.members': '/app/w/{workspace}/members',
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
     'app.inventory.versions': '/app/w/{workspace}/inventories/{inventory}/versions',
@@ -171,6 +172,8 @@ const MESSAGES = {
     'tokens.error.limit': 'You already have :count API tokens.',
     'admin.settings.notice.opened': 'Sign-ups are open',
     'admin.settings.notice.closed': 'Sign-ups are closed',
+    'admin.settings.notice.invitations_on': 'Invitations are on',
+    'admin.settings.notice.invitations_off': 'Invitations are off',
     'admin.users.workspace_count': 'Workspaces: :count',
     'admin.users.created_on': 'Created on :date',
     'admin.users.promote': 'Make administrator',
@@ -264,6 +267,7 @@ function render(path) {
 
         const values = {
             "$settings->registrationOpen() ? '1' : '0'": '1',
+            "$settings->invitationSignUp() ? '1' : '0'": '1',
             "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
             $maxSigners: String(PAGE.maxSigners),
             "$documenso['configured'] ? '1' : '0'": PAGE.documenso.configured ? '1' : '0',
@@ -515,6 +519,21 @@ describe('the pages under the real Alpine CSP build', () => {
                 { work: 1, rename: 1, delete: 1 },
                 { work: 0, rename: 1, delete: 1 },
                 { work: 1, rename: 0, delete: 0 },
+            ]);
+        });
+
+        it('links each workspace to its members, by name', () => {
+            const links = rows().map((row) => row.querySelector('a[href$="/members"]'));
+
+            expect(links.map((link) => link.getAttribute('href'))).toEqual([
+                '/app/w/personal/members',
+                '/app/w/shop/members',
+                '/app/w/shared/members',
+            ]);
+            expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
+                'Members of Espace personnel',
+                'Members of Shop',
+                'Members of Shared',
             ]);
         });
 
@@ -1485,6 +1504,25 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(registrationSwitch().disabled).toBe(false);
         });
 
+        it('has a second switch for the invitations, on as the page was rendered, that saves apart from the first', async () => {
+            const invitations = document.querySelector('#admin-settings-invitation-sign-up');
+            http.put.mockResolvedValue({ data: { registration_open: true, invitation_sign_up: false } });
+
+            expect(invitations.checked).toBe(true);
+            expect(document.body.textContent).toContain(
+                'An invitation to a workspace lets its address create an account',
+            );
+
+            invitations.checked = false;
+            invitations.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/admin/settings', { invitation_sign_up: false });
+            expect(notify).toHaveBeenCalledWith('success', 'Invitations are off');
+            expect(invitations.checked).toBe(false);
+            expect(registrationSwitch().checked).toBe(true);
+        });
+
         it('turns the switch back on when the change could not be saved', async () => {
             http.put.mockRejectedValue(new HttpError(500, 'Server down'));
 
@@ -1633,6 +1671,16 @@ describe('the pages under the real Alpine CSP build', () => {
             dialog().querySelector('[data-step="choose"] [data-autofocus]').click();
             await flush();
         }
+
+        it('links to the members of the workspace', async () => {
+            await open();
+
+            const link = [...document.querySelectorAll('a.btn')].find(
+                (anchor) => anchor.textContent.trim() === 'Members',
+            );
+
+            expect(link.getAttribute('href')).toBe('/app/w/shop/members');
+        });
 
         it('lists the inventories as cards, each linking to its page, with what it holds', async () => {
             await open();

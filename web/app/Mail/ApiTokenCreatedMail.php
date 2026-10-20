@@ -60,13 +60,13 @@ final class ApiTokenCreatedMail extends Mailable
      */
     public function content(): Content
     {
-        $agent = self::oneLine($this->userAgent);
+        $agent = PlainText::oneLine($this->userAgent);
 
         return new Content(
             view: 'mail.api-token-created-html',
             text: 'mail.api-token-created',
             with: [
-                'tokenLabel' => self::oneLine($this->tokenName),
+                'tokenLabel' => PlainText::oneLine($this->tokenName),
                 'abilityLabels' => implode(', ', array_map(
                     static fn (string $ability): string => TokenAbility::from($ability)->label(),
                     $this->abilities,
@@ -85,13 +85,5 @@ final class ApiTokenCreatedMail extends Mailable
     private static function moment(CarbonInterface $moment): string
     {
         return DisplayTime::of($moment)->locale(app()->getLocale())->isoFormat('LLL').' ('.DisplayTime::zone().')';
-    }
-
-    /**
-     * The text on one line: what the sender of a request wrote (a user agent, a name) cannot add lines to the plain-text body.
-     */
-    private static function oneLine(string $text): string
-    {
-        return trim(preg_replace('/[\p{C}\p{Z}]+/u', ' ', $text) ?? '');
     }
 }

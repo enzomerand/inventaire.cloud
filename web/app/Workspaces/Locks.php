@@ -46,8 +46,19 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * with the account: see {@see self::administratorsAnd()}). A transaction may skip levels: creating an account takes
  * none of 2 to 4 for its personal workspace, since the account and the workspace are invisible to everybody until the
  * commit and the workspace is inserted without reading any membership (see {@see Workspaces::createPersonal()}).
- * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
- * memberships: it is what lets the exceptions below stay safety nets.
+ * Code that adds members follows the same order, accounts then the workspace then the memberships: it is what lets the
+ * exceptions below stay safety nets. That is the case of everything that changes who belongs to a workspace (inviting,
+ * accepting, changing a role, removing, leaving, handing the ownership over: see {@see Roster}, which takes the locks in that
+ * order). One consequence: once the memberships *of the workspace* are locked, those transactions do not lock the memberships *of an
+ * account* (`memberships('user_id', ...)`) any more: level 4 would be taken a second time, on rows that sort differently from the
+ * first, and a request that locks them the other way round (the account's memberships, then the workspace's) could wait for it. What
+ * they need to know about the account's memberships (does it belong to another workspace? how many?) is a plain count under the lock
+ * of the account (2), which is enough: everything that adds or removes a membership of an account locks that account first.
+ * Accepting an invitation and leaving or being removed are the cases ({@see Invitations::accept()}, {@see Members::remove()}); the only
+ * exception is named below (`Workspaces::delete()`). The invitations (`workspace_invitations`) come last among these: every writer of the invitations of a workspace holds the
+ * workspace's lock, which is what keeps them one after the other, so they are read and written with plain queries and never
+ * with a locking read (on MySQL and MariaDB it would lock the gap after the last invitation of the workspace, where the first
+ * invitation of the next workspace is inserted). Declining an invitation deletes the one row by its key, without the lock.
  *
  * Levels 5 and 6 are the content of a workspace. Whatever writes to an inventory (its name, its fields, its items)
  * locks the inventory first, so the writes of one inventory happen one after the other: that is what makes a quota
@@ -80,11 +91,20 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * (3), then update the version row, which moves `counted_bytes` and the storage counter in one decision. Deleting a version takes the
  * workspace (3), then the inventory (5).
  *
- * Three paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
+ * Four paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
  *
  * - `Workspaces::delete()` locks, after the workspace and its memberships, the accounts of the members who joined that
  *   workspace meanwhile (a request that committed in that gap);
+ * - `Workspaces::delete()` also reads, with a locking read by `user_id` and after the memberships of the workspace, the other
+ *   memberships of the person who deletes and of the people who would be left without a workspace (to refuse deleting the last one,
+ *   and to give the others a personal one). They are not plain counts, as in accepting or leaving, because the transaction began with a
+ *   plain read (the members, to know whose accounts to lock) before it held any lock, and on MySQL and MariaDB that read fixes the
+ *   snapshot every later plain read sees: a membership ended by a request that held one of these accounts, and that this transaction
+ *   waited for, would still be there for it, and a person could be left with no workspace. It cannot wait for a request the wrong
+ *   way round: every account it reads those rows for is locked by it already, so whatever else holds one of these rows holds the
+ *   workspace of it only (inviting, changing a role, leaving...), and none of those reads the memberships of an account once it has
+ *   locked its workspace's, as the rule above says;
  * - `AccountDeletion` locks, after the memberships of the account, the workspaces the account joined meanwhile (the
  *   account is locked by then, and adding it to a workspace locks it first, so this is for a membership added without
  *   that lock);
@@ -93,7 +113,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  *   workspaces and their memberships), and then, once the memberships are read, the accounts of the members who joined
  *   those workspaces meanwhile.
  *
- * Only these three can end up waiting for each other, in a race that narrow: the writers of the content of a workspace
+ * Only these can end up waiting for each other, in a race that narrow: the writers of the content of a workspace
  * wait for one lock at a time that they take in the order above (an account, an inventory, an item), and for nothing
  * else, since fields are not locked and the quota counts take no lock. The database then aborts one of the
  * requests and the caller retries (`transaction($callback, 3)`, or {@see DeadlockRetries} when many requests may

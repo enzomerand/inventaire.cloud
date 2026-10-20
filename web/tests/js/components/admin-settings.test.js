@@ -15,6 +15,8 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
         ({
             'admin.settings.notice.opened': 'Sign-ups are open',
             'admin.settings.notice.closed': 'Sign-ups are closed',
+            'admin.settings.notice.invitations_on': 'Invitations are on',
+            'admin.settings.notice.invitations_off': 'Invitations are off',
             'admin.settings.select_hint': 'The address is selected: copy it with your keyboard.',
             'tokens.copy': 'Copy',
             'tokens.copied': 'Copied',
@@ -68,6 +70,58 @@ describe('administration settings page', () => {
         expect(http.put).toHaveBeenCalledWith(URL, { registration_open: true });
         expect(component.registrationOpen).toBe(true);
         expect(notify).toHaveBeenCalledWith('success', 'Sign-ups are open');
+    });
+
+    it('starts the invitations switch from the value the page was rendered with', () => {
+        expect(component.invitationSignUp).toBe(false);
+
+        component.$root.dataset.invitationSignUp = '1';
+        component.init();
+
+        expect(component.invitationSignUp).toBe(true);
+    });
+
+    it('turns the invitations off and on, without touching the registration, and says so', async () => {
+        component.$root.dataset.invitationSignUp = '1';
+        component.init();
+        http.put.mockResolvedValue({ data: { registration_open: true, invitation_sign_up: false } });
+
+        await component.toggleInvitationSignUp(box(false));
+
+        expect(http.put).toHaveBeenCalledWith(URL, { invitation_sign_up: false });
+        expect(component.invitationSignUp).toBe(false);
+        expect(component.registrationOpen).toBe(true);
+        expect(notify).toHaveBeenCalledWith('success', 'Invitations are off');
+
+        http.put.mockResolvedValue({ data: { registration_open: true, invitation_sign_up: true } });
+
+        await component.toggleInvitationSignUp(box(true));
+
+        expect(http.put).toHaveBeenLastCalledWith(URL, { invitation_sign_up: true });
+        expect(component.invitationSignUp).toBe(true);
+        expect(notify).toHaveBeenLastCalledWith('success', 'Invitations are on');
+    });
+
+    it('puts the invitations switch back when the change could not be saved, and blocks a second change meanwhile', async () => {
+        component.$root.dataset.invitationSignUp = '1';
+        component.init();
+        http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+        const checkbox = box(false);
+
+        await component.toggleInvitationSignUp(checkbox);
+
+        expect(component.invitationSignUp).toBe(true);
+        expect(checkbox.target.checked).toBe(true);
+        expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+
+        component.busy = true;
+        http.put.mockClear();
+        const other = box(false);
+
+        await component.toggleInvitationSignUp(other);
+
+        expect(http.put).not.toHaveBeenCalled();
+        expect(other.target.checked).toBe(true);
     });
 
     it('shows what the server answers, whatever the switch said', async () => {

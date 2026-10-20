@@ -213,6 +213,8 @@ final class Workspaces
                 throw new AuthorizationException(__('Only an owner of this workspace can delete it.'));
             }
 
+            // Locking reads by user_id, after those of the workspace: the one exception to the order of Locks, which says why it is safe and
+            // why plain reads would not be (the first read of this transaction was made before its locks).
             $others = $this->locks->memberships('user_id', [$user->getKey()])
                 ->reject(fn (WorkspaceMember $other): bool => (int) $other->workspace_id === (int) $workspace->getKey())
                 ->values();

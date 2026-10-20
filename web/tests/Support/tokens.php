@@ -24,7 +24,8 @@ function tokenRouteClassification(): array
         'inventories.items.show', 'inventories.items.revisions.index', 'inventories.items.attachments.show',
         'inventories.items.attachments.thumbnail', 'inventories.exports.index', 'inventories.exports.show', 'inventories.exports.download',
         'inventories.imports.index', 'inventories.imports.show', 'inventories.versions.index', 'inventories.versions.show',
-        'inventories.versions.pdf', 'inventories.versions.snapshot', 'inventories.versions.signed-pdf',
+        'inventories.versions.pdf', 'inventories.versions.snapshot', 'inventories.versions.signed-pdf', 'workspaces.members.index',
+        'workspaces.invitations.index', 'me.invitations.index',
     ];
     $write = [
         'inventories.items.store', 'inventories.items.update', 'inventories.items.destroy', 'inventories.items.attachments.store',
@@ -35,6 +36,8 @@ function tokenRouteClassification(): array
     $manage = [
         'workspaces.store', 'workspaces.update', 'workspaces.destroy', 'workspaces.inventories.store', 'inventories.update',
         'inventories.destroy', 'inventories.fields.store', 'inventories.fields.order', 'inventories.fields.update', 'inventories.fields.destroy',
+        'workspaces.members.update', 'workspaces.members.destroy', 'workspaces.invitations.store',
+        'workspaces.invitations.resend', 'workspaces.invitations.destroy', 'me.invitations.accept', 'me.invitations.destroy',
     ];
 
     $classification = [];
@@ -58,7 +61,7 @@ function tokenSessionOnlyRoutes(): array
     return array_map(fn (string $name): string => 'api.v1.'.$name, [
         'auth.code', 'auth.verify', 'auth.logout', 'me.update', 'me.export', 'me.current-workspace', 'me.sign-out-everywhere',
         'me.deletion-code', 'me.destroy', 'admin.users.index', 'admin.users.store', 'admin.users.update', 'admin.users.destroy',
-        'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy',
+        'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy', 'workspaces.transfer',
     ]);
 }
 

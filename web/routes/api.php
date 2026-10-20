@@ -21,10 +21,14 @@ use App\Http\Controllers\Api\V1\InventoryVersionController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\MyInvitationController;
 use App\Http\Controllers\Api\V1\OpenApiController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\TemplateController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
+use App\Http\Controllers\Api\V1\WorkspaceInvitationController;
+use App\Http\Controllers\Api\V1\WorkspaceMemberController;
+use App\Http\Controllers\Api\V1\WorkspaceOwnershipController;
 use App\Http\Middleware\PaceApiTokens;
 use App\Http\Middleware\RefuseApiTokens;
 use App\Http\Middleware\RequireStatefulRequest;
@@ -82,6 +86,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 Route::get('/me/tokens', [ApiTokenController::class, 'index'])->name('me.tokens.index');
                 Route::post('/me/tokens', [ApiTokenController::class, 'store'])->middleware('throttle:api-token-creation')->name('me.tokens.store');
                 Route::delete('/me/tokens/{token}', [ApiTokenController::class, 'destroy'])->where('token', '[0-9]{1,18}')->name('me.tokens.destroy');
+
+                // Handing the ownership of a workspace over: the person decides it at their browser. A leaked token, whatever its abilities,
+                // must not be able to make somebody else the owner of a workspace and lock its real owner out.
+                Route::post('/workspaces/{workspace}/transfer', WorkspaceOwnershipController::class)->name('workspaces.transfer');
             });
         });
 
@@ -95,6 +103,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::get('/field-types', FieldTypeController::class)->name('field-types.index');
             Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');
             Route::get('/workspaces/{workspace}/inventories', [InventoryController::class, 'index'])->name('workspaces.inventories.index');
+
+            // Who belongs to a workspace and who was invited to it: the members for any member, the invitations it sent for its owner; and the
+            // invitations addressed to the person themselves.
+            Route::get('/workspaces/{workspace}/members', [WorkspaceMemberController::class, 'index'])->name('workspaces.members.index');
+            Route::get('/workspaces/{workspace}/invitations', [WorkspaceInvitationController::class, 'index'])->name('workspaces.invitations.index');
+            Route::get('/me/invitations', [MyInvitationController::class, 'index'])->name('me.invitations.index');
 
             Route::scopeBindings()->group(function (): void {
                 Route::get('/inventories/{inventory}', [InventoryController::class, 'show'])->name('inventories.show');
@@ -148,6 +162,24 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             // it again after it failed. Editors and owners, like asking for signatures in the first place.
             Route::post('/inventories/{inventory}/versions/{version}/signature/cancel', [InventoryVersionController::class, 'cancelSignature'])->name('inventories.versions.signature.cancel');
             Route::post('/inventories/{inventory}/versions/{version}/signature/retry', [InventoryVersionController::class, 'retrySignature'])->name('inventories.versions.signature.retry');
+        });
+
+        // Managing the people of a workspace: its members (their role, who stays) and the invitations. They are the owner's to make, and
+        // the invited person's to answer. A member is named in the path by the `ulid` of their account, found among the members of the
+        // workspace (`{member:ulid}`: User::resolveRouteBindingQuery() lowers its case), and an invitation by its own ULID among the
+        // invitations of the workspace (the bindings are scoped by Workspace::members() and Workspace::invitations()). Inviting and sending
+        // again mail an address the owner chooses, hence their own pace. (Handing the ownership over is not here: it is for a person at their
+        // browser, see the routes of the account above.)
+        Route::scopeBindings()->middleware('token:manage')->group(function (): void {
+            Route::patch('/workspaces/{workspace}/members/{member:ulid}', [WorkspaceMemberController::class, 'update'])->name('workspaces.members.update');
+            Route::delete('/workspaces/{workspace}/members/{member:ulid}', [WorkspaceMemberController::class, 'destroy'])->name('workspaces.members.destroy');
+
+            Route::post('/workspaces/{workspace}/invitations', [WorkspaceInvitationController::class, 'store'])->middleware('throttle:workspace-invitations')->name('workspaces.invitations.store');
+            Route::post('/workspaces/{workspace}/invitations/{invitation}/resend', [WorkspaceInvitationController::class, 'resend'])->middleware('throttle:workspace-invitations')->name('workspaces.invitations.resend');
+            Route::delete('/workspaces/{workspace}/invitations/{invitation}', [WorkspaceInvitationController::class, 'destroy'])->name('workspaces.invitations.destroy');
+
+            Route::post('/me/invitations/{invitation}/accept', [MyInvitationController::class, 'accept'])->name('me.invitations.accept');
+            Route::delete('/me/invitations/{invitation}', [MyInvitationController::class, 'destroy'])->name('me.invitations.destroy');
         });
 
         // Managing: the structure. Workspaces, the inventories in them and their fields.

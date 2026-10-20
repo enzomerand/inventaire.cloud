@@ -45,7 +45,7 @@ function collationOf(string $table, string $column): ?string
  */
 function insertUsersRaw(array $addresses): void
 {
-    DB::table('users')->insert(array_map(fn (string $address): array => ['name' => $address, 'email' => $address, 'created_at' => now(), 'updated_at' => now()], $addresses));
+    DB::table('users')->insert(array_map(fn (string $address): array => ['ulid' => User::newUlid(), 'name' => $address, 'email' => $address, 'created_at' => now(), 'updated_at' => now()], $addresses));
 }
 
 describe('an address on a lookalike domain', function (): void {

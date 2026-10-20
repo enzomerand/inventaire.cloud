@@ -21,6 +21,7 @@
         data-url="{{ route('api.v1.workspaces.index', absolute: false) }}"
         data-current-url="{{ route('api.v1.me.current-workspace', absolute: false) }}"
         data-workspace-url="{{ route('app.workspace', ['workspace' => '__id__'], absolute: false) }}"
+        data-members-url="{{ route('app.workspace.members', ['workspace' => '__id__'], absolute: false) }}"
     >
         <div class="col-12 col-lg-8">
             <div class="card">
@@ -71,6 +72,9 @@
                                             <button type="button" class="btn btn-sm" x-show="!item.current" @click="makeCurrent(item)" :disabled="busy">
                                                 {{ __('Work in this workspace') }}
                                             </button>
+                                            <a class="btn btn-sm btn-icon" :href="membersUrl(item)" :aria-label="membersLabel(item)" :title="membersLabel(item)">
+                                                <x-tabler-users aria-hidden="true" />
+                                            </a>
                                             <button
                                                 type="button"
                                                 class="btn btn-sm btn-icon"

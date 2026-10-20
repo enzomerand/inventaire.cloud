@@ -14,6 +14,7 @@ use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\ItemRevision;
+use App\Workspaces\Members;
 use App\Workspaces\WorkspaceRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -614,6 +615,51 @@ describe('what changes while the import waits', function (): void {
 
         expect($import->error)->toBe('not_allowed')->and(Item::query()->count())->toBe(0);
     });
+
+    it('fails with the same words when the person was removed from the workspace, or left it, before the job ran', function (string $how): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)], as: $case['team']['editor']);
+        $members = app(Members::class);
+
+        if ($how === 'removed') {
+            $members->remove($case['team']['owner'], $case['team']['workspace'], $case['team']['editor']);
+        } else {
+            $members->leave($case['team']['editor'], $case['team']['workspace']);
+        }
+
+        $import = importDone($import);
+
+        expect($import->status)->toBe(ImportStatus::Failed)
+            ->and($import->error)->toBe('not_allowed')
+            ->and(Item::query()->count())->toBe(0)
+            ->and(ImportError::NotAllowed->message())->toBe('You are no longer allowed to change the items of this inventory, so nothing was imported.');
+
+        app()->setLocale('fr');
+        expect(ImportError::NotAllowed->message())->toBe("Vous n'avez plus le droit de modifier les articles de cet inventaire, donc rien n'a été importé.");
+    })->with(['removed' => ['removed'], 'left' => ['left']]);
+
+    it('runs when the person who started it was made the owner, or demoted to an editor, in the meantime: the role at the start counts', function (string $then, bool $imported): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        $import = importAsked($this, $case, importFile(importCsv([['Name'], ['a']])), [importToField(0, $name->ulid)], as: $case['team']['owner']);
+
+        if ($then === 'handed over') {
+            app(Members::class)->transferOwnership($case['team']['owner'], $case['team']['workspace'], $case['team']['editor']);
+        } else {
+            app(Members::class)->transferOwnership($case['team']['owner'], $case['team']['workspace'], $case['team']['viewer']);
+            app(Members::class)->changeRole($case['team']['viewer'], $case['team']['workspace'], $case['team']['owner'], WorkspaceRole::Viewer);
+        }
+
+        $import = importDone($import);
+
+        expect($import->status)->toBe($imported ? ImportStatus::Completed : ImportStatus::Failed)
+            ->and(Item::query()->count())->toBe($imported ? 1 : 0)
+            ->and($import->error)->toBe($imported ? null : 'not_allowed');
+    })->with([
+        'ownership handed over (an editor still edits)' => ['handed over', true],
+        'made a viewer by the new owner' => ['made a viewer', false],
+    ]);
 
     it('fails when the account that started it is gone... its imports go with it, and the job is dropped', function (): void {
         $case = importCase();

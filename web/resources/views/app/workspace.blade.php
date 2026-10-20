@@ -1,5 +1,5 @@
 {{--
-    The page of a workspace: its inventories as cards, and the dialog that adds one (editors and owners).
+    The page of a workspace: its inventories as cards, the dialog that adds one (editors and owners) and the link to its members.
 
     Alpine runs in its CSP build: the "workspaceInventories" component (resources/js/components/workspace-inventories.js)
     is referenced by name and gets its endpoint, the link of a card (__id__ stands for the ULID of the inventory) and
@@ -38,9 +38,13 @@
         data-template-url="{{ route('api.v1.templates.show', ['slug' => '__id__'], absolute: false) }}"
         data-loading-label="{{ __('Loading…') }}"
     >
-        <div class="d-flex align-items-center mb-3">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
             <h2 class="h3 m-0">{{ __('Inventories') }}</h2>
-            <button type="button" class="btn btn-primary ms-auto" x-ref="newInventory" x-show="canCreate" @click="startCreate">
+            <a class="btn ms-auto" href="{{ route('app.workspace.members', ['workspace' => $workspace->ulid], absolute: false) }}">
+                <x-tabler-users aria-hidden="true" />
+                {{ __('Members') }}
+            </a>
+            <button type="button" class="btn btn-primary" x-ref="newInventory" x-show="canCreate" @click="startCreate">
                 <x-tabler-plus aria-hidden="true" />
                 {{ __('New inventory') }}
             </button>

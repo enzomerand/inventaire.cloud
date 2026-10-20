@@ -14,6 +14,8 @@ use App\Models\InventoryField;
 use App\Models\InventoryVersion;
 use App\Models\Item;
 use App\Models\User;
+use App\Models\Workspace;
+use App\Models\WorkspaceInvitation;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Testing\TestResponse;
 
@@ -156,4 +158,27 @@ function contractSigned(array $world, array $signers = []): InventoryVersion
     $fake->complete();
 
     return versionSync($version->fresh() ?? $version);
+}
+
+/**
+ * The address of the members of the workspace of the world, or of one of them.
+ */
+function contractMemberUri(Workspace $workspace, ?User $member = null): string
+{
+    return "/api/v1/workspaces/{$workspace->ulid}/members".($member === null ? '' : '/'.$member->ulid);
+}
+
+/**
+ * An invitation to an address, as the table holds it (nothing is mailed), last sent an hour ago so that it can be sent again.
+ *
+ * @param  array<string, mixed>  $attributes
+ */
+function contractInvitation(Workspace $workspace, string $email, ?User $by = null, array $attributes = []): WorkspaceInvitation
+{
+    return WorkspaceInvitation::factory()->create($attributes + [
+        'workspace_id' => $workspace->id,
+        'email' => $email,
+        'invited_by_id' => $by?->id,
+        'updated_at' => now()->subHour(),
+    ]);
 }

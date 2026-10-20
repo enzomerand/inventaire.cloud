@@ -74,6 +74,9 @@ describe('the migrations', function (): void {
         $imports = require database_path('migrations/2026_10_30_000000_create_imports_table.php');
         // And the official versions (which also add the counter of their numbers to the inventories).
         $versions = require database_path('migrations/2026_11_06_000000_create_inventory_versions_table.php');
+        // The invitations hang from workspaces and accounts.
+        $invitations = require database_path('migrations/2026_11_13_000000_create_workspace_invitations_table.php');
+        $invitations->down();
         $versions->down();
         $imports->down();
         $exports->down();
@@ -99,6 +102,7 @@ describe('the migrations', function (): void {
             $exports->up();
             $imports->up();
             $versions->up();
+            $invitations->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

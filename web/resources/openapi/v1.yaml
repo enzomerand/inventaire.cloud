@@ -4,7 +4,7 @@ info:
   version: '1'
   summary: The public JSON API of inventaire.cloud.
   description: |
-    The public API of inventaire.cloud: workspaces, inventories, fields, items and their files, exports, imports and official versions.
+    The public API of inventaire.cloud: workspaces, their members and invitations, inventories, fields, items and their files, exports, imports and official versions.
     Most of what the web application does with your data can be done here, with a personal access token.
 
     ## Authentication
@@ -17,8 +17,8 @@ info:
 
     A missing, malformed, expired or revoked token is answered with `401`. Signing out everywhere from the account page
     revokes every token of the account. Sign-in, the account itself, the administration and the management of tokens
-    belong to the web application and are not part of this API: they refuse a request made with a token (`403`,
-    `session_required`).
+    belong to the web application and are not part of this API, nor is handing the ownership of a workspace over to another
+    member: they refuse a request made with a token (`403`, `session_required`).
 
     Send the token alone. A request that carries the session cookie of the web application as well is answered with `403`
     and the code `token_with_session`, whatever the token can do: with both, it would be unclear which of the two decides.
@@ -29,7 +29,8 @@ info:
 
     - `read`: every `GET` operation;
     - `write`: the content of an inventory, that is items, attachments, exports, imports and official versions (create, change, delete);
-    - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete).
+    - `manage`: the structure, that is workspaces, inventories and fields (create, change, delete), and the people of a workspace, that is its members,
+      their roles and its invitations.
 
     The abilities are independent: `write` and `manage` do not include `read`. A token that cannot read can hardly be
     used, since the ids that the other operations need are found with `GET`: give `read` along with the others. What a
@@ -41,7 +42,7 @@ info:
     A token never goes beyond its owner. Whatever its abilities, it can do only what the owner may do in each workspace
     with their role: `owner`, `editor` or `viewer`. A resource of a workspace the owner does not belong to is answered
     with `404`, as if it did not exist; a member whose role does not allow the operation is answered with `403`
-    (without `code`).
+    (without `code`, except when only the owner of the workspace may, as for its members and invitations: `not_owner`).
 
     ## Rate limits
 
@@ -50,7 +51,7 @@ info:
     `too_many_requests` and a `Retry-After` header, the number of seconds to wait.
 
     Some operations have a stricter limit of their own, counted per user: creating a workspace, uploading a file,
-    asking for an export, sending or re-reading a file to import, freezing an inventory as an official version. A request that is refused before it gets that far (a
+    asking for an export, sending or re-reading a file to import, freezing an inventory as an official version, sending an invitation to a workspace (or sending it again). A request that is refused before it gets that far (a
     token that lacks the ability, for instance) does not use it up. Past it the answer is `429` as well, with
     `Retry-After`. The public template catalogue has its own limit, per network address.
 
@@ -64,7 +65,7 @@ info:
     An error always has a JSON body, whatever the `Accept` header:
 
     - `{"message": "…"}` for `401`, `403` and `404`; the message is for people and may change. `403` has a `code` when a
-      machine-readable reason exists (`token_ability_missing`, `token_with_session`, `session_required`), `404` has one for the few cases that
+      machine-readable reason exists (`token_ability_missing`, `token_with_session`, `session_required`, `not_owner`), `404` has one for the few cases that
       are not a plain "not found";
     - `{"message": "…", "code": "…"}` for `409`, `429` and `503`, where `code` is the reason to switch on. A `409` that
       comes from a quota also has a `limit`, the number that was crossed;
@@ -76,7 +77,9 @@ info:
     ## Identifiers and dates
 
     Resources are identified by lowercase ULIDs (26 characters, digits and letters), in paths and in bodies. The numeric
-    keys of the database are never exposed; the only exception is the `id` of the account in `GET /me`. Dates are ISO 8601
+    keys of the database are never exposed; the only exception is the `id` of the account in `GET /me`. A member of a workspace is named by an
+    identifier of the same shape, the same in every workspace, drawn at random for each account: it says nothing about the
+    account, not even when it was opened. Dates are ISO 8601
     in UTC (`2026-10-15T12:30:00+00:00`).
 
     ## Items and their values
@@ -96,7 +99,7 @@ info:
     Lists that can be long are paginated with the `page` query parameter (1 by default): 50 items, 25 revisions or 20 versions per
     page. The answer is `{"data": […], "links": {"first", "last", "prev", "next"}, "meta": {"current_page", "last_page",
     "per_page", "total", "from", "to", "path", "links"}}`; the links of the pages keep your other query parameters.
-    The other lists (workspaces, inventories, field types, templates) are answered in one piece, in `data`; the lists of
+    The other lists (workspaces, members, invitations, inventories, field types, templates) are answered in one piece, in `data`; the lists of
     exports and imports hold the 20 newest.
 
     ## Language
@@ -122,6 +125,12 @@ tags:
   - name: Workspaces
     x-displayName: Workspaces
     description: The workspaces the user belongs to, with their role in each.
+  - name: Members
+    x-displayName: Members
+    description: Who belongs to a workspace, with their role in it.
+  - name: Invitations
+    x-displayName: Invitations
+    description: The invitations to join a workspace, sent by its owner and answered by the person they are addressed to.
   - name: Inventories
     x-displayName: Inventories
     description: The inventories of a workspace, with their fields and what the user may do with them.
@@ -515,6 +524,717 @@ paths:
           x-codes:
             - code: last_workspace
               description: It is the last workspace of the user. Create another one first.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /workspaces/{workspace}/members:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags:
+        - Members
+      operationId: listMembers
+      summary: List the members of a workspace
+      description: >-
+        Every member of the workspace, the owner first, then in the order they joined. Any member can ask. The `email`
+        of a member is given to the owner of the workspace and to that member only, and is `null` for anybody else
+        (the key is always there). `id` names the person, the same in every workspace; it is drawn at random for
+        each account, so it is not the number of their account and says nothing about when it was opened.
+      x-ability: read
+      responses:
+        '200':
+          description: The members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Member'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /workspaces/{workspace}/members/{member}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/MemberId'
+    patch:
+      tags:
+        - Members
+      operationId: updateMemberRole
+      summary: Change the role of a member
+      description: >-
+        Makes a member an `editor` or a `viewer`. Owners only. The role of the owner cannot be changed: the ownership is
+        handed over to another member from the web application.
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  $ref: '#/components/schemas/InvitableRole'
+      responses:
+        '200':
+          description: The member, with the new role.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Member'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Only an owner of this workspace can manage it.
+                code: not_owner
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+            - code: not_owner
+              description: >-
+                The user belongs to the workspace without owning it: only its owner decides who belongs to it.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: cannot_change_owner_role
+              description: The member is the owner, whose role cannot be changed. The ownership is handed over from the web application instead.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    delete:
+      tags:
+        - Members
+      operationId: removeMember
+      summary: Remove a member from a workspace, or leave it
+      description: >-
+        Removes a member: they lose access to the workspace at once. Owners can remove any member but themselves. A
+        member can remove themselves, which is leaving the workspace; a person whose last workspace it was is given a
+        personal workspace. The owner cannot leave: they hand the ownership over first, from the web application.
+      x-ability: manage
+      responses:
+        '204':
+          description: The member is no longer in the workspace.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: >-
+            The token lacks the `manage` ability, or the user is removing somebody else without being an owner of the
+            workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Only an owner of this workspace can manage it.
+                code: not_owner
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+            - code: not_owner
+              description: >-
+                The user belongs to the workspace without owning it, and is removing somebody else: only its owner
+                removes members.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: owner_cannot_leave
+              description: >-
+                The user is the owner and is removing themselves: the owner cannot leave. Hand the ownership over
+                first.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /workspaces/{workspace}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags:
+        - Invitations
+      operationId: listInvitations
+      summary: List the invitations a workspace has sent
+      description: >-
+        The invitations of the workspace that wait for an answer, newest first. Owners only. An invitation that lapsed
+        is not listed.
+      x-ability: read
+      responses:
+        '200':
+          description: The invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SentInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Only an owner of this workspace can manage it.
+                code: not_owner
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+            - code: not_owner
+              description: >-
+                The user belongs to the workspace without owning it: only its owner decides who belongs to it.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+    post:
+      tags:
+        - Invitations
+      operationId: createInvitation
+      summary: Invite an address to a workspace
+      description: >-
+        Invites an address to the workspace, as an `editor` or a `viewer`, and mails it. Owners only. The invitation
+        is bound to the address, not to a link: the person signs in with that address, finds the invitation among
+        theirs (`GET /me/invitations`) and accepts or declines it; while registration is closed, a waiting invitation
+        also lets its address sign up, unless the administrator turned that off or the person who sent it has deleted their
+        account. The mail is sent after the answer, in the language of the account of that
+        address if there is one, else of the request. The invitation lapses after 14 days by default; sending it again
+        gives it another term.
+
+        A workspace holds 50 members and waiting invitations together by default (`member_limit_reached`), and an
+        owner can send 20 mails an hour by default, invitations and invitations sent again together, and one address
+        receives 5 a day by default from everybody on the instance together; only a mail that is sent counts for the address, not a request that is refused (`429` beyond, with `Retry-After`).
+      x-ability: manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - role
+              properties:
+                email:
+                  type: string
+                  maxLength: 254
+                  description: The address to invite. It is lowercased, and a domain with accents is converted.
+                role:
+                  $ref: '#/components/schemas/InvitableRole'
+      responses:
+        '201':
+          description: The invitation that was created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SentInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Only an owner of this workspace can manage it.
+                code: not_owner
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+            - code: not_owner
+              description: >-
+                The user belongs to the workspace without owning it: only its owner decides who belongs to it.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: already_member
+              description: The address belongs to a member of the workspace already, the owner included.
+            - code: already_invited
+              description: >-
+                An invitation to this address waits for an answer already. Send it again, or withdraw it, instead.
+            - code: member_limit_reached
+              description: >-
+                The workspace already holds as many members and waiting invitations as allowed. `limit` says how many.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, the invitations an hour of the user, or the invitations a day of the address, is reached.
+  /workspaces/{workspace}/invitations/{invitation}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/InvitationId'
+    delete:
+      tags:
+        - Invitations
+      operationId: cancelInvitation
+      summary: Withdraw an invitation
+      description: 'Deletes the invitation: it can no longer be accepted. Owners only.'
+      x-ability: manage
+      responses:
+        '204':
+          description: The invitation is withdrawn.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Only an owner of this workspace can manage it.
+                code: not_owner
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+            - code: not_owner
+              description: >-
+                The user belongs to the workspace without owning it: only its owner decides who belongs to it.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /workspaces/{workspace}/invitations/{invitation}/resend:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      tags:
+        - Invitations
+      operationId: resendInvitation
+      summary: Send an invitation again
+      description: >-
+        Mails the invitation once more and gives it another term (14 days by default). Owners only. An invitation can
+        be sent again once every 10 minutes (`resend_too_soon`, with `Retry-After`), and sending it counts against the
+        same limits as inviting (the hourly one of the owner and the daily one of the address).
+      x-ability: manage
+      responses:
+        '200':
+          description: The invitation, with its new expiry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SentInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability, or the user is not an owner of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Only an owner of this workspace can manage it.
+                code: not_owner
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+            - code: not_owner
+              description: >-
+                The user belongs to the workspace without owning it: only its owner decides who belongs to it.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TooSoonError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token, the invitations an hour of the user, or the invitations a day of the address, is reached.
+            - code: resend_too_soon
+              description: >-
+                The invitation was sent less than 10 minutes ago. `retry_after`, like `Retry-After`, says how many
+                seconds to wait.
+  /me/invitations:
+    get:
+      tags:
+        - Invitations
+      operationId: listMyInvitations
+      summary: List my invitations
+      description: >-
+        The invitations that wait for an answer from the address of the user, newest first, each with the workspace it
+        gives access to. An invitation that lapsed is not listed.
+      x-ability: read
+      responses:
+        '200':
+          description: The invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReceivedInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `read` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the read permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `read` ability.
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /me/invitations/{invitation}:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    delete:
+      tags:
+        - Invitations
+      operationId: declineInvitation
+      summary: Decline an invitation
+      description: Deletes the invitation. Only the person it is addressed to can.
+      x-ability: manage
+      responses:
+        '204':
+          description: The invitation is declined.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          description: >-
+            There is no such invitation, or it is not addressed to the address of the user, or it lapsed or was
+            withdrawn (the cases are not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Not Found
+        '429':
+          description: Too many requests. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodedError'
+              example:
+                message: Too many attempts. Please wait a moment before trying again.
+                code: too_many_requests
+          x-codes:
+            - code: too_many_requests
+              description: The rate limit of the token is reached.
+  /me/invitations/{invitation}/accept:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      tags:
+        - Invitations
+      operationId: acceptInvitation
+      summary: Accept an invitation
+      description: >-
+        The user joins the workspace with the role of the invitation, and the invitation is spent. It must be
+        addressed to the address of the account of the user: any other is a `404`. The answer is the workspace as the
+        user sees it now; it does not become the one they work in, which is their choice at their browser. Accepting
+        an invitation to a workspace the user belongs to already just spends it.
+      x-ability: manage
+      responses:
+        '200':
+          description: The workspace the user joined.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: The token lacks the `manage` ability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This API token lacks the manage permission.
+                code: token_ability_missing
+          x-codes:
+            - code: token_ability_missing
+              description: The token lacks the `manage` ability.
+        '404':
+          description: >-
+            There is no such invitation, or it is not addressed to the address of the user, or it lapsed or was
+            withdrawn (the cases are not told apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Not Found
+        '409':
+          description: The request is well formed but the state of the data does not allow it, or a quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+          x-codes:
+            - code: member_limit_reached
+              description: The workspace already has as many members as allowed. `limit` says how many.
+            - code: membership_limit_reached
+              description: The user already belongs to as many workspaces as allowed. `limit` says how many.
         '429':
           description: Too many requests. Wait `Retry-After` seconds.
           headers:
@@ -4125,6 +4845,20 @@ components:
       description: The id of the official version. It must belong to the inventory of the path.
       schema:
         $ref: '#/components/schemas/Ulid'
+    MemberId:
+      name: member
+      in: path
+      required: true
+      description: The id of the member, as `GET /workspaces/{workspace}/members` gives it. A person who is not a member of the workspace is a `404`.
+      schema:
+        $ref: '#/components/schemas/Ulid'
+    InvitationId:
+      name: invitation
+      in: path
+      required: true
+      description: The id of the invitation, as the lists of invitations give it. One that is not of the workspace of the path (or not addressed to the user), has lapsed or was withdrawn is a `404`.
+      schema:
+        $ref: '#/components/schemas/Ulid'
     TemplateSlug:
       name: slug
       in: path
@@ -4438,6 +5172,128 @@ components:
           description: Whether it is the workspace the user is working in in the web application.
         created_at:
           $ref: '#/components/schemas/Timestamp'
+    InvitableRole:
+      type: string
+      description: 'The role an invitation gives, or that a member is changed to: an editor or a viewer. A workspace has one owner, who hands the ownership over instead.'
+      enum:
+        - editor
+        - viewer
+    Member:
+      type: object
+      description: A member of a workspace, as seen by the person who asks.
+      required:
+        - id
+        - name
+        - email
+        - role
+        - joined_at
+        - is_self
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+          description: Names the person, the same in every workspace. It is not the number of their account and says nothing about it.
+        name:
+          type: string
+        email:
+          type:
+            - string
+            - 'null'
+          description: The address of the member, for the owner of the workspace and for the member themselves; null for anybody else.
+        role:
+          $ref: '#/components/schemas/Role'
+        joined_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the member joined, null if the date is not known.
+        is_self:
+          type: boolean
+          description: Whether it is the person who asks.
+    SentInvitation:
+      type: object
+      description: An invitation a workspace has sent that waits for an answer, as seen by its owner.
+      required:
+        - id
+        - email
+        - role
+        - invited_by
+        - expires_at
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        email:
+          type: string
+          description: The address it is addressed to, in lowercase.
+        role:
+          $ref: '#/components/schemas/InvitableRole'
+        invited_by:
+          description: The person who sent it last, as the id they have among the members, null once their account was deleted.
+          oneOf:
+            - type: object
+              required:
+                - id
+                - name
+              properties:
+                id:
+                  $ref: '#/components/schemas/Ulid'
+                name:
+                  type: string
+            - type: 'null'
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+          description: Until when it can be accepted.
+        created_at:
+          $ref: '#/components/schemas/Timestamp'
+    ReceivedInvitation:
+      type: object
+      description: An invitation addressed to the user, with the workspace it gives access to.
+      required:
+        - id
+        - workspace
+        - role
+        - inviter
+        - expires_at
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        workspace:
+          type: object
+          required:
+            - id
+            - name
+          properties:
+            id:
+              $ref: '#/components/schemas/Ulid'
+            name:
+              type: string
+              maxLength: 100
+        role:
+          $ref: '#/components/schemas/InvitableRole'
+        inviter:
+          description: 'Who sent it, null once their account was deleted. Only the name: the user is not a member of the workspace yet.'
+          oneOf:
+            - type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+            - type: 'null'
+        expires_at:
+          $ref: '#/components/schemas/Timestamp'
+          description: Until when it can be accepted.
+    TooSoonError:
+      description: A request refused for the moment (`429`), with the seconds to wait when the refusal says so.
+      allOf:
+        - $ref: '#/components/schemas/CodedError'
+        - type: object
+          properties:
+            retry_after:
+              type: integer
+              minimum: 1
+              description: Seconds to wait before trying again, with `resend_too_soon`. It is the number `Retry-After` carries.
     InventoryAbilities:
       type: object
       description: What the user may do with the inventory, from their role in its workspace.

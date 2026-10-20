@@ -11,20 +11,26 @@ use App\Database\DeadlockRetries;
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exports\ExportCleanup;
 use App\Inventories\Imports\ImportCleanup;
+use App\Models\Concerns\HasUlidRouteKey;
 use App\Workspaces\Workspaces;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
+use Symfony\Component\Uid\Ulid;
 
 /**
  * A person who can sign in to the application.
@@ -37,7 +43,12 @@ use Laravel\Sanctum\HasApiTokens;
  * application then uses the visitor's own choice). `is_admin` is deliberately
  * not mass-assignable: only the installer and `inventaire:make-admin` set it.
  *
+ * `ulid` is how the other members of a workspace name the account in the API (never `id`, which only its owner sees, in `GET /me`).
+ * It looks like a ULID but is drawn at random in full, so that, unlike the time part of a real one, it says nothing about when the
+ * account was opened ({@see self::newUlid()}).
+ *
  * @property int $id
+ * @property string $ulid
  * @property string $name
  * @property string $email
  * @property string|null $locale
@@ -46,7 +57,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property Carbon|null $email_verified_at
  */
 #[Fillable(['name', 'email', 'locale'])]
-#[Hidden(['remember_token'])]
+#[Hidden(['remember_token', 'ulid'])]
 class User extends Authenticatable implements HasLocalePreference
 {
     /** @use HasFactory<UserFactory> */
@@ -116,6 +127,47 @@ class User extends Authenticatable implements HasLocalePreference
         static::deleted(function (self $user): void {
             app(AttachmentCleanup::class)->purgeCollected($user);
         });
+    }
+
+    /**
+     * A new identifier for an account: 26 lowercase Crockford characters, the first of them 0 to 7 (a valid ULID), all of them random.
+     *
+     * A real ULID starts with the moment it was made. This one is 128 bits drawn from the system's source of randomness, so it tells
+     * nothing about the account that carries it and cannot be guessed from another account's.
+     */
+    public static function newUlid(): string
+    {
+        return strtolower(Ulid::fromBinary(random_bytes(16))->toBase32());
+    }
+
+    /**
+     * Gives the account its `ulid` as the row is inserted, whatever path creates it. It is done here and not in a `creating` listener
+     * so that nothing which removes the listeners of the model (a test that undoes a forced failure) can leave an account without one:
+     * the column is mandatory.
+     *
+     * @param  EloquentBuilder<static>  $query
+     */
+    protected function performInsert(EloquentBuilder $query): bool
+    {
+        if (empty($this->ulid)) {
+            $this->ulid = self::newUlid();
+        }
+
+        return parent::performInsert($query);
+    }
+
+    /**
+     * Looks an account up by the `ulid` of a path, whatever its case, as {@see HasUlidRouteKey::resolveRouteBindingQuery()} does for
+     * the models that use it (an account is bound by its `ulid` only where a route says so: `{member:ulid}`).
+     *
+     * @param  Model|BuilderContract|Relation<*, *, *>  $query
+     * @param  mixed  $value
+     * @param  string|null  $field
+     * @return BuilderContract
+     */
+    public function resolveRouteBindingQuery($query, $value, $field = null)
+    {
+        return parent::resolveRouteBindingQuery($query, in_array($field, ['ulid', $this->qualifyColumn('ulid')], true) && is_string($value) ? strtolower($value) : $value, $field);
     }
 
     /**

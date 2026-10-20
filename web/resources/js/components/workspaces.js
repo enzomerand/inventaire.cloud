@@ -54,6 +54,11 @@ export default function workspaces() {
             return this.$root.dataset.workspaceUrl;
         },
 
+        /** Page of the members of a workspace, with `__id__` where its ULID goes, from `data-members-url` on the component root. */
+        get membersPage() {
+            return this.$root.dataset.membersUrl;
+        },
+
         /** The workspaces of the person, from the shared store. */
         get items() {
             return this.$store.workspaces.items;
@@ -104,6 +109,26 @@ export default function workspaces() {
          */
         pageUrl(item) {
             return fillUrl(this.workspaceUrl, item.id);
+        },
+
+        /**
+         * Where the page of the members of a workspace is: the people who belong to it, and for its owner the way to manage them.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        membersUrl(item) {
+            return fillUrl(this.membersPage, item.id);
+        },
+
+        /**
+         * The accessible name of the link to the members of a workspace.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        membersLabel(item) {
+            return t('workspaces.members_named', { name: item.name });
         },
 
         /**

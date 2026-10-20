@@ -18,6 +18,9 @@ Schedule::command('inventaire:prune-exports')->hourly()->withoutOverlapping(30);
 // whose worker was lost are given up on.
 Schedule::command('inventaire:prune-imports')->hourly()->withoutOverlapping(30);
 
+// The invitations to join a workspace that lapsed are deleted. They are invisible and refused as soon as they lapse: this only clears the table.
+Schedule::command('inventaire:prune-invitations')->hourly()->withoutOverlapping(30);
+
 // The API tokens that expired are deleted a day later. They stop working the moment they expire (and the list of tokens hides them):
 // this only clears the table. The lock of a run that was killed is forgotten after 30 minutes, as for the exports.
 Schedule::command('sanctum:prune-expired --hours=24')->daily()->withoutOverlapping(30);

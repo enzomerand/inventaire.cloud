@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Inventories\Exports\ExportFormat;
 use App\Inventories\Versions\SignatureError;
 use App\Inventories\Versions\SignatureStatus;
+use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 
@@ -64,6 +65,79 @@ function contractScenarios(): array
             $world = contractWorld();
 
             contractCheck(contractCall($test, $world['owner'], 'deleteWorkspace', 'DELETE', "/api/v1/workspaces/{$world['team']['workspace']->ulid}"), 'deleteWorkspace', 204);
+        },
+
+        'listMembers' => function (object $test): void {
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'listMembers', 'GET', contractMemberUri($world['team']['workspace'])), 'listMembers', 200);
+            // A member sees the same list without the addresses of the others.
+            contractCheck(contractCall($test, $world['team']['viewer'], 'listMembers', 'GET', contractMemberUri($world['team']['workspace'])), 'listMembers', 200);
+        },
+
+        'updateMemberRole' => function (object $test): void {
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'updateMemberRole', 'PATCH', contractMemberUri($world['team']['workspace'], $world['team']['editor']), ['role' => 'viewer']), 'updateMemberRole', 200);
+        },
+
+        'removeMember' => function (object $test): void {
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'removeMember', 'DELETE', contractMemberUri($world['team']['workspace'], $world['team']['editor'])), 'removeMember', 204);
+        },
+
+        'listInvitations' => function (object $test): void {
+            $world = contractWorld();
+            contractInvitation($world['team']['workspace'], 'guest@example.test', $world['owner']);
+            contractInvitation($world['team']['workspace'], 'gone@example.test');
+
+            contractCheck(contractCall($test, $world['owner'], 'listInvitations', 'GET', "/api/v1/workspaces/{$world['team']['workspace']->ulid}/invitations"), 'listInvitations', 200);
+        },
+
+        'createInvitation' => function (object $test): void {
+            $world = contractWorld();
+
+            contractCheck(contractCall($test, $world['owner'], 'createInvitation', 'POST', "/api/v1/workspaces/{$world['team']['workspace']->ulid}/invitations", ['email' => 'guest@example.test', 'role' => 'editor']), 'createInvitation', 201);
+        },
+
+        'resendInvitation' => function (object $test): void {
+            $world = contractWorld();
+            $invitation = contractInvitation($world['team']['workspace'], 'guest@example.test', $world['owner']);
+
+            contractCheck(contractCall($test, $world['owner'], 'resendInvitation', 'POST', "/api/v1/workspaces/{$world['team']['workspace']->ulid}/invitations/{$invitation->ulid}/resend"), 'resendInvitation', 200);
+        },
+
+        'cancelInvitation' => function (object $test): void {
+            $world = contractWorld();
+            $invitation = contractInvitation($world['team']['workspace'], 'guest@example.test', $world['owner']);
+
+            contractCheck(contractCall($test, $world['owner'], 'cancelInvitation', 'DELETE', "/api/v1/workspaces/{$world['team']['workspace']->ulid}/invitations/{$invitation->ulid}"), 'cancelInvitation', 204);
+        },
+
+        'listMyInvitations' => function (object $test): void {
+            $world = contractWorld();
+            $guest = $world['team']['stranger'];
+            contractInvitation($world['team']['workspace'], $guest->email, $world['owner']);
+            contractInvitation(app(Workspaces::class)->create($world['team']['editor'], 'Annex'), $guest->email);
+
+            contractCheck(contractCall($test, $guest, 'listMyInvitations', 'GET', '/api/v1/me/invitations'), 'listMyInvitations', 200);
+        },
+
+        'acceptInvitation' => function (object $test): void {
+            $world = contractWorld();
+            $guest = $world['team']['stranger'];
+            $invitation = contractInvitation($world['team']['workspace'], $guest->email, $world['owner']);
+
+            contractCheck(contractCall($test, $guest, 'acceptInvitation', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept"), 'acceptInvitation', 200);
+        },
+
+        'declineInvitation' => function (object $test): void {
+            $world = contractWorld();
+            $guest = $world['team']['stranger'];
+            $invitation = contractInvitation($world['team']['workspace'], $guest->email, $world['owner']);
+
+            contractCheck(contractCall($test, $guest, 'declineInvitation', 'DELETE', "/api/v1/me/invitations/{$invitation->ulid}"), 'declineInvitation', 204);
         },
 
         'listInventories' => function (object $test): void {

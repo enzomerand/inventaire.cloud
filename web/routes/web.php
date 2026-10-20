@@ -20,6 +20,7 @@ use App\Http\Controllers\Web\InventoryVersionsPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
+use App\Http\Controllers\Web\WorkspaceMembersPageController;
 use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Controllers\Webhooks\DocumensoWebhookController;
 use App\Http\Middleware\AbortIfInstalled;
@@ -85,15 +86,20 @@ Route::middleware(['auth', AuthenticateSession::class])->group(function (): void
     Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
     Route::view('/app/account', 'app.account')->name('app.account');
 
+    // The invitations addressed to the address of the account. The invitation mail links to this path (WorkspaceInvitationMail::PAGE, kept
+    // equal to it by a test). A visitor who is not signed in goes through the login page and comes back here.
+    Route::view('/app/invitations', 'app.invitations')->name('app.invitations');
+
     // "Use this template" on a public page: opens the dialog of a new inventory, with the template chosen, in a workspace
     // the person may change. A visitor who is not signed in goes through the login page and comes back here.
     Route::get('/app/templates/{slug}', TemplateUseController::class)->name('app.templates.use');
 
-    // The pages of a workspace: its inventories, the items of one of them and its fields. The ULID of the workspace is in
+    // The pages of a workspace: its inventories, its members, the items of one of them and its fields. The ULID of the workspace is in
     // the path (not the "current" workspace of the account), so that a link always shows the same thing; the inventory
     // is looked up inside that workspace (scoped binding) and every page refuses, as a 404, whoever does not belong to it.
     Route::prefix('app/w/{workspace}')->name('app.')->group(function (): void {
         Route::get('/', WorkspacePageController::class)->name('workspace');
+        Route::get('/members', WorkspaceMembersPageController::class)->name('workspace.members');
 
         Route::scopeBindings()->group(function (): void {
             Route::get('/inventories/{inventory}', InventoryPageController::class)->name('inventory');

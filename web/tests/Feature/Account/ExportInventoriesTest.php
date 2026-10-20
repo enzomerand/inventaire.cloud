@@ -140,7 +140,7 @@ describe('the inventories in the export of the account', function (): void {
         $export = inventoryCall($this, $team['owner'], 'GET', '/api/v1/me/export')->assertOk()->json();
 
         expect($export['version'])->toBe(AccountExport::VERSION)
-            ->and(array_keys($export))->toBe(['format', 'version', 'exported_at', 'user', 'workspaces', 'sessions', 'tokens'])
+            ->and(array_keys($export))->toBe(['format', 'version', 'exported_at', 'user', 'workspaces', 'invitations', 'sessions', 'tokens'])
             ->and(array_keys($export['workspaces'][0]))->toBe(['id', 'name', 'role', 'is_current', 'created_at', 'updated_at', 'revisions_written', 'files_uploaded', 'official_versions_created', 'inventories']);
     });
 });

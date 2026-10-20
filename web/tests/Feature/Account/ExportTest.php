@@ -48,6 +48,7 @@ describe('the export of the account', function (): void {
             ->and($export['version'])->toBe(AccountExport::VERSION)
             ->and($export['user'])->toBe([
                 'id' => $user->id,
+                'ulid' => $user->ulid,
                 'name' => 'Ada Lovelace',
                 'email' => 'ada@example.com',
                 'locale' => 'en',

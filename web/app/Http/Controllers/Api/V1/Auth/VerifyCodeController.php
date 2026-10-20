@@ -15,6 +15,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\LocaleResolver;
 use App\Settings\InstanceSettings;
+use App\Workspaces\Invitations;
 use App\Workspaces\Workspaces;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Http\JsonResponse;
@@ -32,7 +33,10 @@ use Illuminate\Support\Str;
  *
  * When an administrator has closed registration, an address that has no account cannot create one: it is judged like
  * any other address (wrong codes are counted, attempts run out), but whatever it types is refused as a wrong code,
- * even the right one, so a code issued before registration closed opens nothing and nothing tells the two apart.
+ * even the right one, so a code issued before registration closed opens nothing and nothing tells the two apart. The exception is an
+ * address that an invitation to join a workspace waits for (one that a person who still has an account sent, and only while the administrator
+ * leaves invitations on as a way to sign up: {@see Invitations::hasTicketFor()}, {@see InstanceSettings::invitationSignUp()}): the invitation is
+ * its ticket, and the right code creates the account.
  *
  * Spending the code and everything that is saved because of it (the account,
  * its verified address, its language, its workspace) is one transaction: if any of it fails,
@@ -45,6 +49,7 @@ final class VerifyCodeController extends Controller
         private readonly DatabaseManager $db,
         private readonly Workspaces $workspaces,
         private readonly InstanceSettings $settings,
+        private readonly Invitations $invitations,
     ) {}
 
     /**
@@ -85,14 +90,18 @@ final class VerifyCodeController extends Controller
         // Locked before anything is read (see LoginCodes::lock() for why).
         $codes->lock($email);
 
-        // Read for every address, so that the work is the same whether it has an account or not.
+        // Read for every address, so that the work is the same whether it has an account or not (and so is the look for an
+        // invitation, which only matters while registration is closed: it is made first, whatever the setting says, and the setting
+        // is already in memory).
         $registrationOpen = $this->settings->registrationOpen();
+        $invited = ! $registrationOpen && $this->invitations->hasTicketFor($email) && $this->settings->invitationSignUp();
 
         $user = User::query()->where('email', $email)->first();
 
         // A name is needed to create an account: until it is known, a right code is checked but kept. And when no
-        // account can be created, the code of an address without one is never the right one.
-        $verdict = $codes->verify($email, $code, consume: $user !== null || $name !== null, acceptable: $user !== null || $registrationOpen);
+        // account can be created (registration closed, and no invitation waiting for the address), the code of an address
+        // without one is never the right one.
+        $verdict = $codes->verify($email, $code, consume: $user !== null || $name !== null, acceptable: $user !== null || $registrationOpen || $invited);
 
         if (! $verdict->accepted()) {
             return $this->refusal($verdict);
