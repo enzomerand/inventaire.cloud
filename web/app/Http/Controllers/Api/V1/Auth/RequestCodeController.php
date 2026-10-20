@@ -11,6 +11,7 @@ use App\Mail\AfterResponse;
 use App\Mail\LoginCodeMail;
 use App\Models\User;
 use App\Settings\InstanceSettings;
+use App\Workspaces\Invitations;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Mail;
 
@@ -27,6 +28,9 @@ use Illuminate\Support\Facades\Mail;
  * without an account that cannot create one is given a code nobody receives, which is judged like any other when it is
  * typed back: were it not stored, "expired" would tell it from an address that has an account and a code, and the
  * sign-in step would reveal who has an account.
+ *
+ * Registration closed, an address without an account is still given its code when an invitation to join a workspace waits for it
+ * ({@see Invitations}): the invitation is its ticket. That, too, is looked up after the answer.
  */
 final class RequestCodeController extends Controller
 {
@@ -35,7 +39,7 @@ final class RequestCodeController extends Controller
      * language of the request. If the mail cannot be sent, the code is dropped (while registration is open) and the
      * failure is logged: the person asks for another one.
      */
-    public function __invoke(RequestLoginCodeRequest $request, LoginCodes $codes, InstanceSettings $settings): JsonResponse
+    public function __invoke(RequestLoginCodeRequest $request, LoginCodes $codes, InstanceSettings $settings, Invitations $invitations): JsonResponse
     {
         $email = $request->email();
         $code = $codes->issue($email);
@@ -44,10 +48,10 @@ final class RequestCodeController extends Controller
 
         AfterResponse::run(
             'a sign-in code',
-            function () use ($email, $code, $locale, $minutes, $settings): void {
-                // Registration closed: only an address that has an account gets its code (the lookup is made here,
-                // after the answer, and only then).
-                if (! $settings->registrationOpen() && ! User::query()->where('email', $email)->exists()) {
+            function () use ($email, $code, $locale, $minutes, $settings, $invitations): void {
+                // Registration closed: only an address that has an account, or that an invitation waits for, gets its code
+                // (the lookups are made here, after the answer, and only then).
+                if (! $settings->registrationOpen() && ! User::query()->where('email', $email)->exists() && ! $invitations->hasPendingFor($email)) {
                     return;
                 }
 
@@ -55,7 +59,7 @@ final class RequestCodeController extends Controller
             },
             function () use ($codes, $settings, $email, $code): void {
                 // Closed, the code stays: it is deleted for an address whose mail failed, and an address that has no
-                // account has nothing to fail, so deleting would tell them apart (typing a code back would answer
+                // account (and no invitation) has nothing to fail, so deleting would tell them apart (typing a code back would answer
                 // "expired" to the one and "incorrect" to the other) for whoever probes while the mail server is down.
                 // An undelivered code does no harm: nobody knows it, and it lapses.
                 if ($settings->registrationOpen()) {
