@@ -204,6 +204,14 @@ final class Invitations
     }
 
     /**
+     * How many invitations wait for an address: the figure the header of the app shows. One query on `(email, expires_at)`.
+     */
+    public function countPendingFor(string $email): int
+    {
+        return WorkspaceInvitation::query()->addressedTo($email)->pending()->count();
+    }
+
+    /**
      * Accepts an invitation: the account joins the workspace with the invited role, and the invitation is spent.
      *
      * It must be addressed to the address of the account and not have lapsed (else it is answered as if it was not there). An account
