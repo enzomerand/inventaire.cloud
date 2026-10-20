@@ -18,6 +18,8 @@
 //        php concurrent-action.php <go file> upload-attachment <user id> <inventory id> <item id> <path of the file to upload> [<ULID of the file or photo field>]
 //        php concurrent-action.php <go file> remove-attachment <user id> <inventory id> <item id> <attachment id>
 //        php concurrent-action.php <go file> run-import <import id>
+//        php concurrent-action.php <go file> create-share-link <user id> <inventory id>
+//        php concurrent-action.php <go file> revoke-share-link <inventory id> <share link id>
 //        php concurrent-action.php <go file> create-token <user id> <name>
 //        php concurrent-action.php <go file> hold-token-revocation <user id>
 //        php concurrent-action.php <go file> insert-token <user id>
@@ -68,17 +70,20 @@ use App\Inventories\Exceptions\FieldFileLimitReachedException;
 use App\Inventories\Exceptions\FieldLimitReachedException;
 use App\Inventories\Exceptions\InventoryLimitReachedException;
 use App\Inventories\Exceptions\ItemLimitReachedException;
+use App\Inventories\Exceptions\ShareLinkLimitReachedException;
 use App\Inventories\Exceptions\StorageLimitReachedException;
 use App\Inventories\Imports\ImportRunner;
 use App\Inventories\Imports\ImportStatus;
 use App\Inventories\Inventories;
 use App\Inventories\InventoryFields;
 use App\Inventories\Items;
+use App\Inventories\Sharing\ShareLinks;
 use App\Models\Attachment;
 use App\Models\Import;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\Item;
+use App\Models\ShareLink;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -378,6 +383,12 @@ function changeInventories(Application $app, string $action, array $arguments): 
             $app->make(ImportRunner::class)->run($import);
 
             return $import->refresh()->status === ImportStatus::Completed ? ['result' => 'completed'] : ['result' => 'refused', 'reason' => (string) $import->error];
+        case 'create-share-link':
+            $app->make(ShareLinks::class)->create(User::query()->findOrFail((int) $arguments[0]), Inventory::query()->findOrFail((int) $arguments[1]), null, true, 30);
+
+            return ['result' => 'created'];
+        case 'revoke-share-link':
+            return $app->make(ShareLinks::class)->revoke(Inventory::query()->findOrFail((int) $arguments[0]), ShareLink::query()->findOrFail((int) $arguments[1])) ? ['result' => 'revoked'] : ['result' => 'refused', 'reason' => 'gone'];
         case 'update-item':
             $app->make(Items::class)->update(Inventory::query()->findOrFail((int) $arguments[1]), Item::query()->findOrFail((int) $arguments[2]), [$arguments[3] => $arguments[4]], User::query()->findOrFail((int) $arguments[0]));
 
@@ -396,7 +407,7 @@ try {
         'post-inventory' => postInventory($app, $arguments),
         'create-token' => createToken($app, $arguments),
         'invite', 'accept-invitation', 'decline-invitation', 'cancel-invitation', 'transfer-ownership', 'remove-member', 'leave-workspace' => changeMembers($app, $action, $arguments),
-        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment', 'run-import' => changeInventories($app, $action, $arguments),
+        'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment', 'run-import', 'create-share-link', 'revoke-share-link' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
 } catch (AccountDeletionRefused $refusal) {
@@ -409,7 +420,7 @@ try {
     $outcome = ['result' => 'refused', 'reason' => 'not_member'];
 } catch (LastWorkspaceException) {
     $outcome = ['result' => 'refused', 'reason' => LastWorkspaceException::CODE];
-} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException|ApiTokenLimitReachedException $limit) {
+} catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException|ApiTokenLimitReachedException|ShareLinkLimitReachedException $limit) {
     $outcome = ['result' => 'refused', 'reason' => $limit::CODE];
 } catch (ModelNotFoundException) {
     // Something the action needed was deleted by the other process first (the account that writes, the inventory...).

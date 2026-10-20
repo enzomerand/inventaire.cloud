@@ -76,6 +76,9 @@ describe('the migrations', function (): void {
         $versions = require database_path('migrations/2026_11_06_000000_create_inventory_versions_table.php');
         // The invitations hang from workspaces and accounts.
         $invitations = require database_path('migrations/2026_11_13_000000_create_workspace_invitations_table.php');
+        // The share links hang from inventories and accounts.
+        $shareLinks = require database_path('migrations/2026_11_20_000000_create_share_links_table.php');
+        $shareLinks->down();
         $invitations->down();
         $versions->down();
         $imports->down();
@@ -103,6 +106,7 @@ describe('the migrations', function (): void {
             $imports->up();
             $versions->up();
             $invitations->up();
+            $shareLinks->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

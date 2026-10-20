@@ -319,4 +319,34 @@ return [
 
     'api_token_creations_per_hour' => 10,
 
+    /*
+    |--------------------------------------------------------------------------
+    | Share links
+    |--------------------------------------------------------------------------
+    |
+    | The owner of an inventory shares it, read-only, through a secret link
+    | (see App\Inventories\Sharing\ShareLinks).
+    |
+    | - `max_share_links`: links one inventory may have (`INVENTORIES_MAX_SHARE_LINKS`,
+    |   20), the ones that expired included until they are deleted: the API
+    |   answers 409 (`share_link_limit_reached`) beyond. Counted under the lock
+    |   of the inventory's row.
+    | - `share_link_creations_per_hour`: links one person may make in an hour
+    |   (`INVENTORIES_SHARE_LINK_CREATIONS_PER_HOUR`, 20), `429` beyond.
+    | - `share_page_per_minute`: requests per minute the public page of a link
+    |   answers (`INVENTORIES_SHARE_PAGE_PER_MINUTE`, 120), counted for each
+    |   network and link together, `429` beyond.
+    | - `share_files_per_minute`: the same for the photos and files served
+    |   through a link (`INVENTORIES_SHARE_FILES_PER_MINUTE`, 600): a page of
+    |   items shows many thumbnails at once.
+    |
+    */
+    'max_share_links' => (int) env('INVENTORIES_MAX_SHARE_LINKS', 20),
+
+    'share_link_creations_per_hour' => (int) env('INVENTORIES_SHARE_LINK_CREATIONS_PER_HOUR', 20),
+
+    'share_page_per_minute' => (int) env('INVENTORIES_SHARE_PAGE_PER_MINUTE', 120),
+
+    'share_files_per_minute' => (int) env('INVENTORIES_SHARE_FILES_PER_MINUTE', 600),
+
 ];
