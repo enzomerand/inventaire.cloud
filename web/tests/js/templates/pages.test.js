@@ -70,6 +70,7 @@ const ROUTES = {
 /** Routes with parameters: `{name}` stands for a parameter the template gives (a literal, or a variable of PAGE). */
 const ROUTE_PATTERNS = {
     'app.workspace': '/app/w/{workspace}',
+    'app.workspace.members': '/app/w/{workspace}/members',
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
     'app.inventory.versions': '/app/w/{workspace}/inventories/{inventory}/versions',
@@ -515,6 +516,21 @@ describe('the pages under the real Alpine CSP build', () => {
                 { work: 1, rename: 1, delete: 1 },
                 { work: 0, rename: 1, delete: 1 },
                 { work: 1, rename: 0, delete: 0 },
+            ]);
+        });
+
+        it('links each workspace to its members, by name', () => {
+            const links = rows().map((row) => row.querySelector('a[href$="/members"]'));
+
+            expect(links.map((link) => link.getAttribute('href'))).toEqual([
+                '/app/w/personal/members',
+                '/app/w/shop/members',
+                '/app/w/shared/members',
+            ]);
+            expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
+                'Members of Espace personnel',
+                'Members of Shop',
+                'Members of Shared',
             ]);
         });
 
@@ -1633,6 +1649,16 @@ describe('the pages under the real Alpine CSP build', () => {
             dialog().querySelector('[data-step="choose"] [data-autofocus]').click();
             await flush();
         }
+
+        it('links to the members of the workspace', async () => {
+            await open();
+
+            const link = [...document.querySelectorAll('a.btn')].find(
+                (anchor) => anchor.textContent.trim() === 'Members',
+            );
+
+            expect(link.getAttribute('href')).toBe('/app/w/shop/members');
+        });
 
         it('lists the inventories as cards, each linking to its page, with what it holds', async () => {
             await open();

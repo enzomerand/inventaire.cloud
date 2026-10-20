@@ -288,6 +288,61 @@ export const MESSAGES = {
     'tokens.copy': 'Copy',
     'tokens.copied': 'Copied',
     'admin.settings.select_hint': 'The address is selected: copy it with your keyboard.',
+    'workspaces.role.owner': 'Owner',
+    'workspaces.role.editor': 'Editor',
+    'workspaces.role.viewer': 'Viewer',
+    'workspaces.members_named': 'Members of :name',
+    'members.joined': 'Joined :date',
+    'members.role_of': 'Role of :name',
+    'members.make_owner': 'Make owner',
+    'members.make_owner_named': 'Make owner: :name',
+    'members.remove': 'Remove',
+    'members.remove_named': 'Remove :name from the workspace',
+    'members.confirm_remove': 'Remove :name from the workspace? They lose access at once.',
+    'members.confirm_transfer':
+        'Make :name the owner? You become an editor, and only they can give the ownership back.',
+    'members.confirm_leave': 'Leave :name? You lose access to its inventories until somebody invites you again.',
+    'members.confirm_withdraw': 'Withdraw the invitation sent to :email?',
+    'members.resend_named': 'Send again: :email',
+    'members.withdraw_named': 'Withdraw the invitation sent to :email',
+    'members.notice.role_changed': 'The role of :name was updated.',
+    'members.notice.removed': ':name was removed from the workspace.',
+    'members.notice.transferred': ':name is now the owner of the workspace. The page is about to reload.',
+    'members.notice.left': 'You left :name.',
+    'members.notice.invited': 'Invitation sent to :email.',
+    'members.notice.resent': 'Invitation sent to :email again.',
+    'members.notice.withdrawn': 'Invitation to :email withdrawn.',
+    'members.error.not_owner': 'Only an owner of this workspace can manage it.',
+    'members.error.already_member': 'This person already belongs to the workspace.',
+    'members.error.already_invited': 'An invitation to this address is already waiting for an answer.',
+    'members.error.cannot_change_owner_role':
+        'The role of the owner cannot be changed: hand the ownership over to another member instead.',
+    'members.error.cannot_remove_owner':
+        'The owner cannot be removed from the workspace: hand the ownership over to another member first.',
+    'members.error.owner_cannot_leave':
+        'The owner cannot leave the workspace: hand the ownership over to another member first.',
+    'members.error.already_owner': 'This member is already the owner of the workspace.',
+    'members.error.member_limit':
+        'Member limit reached (:count per workspace, invitations waiting for an answer included).',
+    'members.error.membership_limit': 'Workspace limit reached (:count per account).',
+    'members.error.resend_too_soon':
+        'This invitation was sent a moment ago: wait a few minutes before sending it again.',
+    'members.error.resend_wait.one':
+        'This invitation was sent a moment ago: wait :count minute before sending it again.',
+    'members.error.resend_wait.other':
+        'This invitation was sent a moment ago: wait :count minutes before sending it again.',
+    'invitations.expires': 'Expires :date',
+    'invitations.invited_by': 'Invited by :name',
+    'invitations.accept_named': 'Accept the invitation to :name',
+    'invitations.decline_named': 'Decline the invitation to :name',
+    'invitations.confirm_decline': 'Decline the invitation to :name?',
+    'invitations.notice.accepted': 'You joined :name.',
+    'invitations.notice.declined': 'Invitation to :name declined.',
+    'invitations.error.workspace_full': 'This workspace cannot take more members for now: ask its owner to make room.',
+    'invitations.error.membership_limit':
+        'You already belong to as many workspaces as an account can (:count): leave one, then accept.',
+    'invitations.waiting.one': ':count invitation waiting',
+    'invitations.waiting.other': ':count invitations waiting',
 };
 
 /**
