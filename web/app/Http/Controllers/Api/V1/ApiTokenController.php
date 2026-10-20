@@ -10,10 +10,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Account\StoreApiTokenRequest;
 use App\Http\Resources\ApiTokenResource;
 use App\Http\Responses\ApiError;
+use App\Mail\AfterResponse;
+use App\Mail\ApiTokenCreatedMail;
+use App\Models\User;
+use App\Support\PublicUrls;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -49,8 +54,10 @@ final class ApiTokenController extends Controller
      */
     public function store(StoreApiTokenRequest $request): JsonResponse
     {
+        $user = $this->user($request);
+
         try {
-            $token = $this->tokens->create($this->user($request), $request->tokenName(), $request->abilities(), $request->lifetimeDays());
+            $token = $this->tokens->create($user, $request->tokenName(), $request->abilities(), $request->lifetimeDays());
         } catch (ApiTokenLimitReachedException $limit) {
             return ApiError::conflict(
                 trans_choice('You can have :count API token at a time: revoke one, or wait for one to expire.|You can have :count API tokens at a time: revoke one, or wait for one to expire.', $limit->limit),
@@ -63,10 +70,38 @@ final class ApiTokenController extends Controller
         // is what the person copies.
         $secret = Str::after($token->plainTextToken, '|');
 
+        // Not inside `create()`, which runs again when the database picks it as the loser of a deadlock: the mail would go twice.
+        $this->announce($request, $user, $token->accessToken);
+
         return (new ApiTokenResource($token->accessToken, $secret))->response()
             ->setStatusCode(201)
             // The only answer that holds the value of a token: nothing is to keep a copy of it.
             ->header('Cache-Control', 'no-store, private');
+    }
+
+    /**
+     * Tells the person, after the answer, that a token was made on their account, in the language of the account.
+     *
+     * What the mail needs from the request (the address and the user agent) is read now, as strings: the request is gone when it is
+     * sent. It is given what describes the token, never its value ({@see ApiTokenCreatedMail}).
+     */
+    private function announce(Request $request, User $user, PersonalAccessToken $token): void
+    {
+        $locale = $user->locale ?? app()->getLocale();
+        $mail = new ApiTokenCreatedMail(
+            name: $user->name,
+            tokenName: $token->name,
+            abilities: array_values($token->abilities ?? []),
+            createdAt: $token->created_at ?? now(),
+            expiresAt: $token->expires_at,
+            ipAddress: $request->ip() ?? '',
+            userAgent: $request->userAgent() ?? '',
+            accountUrl: PublicUrls::to(route('app.account', absolute: false)),
+        );
+
+        AfterResponse::run('an API token notice', function () use ($user, $locale, $mail): void {
+            Mail::to($user->email)->locale($locale)->send($mail);
+        });
     }
 
     /**

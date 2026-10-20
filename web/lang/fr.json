@@ -1280,5 +1280,15 @@
     "The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.": "Les données de cet inventaire sont trop volumineuses pour être figées en version officielle : elles ne peuvent pas peser plus de :size.",
     "Not found.": "Introuvable.",
     "The secret is missing or wrong.": "Le secret est absent ou erroné.",
-    "The body is too large.": "Le corps de la requête est trop volumineux."
+    "The body is too large.": "Le corps de la requête est trop volumineux.",
+    "New API token on your :app account": "Nouveau jeton d'API sur votre compte :app",
+    "An API token was created on your :app account:": "Un jeton d'API a été créé sur votre compte :app :",
+    "Token name: :value": "Nom du jeton : :value",
+    "Permissions: :value": "Permissions : :value",
+    "Created: :value": "Création : :value",
+    "Expires: :value": "Expiration : :value",
+    "IP address: :value": "Adresse IP : :value",
+    "Browser or application: :value": "Navigateur ou application : :value",
+    "Unknown": "Inconnu",
+    "If you did not create this token, revoke it now from your account page and sign out everywhere:": "Si vous n'avez pas créé ce jeton, révoquez-le maintenant depuis la page de votre compte et déconnectez-vous partout :"
 }
