@@ -11,6 +11,9 @@ use App\Inventories\Versions\VersionError;
 use App\Inventories\Versions\VersionStatus;
 use App\Models\Import;
 use App\Models\InventoryVersion;
+use App\Models\WorkspaceMember;
+use App\Workspaces\MemberIds;
+use App\Workspaces\WorkspaceRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -503,5 +506,173 @@ describe('the answers that hold every kind of value', function (): void {
         }
 
         contractCheck(contractCall($this, null, 'listTemplates', 'GET', '/api/v1/templates', [], ['Accept-Language' => 'fr']), 'listTemplates', 200);
+    });
+});
+
+describe('the errors of the members and the invitations', function (): void {
+    it('answers 403 with the code not_owner, which the document lists, to a member who is not the owner', function (): void {
+        $world = contractWorld();
+        $team = $world['team'];
+        $workspace = $team['workspace'];
+        $invitation = contractInvitation($workspace, 'guest@example.test', $world['owner']);
+        $uri = "/api/v1/workspaces/{$workspace->ulid}";
+
+        foreach ([
+            ['updateMemberRole', 'PATCH', contractMemberUri($workspace, $team['viewer']), ['role' => 'editor']],
+            ['removeMember', 'DELETE', contractMemberUri($workspace, $team['viewer']), []],
+            ['transferOwnership', 'POST', "{$uri}/transfer", ['user_id' => app(MemberIds::class)->of($workspace, $team['editor'])]],
+            ['listInvitations', 'GET', "{$uri}/invitations", []],
+            ['createInvitation', 'POST', "{$uri}/invitations", ['email' => 'other@example.test', 'role' => 'viewer']],
+            ['resendInvitation', 'POST', "{$uri}/invitations/{$invitation->ulid}/resend", []],
+            ['cancelInvitation', 'DELETE', "{$uri}/invitations/{$invitation->ulid}", []],
+        ] as [$operationId, $method, $path, $data]) {
+            $response = contractCall($this, $team['editor'], $operationId, $method, $path, $data);
+
+            contractCheck($response, $operationId, 403);
+            expect($response->json('code'))->toBe('not_owner')->and(contractCodes($operationId, 403))->toContain('not_owner', 'token_ability_missing');
+        }
+    });
+
+    it('answers 403 with the code token_ability_missing to a token that lacks the ability, on the operations that read and the ones that manage', function (): void {
+        $world = contractWorld();
+        $workspace = $world['team']['workspace'];
+        $guest = $world['team']['stranger'];
+        $invitation = contractInvitation($workspace, $guest->email, $world['owner']);
+
+        foreach ([
+            ['listMembers', 'manage', 'GET', contractMemberUri($workspace)],
+            ['listInvitations', 'write', 'GET', "/api/v1/workspaces/{$workspace->ulid}/invitations"],
+            ['listMyInvitations', 'manage', 'GET', '/api/v1/me/invitations'],
+            ['updateMemberRole', 'read', 'PATCH', contractMemberUri($workspace, $world['team']['editor'])],
+            ['createInvitation', 'write', 'POST', "/api/v1/workspaces/{$workspace->ulid}/invitations"],
+            ['acceptInvitation', 'read', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept"],
+            ['declineInvitation', 'write', 'DELETE', "/api/v1/me/invitations/{$invitation->ulid}"],
+        ] as [$operationId, $ability, $method, $uri]) {
+            $response = tokenCall($this, tokenFor($world['owner'], [$ability]), $method, $uri);
+
+            contractCheck($response, $operationId, 403);
+            expect($response->json('code'))->toBe('token_ability_missing')->and(contractCodes($operationId, 403))->toContain('token_ability_missing');
+        }
+    });
+
+    it('answers 404 to what is not there for the caller: a workspace, a member or an invitation that is not theirs', function (): void {
+        $world = contractWorld();
+        $workspace = $world['team']['workspace'];
+        $stranger = $world['team']['stranger'];
+        $invitation = contractInvitation($workspace, 'guest@example.test', $world['owner']);
+
+        contractCheck(contractCall($this, $stranger, 'listMembers', 'GET', contractMemberUri($workspace)), 'listMembers', 404);
+        contractCheck(contractCall($this, $stranger, 'createInvitation', 'POST', "/api/v1/workspaces/{$workspace->ulid}/invitations", ['email' => 'x@example.test', 'role' => 'viewer']), 'createInvitation', 404);
+        contractCheck(contractCall($this, $world['owner'], 'removeMember', 'DELETE', contractMemberUri($workspace, $stranger)), 'removeMember', 404);
+        contractCheck(contractCall($this, $world['owner'], 'cancelInvitation', 'DELETE', "/api/v1/workspaces/{$workspace->ulid}/invitations/01j0000000000000000000000x"), 'cancelInvitation', 404);
+
+        // An invitation that is not addressed to the person is no business of theirs, whoever they are.
+        foreach ([['acceptInvitation', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept"], ['declineInvitation', 'DELETE', "/api/v1/me/invitations/{$invitation->ulid}"]] as [$operationId, $method, $uri]) {
+            contractCheck(contractCall($this, $stranger, $operationId, $method, $uri), $operationId, 404);
+            contractCheck(contractCall($this, $world['owner'], $operationId, $method, $uri), $operationId, 404);
+        }
+    });
+
+    it('answers 409 with the codes the document lists, and the quota that was reached', function (): void {
+        $world = contractWorld();
+        $team = $world['team'];
+        $workspace = $team['workspace'];
+        $uri = "/api/v1/workspaces/{$workspace->ulid}";
+        $ids = app(MemberIds::class);
+
+        $cases = [
+            ['updateMemberRole', 'PATCH', contractMemberUri($workspace, $team['owner']), ['role' => 'viewer'], 'cannot_change_owner_role'],
+            ['removeMember', 'DELETE', contractMemberUri($workspace, $team['owner']), [], 'owner_cannot_leave'],
+            ['transferOwnership', 'POST', "{$uri}/transfer", ['user_id' => $ids->of($workspace, $team['owner'])], 'already_owner'],
+            ['createInvitation', 'POST', "{$uri}/invitations", ['email' => $team['viewer']->email, 'role' => 'viewer'], 'already_member'],
+        ];
+
+        contractInvitation($workspace, 'waiting@example.test', $world['owner']);
+        $cases[] = ['createInvitation', 'POST', "{$uri}/invitations", ['email' => 'waiting@example.test', 'role' => 'viewer'], 'already_invited'];
+
+        foreach ($cases as [$operationId, $method, $path, $data, $code]) {
+            $response = contractCall($this, $team['owner'], $operationId, $method, $path, $data);
+
+            contractCheck($response, $operationId, 409);
+            expect($response->json('code'))->toBe($code)->and(contractCodes($operationId, 409))->toContain($code);
+        }
+
+        // A workspace that has two owners (leftover data) still refuses to remove the one who is not the person who asks.
+        WorkspaceMember::query()->where('workspace_id', $workspace->id)->where('user_id', $team['editor']->id)->update(['role' => WorkspaceRole::Owner->value]);
+        $removal = contractCall($this, $world['owner'], 'removeMember', 'DELETE', contractMemberUri($workspace, $team['editor']));
+        contractCheck($removal, 'removeMember', 409);
+        expect($removal->json('code'))->toBe('cannot_remove_owner')->and(contractCodes('removeMember', 409))->toContain('cannot_remove_owner');
+    });
+
+    it('answers 409 with the limit when the workspace is full or the person belongs to as many workspaces as they may', function (): void {
+        $world = contractWorld();
+        $workspace = $world['team']['workspace'];
+        $guest = $world['team']['stranger'];
+        $invitation = contractInvitation($workspace, $guest->email, $world['owner']);
+        config(['workspaces.max_members' => 4]);
+
+        $full = contractCall($this, $world['owner'], 'createInvitation', 'POST', "/api/v1/workspaces/{$workspace->ulid}/invitations", ['email' => 'second@example.test', 'role' => 'viewer']);
+        contractCheck($full, 'createInvitation', 409);
+
+        config(['workspaces.max_members' => 3]);
+        $accept = contractCall($this, $guest, 'acceptInvitation', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept");
+        contractCheck($accept, 'acceptInvitation', 409);
+
+        config(['workspaces.max_members' => 50, 'workspaces.max_memberships_per_user' => 1]);
+        $joined = contractCall($this, $guest, 'acceptInvitation', 'POST', "/api/v1/me/invitations/{$invitation->ulid}/accept");
+        contractCheck($joined, 'acceptInvitation', 409);
+
+        expect([$full->json('code'), $accept->json('code'), $joined->json('code')])->toBe(['member_limit_reached', 'member_limit_reached', 'membership_limit_reached'])
+            ->and([$full->json('limit'), $accept->json('limit'), $joined->json('limit')])->toBe([4, 3, 1])
+            ->and(contractCodes('acceptInvitation', 409))->toContain('member_limit_reached', 'membership_limit_reached')
+            ->and(contractCodes('createInvitation', 409))->toContain('member_limit_reached');
+    });
+
+    it('answers 422 with the faults of the body under their keys', function (): void {
+        $world = contractWorld();
+        $workspace = $world['team']['workspace'];
+
+        $invalid = contractCall($this, $world['owner'], 'createInvitation', 'POST', "/api/v1/workspaces/{$workspace->ulid}/invitations", ['email' => 'nobody', 'role' => 'owner'], valid: false);
+        contractCheck($invalid, 'createInvitation', 422);
+        expect($invalid->json('errors'))->toHaveKeys(['email', 'role']);
+
+        $role = contractCall($this, $world['owner'], 'updateMemberRole', 'PATCH', contractMemberUri($workspace, $world['team']['editor']), ['role' => 'owner'], valid: false);
+        contractCheck($role, 'updateMemberRole', 422);
+        expect($role->json('errors'))->toHaveKey('role');
+
+        $transfer = contractCall($this, $world['owner'], 'transferOwnership', 'POST', "/api/v1/workspaces/{$workspace->ulid}/transfer", ['user_id' => '01j0000000000000000000000x']);
+        contractCheck($transfer, 'transferOwnership', 422);
+        expect($transfer->json('errors'))->toHaveKey('user_id');
+    });
+
+    it('answers 429 to a resend that comes too soon, with the code the document lists, retry_after and the Retry-After header', function (): void {
+        $world = contractWorld();
+        $workspace = $world['team']['workspace'];
+        $invitation = contractInvitation($workspace, 'guest@example.test', $world['owner'], ['updated_at' => now()->subMinutes(2)]);
+
+        $response = contractCall($this, $world['owner'], 'resendInvitation', 'POST', "/api/v1/workspaces/{$workspace->ulid}/invitations/{$invitation->ulid}/resend");
+
+        contractCheck($response, 'resendInvitation', 429);
+        expect($response->json('code'))->toBe('resend_too_soon')
+            ->and(contractCodes('resendInvitation', 429))->toContain('resend_too_soon', 'too_many_requests')
+            ->and(contractHeaders('resendInvitation', 429))->toContain('Retry-After')
+            ->and($response->json('retry_after'))->toBeInt()->toBeGreaterThan(0)->toBeLessThanOrEqual(480)
+            ->and($response->headers->get('Retry-After'))->toBe((string) $response->json('retry_after'));
+    });
+
+    it('answers 429 to the invitations of an owner beyond their pace, with the code the document lists', function (): void {
+        config(['workspaces.invitations_per_hour' => 1]);
+        $world = contractWorld();
+        $uri = "/api/v1/workspaces/{$world['team']['workspace']->ulid}/invitations";
+
+        contractCall($this, $world['owner'], 'createInvitation', 'POST', $uri, ['email' => 'one@example.test', 'role' => 'viewer'])->assertCreated();
+        $response = contractCall($this, $world['owner'], 'createInvitation', 'POST', $uri, ['email' => 'two@example.test', 'role' => 'viewer']);
+
+        contractCheck($response, 'createInvitation', 429);
+        expect($response->json('code'))->toBe('too_many_requests')->and(contractCodes('createInvitation', 429))->toContain('too_many_requests');
+
+        foreach (contractHeaders('createInvitation', 429) as $header) {
+            expect($response->headers->has($header))->toBeTrue("the header {$header}");
+        }
     });
 });
