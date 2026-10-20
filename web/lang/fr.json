@@ -1371,5 +1371,10 @@
     "Read-only share made with :app": "Partage en lecture seule réalisé avec :app",
     "This link expires on :date.": "Ce lien expire le :date.",
     ":count result out of :total|:count results out of :total": ":count résultat sur :total|:count résultats sur :total",
-    "No item matches your search.": "Aucun article ne correspond à votre recherche."
+    "No item matches your search.": "Aucun article ne correspond à votre recherche.",
+    "Sharing": "Partage",
+    "Owners can share an inventory through a link": "Les propriétaires peuvent partager un inventaire par un lien",
+    "A share link shows an inventory, read-only, to anybody who holds its address, without an account. When this is off, no link can be made and every existing link answers as if it did not exist; they work again when it is turned back on.": "Un lien de partage montre un inventaire, en lecture seule, à toute personne qui en détient l'adresse, sans compte. Lorsque cette option est désactivée, aucun lien ne peut être créé et chaque lien existant répond comme s'il n'existait pas ; ils refonctionnent dès qu'elle est réactivée.",
+    "Sharing by link is on.": "Le partage par lien est activé.",
+    "Sharing by link is off: every link answers as if it did not exist.": "Le partage par lien est désactivé : chaque lien répond comme s'il n'existait pas."
 }

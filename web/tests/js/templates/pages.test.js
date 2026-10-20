@@ -74,6 +74,8 @@ const ROUTE_PATTERNS = {
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
     'app.inventory.versions': '/app/w/{workspace}/inventories/{inventory}/versions',
+    'app.inventory.sharing': '/app/w/{workspace}/inventories/{inventory}/sharing',
+    'api.v1.inventories.share-links.index': '/api/v1/inventories/{inventory}/share-links',
     'api.v1.inventories.versions.index': '/api/v1/inventories/{inventory}/versions',
     'api.v1.inventories.versions.show': '/api/v1/inventories/{inventory}/versions/{version}',
     'api.v1.inventories.versions.signature.cancel':
@@ -109,6 +111,7 @@ const PAGE = {
         { code: 'USD', name: 'US Dollar' },
     ],
     abilities: {},
+    sharing: { enabled: true, limit: 20 },
     signaturesAvailable: true,
     maxSigners: 3,
     documenso: {
@@ -125,7 +128,15 @@ const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 const IMPORT_MAX_SIZE = 3 * 1024 * 1024;
 
 /** What an editor of the workspace may do; a test narrows it down by setting `PAGE.abilities`. */
-const EDITOR = { view: true, create: true, update: true, delete: false, manage_fields: true, edit_items: true };
+const EDITOR = {
+    view: true,
+    create: true,
+    update: true,
+    delete: false,
+    manage_fields: true,
+    edit_items: true,
+    share: false,
+};
 
 /** The workspaces of the person the templates are rendered for. */
 const WORKSPACES = [
@@ -174,6 +185,21 @@ const MESSAGES = {
     'admin.settings.notice.closed': 'Sign-ups are closed',
     'admin.settings.notice.invitations_on': 'Invitations are on',
     'admin.settings.notice.invitations_off': 'Invitations are off',
+    'admin.settings.notice.sharing_on': 'Sharing is on',
+    'admin.settings.notice.sharing_off': 'Sharing is off',
+    'sharing.untitled': 'Untitled link',
+    'sharing.state.active': 'Active',
+    'sharing.state.expired': 'Expired',
+    'sharing.files.included': 'Photos and files shown',
+    'sharing.files.excluded': 'Photos and files hidden',
+    'sharing.copy_named': 'Copy the address of the link :name',
+    'sharing.revoke_named': 'Revoke the link :name',
+    'sharing.confirm_revoke': 'Revoke the link :name? Its address stops working at once.',
+    'sharing.select_hint': 'The address is selected: copy it with your keyboard.',
+    'sharing.notice.created': 'Link created.',
+    'sharing.notice.revoked': 'Link revoked.',
+    'sharing.error.limit': 'This inventory already has :count share links.',
+    'sharing.error.disabled': 'Sharing by link is turned off on this instance.',
     'admin.users.workspace_count': 'Workspaces: :count',
     'admin.users.created_on': 'Created on :date',
     'admin.users.promote': 'Make administrator',
@@ -220,6 +246,11 @@ function render(path) {
 
     // The content section is the page; the layout around it is not under test.
     html = html.replace(/@section\('content'\)([\s\S]*)@endsection/, '$1');
+
+    // What only the owners are offered (the link to the sharing page) is in the markup, or not.
+    html = html.replace(/@if \(\$abilities\['(\w+)'\]\)([\s\S]*?)@endif/g, (_match, ability, body) =>
+        abilitiesOfPage()[ability] ? body : '',
+    );
 
     // The language select lists two languages.
     html = html.replace(/@foreach \(\$locales as \$code => \$name\)([\s\S]*?)@endforeach/g, (_match, body) =>
@@ -268,6 +299,9 @@ function render(path) {
         const values = {
             "$settings->registrationOpen() ? '1' : '0'": '1',
             "$settings->invitationSignUp() ? '1' : '0'": '1',
+            "$settings->shareLinksEnabled() ? '1' : '0'": '1',
+            "$enabled ? '1' : '0'": PAGE.sharing.enabled ? '1' : '0',
+            $limit: String(PAGE.sharing.limit),
             "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
             $maxSigners: String(PAGE.maxSigners),
             "$documenso['configured'] ? '1' : '0'": PAGE.documenso.configured ? '1' : '0',
@@ -438,6 +472,7 @@ describe('the pages under the real Alpine CSP build', () => {
         useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
+        PAGE.sharing = { enabled: true, limit: 20 };
         PAGE.signaturesAvailable = true;
         PAGE.maxSigners = 3;
         PAGE.documenso = {
@@ -1521,6 +1556,43 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(notify).toHaveBeenCalledWith('success', 'Invitations are off');
             expect(invitations.checked).toBe(false);
             expect(registrationSwitch().checked).toBe(true);
+        });
+
+        it('has a third switch for sharing by link, on as the page was rendered, that saves apart from the others', async () => {
+            const sharing = document.querySelector('#admin-settings-share-links');
+            http.put.mockResolvedValue({
+                data: { registration_open: true, invitation_sign_up: true, share_links_enabled: false },
+            });
+
+            expect(sharing.checked).toBe(true);
+            expect(sharing.getAttribute('role')).toBe('switch');
+            expect(document.body.textContent).toContain('Owners can share an inventory through a link');
+            // The hint is the description of the switch.
+            expect(document.getElementById(sharing.getAttribute('aria-describedby')).textContent).toContain(
+                'every existing link answers as if it did not exist',
+            );
+
+            sharing.checked = false;
+            sharing.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/admin/settings', { share_links_enabled: false });
+            expect(notify).toHaveBeenCalledWith('success', 'Sharing is off');
+            expect(sharing.checked).toBe(false);
+            expect(registrationSwitch().checked).toBe(true);
+            expect(document.querySelector('#admin-settings-invitation-sign-up').checked).toBe(true);
+        });
+
+        it('turns the sharing switch back on when the change could not be saved', async () => {
+            const sharing = document.querySelector('#admin-settings-share-links');
+            http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+
+            sharing.checked = false;
+            sharing.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+            expect(sharing.checked).toBe(true);
         });
 
         it('turns the switch back on when the change could not be saved', async () => {

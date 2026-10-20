@@ -231,6 +231,30 @@ describe('the settings page', function (): void {
             ->assertSee('Tout le monde peut créer un compte');
     });
 
+    it('shows the switch of sharing by link as it is, next to the other two, and the messages its script needs', function (bool $enabled): void {
+        app(InstanceSettings::class)->update([InstanceSettings::SHARE_LINKS_ENABLED => $enabled]);
+
+        $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+            ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+            ->assertOk()
+            ->assertSee('data-share-links-enabled="'.($enabled ? '1' : '0').'"', false)
+            ->assertSee('data-registration-open', false)
+            ->assertSee('data-invitation-sign-up', false)
+            ->assertSee('id="admin-settings-share-links"', false)
+            ->assertSee('@change="toggleShareLinks"', false)
+            ->assertSee('Owners can share an inventory through a link')
+            ->assertSee('admin.settings.notice.sharing_on', false)
+            ->assertSee('admin.settings.notice.sharing_off', false);
+    })->with(['on' => [true], 'off' => [false]]);
+
+    it('has the switch of sharing by link in French', function (): void {
+        $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+            ->get(route('app.admin.settings'), ['Accept-Language' => 'fr'])
+            ->assertOk()
+            ->assertSee('Les propriétaires peuvent partager un inventaire par un lien')
+            ->assertSee('Un lien de partage montre un inventaire, en lecture seule');
+    });
+
     describe('the card of the e-signature service', function (): void {
         beforeEach(function (): void {
             config(['services.documenso.url' => null, 'services.documenso.api_key' => null, 'services.documenso.webhook_secret' => null]);

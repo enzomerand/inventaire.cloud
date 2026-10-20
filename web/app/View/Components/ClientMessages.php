@@ -85,6 +85,8 @@ class ClientMessages extends Component
             'admin.settings.notice.closed' => __('Sign-ups are closed.'),
             'admin.settings.notice.invitations_on' => __('Invitations let new addresses create an account while sign-ups are closed.'),
             'admin.settings.notice.invitations_off' => __('Invitations no longer let new addresses create an account.'),
+            'admin.settings.notice.sharing_on' => __('Sharing by link is on.'),
+            'admin.settings.notice.sharing_off' => __('Sharing by link is off: every link answers as if it did not exist.'),
             'admin.settings.select_hint' => __('The address is selected: copy it with your keyboard.'),
             'admin.users.workspace_count' => __('Workspaces: :count'),
             'admin.users.created_on' => __('Created on :date'),

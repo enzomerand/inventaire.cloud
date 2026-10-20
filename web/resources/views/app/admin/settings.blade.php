@@ -5,7 +5,7 @@
 
     Alpine runs in its CSP build: the "adminSettings" component (resources/js/components/admin-settings.js) is
     referenced by name and gets its endpoint and the current values from the data-* attributes of its root, which holds
-    both cards. Flipping the switch saves it through the API. The card of the e-signature service (Documenso) is
+    all the cards. Flipping a switch saves it through the API. The card of the e-signature service (Documenso) is
     read-only: where it stands comes from the environment of the instance ($documenso, see AdminSettingsPageController),
     and the address of its webhook can be copied.
 
@@ -29,6 +29,7 @@
         data-url="{{ route('api.v1.admin.settings.show', absolute: false) }}"
         data-registration-open="{{ $settings->registrationOpen() ? '1' : '0' }}"
         data-invitation-sign-up="{{ $settings->invitationSignUp() ? '1' : '0' }}"
+        data-share-links-enabled="{{ $settings->shareLinksEnabled() ? '1' : '0' }}"
         data-documenso-configured="{{ $documenso['configured'] ? '1' : '0' }}"
         data-documenso-secret="{{ $documenso['webhook_secret_configured'] ? '1' : '0' }}"
         data-webhook-url="{{ $documenso['webhook_url'] }}"
@@ -70,6 +71,32 @@
                     </label>
                     <div class="form-hint mt-2" id="admin-settings-invitation-sign-up-hint">
                         {{ __('Only while sign-ups are closed, which then means on invitation: an address that a person with an account invited to a workspace gets its code and can create its account. Turn it off for accounts to come from you alone.') }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">{{ __('Sharing') }}</h2>
+                </div>
+                <div class="card-body">
+                    <label class="form-check form-switch">
+                        <input
+                            id="admin-settings-share-links"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="shareLinksEnabled"
+                            :disabled="busy"
+                            aria-describedby="admin-settings-share-links-hint"
+                            @change="toggleShareLinks"
+                        >
+                        <span class="form-check-label">{{ __('Owners can share an inventory through a link') }}</span>
+                    </label>
+                    <div class="form-hint mt-2" id="admin-settings-share-links-hint">
+                        {{ __('A share link shows an inventory, read-only, to anybody who holds its address, without an account. When this is off, no link can be made and every existing link answers as if it did not exist; they work again when it is turned back on.') }}
                     </div>
                 </div>
             </div>
