@@ -10,9 +10,11 @@ use App\Http\Middleware\RequireTokenAbility;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\SetReferrerPolicy;
 use App\Http\Middleware\SetRobotsTag;
+use App\Http\Responses\MembershipError;
 use App\Installer\ProcessEnvironment;
 use App\Services\LocaleResolver;
 use App\Services\TrustedProxies;
+use App\Workspaces\Exceptions\MembershipRefused;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -86,6 +88,12 @@ $app = Application::configure(basePath: dirname(__DIR__))
                 $exception->getHeaders(),
             );
         });
+
+        // A change to who belongs to a workspace that the rules refuse (not the owner, a quota, a resend too soon...) is told like the other
+        // refusals: a `message` and the `code` to switch on (see MembershipError). The services raise it, the controllers do not catch it, and it is
+        // an answer, not a fault to log.
+        $exceptions->dontReport(MembershipRefused::class);
+        $exceptions->render(fn (MembershipRefused $refused): JsonResponse => MembershipError::response($refused));
 
         // A row that is not there is a plain 404. The framework's own message names the model class and the key that was
         // looked up, which tells a row that does not exist from one the person may not see: that one is a 404 too, with

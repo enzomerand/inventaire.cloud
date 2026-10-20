@@ -21,10 +21,14 @@ use App\Http\Controllers\Api\V1\InventoryVersionController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\MyInvitationController;
 use App\Http\Controllers\Api\V1\OpenApiController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\TemplateController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
+use App\Http\Controllers\Api\V1\WorkspaceInvitationController;
+use App\Http\Controllers\Api\V1\WorkspaceMemberController;
+use App\Http\Controllers\Api\V1\WorkspaceOwnershipController;
 use App\Http\Middleware\PaceApiTokens;
 use App\Http\Middleware\RefuseApiTokens;
 use App\Http\Middleware\RequireStatefulRequest;
@@ -96,6 +100,12 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             Route::get('/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');
             Route::get('/workspaces/{workspace}/inventories', [InventoryController::class, 'index'])->name('workspaces.inventories.index');
 
+            // Who belongs to a workspace and who was invited to it: the members for any member, the invitations it sent for its owner; and the
+            // invitations addressed to the person themselves.
+            Route::get('/workspaces/{workspace}/members', [WorkspaceMemberController::class, 'index'])->name('workspaces.members.index');
+            Route::get('/workspaces/{workspace}/invitations', [WorkspaceInvitationController::class, 'index'])->name('workspaces.invitations.index');
+            Route::get('/me/invitations', [MyInvitationController::class, 'index'])->name('me.invitations.index');
+
             Route::scopeBindings()->group(function (): void {
                 Route::get('/inventories/{inventory}', [InventoryController::class, 'show'])->name('inventories.show');
                 Route::get('/inventories/{inventory}/items', [ItemController::class, 'index'])->name('inventories.items.index');
@@ -148,6 +158,24 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
             // it again after it failed. Editors and owners, like asking for signatures in the first place.
             Route::post('/inventories/{inventory}/versions/{version}/signature/cancel', [InventoryVersionController::class, 'cancelSignature'])->name('inventories.versions.signature.cancel');
             Route::post('/inventories/{inventory}/versions/{version}/signature/retry', [InventoryVersionController::class, 'retrySignature'])->name('inventories.versions.signature.retry');
+        });
+
+        // Managing the people of a workspace: its members (their role, who stays, who owns it) and the invitations. They are the owner's
+        // to make, and the invited person's to answer. A member is named by the identifier of App\Workspaces\MemberIds, which the controller
+        // looks up among the members of the workspace, and an invitation by its ULID alone (the service checks that it is the workspace's, or
+        // the person's): no scoped binding, the workspace has no relation to scope by. Inviting and sending again mail an address the
+        // owner chooses, hence their own pace.
+        Route::middleware('token:manage')->group(function (): void {
+            Route::patch('/workspaces/{workspace}/members/{member}', [WorkspaceMemberController::class, 'update'])->name('workspaces.members.update');
+            Route::delete('/workspaces/{workspace}/members/{member}', [WorkspaceMemberController::class, 'destroy'])->name('workspaces.members.destroy');
+            Route::post('/workspaces/{workspace}/transfer', WorkspaceOwnershipController::class)->name('workspaces.transfer');
+
+            Route::post('/workspaces/{workspace}/invitations', [WorkspaceInvitationController::class, 'store'])->middleware('throttle:workspace-invitations')->name('workspaces.invitations.store');
+            Route::post('/workspaces/{workspace}/invitations/{invitation}/resend', [WorkspaceInvitationController::class, 'resend'])->middleware('throttle:workspace-invitations')->name('workspaces.invitations.resend');
+            Route::delete('/workspaces/{workspace}/invitations/{invitation}', [WorkspaceInvitationController::class, 'destroy'])->name('workspaces.invitations.destroy');
+
+            Route::post('/me/invitations/{invitation}/accept', [MyInvitationController::class, 'accept'])->name('me.invitations.accept');
+            Route::delete('/me/invitations/{invitation}', [MyInvitationController::class, 'destroy'])->name('me.invitations.destroy');
         });
 
         // Managing: the structure. Workspaces, the inventories in them and their fields.

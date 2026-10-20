@@ -1296,5 +1296,15 @@
     ":inviter invited you to join the workspace \":workspace\" on :app with the role :role.": ":inviter vous invite à rejoindre l'espace de travail « :workspace » sur :app avec le rôle :role.",
     "To answer, sign in with this email address and open the page of your invitations:": "Pour répondre, connectez-vous avec cette adresse e-mail et ouvrez la page de vos invitations :",
     "The invitation is valid until :date.": "L'invitation est valable jusqu'au :date.",
-    "If you were not expecting this invitation, you can ignore this message: nothing happens unless you accept it.": "Si vous n'attendiez pas cette invitation, vous pouvez ignorer ce message : il ne se passe rien tant que vous ne l'acceptez pas."
+    "If you were not expecting this invitation, you can ignore this message: nothing happens unless you accept it.": "Si vous n'attendiez pas cette invitation, vous pouvez ignorer ce message : il ne se passe rien tant que vous ne l'acceptez pas.",
+    "This person already belongs to the workspace.": "Cette personne appartient déjà à l'espace de travail.",
+    "An invitation to this address is already waiting for an answer.": "Une invitation à cette adresse attend déjà une réponse.",
+    "A workspace cannot have more than :count member, counting the invitations waiting for an answer.|A workspace cannot have more than :count members, counting the invitations waiting for an answer.": "Un espace de travail ne peut pas avoir plus de :count membre, invitations en attente comprises.|Un espace de travail ne peut pas avoir plus de :count membres, invitations en attente comprises.",
+    "The role of the owner cannot be changed: hand the ownership over to another member instead.": "Le rôle du propriétaire ne peut pas être modifié : transférez plutôt la propriété à un autre membre.",
+    "The owner cannot be removed from the workspace: hand the ownership over to another member first.": "Le propriétaire ne peut pas être retiré de l'espace de travail : transférez d'abord la propriété à un autre membre.",
+    "The owner cannot leave the workspace: hand the ownership over to another member first.": "Le propriétaire ne peut pas quitter l'espace de travail : transférez d'abord la propriété à un autre membre.",
+    "This member is already the owner of the workspace.": "Ce membre est déjà le propriétaire de l'espace de travail.",
+    "This invitation was sent a moment ago: wait a few minutes before sending it again.": "Cette invitation a été envoyée à l'instant : attendez quelques minutes avant de la renvoyer.",
+    "The change is refused.": "Le changement est refusé.",
+    "This person is not a member of the workspace.": "Cette personne n'est pas membre de l'espace de travail."
 }
