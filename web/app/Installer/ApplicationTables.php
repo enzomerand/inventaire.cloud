@@ -42,6 +42,7 @@ final class ApplicationTables
         'imports',
         'inventory_versions',
         'workspace_invitations',
+        'share_links',
     ];
 
     /**

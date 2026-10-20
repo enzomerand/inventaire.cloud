@@ -62,7 +62,7 @@ describe('the settings', function (): void {
     it('are open to sign-ups until an administrator says otherwise', function (): void {
         $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('close registration, and are answered as they now are', function (): void {
@@ -70,7 +70,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
@@ -84,7 +84,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['invitation_sign_up' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => false, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => false, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
@@ -93,7 +93,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['invitation_sign_up' => true, 'registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('refuse an invitation_sign_up that is not a boolean, and change nothing', function (): void {
@@ -102,6 +102,39 @@ describe('the settings', function (): void {
             ->assertJsonValidationErrors('invitation_sign_up');
 
         expect(DB::table('settings')->count())->toBe(0);
+    });
+
+    it('let an administrator turn sharing by link off and on, apart from the other settings', function (): void {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['share_links_enabled' => false], frontend())
+            ->assertOk()
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false, 'documenso' => adminNoDocumenso()]]);
+
+        $this->flushSession();
+
+        $this->actingAs($admin)->getJson('/api/v1/admin/settings', frontend())->assertOk()->assertJsonPath('data.share_links_enabled', false)->assertJsonPath('data.registration_open', true);
+        expect(DB::table('settings')->pluck('key')->all())->toBe(['share_links_enabled'])
+            ->and(app(InstanceSettings::class)->shareLinksEnabled())->toBeFalse();
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['share_links_enabled' => true, 'registration_open' => false], frontend())
+            ->assertOk()
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+    });
+
+    it('refuse a share_links_enabled that is not a boolean, or null, and change nothing', function (mixed $value): void {
+        $this->actingAs(User::factory()->admin()->create())->putJson('/api/v1/admin/settings', ['share_links_enabled' => $value], frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('share_links_enabled');
+
+        expect(DB::table('settings')->count())->toBe(0);
+    })->with(['a word' => 'maybe', 'null' => null, 'a list' => [[true]]]);
+
+    it('refuse a share_links_enabled in French as well, with a message in French', function (): void {
+        $response = $this->actingAs(User::factory()->admin()->speaking('fr')->create())->putJson('/api/v1/admin/settings', ['share_links_enabled' => 'maybe'], frontend(['Accept-Language' => 'fr']))
+            ->assertUnprocessable();
+
+        expect($response->json('errors.share_links_enabled.0'))->toContain('vrai ou faux');
     });
 
     it('open registration again', function (): void {
@@ -170,7 +203,7 @@ describe('the settings', function (): void {
         $this->actingAs(User::factory()->admin()->create())
             ->putJson('/api/v1/admin/settings', ['registration_open' => false, 'something_else' => 'x'], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
 
         expect(DB::table('settings')->pluck('key')->all())->toBe(['registration_open']);
     });
@@ -196,6 +229,30 @@ describe('the settings page', function (): void {
             ->assertOk()
             ->assertSee('Inscriptions')
             ->assertSee('Tout le monde peut créer un compte');
+    });
+
+    it('shows the switch of sharing by link as it is, next to the other two, and the messages its script needs', function (bool $enabled): void {
+        app(InstanceSettings::class)->update([InstanceSettings::SHARE_LINKS_ENABLED => $enabled]);
+
+        $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+            ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+            ->assertOk()
+            ->assertSee('data-share-links-enabled="'.($enabled ? '1' : '0').'"', false)
+            ->assertSee('data-registration-open', false)
+            ->assertSee('data-invitation-sign-up', false)
+            ->assertSee('id="admin-settings-share-links"', false)
+            ->assertSee('@change="toggleShareLinks"', false)
+            ->assertSee('Owners can share an inventory through a link')
+            ->assertSee('admin.settings.notice.sharing_on', false)
+            ->assertSee('admin.settings.notice.sharing_off', false);
+    })->with(['on' => [true], 'off' => [false]]);
+
+    it('has the switch of sharing by link in French', function (): void {
+        $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+            ->get(route('app.admin.settings'), ['Accept-Language' => 'fr'])
+            ->assertOk()
+            ->assertSee('Les propriétaires peuvent partager un inventaire par un lien')
+            ->assertSee('Un lien de partage montre un inventaire, en lecture seule');
     });
 
     describe('the card of the e-signature service', function (): void {

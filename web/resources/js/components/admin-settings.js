@@ -2,11 +2,12 @@
  * Alpine component of the administration's settings page: the choices that apply to the whole instance, and where the
  * e-signature service (Documenso) stands.
  *
- * There are two choices: whether new addresses can create an account, and, while they cannot, whether an invitation to a
- * workspace still lets its address create one ("on invitation"). Flipping a switch saves it at once; the switch then shows
- * what the server answers, and goes back to what it was if the change could not be saved. The endpoint and the current
- * values come from the markup (`data-url`, `data-registration-open` and `data-invitation-sign-up`, "1" or "0", on the
- * root), because the CSP build of Alpine does not allow Blade to inject values into expressions.
+ * There are three choices: whether new addresses can create an account, while they cannot whether an invitation to a
+ * workspace still lets its address create one ("on invitation"), and whether the owners of an inventory can share it through a
+ * secret read-only link. Flipping a switch saves it at once; the switch then shows what the server answers, and goes back to
+ * what it was if the change could not be saved. The endpoint and the current values come from the markup (`data-url`,
+ * `data-registration-open`, `data-invitation-sign-up` and `data-share-links-enabled`, "1" or "0", on the root), because the CSP
+ * build of Alpine does not allow Blade to inject values into expressions.
  *
  * The state of Documenso is read-only (it is set in the environment of the instance): whether the instance can ask for
  * signatures and whether its webhook is open (`data-documenso-configured`, `data-documenso-secret`, "1" or "0"), and the
@@ -30,6 +31,9 @@ export default function adminSettings() {
 
         /** Whether, while sign-ups are closed, an invitation to a workspace lets its address create an account, as the server holds it. */
         invitationSignUp: true,
+
+        /** Whether the owners of an inventory can share it through a share link, as the server holds it. */
+        shareLinksEnabled: true,
 
         /** True while a change is being saved; blocks the switches. */
         busy: false,
@@ -72,6 +76,7 @@ export default function adminSettings() {
 
             this.registrationOpen = data.registrationOpen === '1';
             this.invitationSignUp = data.invitationSignUp === '1';
+            this.shareLinksEnabled = data.shareLinksEnabled === '1';
             this.documensoConfigured = data.documensoConfigured === '1';
             this.webhookSecretConfigured = data.documensoSecret === '1';
             this.webhookUrl = data.webhookUrl ?? '';
@@ -139,12 +144,25 @@ export default function adminSettings() {
         },
 
         /**
+         * Saves the position the sharing switch was put in.
+         *
+         * @param {Event} event The change event of the checkbox.
+         * @returns {Promise<void>}
+         */
+        async toggleShareLinks(event) {
+            await this.saveSwitch(event.target, 'share_links_enabled', 'shareLinksEnabled', {
+                on: 'admin.settings.notice.sharing_on',
+                off: 'admin.settings.notice.sharing_off',
+            });
+        },
+
+        /**
          * Sends one setting and shows what the server holds afterwards: the switch is put back to the stored value, whether the change
          * was saved or not.
          *
          * @param {HTMLInputElement} box The checkbox that was flipped.
          * @param {string} setting Name of the setting in the API.
-         * @param {'registrationOpen' | 'invitationSignUp'} property The state that mirrors it.
+         * @param {'registrationOpen' | 'invitationSignUp' | 'shareLinksEnabled'} property The state that mirrors it.
          * @param {{ on: string, off: string }} notices The messages that say it was turned on or off.
          * @returns {Promise<void>}
          */

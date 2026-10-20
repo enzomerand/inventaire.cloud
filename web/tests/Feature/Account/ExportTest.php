@@ -43,7 +43,7 @@ describe('the export of the account', function (): void {
 
         $export = $this->actingAs($user)->getJson('/api/v1/me/export', frontend())->assertOk()->json();
 
-        expect($export)->toHaveKeys(['format', 'version', 'exported_at', 'user', 'workspaces', 'sessions', 'tokens'])
+        expect($export)->toHaveKeys(['format', 'version', 'exported_at', 'user', 'workspaces', 'share_links', 'sessions', 'tokens'])
             ->and($export['format'])->toBe(AccountExport::FORMAT)
             ->and($export['version'])->toBe(AccountExport::VERSION)
             ->and($export['user'])->toBe([

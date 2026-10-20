@@ -58,7 +58,7 @@ describe('the registration setting', function (): void {
         // Asked many times, in many ways, during one request: it is said once.
         expect($settings->registrationOpen())->toBeFalse()
             ->and($settings->registrationOpen())->toBeFalse()
-            ->and($settings->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true]);
+            ->and($settings->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true]);
 
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'registration_open'])->once();
     })->with([
@@ -108,7 +108,7 @@ describe('the registration setting', function (): void {
 
         $settings->update([InstanceSettings::REGISTRATION_OPEN => false, InstanceSettings::INVITATION_SIGN_UP => true]);
 
-        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true])
+        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true])
             ->and(DB::table('settings')->count())->toBe(2);
     });
 
@@ -174,8 +174,47 @@ describe('the registration setting', function (): void {
         DB::table('settings')->insert(['key' => 'something_else', 'value' => '{"a":1}', 'created_at' => now(), 'updated_at' => now()]);
         freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
-        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true]);
+        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true]);
     });
+});
+
+describe('the share links setting', function (): void {
+    it('is on when nothing was ever stored', function (): void {
+        expect(DB::table('settings')->count())->toBe(0)
+            ->and(freshSettings()->shareLinksEnabled())->toBeTrue();
+    });
+
+    it('can be turned off and on, apart from the registration and the invitations, for the next request as well', function (): void {
+        freshSettings()->update([InstanceSettings::SHARE_LINKS_ENABLED => false]);
+
+        expect(freshSettings()->shareLinksEnabled())->toBeFalse()
+            ->and(freshSettings()->registrationOpen())->toBeTrue()
+            ->and(freshSettings()->invitationSignUp())->toBeTrue()
+            ->and(DB::table('settings')->pluck('key')->all())->toBe(['share_links_enabled'])
+            ->and(json_decode((string) DB::table('settings')->value('value')))->toBeFalse();
+
+        freshSettings()->update([InstanceSettings::SHARE_LINKS_ENABLED => true]);
+
+        expect(freshSettings()->shareLinksEnabled())->toBeTrue();
+    });
+
+    it('is off, with one warning, when the stored value is not a flag: an inventory is not shown on the strength of a value nobody understands', function (string $stored): void {
+        Log::spy();
+        DB::table('settings')->insert(['key' => 'share_links_enabled', 'value' => $stored, 'created_at' => now(), 'updated_at' => now()]);
+        $settings = freshSettings();
+
+        expect($settings->shareLinksEnabled())->toBeFalse()
+            ->and($settings->shareLinksEnabled())->toBeFalse()
+            ->and($settings->all())->toBe(['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false]);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'share_links_enabled'])->once();
+    })->with([
+        'a string' => ['"yes"'],
+        'the word true as a string' => ['"true"'],
+        'a number' => ['1'],
+        'null' => ['null'],
+        'a list' => ['[true]'],
+    ]);
 });
 
 describe('the reading of the settings', function (): void {

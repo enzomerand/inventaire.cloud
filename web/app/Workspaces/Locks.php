@@ -91,6 +91,9 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * (3), then update the version row, which moves `counted_bytes` and the storage counter in one decision. Deleting a version takes the
  * workspace (3), then the inventory (5).
  *
+ * The share links follow it too. Making one takes the author's account (2), then the inventory (5), and counts the links of the inventory
+ * under that lock against their limit; revoking one deletes its row by its key and takes no lock.
+ *
  * Four paths do go back up the order, each to catch a row that appeared between the plain read that chose what to lock
  * and the locks themselves:
  *

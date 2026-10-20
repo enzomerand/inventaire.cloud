@@ -138,6 +138,17 @@ final class Inventory extends Model
     }
 
     /**
+     * The share links of the inventory, whoever made them. The route key of a link is its ULID, and a link is bound through this relation
+     * (`/inventories/{inventory}/share-links/{shareLink}`), so a link of another inventory is a 404.
+     *
+     * @return HasMany<ShareLink, $this>
+     */
+    public function shareLinks(): HasMany
+    {
+        return $this->hasMany(ShareLink::class);
+    }
+
+    /**
      * The items of the inventory. Unordered: the caller says whether it wants the newest first or something else.
      *
      * @return HasMany<Item, $this>

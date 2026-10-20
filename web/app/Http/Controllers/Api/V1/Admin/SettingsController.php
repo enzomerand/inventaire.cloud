@@ -20,6 +20,9 @@ use Illuminate\Http\JsonResponse;
  * default) lets an address that a workspace invited sign up anyway, so that "closed" means "on invitation"; turned off, invitations open
  * nothing and accounts come from the administrators alone. It has no effect while registration is open.
  *
+ * `share_links_enabled` (on by default): whether the owners of an inventory can share it through a secret read-only link. Turned off, no link
+ * can be made (`409`, `share_links_disabled`) and every link that exists answers as if it did not; they work again when it is turned back on.
+ *
  * The answer also tells, read-only, where the e-signature service (Documenso) stands: `documenso.configured` (the instance has its
  * address and API token), `documenso.webhook_secret_configured` (the webhook is open) and `documenso.webhook_url`, the address to give
  * Documenso, built from `APP_URL` (see {@see Documenso::status()}). The secrets themselves are never given, and these are set in the environment, not here.

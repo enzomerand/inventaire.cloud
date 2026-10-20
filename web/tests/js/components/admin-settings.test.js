@@ -17,6 +17,8 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
             'admin.settings.notice.closed': 'Sign-ups are closed',
             'admin.settings.notice.invitations_on': 'Invitations are on',
             'admin.settings.notice.invitations_off': 'Invitations are off',
+            'admin.settings.notice.sharing_on': 'Sharing is on',
+            'admin.settings.notice.sharing_off': 'Sharing is off',
             'admin.settings.select_hint': 'The address is selected: copy it with your keyboard.',
             'tokens.copy': 'Copy',
             'tokens.copied': 'Copied',
@@ -100,6 +102,55 @@ describe('administration settings page', () => {
         expect(http.put).toHaveBeenLastCalledWith(URL, { invitation_sign_up: true });
         expect(component.invitationSignUp).toBe(true);
         expect(notify).toHaveBeenLastCalledWith('success', 'Invitations are on');
+    });
+
+    it('starts the sharing switch from the value the page was rendered with', () => {
+        expect(component.shareLinksEnabled).toBe(false);
+
+        component.$root.dataset.shareLinksEnabled = '1';
+        component.init();
+
+        expect(component.shareLinksEnabled).toBe(true);
+    });
+
+    it('turns sharing by link off and on, without touching the other switches, and says so', async () => {
+        component.$root.dataset.shareLinksEnabled = '1';
+        component.init();
+        http.put.mockResolvedValue({
+            data: { registration_open: true, invitation_sign_up: true, share_links_enabled: false },
+        });
+
+        await component.toggleShareLinks(box(false));
+
+        expect(http.put).toHaveBeenCalledWith(URL, { share_links_enabled: false });
+        expect(component.shareLinksEnabled).toBe(false);
+        expect(component.registrationOpen).toBe(true);
+        expect(component.invitationSignUp).toBe(false);
+        expect(notify).toHaveBeenCalledWith('success', 'Sharing is off');
+
+        http.put.mockResolvedValue({
+            data: { registration_open: true, invitation_sign_up: true, share_links_enabled: true },
+        });
+
+        await component.toggleShareLinks(box(true));
+
+        expect(http.put).toHaveBeenLastCalledWith(URL, { share_links_enabled: true });
+        expect(component.shareLinksEnabled).toBe(true);
+        expect(notify).toHaveBeenLastCalledWith('success', 'Sharing is on');
+    });
+
+    it('puts the sharing switch back when the change could not be saved', async () => {
+        component.$root.dataset.shareLinksEnabled = '1';
+        component.init();
+        http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+        const checkbox = box(false);
+
+        await component.toggleShareLinks(checkbox);
+
+        expect(component.shareLinksEnabled).toBe(true);
+        expect(checkbox.target.checked).toBe(true);
+        expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+        expect(component.busy).toBe(false);
     });
 
     it('puts the invitations switch back when the change could not be saved, and blocks a second change meanwhile', async () => {

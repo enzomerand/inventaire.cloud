@@ -17,6 +17,8 @@ use Symfony\Component\HttpFoundation\Response;
  * the engines that read a page; the header says it to those that read anything else (a JSON answer or a file has no
  * `<head>`), and for the pages too, before they are read.
  *
+ * A response that already carries an `X-Robots-Tag` keeps it (the page of a share link sends `noindex, nofollow`).
+ *
  * The only answers that do not carry it are the public pages that ask to be indexed: the instance allows it
  * (`app.indexable`, APP_INDEXABLE) and the {@see PageMeta} the page was drawn with does not ask otherwise
  * ({@see PageMeta::mayBeIndexed()}, the very decision the layout follows). Everything else carries it, and so does every
@@ -35,7 +37,9 @@ final class SetRobotsTag
     {
         $response = $next($request);
 
-        if (! $this->mayBeIndexed($response)) {
+        // An answer that already says what robots may do with it (the page of a share link, which also asks them not to follow its links)
+        // keeps its own header.
+        if (! $response->headers->has('X-Robots-Tag') && ! $this->mayBeIndexed($response)) {
             $response->headers->set('X-Robots-Tag', 'noindex');
         }
 

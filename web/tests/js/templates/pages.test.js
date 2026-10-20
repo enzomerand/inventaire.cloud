@@ -74,6 +74,8 @@ const ROUTE_PATTERNS = {
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
     'app.inventory.versions': '/app/w/{workspace}/inventories/{inventory}/versions',
+    'app.inventory.sharing': '/app/w/{workspace}/inventories/{inventory}/sharing',
+    'api.v1.inventories.share-links.index': '/api/v1/inventories/{inventory}/share-links',
     'api.v1.inventories.versions.index': '/api/v1/inventories/{inventory}/versions',
     'api.v1.inventories.versions.show': '/api/v1/inventories/{inventory}/versions/{version}',
     'api.v1.inventories.versions.signature.cancel':
@@ -109,6 +111,7 @@ const PAGE = {
         { code: 'USD', name: 'US Dollar' },
     ],
     abilities: {},
+    sharing: { enabled: true, limit: 20 },
     signaturesAvailable: true,
     maxSigners: 3,
     documenso: {
@@ -125,7 +128,15 @@ const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 const IMPORT_MAX_SIZE = 3 * 1024 * 1024;
 
 /** What an editor of the workspace may do; a test narrows it down by setting `PAGE.abilities`. */
-const EDITOR = { view: true, create: true, update: true, delete: false, manage_fields: true, edit_items: true };
+const EDITOR = {
+    view: true,
+    create: true,
+    update: true,
+    delete: false,
+    manage_fields: true,
+    edit_items: true,
+    share: false,
+};
 
 /** The workspaces of the person the templates are rendered for. */
 const WORKSPACES = [
@@ -174,6 +185,20 @@ const MESSAGES = {
     'admin.settings.notice.closed': 'Sign-ups are closed',
     'admin.settings.notice.invitations_on': 'Invitations are on',
     'admin.settings.notice.invitations_off': 'Invitations are off',
+    'admin.settings.notice.sharing_on': 'Sharing is on',
+    'admin.settings.notice.sharing_off': 'Sharing is off',
+    'sharing.untitled': 'Untitled link',
+    'sharing.state.active': 'Active',
+    'sharing.state.expired': 'Expired',
+    'sharing.files.included': 'Photos and files shown',
+    'sharing.files.excluded': 'Photos and files hidden',
+    'sharing.copy_named': 'Copy the address of the link :name',
+    'sharing.revoke_named': 'Revoke the link :name',
+    'sharing.confirm_revoke': 'Revoke the link :name? Its address stops working at once.',
+    'sharing.notice.created': 'Link created.',
+    'sharing.notice.revoked': 'Link revoked.',
+    'sharing.error.limit': 'This inventory already has :count share links.',
+    'sharing.error.disabled': 'Sharing by link is turned off on this instance.',
     'admin.users.workspace_count': 'Workspaces: :count',
     'admin.users.created_on': 'Created on :date',
     'admin.users.promote': 'Make administrator',
@@ -220,6 +245,11 @@ function render(path) {
 
     // The content section is the page; the layout around it is not under test.
     html = html.replace(/@section\('content'\)([\s\S]*)@endsection/, '$1');
+
+    // What only the owners are offered (the link to the sharing page) is in the markup, or not.
+    html = html.replace(/@if \(\$abilities\['(\w+)'\]\)([\s\S]*?)@endif/g, (_match, ability, body) =>
+        abilitiesOfPage()[ability] ? body : '',
+    );
 
     // The language select lists two languages.
     html = html.replace(/@foreach \(\$locales as \$code => \$name\)([\s\S]*?)@endforeach/g, (_match, body) =>
@@ -268,6 +298,9 @@ function render(path) {
         const values = {
             "$settings->registrationOpen() ? '1' : '0'": '1',
             "$settings->invitationSignUp() ? '1' : '0'": '1',
+            "$settings->shareLinksEnabled() ? '1' : '0'": '1',
+            "$enabled ? '1' : '0'": PAGE.sharing.enabled ? '1' : '0',
+            $limit: String(PAGE.sharing.limit),
             "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
             $maxSigners: String(PAGE.maxSigners),
             "$documenso['configured'] ? '1' : '0'": PAGE.documenso.configured ? '1' : '0',
@@ -353,6 +386,7 @@ describe('the pages under the real Alpine CSP build', () => {
             inventoryFields: '../../../resources/js/components/inventory-fields.js',
             inventoryHeader: '../../../resources/js/components/inventory-header.js',
             inventoryItems: '../../../resources/js/components/inventory-items.js',
+            inventorySharing: '../../../resources/js/components/inventory-sharing.js',
             inventoryVersions: '../../../resources/js/components/inventory-versions.js',
             workspaceInventories: '../../../resources/js/components/workspace-inventories.js',
             workspaceSwitcher: '../../../resources/js/components/workspace-switcher.js',
@@ -438,6 +472,7 @@ describe('the pages under the real Alpine CSP build', () => {
         useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
+        PAGE.sharing = { enabled: true, limit: 20 };
         PAGE.signaturesAvailable = true;
         PAGE.maxSigners = 3;
         PAGE.documenso = {
@@ -1521,6 +1556,31 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(notify).toHaveBeenCalledWith('success', 'Invitations are off');
             expect(invitations.checked).toBe(false);
             expect(registrationSwitch().checked).toBe(true);
+        });
+
+        it('has a third switch for sharing by link, on as the page was rendered, that saves apart from the others', async () => {
+            const sharing = document.querySelector('#admin-settings-share-links');
+            http.put.mockResolvedValue({
+                data: { registration_open: true, invitation_sign_up: true, share_links_enabled: false },
+            });
+
+            expect(sharing.checked).toBe(true);
+            expect(sharing.getAttribute('role')).toBe('switch');
+            expect(document.body.textContent).toContain('Owners can share an inventory through a link');
+            // The hint is the description of the switch.
+            expect(document.getElementById(sharing.getAttribute('aria-describedby')).textContent).toContain(
+                'every existing link answers as if it did not exist',
+            );
+
+            sharing.checked = false;
+            sharing.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/admin/settings', { share_links_enabled: false });
+            expect(notify).toHaveBeenCalledWith('success', 'Sharing is off');
+            expect(sharing.checked).toBe(false);
+            expect(registrationSwitch().checked).toBe(true);
+            expect(document.querySelector('#admin-settings-invitation-sign-up').checked).toBe(true);
         });
 
         it('turns the switch back on when the change could not be saved', async () => {
@@ -2685,6 +2745,22 @@ describe('the pages under the real Alpine CSP build', () => {
         });
 
         describe('what the role allows', () => {
+            it('offers the link to the sharing page to an owner only', async () => {
+                const sharing = () =>
+                    [...document.querySelectorAll('a.btn')].filter((link) => link.textContent.trim() === 'Share');
+
+                await open();
+
+                expect(sharing()).toHaveLength(0);
+
+                PAGE.abilities = { share: true, delete: true };
+                await open();
+
+                expect(sharing()).toHaveLength(1);
+                expect(visible(sharing()[0])).toBe(true);
+                expect(sharing()[0].getAttribute('href')).toBe('/app/w/shop/inventories/tools/sharing');
+            });
+
             it('offers an editor the fields and the edition, but not the deletion', async () => {
                 await open();
 
@@ -7176,6 +7252,298 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(cards()).toHaveLength(0);
                 expect(visible(document.querySelector('.empty'))).toBe(true);
+            });
+        });
+    });
+
+    describe('the sharing page of an inventory', () => {
+        const LINKS_URL = '/api/v1/inventories/tools/share-links';
+
+        /** A share link as `GET /inventories/tools/share-links` describes it. */
+        function shareLink(id, overrides = {}) {
+            return {
+                id,
+                label: `Link ${id}`,
+                url: `https://inventaire.example/s/token-${id}`,
+                include_files: true,
+                expires_at: '2999-01-01T10:00:00+00:00',
+                last_used_at: null,
+                created_at: '2026-10-01T10:00:00+00:00',
+                created_by: { id: 'u1', name: 'Ada', is_owner: true },
+                ...overrides,
+            };
+        }
+
+        /** Opens the page of the share links of the inventory `tools`; the API answers the list with `links`. */
+        async function open(links = [], { enabled = true, limit = 20 } = {}) {
+            PAGE.sharing = { enabled, limit };
+            http.get.mockReset();
+            http.post.mockReset();
+            http.delete.mockReset();
+            http.get.mockImplementation(async (url) => {
+                if (url === LINKS_URL) {
+                    return { data: links };
+                }
+
+                throw new Error(`unexpected reading of ${url}`);
+            });
+            await mount('app/inventory-sharing.blade.php');
+        }
+
+        const items = () => [...document.querySelectorAll('.list-group-item')];
+        const live = () => document.querySelector('[role="status"][aria-live="polite"]');
+        const form = () => document.querySelector('form[aria-labelledby="share-link-new-title"]');
+        const field = (id) => document.getElementById(id);
+
+        /** The text of the elements of a row that match, the ones that are visible. */
+        const shown = (row, selector) =>
+            [...row.querySelectorAll(selector)].filter(visible).map((one) => one.textContent.trim());
+
+        afterEach(() => {
+            Reflect.deleteProperty(navigator, 'clipboard');
+            Reflect.deleteProperty(document, 'execCommand');
+        });
+
+        describe('the list', () => {
+            it('lists the links with their name, state, files, dates and address', async () => {
+                await open([
+                    shareLink('b', {
+                        label: null,
+                        include_files: false,
+                        expires_at: null,
+                        last_used_at: '2026-10-05T08:00:00+00:00',
+                    }),
+                    shareLink('a'),
+                ]);
+
+                expect(items()).toHaveLength(2);
+                expect(visible(document.querySelector('.card-body.text-secondary[role="status"]'))).toBe(false);
+
+                const [first, second] = items();
+
+                expect(shown(first, '.fw-bold')).toEqual(['Untitled link']);
+                expect(shown(first, '.badge')).toEqual(['Active', 'Photos and files hidden']);
+                expect(first.querySelector('.text-secondary.small').textContent.replace(/\s+/g, ' ').trim()).toContain(
+                    'Last used',
+                );
+                expect(first.querySelector('.text-secondary.small').textContent).toContain('Never expires');
+                expect(shown(second, '.fw-bold')).toEqual(['Link a']);
+                expect(shown(second, '.badge')).toEqual(['Active', 'Photos and files shown']);
+
+                const address = second.querySelector('input[readonly]');
+
+                expect(visible(address)).toBe(true);
+                expect(address.value).toBe('https://inventaire.example/s/token-a');
+                expect(address.getAttribute('aria-label')).toBe('Copy the address of the link Link a');
+                expect(buttons('Copy the address of the link Link a')).toHaveLength(1);
+            });
+
+            it('says there is no link yet, and offers to make one', async () => {
+                await open([]);
+
+                expect(items()).toHaveLength(0);
+                expect(
+                    visible(
+                        [...document.querySelectorAll('.card-body')].find((one) =>
+                            one.textContent.includes('no share link yet'),
+                        ),
+                    ),
+                ).toBe(true);
+                expect(buttons('Create a share link')).toHaveLength(1);
+            });
+
+            it('says it could not be read and reads it again on demand', async () => {
+                await open([]);
+                http.get.mockReset();
+                http.get.mockRejectedValueOnce(new HttpError(500, 'Server error'));
+                http.get.mockResolvedValue({ data: [shareLink('a')] });
+                // The failure is shown after a reload of the list.
+                window.Alpine.$data(document.querySelector('[x-data="inventorySharing"]')).load();
+                await flush();
+
+                expect(document.body.textContent).toContain('The share links could not be loaded.');
+
+                await press('Try again');
+
+                expect(items()).toHaveLength(1);
+            });
+
+            it('shows a link that expired as such, without its address', async () => {
+                await open([shareLink('a', { expires_at: '2000-01-01T00:00:00+00:00' })]);
+
+                expect(shown(items()[0], '.badge')).toEqual(['Expired', 'Photos and files shown']);
+                expect(visible(items()[0].querySelector('input[readonly]'))).toBe(false);
+                expect(buttons('Revoke the link Link a')).toHaveLength(1);
+            });
+
+            it('says so when the address of a link that works can no longer be read', async () => {
+                await open([shareLink('a', { url: null })]);
+
+                expect(visible(items()[0].querySelector('input[readonly]'))).toBe(false);
+                expect(items()[0].textContent).toContain('can no longer be read');
+            });
+
+            it('marks the links made by somebody who is no longer an owner, or whose account is gone', async () => {
+                await open([
+                    shareLink('c', { created_by: null }),
+                    shareLink('b', { created_by: { id: 'u2', name: 'Bob', is_owner: false } }),
+                    shareLink('a'),
+                ]);
+
+                const [deleted, demoted, owner] = items();
+                const mark = 'Created by a former member';
+                const hint = 'no longer an owner of this workspace';
+
+                for (const row of [deleted, demoted]) {
+                    expect(shown(row, '.badge')).toEqual(['Active', 'Photos and files shown', mark]);
+                    expect(shown(row, '.text-secondary.small').join(' ')).toContain(hint);
+                }
+
+                expect(shown(owner, '.badge')).toEqual(['Active', 'Photos and files shown']);
+                expect(shown(owner, '.text-secondary.small').join(' ')).not.toContain(hint);
+            });
+
+            it('shows what people typed as text', async () => {
+                await open([shareLink('a', { label: '<img src=x onerror="window.pwned = true">' })]);
+
+                expect(items()[0].querySelector('.fw-bold').textContent).toBe(
+                    '<img src=x onerror="window.pwned = true">',
+                );
+                expect(items()[0].querySelector('img')).toBeNull();
+                expect(window.pwned).toBeUndefined();
+            });
+        });
+
+        describe('making a link', () => {
+            it('opens a form with the files shown and 30 days chosen, and sends what was typed', async () => {
+                await open([shareLink('a')]);
+                http.post.mockResolvedValue({ data: shareLink('b', { label: 'Insurer', include_files: false }) });
+
+                expect(visible(form())).toBe(false);
+
+                await press('Create a share link');
+
+                expect(visible(form())).toBe(true);
+                expect(field('share-link-expiry').value).toBe('30');
+                expect(form().querySelector('input[role="switch"]').checked).toBe(true);
+                expect(document.activeElement).toBe(field('share-link-label'));
+                expect([...field('share-link-expiry').options].map((option) => option.value)).toEqual([
+                    '7',
+                    '30',
+                    '90',
+                    '365',
+                    '',
+                ]);
+
+                await type(field('share-link-label'), 'Insurer');
+                form().querySelector('input[role="switch"]').click();
+                field('share-link-expiry').value = '90';
+                field('share-link-expiry').dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+                await press('Create the link');
+
+                expect(http.post).toHaveBeenCalledWith(
+                    LINKS_URL,
+                    { label: 'Insurer', include_files: false, expires_in_days: 90 },
+                    { silent: true },
+                );
+                expect(items().map((row) => shown(row, '.fw-bold')[0])).toEqual(['Insurer', 'Link a']);
+                expect(visible(form())).toBe(false);
+                expect(live().textContent).toBe('Link created.');
+                expect(items()[0].querySelector('input[readonly]').value).toBe('https://inventaire.example/s/token-b');
+            });
+
+            it('shows the refusals next to the fields and in the alert', async () => {
+                await open([]);
+                http.post.mockRejectedValueOnce(
+                    new HttpError(422, 'Invalid', { errors: { label: ['The label is too long.'] } }),
+                );
+
+                await press('Create a share link');
+                await press('Create the link');
+
+                expect(field('share-link-label').getAttribute('aria-invalid')).toBe('true');
+                expect(field('share-link-label-error').textContent).toBe('The label is too long.');
+
+                http.post.mockRejectedValueOnce(
+                    new HttpError(409, 'Conflict', { code: 'share_link_limit_reached', body: { limit: 20 } }),
+                );
+                await press('Create the link');
+
+                expect(form().querySelector('.alert-danger').textContent).toBe(
+                    'This inventory already has 20 share links.',
+                );
+            });
+
+            it('offers nothing to make when the inventory has all the links it may', async () => {
+                await open([shareLink('b'), shareLink('a')], { limit: 2 });
+
+                const create = [...document.querySelectorAll('button')].find(
+                    (button) => button.textContent.trim() === 'Create a share link',
+                );
+
+                expect(create.disabled).toBe(true);
+                expect(document.body.textContent).toContain('This inventory already has 2 share links.');
+            });
+        });
+
+        describe('copying an address', () => {
+            it('copies it and says so on the button and in the live region', async () => {
+                await open([shareLink('b'), shareLink('a')]);
+                const writeText = vi.fn().mockResolvedValue(undefined);
+                Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+                await press('Copy the address of the link Link a');
+
+                expect(writeText).toHaveBeenCalledWith('https://inventaire.example/s/token-a');
+                expect(items()[1].querySelector('button .ms-1, button span').textContent.trim()).toBe('Copied');
+                expect(items()[0].querySelector('button span').textContent.trim()).toBe('Copy');
+                expect(live().textContent).toBe('Copied');
+            });
+        });
+
+        describe('revoking a link', () => {
+            it('asks first, in the row, and revokes once confirmed', async () => {
+                await open([shareLink('b'), shareLink('a')]);
+                http.delete.mockResolvedValue(null);
+
+                await press('Revoke the link Link a');
+
+                expect(http.delete).not.toHaveBeenCalled();
+                expect(items()[1].textContent).toContain('Revoke the link Link a? Its address stops working at once.');
+                expect(document.activeElement.getAttribute('data-share-action')).toBe('confirm');
+
+                // The button of the confirmation has the same name; the one of the row is hidden meanwhile.
+                await press('Revoke the link Link a');
+
+                expect(http.delete).toHaveBeenCalledWith(`${LINKS_URL}/a`);
+                expect(items()).toHaveLength(1);
+                expect(live().textContent).toBe('Link revoked.');
+            });
+        });
+
+        describe('when the administrator turned sharing off', () => {
+            it('says so, offers no new link and no address to copy, and still lets the owner revoke', async () => {
+                await open([shareLink('a')], { enabled: false });
+
+                const notice = [...document.querySelectorAll('.alert-warning')].find((one) =>
+                    one.textContent.includes('turned off'),
+                );
+
+                expect(visible(notice)).toBe(true);
+                expect(buttons('Create a share link')).toHaveLength(0);
+                expect(visible(items()[0].querySelector('input[readonly]'))).toBe(false);
+                expect(buttons('Revoke the link Link a')).toHaveLength(1);
+            });
+
+            it('hides the notice while it is on', async () => {
+                await open([]);
+
+                const notice = [...document.querySelectorAll('.alert-warning')].find((one) =>
+                    one.textContent.includes('turned off'),
+                );
+
+                expect(visible(notice)).toBe(false);
             });
         });
     });

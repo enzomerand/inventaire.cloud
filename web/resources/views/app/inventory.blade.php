@@ -17,7 +17,7 @@
     data-import-max-size is the largest spreadsheet the server takes, in bytes.
 
     The header links to the official versions of the inventory (app/inventory-versions.blade.php) for every member: the page itself
-    shows what the role allows.
+    shows what the role allows. It links to the sharing page (app/inventory-sharing.blade.php) for the owners only: the link is not in the markup for anybody else.
 
     The dialog of an item that exists has three tabs: its details (the form, or the read-only list), its attachments
     (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
@@ -58,6 +58,12 @@
                     <x-tabler-certificate aria-hidden="true" />
                     {{ __('Official versions') }}
                 </a>
+                @if ($abilities['share'])
+                    <a class="btn" href="{{ route('app.inventory.sharing', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
+                        <x-tabler-share aria-hidden="true" />
+                        {{ __('Share') }}
+                    </a>
+                @endif
                 <a class="btn" x-show="canManageFields" href="{{ route('app.inventory.fields', ['workspace' => $workspace->ulid, 'inventory' => $inventory->ulid], absolute: false) }}">
                     <x-tabler-layout-columns aria-hidden="true" />
                     {{ __('Fields') }}

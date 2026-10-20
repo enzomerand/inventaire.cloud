@@ -16,8 +16,9 @@ use Illuminate\Auth\Access\Response;
  * the inventory belongs to.
  *
  * Any member can see an inventory and what is in it. Editors and owners change it, its fields and its items; deleting
- * an inventory is for owners (it takes every item with it). Somebody who does not belong to the workspace is answered
- * as if the inventory did not exist (a 404, not a 403), like the workspace itself ({@see WorkspacePolicy}).
+ * an inventory is for owners (it takes every item with it), and so is sharing it through a secret read-only link. Somebody
+ * who does not belong to the workspace is answered as if the inventory did not exist (a 404, not a 403), like the workspace
+ * itself ({@see WorkspacePolicy}).
  *
  * The abilities of the roles live in {@see WorkspaceRole}; {@see self::abilities()} is the one place that maps them to
  * the actions on an inventory, for this policy and for the API, which tells the interface what to offer.
@@ -37,9 +38,10 @@ final class InventoryPolicy
      * - `update`: change the name and the description;
      * - `delete`: delete the inventory and everything in it;
      * - `manage_fields`: add, change, delete and order its fields;
-     * - `edit_items`: add, change and delete its items.
+     * - `edit_items`: add, change and delete its items;
+     * - `share`: make, list and revoke its share links.
      *
-     * @return array{view: bool, create: bool, update: bool, delete: bool, manage_fields: bool, edit_items: bool}
+     * @return array{view: bool, create: bool, update: bool, delete: bool, manage_fields: bool, edit_items: bool, share: bool}
      */
     public static function abilities(WorkspaceRole $role): array
     {
@@ -50,6 +52,7 @@ final class InventoryPolicy
             'delete' => $role->canManage(),
             'manage_fields' => $role->canEdit(),
             'edit_items' => $role->canEdit(),
+            'share' => $role->canManage(),
         ];
     }
 
@@ -102,10 +105,19 @@ final class InventoryPolicy
     }
 
     /**
+     * Making, listing and revoking the share links of an inventory: the owners of its workspace. A link shows the whole inventory to
+     * anybody who holds it, which is a decision about who sees the workspace's data, not an edit.
+     */
+    public function share(User $user, Inventory $inventory): Response
+    {
+        return $this->allow($user, $inventory->workspace_id, 'share', __('Only an owner of this workspace can share an inventory.'));
+    }
+
+    /**
      * Allows when the role of the user in the workspace has the ability; a non-member is told the inventory is not there.
      *
      * @param  int  $workspaceId  The workspace the inventory belongs to (or is to be added to).
-     * @param  'view'|'create'|'update'|'delete'|'manage_fields'|'edit_items'  $ability
+     * @param  'view'|'create'|'update'|'delete'|'manage_fields'|'edit_items'|'share'  $ability
      * @param  string  $denial  What a member who lacks the right is told: it names the action that was refused.
      */
     private function allow(User $user, int $workspaceId, string $ability, string $denial): Response

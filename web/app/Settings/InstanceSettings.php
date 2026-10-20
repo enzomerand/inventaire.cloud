@@ -41,6 +41,9 @@ final class InstanceSettings
      */
     public const INVITATION_SIGN_UP = 'invitation_sign_up';
 
+    /** Whether the owners of an inventory can share it read-only through a secret link. Off, every link answers as if it did not exist. */
+    public const SHARE_LINKS_ENABLED = 'share_links_enabled';
+
     /**
      * The version ({@see SearchText::VERSION}) the stored search texts of the items were built with (a bookkeeping value of
      * `inventaire:upgrade`, not a choice of the administrator: it is not among {@see self::all()}).
@@ -65,21 +68,7 @@ final class InstanceSettings
      */
     public function registrationOpen(): bool
     {
-        $this->stored ??= $this->load();
-
-        if (! array_key_exists(self::REGISTRATION_OPEN, $this->stored)) {
-            return true;
-        }
-
-        $value = $this->stored[self::REGISTRATION_OPEN];
-
-        if (is_bool($value)) {
-            return $value;
-        }
-
-        $this->reportUnusable(self::REGISTRATION_OPEN);
-
-        return false;
+        return $this->flag(self::REGISTRATION_OPEN);
     }
 
     /**
@@ -93,21 +82,20 @@ final class InstanceSettings
      */
     public function invitationSignUp(): bool
     {
-        $this->stored ??= $this->load();
+        return $this->flag(self::INVITATION_SIGN_UP);
+    }
 
-        if (! array_key_exists(self::INVITATION_SIGN_UP, $this->stored)) {
-            return true;
-        }
-
-        $value = $this->stored[self::INVITATION_SIGN_UP];
-
-        if (is_bool($value)) {
-            return $value;
-        }
-
-        $this->reportUnusable(self::INVITATION_SIGN_UP);
-
-        return false;
+    /**
+     * Whether the owners of an inventory can share it through a secret read-only link: on unless an administrator turned it off, which is
+     * the case when there is no row at all. Off, no link can be made and every link that exists answers as if it did not (the links are
+     * kept, and work again when sharing is turned back on).
+     *
+     * A row that is there but unusable (not a boolean) counts as *off*, for the reason {@see self::registrationOpen()} gives: showing an
+     * inventory to anybody who holds an address, on the strength of a value nobody understands, is the wrong way to fail.
+     */
+    public function shareLinksEnabled(): bool
+    {
+        return $this->flag(self::SHARE_LINKS_ENABLED);
     }
 
     /**
@@ -145,7 +133,7 @@ final class InstanceSettings
      * Changes the settings that are given, and only those, in one statement. A setting that is not in `$changes` keeps
      * what it holds.
      *
-     * @param  array{registration_open?: bool, invitation_sign_up?: bool}  $changes  The new values by name.
+     * @param  array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool}  $changes  The new values by name.
      */
     public function update(array $changes): void
     {
@@ -178,14 +166,38 @@ final class InstanceSettings
     /**
      * Every setting with its current value, as the API shows them.
      *
-     * @return array{registration_open: bool, invitation_sign_up: bool}
+     * @return array{registration_open: bool, invitation_sign_up: bool, share_links_enabled: bool}
      */
     public function all(): array
     {
         return [
             self::REGISTRATION_OPEN => $this->registrationOpen(),
             self::INVITATION_SIGN_UP => $this->invitationSignUp(),
+            self::SHARE_LINKS_ENABLED => $this->shareLinksEnabled(),
         ];
+    }
+
+    /**
+     * The value of a setting that holds a boolean: what it is when it has a row, else true (every flag is on until the administrator
+     * turns it off), and false (reported once in the log) when the row holds something else.
+     */
+    private function flag(string $key): bool
+    {
+        $this->stored ??= $this->load();
+
+        if (! array_key_exists($key, $this->stored)) {
+            return true;
+        }
+
+        $value = $this->stored[$key];
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        $this->reportUnusable($key);
+
+        return false;
     }
 
     /**
