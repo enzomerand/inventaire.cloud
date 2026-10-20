@@ -8,6 +8,8 @@ use App\Http\Controllers\Install\InstallStepController;
 use App\Http\Controllers\Install\TokenController;
 use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\RobotsController;
+use App\Http\Controllers\Share\ShareFileController;
+use App\Http\Controllers\Share\SharePageController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Controllers\Web\AdminSettingsPageController;
@@ -28,6 +30,7 @@ use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
 use App\Installer\InstallStep;
+use App\Inventories\Sharing\ShareLinks;
 use App\Services\LocaleResolver;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Session\Middleware\StartSession;
@@ -74,6 +77,17 @@ Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, Pr
 // see the controller.
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
     Route::post('/webhooks/documenso', DocumensoWebhookController::class)->name('webhooks.documenso');
+});
+
+// The public page of a share link and the photos and files it shows: an inventory read-only for anybody who holds the secret address
+// (see ShareLinks). Visitors keep no session and no cookie: the address is the secret, and a session would store it (`storeCurrentUrl`),
+// so nothing here starts one or checks a CSRF token (these routes only read). The token has no `where()` pattern on purpose: an address
+// that is not shaped like a token must get the same 404 page as one that is unknown, expired or revoked, which the controllers answer.
+// Each route is limited in pace per network and link (the `share-page` and `share-files` limiters).
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
+    Route::get(ShareLinks::PAGE_PATH, SharePageController::class)->middleware('throttle:share-page')->name('share.show');
+    Route::get(ShareLinks::PAGE_PATH.'/items/{item}/attachments/{attachment}', [ShareFileController::class, 'show'])->middleware('throttle:share-files')->name('share.attachment');
+    Route::get(ShareLinks::PAGE_PATH.'/items/{item}/attachments/{attachment}/thumbnail', [ShareFileController::class, 'thumbnail'])->middleware('throttle:share-files')->name('share.thumbnail');
 });
 
 // Passwordless sign-in: the page drives the /api/v1/auth endpoints. Signed-in visitors are sent to their space (the

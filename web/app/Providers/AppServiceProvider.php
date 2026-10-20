@@ -10,6 +10,7 @@ use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Http\Middleware\PaceApiTokens;
 use App\Inventories\Fields\FieldTypes;
+use App\Inventories\Sharing\ShareLinks;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Jobs\GenerateExport;
 use App\Models\User;
@@ -82,7 +83,8 @@ class AppServiceProvider extends ServiceProvider
      * share a count. And the one of the endpoint that asks for an export (`exports_per_minute`), keyed on the user, and the one of the endpoints
      * that read the file of an import (`imports_per_minute`), keyed on the user too, and the one of the endpoint that freezes an inventory as an
      * official version (`versions_per_hour`), keyed on the user as well, and the one of the endpoint that makes a share link
-     * (`share_link_creations_per_hour`).
+     * (`share_link_creations_per_hour`), and the two of the public page of a share link and of the files it serves
+     * (`share_page_per_minute`, `share_files_per_minute`), keyed on the network and the link.
      */
     private function registerInventoryLimiters(): void
     {
@@ -115,6 +117,34 @@ class AppServiceProvider extends ServiceProvider
         // Making a share link opens an inventory to whoever holds the address (`share_link_creations_per_hour`), keyed on the user.
         RateLimiter::for('share-link-creation', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.share_link_creations_per_hour'))
             ->by('share-link-creation:'.$this->signedInKey($request)));
+
+        // The public page of a share link, and the photos and files it serves, are open to anybody who holds the address (a visitor has no
+        // session): they are counted for each network and link together, so that one link opened by a crowd behind one address does not
+        // use up what another gets, and the files have a limit of their own (a page of items shows many thumbnails at once).
+        RateLimiter::for('share-page', fn (Request $request): array => $this->sharePace($request, 'share-page', config()->integer('inventories.share_page_per_minute')));
+        RateLimiter::for('share-files', fn (Request $request): array => $this->sharePace($request, 'share-files', config()->integer('inventories.share_files_per_minute')));
+    }
+
+    /**
+     * The limits of a request to a share link, for the limiter `$name`: `$perMinute` for the network and the link together, and ten times as
+     * much for the network whatever the link (a visitor who tries made-up addresses never gets to a link, so the first count alone would
+     * never stop them, and each made-up address would leave a counter in the cache).
+     *
+     * The link is counted by the SHA-256 of its token ({@see ShareLinks::hash()}): the token is the secret of the address and is never
+     * written into a cache key. A text that does not look like a token is not a link at all, and they all share one counter.
+     *
+     * @return list<Limit>
+     */
+    private function sharePace(Request $request, string $name, int $perMinute): array
+    {
+        $token = $request->route('token');
+        $network = ClientNetwork::key($request->ip());
+        $link = is_string($token) && ShareLinks::isWellFormed($token) ? ShareLinks::hash($token) : 'malformed';
+
+        return [
+            Limit::perMinute($perMinute)->by($name.':'.$network.'|'.$link),
+            Limit::perMinute($perMinute * 10)->by($name.'-network:'.$network),
+        ];
     }
 
     /**

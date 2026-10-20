@@ -24,7 +24,7 @@ use NumberFormatter;
 final class TemplatePresenter
 {
     /** The Tabler badge of each color of a choice, written out so that the stylesheet keeps them (see resources/js/fields/palette.js). */
-    private const BADGES = [
+    public const BADGES = [
         'gray' => 'badge bg-secondary-lt',
         'red' => 'badge bg-red-lt',
         'orange' => 'badge bg-orange-lt',
