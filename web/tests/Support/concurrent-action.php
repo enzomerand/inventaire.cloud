@@ -21,6 +21,13 @@
 //        php concurrent-action.php <go file> create-token <user id> <name>
 //        php concurrent-action.php <go file> hold-token-revocation <user id>
 //        php concurrent-action.php <go file> insert-token <user id>
+//        php concurrent-action.php <go file> invite <owner id> <workspace id> <email> <role>
+//        php concurrent-action.php <go file> accept-invitation <user id> <invitation id>
+//        php concurrent-action.php <go file> decline-invitation <user id> <invitation id>
+//        php concurrent-action.php <go file> cancel-invitation <owner id> <workspace id> <invitation id>
+//        php concurrent-action.php <go file> transfer-ownership <owner id> <workspace id> <member id>
+//        php concurrent-action.php <go file> remove-member <owner id> <workspace id> <member id>
+//        php concurrent-action.php <go file> leave-workspace <user id> <workspace id>
 //
 // The files of the attachments are written to the local disk, whose folder the test gives with TEST_STORAGE_ROOT (the
 // folder its own process writes to), so that a child never writes to the real storage of the application.
@@ -35,6 +42,10 @@
 // post-inventory goes through the whole HTTP kernel, as a call of the API does (`POST /api/v1/workspaces/{workspace}/inventories`,
 // the person signed in, in English): {"result": "created"} for a 201, {"result": "refused", "reason": <the "code" of a 409>}, and
 // {"result": "error", "reason": "HTTP <status>: <body>"} for anything else.
+//
+// The actions on members and invitations answer {"result": "invited"}, "accepted", "declined", "cancelled", "transferred", "removed" or "left",
+// {"result": "refused", "reason": <the code of a MembershipRefused>} (`member_limit_reached`, `already_invited`, `not_owner`...), "gone" (what
+// they work on was deleted by the other process first) or "not_member" (the person does not belong to the workspace).
 //
 // hold-admin-lock and insert-user go together (see AdminConcurrencyTest): the first locks the administrators and the
 // given account the way the administration does, says so (<go file>.locked) and keeps the lock until the second is done
@@ -70,9 +81,15 @@ use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceInvitation;
 use App\Workspaces\Exceptions\LastWorkspaceException;
+use App\Workspaces\Exceptions\MembershipRefused;
+use App\Workspaces\Invitations;
 use App\Workspaces\Locks;
+use App\Workspaces\Members;
+use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
@@ -264,6 +281,51 @@ function changeAccounts(Application $app, string $action, array $arguments): arr
 }
 
 /**
+ * Invites, answers invitations, hands the ownership over, removes members and leaves the way the application does.
+ *
+ * @param  list<string>  $arguments
+ * @return array{result: string}
+ */
+function changeMembers(Application $app, string $action, array $arguments): array
+{
+    $user = fn (string $id): User => User::query()->findOrFail((int) $id);
+    $workspace = fn (string $id): Workspace => Workspace::query()->findOrFail((int) $id);
+
+    switch ($action) {
+        case 'invite':
+            $app->make(Invitations::class)->invite($user($arguments[0]), $workspace($arguments[1]), $arguments[2], WorkspaceRole::from($arguments[3]));
+
+            return ['result' => 'invited'];
+        case 'accept-invitation':
+            $app->make(Invitations::class)->accept($user($arguments[0]), WorkspaceInvitation::query()->findOrFail((int) $arguments[1]));
+
+            return ['result' => 'accepted'];
+        case 'decline-invitation':
+            $app->make(Invitations::class)->decline($user($arguments[0]), WorkspaceInvitation::query()->findOrFail((int) $arguments[1]));
+
+            return ['result' => 'declined'];
+        case 'cancel-invitation':
+            $app->make(Invitations::class)->cancel($user($arguments[0]), $workspace($arguments[1]), WorkspaceInvitation::query()->findOrFail((int) $arguments[2]));
+
+            return ['result' => 'cancelled'];
+        case 'transfer-ownership':
+            $app->make(Members::class)->transferOwnership($user($arguments[0]), $workspace($arguments[1]), $user($arguments[2]));
+
+            return ['result' => 'transferred'];
+        case 'remove-member':
+            $app->make(Members::class)->remove($user($arguments[0]), $workspace($arguments[1]), $user($arguments[2]));
+
+            return ['result' => 'removed'];
+        case 'leave-workspace':
+            $app->make(Members::class)->leave($user($arguments[0]), $workspace($arguments[1]));
+
+            return ['result' => 'left'];
+        default:
+            throw new InvalidArgumentException("Unknown action {$action}.");
+    }
+}
+
+/**
  * Adds, changes or deletes an inventory, a field or an item the way the application does.
  *
  * @param  list<string>  $arguments
@@ -333,6 +395,7 @@ try {
         'insert-token' => insertTokenWhileHeld($go, (int) $arguments[0]),
         'post-inventory' => postInventory($app, $arguments),
         'create-token' => createToken($app, $arguments),
+        'invite', 'accept-invitation', 'decline-invitation', 'cancel-invitation', 'transfer-ownership', 'remove-member', 'leave-workspace' => changeMembers($app, $action, $arguments),
         'create-inventory', 'create-field', 'delete-field', 'create-item', 'update-item', 'delete-item', 'upload-attachment', 'remove-attachment', 'run-import' => changeInventories($app, $action, $arguments),
         default => changeAccounts($app, $action, $arguments),
     };
@@ -340,6 +403,10 @@ try {
     $outcome = ['result' => 'refused', 'reason' => $refusal->reason];
 } catch (UserAdministrationRefused $refusal) {
     $outcome = ['result' => 'refused', 'reason' => $refusal->reason];
+} catch (MembershipRefused $refusal) {
+    $outcome = ['result' => 'refused', 'reason' => $refusal->reason];
+} catch (AuthorizationException) {
+    $outcome = ['result' => 'refused', 'reason' => 'not_member'];
 } catch (LastWorkspaceException) {
     $outcome = ['result' => 'refused', 'reason' => LastWorkspaceException::CODE];
 } catch (InventoryLimitReachedException|FieldLimitReachedException|ItemLimitReachedException|AttachmentLimitReachedException|FieldFileLimitReachedException|StorageLimitReachedException|ApiTokenLimitReachedException $limit) {

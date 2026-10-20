@@ -46,8 +46,13 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * with the account: see {@see self::administratorsAnd()}). A transaction may skip levels: creating an account takes
  * none of 2 to 4 for its personal workspace, since the account and the workspace are invisible to everybody until the
  * commit and the workspace is inserted without reading any membership (see {@see Workspaces::createPersonal()}).
- * Code that adds members (the invitations of lot 9) must follow the same order, accounts then the workspace then the
- * memberships: it is what lets the exceptions below stay safety nets.
+ * Code that adds members follows the same order, accounts then the workspace then the memberships: it is what lets the
+ * exceptions below stay safety nets. That is the case of everything that changes who belongs to a workspace (inviting,
+ * accepting, changing a role, removing, leaving, handing the ownership over: see {@see Roster}, which takes the locks in that
+ * order). The invitations (`workspace_invitations`) come last among these: every writer of the invitations of a workspace holds the
+ * workspace's lock, which is what keeps them one after the other, so they are read and written with plain queries and never
+ * with a locking read (on MySQL and MariaDB it would lock the gap after the last invitation of the workspace, where the first
+ * invitation of the next workspace is inserted). Declining an invitation deletes the one row by its key, without the lock.
  *
  * Levels 5 and 6 are the content of a workspace. Whatever writes to an inventory (its name, its fields, its items)
  * locks the inventory first, so the writes of one inventory happen one after the other: that is what makes a quota
