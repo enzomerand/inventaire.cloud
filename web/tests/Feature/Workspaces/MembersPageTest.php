@@ -212,10 +212,10 @@ describe('the markup', function (): void {
 
         $this->actingAs($team['owner'])->get(membersPageUri($team['workspace']), ['Accept-Language' => 'fr'])
             ->assertOk()
-            ->assertSee('Membres de Shop')
+            ->assertSee('Membres de « Shop »')
             ->assertSee('Inviter quelqu&#039;un', false)
             ->assertSee('Envoyer l&#039;invitation', false)
-            ->assertSee('Retour à Shop');
+            ->assertSee('Retour à « Shop »');
 
         $this->flushSession();
         app('auth')->forgetGuards();
