@@ -1290,5 +1290,11 @@
     "IP address: :value": "Adresse IP : :value",
     "Browser or application: :value": "Navigateur ou application : :value",
     "Unknown": "Inconnu",
-    "If you did not create this token, revoke it now from your account page and sign out everywhere:": "Si vous n'avez pas créé ce jeton, révoquez-le maintenant depuis la page de votre compte et déconnectez-vous partout :"
+    "If you did not create this token, revoke it now from your account page and sign out everywhere:": "Si vous n'avez pas créé ce jeton, révoquez-le maintenant depuis la page de votre compte et déconnectez-vous partout :",
+    "You have been invited to a workspace on :app": "Vous avez été invité à un espace de travail sur :app",
+    "Hello,": "Bonjour,",
+    ":inviter invited you to join the workspace \":workspace\" on :app with the role :role.": ":inviter vous invite à rejoindre l'espace de travail « :workspace » sur :app avec le rôle :role.",
+    "To answer, sign in with this email address and open the page of your invitations:": "Pour répondre, connectez-vous avec cette adresse e-mail et ouvrez la page de vos invitations :",
+    "The invitation is valid until :date.": "L'invitation est valable jusqu'au :date.",
+    "If you were not expecting this invitation, you can ignore this message: nothing happens unless you accept it.": "Si vous n'attendiez pas cette invitation, vous pouvez ignorer ce message : il ne se passe rien tant que vous ne l'acceptez pas."
 }
