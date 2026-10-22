@@ -103,7 +103,12 @@
             return offline || Response.error();
         }
 
-        event.waitUntil(restoreOfflinePage());
+        // Still allowed here (the answer is not settled yet), but the page must never fail because of the repair.
+        try {
+            event.waitUntil(restoreOfflinePage());
+        } catch {
+            // The next navigation repairs it.
+        }
 
         return page;
     }

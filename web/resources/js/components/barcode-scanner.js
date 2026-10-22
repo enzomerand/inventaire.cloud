@@ -353,10 +353,9 @@ export default function barcodeScanner() {
                         return;
                     }
 
-                    // A code that is not the field's (the barcode of a bottle in front of an ISBN): the scan goes on, and says why.
-                    if (codes.length > 0) {
-                        this.note = t('scanner.error.mismatch');
-                    }
+                    // A code that is not the field's (the barcode of a bottle in front of an ISBN): the scan goes on, and says why
+                    // as long as that code stays in sight.
+                    this.note = codes.length > 0 ? t('scanner.error.mismatch') : '';
                 } catch {
                     if (ticket !== this.ticket) {
                         return;
