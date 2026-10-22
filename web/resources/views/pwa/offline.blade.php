@@ -16,7 +16,7 @@
     <meta name="theme-color" content="{{ App\Pwa\WebManifest::THEME_COLOR }}">
     <meta name="color-scheme" content="light dark">
 
-    <title>{{ __('You are offline') }} · {{ config('app.name') }}</title>
+    <title>{{ __('Connection unavailable') }} · {{ config('app.name') }}</title>
 
     <style>
         :root {
@@ -110,8 +110,8 @@
             </g>
         </svg>
 
-        <h1>{{ __('You are offline') }}</h1>
-        <p>{{ __('Check your connection, then try again.') }}</p>
+        <h1>{{ __('Connection unavailable') }}</h1>
+        <p>{{ __('We could not reach :app. Check your connection, then try again.', ['app' => config('app.name')]) }}</p>
         <a href="">{{ __('Try again') }}</a>
     </main>
 </body>

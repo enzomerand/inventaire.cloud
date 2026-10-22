@@ -41,11 +41,10 @@ class FakeResponse {
  * @param {object} [options]
  * @param {string} [options.version] The version the server wrote in the configuration.
  * @param {string} [options.offlineUrl] The address of the offline page the server wrote in the configuration.
- * @param {boolean} [options.preload] Whether the browser supports navigation preload.
  * @param {string[]} [options.existing] The names of the caches that already exist.
  * @returns {object} The scope, its doubles and the handlers the worker registered.
  */
-function createWorker({ version = 'v1', offlineUrl = '/offline', preload = true, existing = [] } = {}) {
+function createWorker({ version = 'v1', offlineUrl = '/offline', existing = [] } = {}) {
     const handlers = {};
     const order = [];
     const stores = new Map(existing.map((name) => [name, makeCache(name)]));
@@ -94,7 +93,7 @@ function createWorker({ version = 'v1', offlineUrl = '/offline', preload = true,
                 order.push('claim');
             }),
         },
-        registration: preload ? { navigationPreload: { enable: vi.fn(async () => {}) } } : {},
+        registration: {},
     };
     const network = vi.fn();
 
@@ -120,13 +119,18 @@ function lifecycleEvent() {
     return event;
 }
 
-/** A `fetch` event for a request. */
-function fetchEvent(url, init = {}, preloadResponse = undefined) {
-    return {
+/** A `fetch` event for a request: it keeps the promises the worker asks to wait for (`waitUntil`) in `extended`. */
+function fetchEvent(url, init = {}) {
+    const event = {
         request: new FakeRequest(url, init),
-        preloadResponse: Promise.resolve(preloadResponse),
+        extended: [],
         respondWith: vi.fn(),
+        waitUntil: vi.fn((promise) => {
+            event.extended.push(promise);
+        }),
     };
+
+    return event;
 }
 
 /** The navigation of a person to a page. */
@@ -220,25 +224,28 @@ describe('activating', () => {
         expect(worker.caches.delete).toHaveBeenCalledTimes(2);
     });
 
-    it('enables navigation preload where the browser has it, and takes control of the open pages last', async () => {
-        const worker = createWorker();
+    it('takes control of the open pages once the old caches are gone', async () => {
+        const worker = createWorker({ existing: ['inventaire-offline-v0'] });
         const event = lifecycleEvent();
 
         worker.handlers.activate(event);
         await event.pending;
 
-        expect(worker.scope.registration.navigationPreload.enable).toHaveBeenCalledTimes(1);
+        expect(worker.caches.delete).toHaveBeenCalledWith('inventaire-offline-v0');
         expect(worker.scope.clients.claim).toHaveBeenCalledTimes(1);
     });
 
-    it('works in a browser without navigation preload', async () => {
-        const worker = createWorker({ preload: false });
+    it('does not use navigation preload: it would double the requests of the navigations the worker leaves alone', async () => {
+        const enable = vi.fn(async () => {});
+        const worker = createWorker();
+        worker.scope.registration = { navigationPreload: { enable } };
         const event = lifecycleEvent();
 
         worker.handlers.activate(event);
         await event.pending;
 
-        expect(worker.scope.clients.claim).toHaveBeenCalledTimes(1);
+        expect(enable).not.toHaveBeenCalled();
+        expect(SOURCE).not.toMatch(/navigationPreload|preloadResponse/);
     });
 });
 
@@ -253,17 +260,6 @@ describe('a navigation', () => {
 
         expect(await answerOf(event)).toBe(page);
         expect(worker.network).toHaveBeenCalledWith(event.request);
-    });
-
-    it('uses the answer the browser already asked for (navigation preload) instead of asking again', async () => {
-        const worker = createWorker();
-        const preloaded = new FakeResponse('preloaded');
-        const event = fetchEvent(`${ORIGIN}/app`, { mode: 'navigate' }, preloaded);
-
-        worker.handlers.fetch(event);
-
-        expect(await answerOf(event)).toBe(preloaded);
-        expect(worker.network).not.toHaveBeenCalled();
     });
 
     it('shows a page of the server that is an error as it is: only a missing network is "offline"', async () => {
@@ -290,20 +286,11 @@ describe('a navigation', () => {
         const answer = await answerOf(event);
 
         expect(answer.label).toBe('offline page of inventaire-offline-v1');
-        expect(worker.caches.match).toHaveBeenCalledWith('/offline', { cacheName: 'inventaire-offline-v1' });
-    });
-
-    it('is answered with the offline page when the preloaded request fails too', async () => {
-        const worker = createWorker();
-        const install = lifecycleEvent();
-        worker.handlers.install(install);
-        await install.pending;
-        const event = navigation();
-        event.preloadResponse = Promise.reject(new TypeError('Failed to fetch'));
-
-        worker.handlers.fetch(event);
-
-        expect((await answerOf(event)).label).toBe('offline page of inventaire-offline-v1');
+        // The page was cached with `Vary: Accept-Language, Cookie`: the request of the navigation does not have to match it.
+        expect(worker.caches.match).toHaveBeenCalledWith('/offline', {
+            cacheName: 'inventaire-offline-v1',
+            ignoreVary: true,
+        });
     });
 
     it('is a network error, the browser own page, when there is no network and no copy of the offline page', async () => {
@@ -337,6 +324,135 @@ describe('a navigation', () => {
     });
 });
 
+describe('the copy of the offline page', () => {
+    /** A worker that is installed, then whose cache loses the page (the browser evicted it). */
+    async function evicted() {
+        const worker = createWorker();
+        const install = lifecycleEvent();
+
+        worker.handlers.install(install);
+        await install.pending;
+
+        const cache = worker.stores.get('inventaire-offline-v1');
+
+        cache.entries.clear();
+        cache.add.mockClear();
+
+        return { worker, cache };
+    }
+
+    it('is put back after a navigation that reached the server, without making the page wait for it', async () => {
+        const { worker, cache } = await evicted();
+        let release;
+        cache.add.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    release = () => {
+                        cache.entries.set('/offline', new FakeResponse('offline page again'));
+                        resolve();
+                    };
+                }),
+        );
+        const page = new FakeResponse('the page');
+        worker.network.mockResolvedValue(page);
+        const event = navigation('/app');
+
+        worker.handlers.fetch(event);
+
+        // The answer is the page, while the copy is still being fetched.
+        expect(await answerOf(event)).toBe(page);
+        expect(event.waitUntil).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => expect(cache.add).toHaveBeenCalledTimes(1));
+        expect(cache.add.mock.calls[0][0].url).toBe('/offline');
+        expect(cache.add.mock.calls[0][0].init).toEqual({ cache: 'reload' });
+
+        release();
+        await event.extended[0];
+
+        expect(cache.entries.get('/offline').label).toBe('offline page again');
+    });
+
+    it('is put back after a page that is an error of the server too: the network works', async () => {
+        const { worker, cache } = await evicted();
+        const down = new FakeResponse('maintenance', 503);
+        worker.network.mockResolvedValue(down);
+        const event = navigation('/app');
+
+        worker.handlers.fetch(event);
+
+        expect(await answerOf(event)).toBe(down);
+        await event.extended[0];
+        expect(cache.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('is left alone when it is still there', async () => {
+        const { worker, cache } = await evicted();
+        cache.entries.set('/offline', new FakeResponse('offline page'));
+        worker.network.mockResolvedValue(new FakeResponse('the page'));
+        const event = navigation('/app');
+
+        worker.handlers.fetch(event);
+        await answerOf(event);
+        await event.extended[0];
+
+        expect(cache.add).not.toHaveBeenCalled();
+        expect(worker.caches.match).toHaveBeenCalledWith('/offline', {
+            cacheName: 'inventaire-offline-v1',
+            ignoreVary: true,
+        });
+    });
+
+    it('never fails the navigation when it cannot be put back', async () => {
+        const { worker, cache } = await evicted();
+        cache.add.mockRejectedValue(new TypeError('Failed to fetch'));
+        const page = new FakeResponse('the page');
+        worker.network.mockResolvedValue(page);
+        const event = navigation('/app');
+
+        worker.handlers.fetch(event);
+
+        expect(await answerOf(event)).toBe(page);
+        await expect(event.extended[0]).resolves.toBeUndefined();
+        expect(cache.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not fetched twice by navigations that find it missing at the same time', async () => {
+        const { worker, cache } = await evicted();
+        let release;
+        cache.add.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    release = resolve;
+                }),
+        );
+        worker.network.mockResolvedValue(new FakeResponse('the page'));
+        const first = navigation('/app');
+        const second = navigation('/app/account');
+
+        worker.handlers.fetch(first);
+        worker.handlers.fetch(second);
+        await answerOf(first);
+        await answerOf(second);
+        await vi.waitFor(() => expect(cache.add).toHaveBeenCalledTimes(1));
+        release();
+        await Promise.all([...first.extended, ...second.extended]);
+
+        expect(cache.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not touched when there is no network: the page of the cache is the answer', async () => {
+        const { worker, cache } = await evicted();
+        worker.network.mockRejectedValue(new TypeError('Failed to fetch'));
+        const event = navigation('/app');
+
+        worker.handlers.fetch(event);
+
+        expect((await answerOf(event)).label).toBe('network error');
+        expect(event.waitUntil).not.toHaveBeenCalled();
+        expect(cache.add).not.toHaveBeenCalled();
+    });
+});
+
 describe('what is left to the browser', () => {
     /** Fires a fetch event and says whether the worker answered it. */
     function answered(event) {
@@ -365,8 +481,19 @@ describe('what is left to the browser', () => {
         expect(answered(fetchEvent(`${ORIGIN}/api/v1/exports/01HX/download`, { mode: 'navigate' }))).toBe(false);
     });
 
-    it('answers the navigations to the pages of the application, even the ones whose path only looks like the API', () => {
+    it.each([
+        ['an attachment', '/s/AbC123_token/items/01HX/attachments/01HY'],
+        ['a thumbnail', '/s/AbC123_token/items/01HX/attachments/01HY/thumbnail'],
+    ])('does not touch the link to %s of a share link: it is a download, not a page', (_name, path) => {
+        expect(answered(fetchEvent(ORIGIN + path, { mode: 'navigate' }))).toBe(false);
+    });
+
+    it('answers the navigations to the pages of the application, even the ones whose path only looks like a file', () => {
         expect(answered(fetchEvent(`${ORIGIN}/apiary`, { mode: 'navigate' }))).toBe(true);
         expect(answered(fetchEvent(`${ORIGIN}/docs/api`, { mode: 'navigate' }))).toBe(true);
+        // The page of a share link is a page; only the files it shows are not.
+        expect(answered(fetchEvent(`${ORIGIN}/s/AbC123_token`, { mode: 'navigate' }))).toBe(true);
+        expect(answered(fetchEvent(`${ORIGIN}/s/AbC123_token/`, { mode: 'navigate' }))).toBe(true);
+        expect(answered(fetchEvent(`${ORIGIN}/app/w/abc/items/01HX`, { mode: 'navigate' }))).toBe(true);
     });
 });

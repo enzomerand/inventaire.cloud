@@ -3,7 +3,8 @@
  *
  * The server stays the only judge of a code (check digit, length, characters: see `BarcodeType`): nothing here mirrors
  * those rules. This only picks the symbologies the reader looks for (fewer symbologies means fewer false reads and a
- * faster pass over each frame) and undoes the ways the same product shows up under another code than the field's.
+ * faster pass over each frame), sets aside the reads that cannot be the code of a field by their shape alone (the barcode of
+ * a bottle read for an ISBN) and undoes the ways the same product shows up under another code than the field's.
  */
 
 /** The symbologies a search, and a field that takes any code, look for. */
@@ -33,6 +34,18 @@ const FIELD_FORMATS = {
 };
 
 /**
+ * The shape of the reads a field with a format can take. The reader gives a UPC-A symbol as 13 digits (a 0 and the 12 digits) or
+ * as 12, and the barcode of a book is an EAN-13 that starts with 978 or 979 (only 978 has an ISBN-10).
+ */
+const FIELD_SHAPES = {
+    upca: /^0?\d{12}$/,
+    isbn10: /^978\d{10}$/,
+    ean13: /^\d{13}$/,
+    isbn13: /^97[89]\d{10}$/,
+    ean8: /^\d{8}$/,
+};
+
+/**
  * The symbologies to look for.
  *
  * @param {string | null} [fieldFormat] The `format` option of the barcode field being filled in, or null for a search
@@ -41,6 +54,22 @@ const FIELD_FORMATS = {
  */
 export function formatsFor(fieldFormat = null) {
     return [...(FIELD_FORMATS[fieldFormat ?? ''] ?? ANY_FORMATS)];
+}
+
+/**
+ * Whether a read can be the code of a field with this format. A reader looks for EAN-13 symbols in a UPC-A, ISBN-10 or ISBN-13 field,
+ * so it also finds the barcode of a product that is none of them: that read is not the code of the field, and is ignored (the
+ * server stays the judge of the check digit, only the shape of the read is looked at). A field that takes any code, a search
+ * and a format that is not known take every read.
+ *
+ * @param {string} rawValue What the reader decoded.
+ * @param {string | null} [fieldFormat] The `format` option of the field, null for a search.
+ * @returns {boolean}
+ */
+export function fitsFormat(rawValue, fieldFormat = null) {
+    const shape = Object.hasOwn(FIELD_SHAPES, fieldFormat ?? '') ? FIELD_SHAPES[fieldFormat ?? ''] : undefined;
+
+    return shape === undefined || shape.test(String(rawValue ?? '').trim());
 }
 
 /**
@@ -94,13 +123,22 @@ export function normalizeScan(rawValue, detectedFormat, fieldFormat = null) {
 }
 
 /**
- * The words to search for a code that was scanned. The search finds a word anywhere in the text of an item, so a UPC-A
- * code (which the reader gives with a leading 0, as an EAN-13) is searched as its 12 digits: they are found whether the
- * item holds the UPC-A or the EAN-13 form of the code.
+ * The words to search for a code that was scanned. The search finds a word anywhere in the text of an item (case and accents
+ * aside), so a code is searched as the part of it that every form of the same product shares:
+ *
+ * - a UPC-A code, which the reader gives with a leading 0 as an EAN-13, is searched as its 12 digits: they are found whether the
+ *   item holds the UPC-A or the EAN-13 form of the code;
+ * - the EAN-13 of a book (978...) is searched as the 9 digits it has in common with the ISBN-10 of the same book (the ISBN-13 is
+ *   978, these 9 digits and a check digit, the ISBN-10 these 9 digits and a check digit): they are found whether the item holds the
+ *   ISBN-13 or the ISBN-10. An EAN-13 that starts with 979 has no ISBN-10 and is searched whole.
  *
  * @param {string} code The code as the reader gave it.
  * @returns {string}
  */
 export function searchTermFor(code) {
-    return /^0\d{12}$/.test(code) ? code.slice(1) : code;
+    if (/^0\d{12}$/.test(code)) {
+        return code.slice(1);
+    }
+
+    return /^978\d{10}$/.test(code) ? code.slice(3, 12) : code;
 }

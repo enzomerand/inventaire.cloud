@@ -44,6 +44,8 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
 vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
 // The barcode reader is WebAssembly that jsdom cannot run: a scan is given the reader the test chooses.
 vi.mock('../../../resources/js/scanner/decoder.js', () => ({ loadDetector: vi.fn() }));
+// jsdom loads no image: a photo goes to the reader as it is.
+vi.mock('../../../resources/js/scanner/photo.js', () => ({ prepareImage: vi.fn(async (file) => file) }));
 // The page of the versions asks again every two seconds: a test cannot wait that long, nor fake the timers under Alpine.
 vi.mock('../../../resources/js/versions/versions.js', async (importOriginal) => ({
     ...(await importOriginal()),
@@ -3589,6 +3591,8 @@ describe('the pages under the real Alpine CSP build', () => {
             const WITH_CODE = [...FIELDS, CODE];
             const scanDialog = () => document.querySelector('#scan-modal-title').closest('.modal');
             const panelOf = (dialog) => dialog.querySelector('[data-slot]');
+            // The panel is always on the page (its live region must be); what a scan shows and the buttons that go with it are not.
+            const panelOpen = (dialog) => visible(panelOf(dialog).querySelector('.btn-list'));
             const searchBox = () => document.querySelector('input[type="search"]');
             const toolbar = () => searchBox().closest('.card-body');
             const details = () => itemDialog().querySelector('#item-panel-details');
@@ -3596,6 +3600,11 @@ describe('the pages under the real Alpine CSP build', () => {
             const originalSecure = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
             const originalDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
             let getUserMedia;
+
+            /** A track of the camera, which can be listened to. */
+            function cameraTrack() {
+                return { stop: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
+            }
 
             /** The reader finds this code in whatever it is given. */
             function readerFinds(rawValue, format = 'ean_13') {
@@ -3655,14 +3664,14 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(scanButtons[0].closest('[data-field]').dataset.field).toBe('code');
                     expect(control('code').parentElement.classList.contains('input-group')).toBe(true);
                     expect(control('name').parentElement.classList.contains('input-group')).toBe(false);
-                    expect(visible(panelOf(itemDialog()))).toBe(false);
+                    expect(panelOpen(itemDialog())).toBe(false);
                 });
 
                 it('shows the scanner in place of the form, and says why the camera did not open', async () => {
                     await press('Scan a barcode', itemDialog());
 
                     expect(getUserMedia).toHaveBeenCalledTimes(1);
-                    expect(visible(panelOf(itemDialog()))).toBe(true);
+                    expect(panelOpen(itemDialog())).toBe(true);
                     expect(visible(details())).toBe(false);
                     expect(panelOf(itemDialog()).textContent).toContain('Camera access was denied');
                     // The photo is still there, and so is the way out.
@@ -3681,7 +3690,7 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(loadDetector).toHaveBeenCalledWith(['upc_a', 'ean_13']);
                     expect(control('code').value).toBe('012345678905');
                     expect(control('name').value).toBe('Hammer');
-                    expect(visible(panelOf(itemDialog()))).toBe(false);
+                    expect(panelOpen(itemDialog())).toBe(false);
                     expect(visible(details())).toBe(true);
                     expect(document.activeElement).toBe(control('code'));
 
@@ -3699,7 +3708,7 @@ describe('the pages under the real Alpine CSP build', () => {
                     await takePhoto(panelOf(itemDialog()));
 
                     expect(panelOf(itemDialog()).textContent).toContain('No barcode found in this photo.');
-                    expect(visible(panelOf(itemDialog()))).toBe(true);
+                    expect(panelOpen(itemDialog())).toBe(true);
                     expect(control('code').value).toBe('');
                 });
 
@@ -3707,7 +3716,7 @@ describe('the pages under the real Alpine CSP build', () => {
                     await press('Scan a barcode', itemDialog());
                     await press('Cancel', panelOf(itemDialog()));
 
-                    expect(visible(panelOf(itemDialog()))).toBe(false);
+                    expect(panelOpen(itemDialog())).toBe(false);
                     expect(visible(details())).toBe(true);
                     expect(control('code').value).toBe('');
                     expect(document.activeElement).toBe(control('code'));
@@ -3724,12 +3733,12 @@ describe('the pages under the real Alpine CSP build', () => {
                     await flush();
 
                     expect(reachedTheDialog).not.toHaveBeenCalled();
-                    expect(visible(panelOf(itemDialog()))).toBe(false);
+                    expect(panelOpen(itemDialog())).toBe(false);
                     expect(visible(details())).toBe(true);
                 });
 
                 it('shows the picture of the camera, and lets the camera go when the person gives up', async () => {
-                    const track = { stop: vi.fn() };
+                    const track = cameraTrack();
                     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 
                     readerFinds(null);
@@ -3751,8 +3760,147 @@ describe('the pages under the real Alpine CSP build', () => {
                     play.mockRestore();
                 });
 
+                it('offers the camera and the gallery for a photo: the file chooser has no "capture", which would only offer the camera', () => {
+                    for (const dialog of [itemDialog(), document.body]) {
+                        for (const input of panelOf(dialog).querySelectorAll('input[type="file"]')) {
+                            expect(input.hasAttribute('capture')).toBe(false);
+                            expect(input.accept).toBe('image/*');
+                        }
+                    }
+                });
+
+                it('tells everything in one live region that is on the page before the scan, with nothing hidden around it', async () => {
+                    const panel = panelOf(itemDialog());
+                    const region = panel.querySelector('[aria-live]');
+                    const hiddenAround = (element) => {
+                        for (let node = element; node && node !== document.body; node = node.parentElement) {
+                            if (node.hidden || node.style.display === 'none') {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    };
+
+                    expect(panel.querySelectorAll('[aria-live]')).toHaveLength(1);
+                    expect(region.getAttribute('aria-live')).toBe('polite');
+                    expect(hiddenAround(region)).toBe(false);
+                    expect(region.textContent.trim()).toBe('');
+
+                    await press('Scan a barcode', itemDialog());
+
+                    // The same region, now with the reason the camera did not open.
+                    expect(panel.querySelector('[aria-live]')).toBe(region);
+                    expect(hiddenAround(region)).toBe(false);
+                    expect(region.textContent).toContain('Camera access was denied');
+                });
+
+                it("says what to aim at in the live region while the camera is on, and says when a code is not the field's", async () => {
+                    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+                    const video = () => panelOf(itemDialog()).querySelector('video');
+                    const region = panelOf(itemDialog()).querySelector('[aria-live]');
+
+                    getUserMedia.mockResolvedValue({ getTracks: () => [cameraTrack()] });
+                    const detector = readerFinds(null);
+                    await press('Scan a barcode', itemDialog());
+
+                    Object.defineProperty(video(), 'readyState', { configurable: true, value: 4 });
+                    Object.defineProperty(video(), 'videoWidth', { configurable: true, value: 640 });
+                    expect(region.textContent.trim()).toBe('Point the camera at the barcode.');
+                    expect(region.firstElementChild.classList.contains('alert')).toBe(false);
+
+                    // A European product in a UPC-A field: not the code of the field.
+                    detector.detect.mockResolvedValue([{ rawValue: '3017620422003', format: 'ean_13' }]);
+                    await new Promise((resolve) => setTimeout(resolve, 400));
+                    await flush();
+
+                    expect(region.textContent.trim()).toBe('This code does not match the field format.');
+                    expect(region.firstElementChild.classList.contains('alert-warning')).toBe(true);
+                    expect(panelOpen(itemDialog())).toBe(true);
+                    expect(control('code').value).toBe('');
+
+                    await press('Cancel', panelOf(itemDialog()));
+                    play.mockRestore();
+                });
+
+                it('hides the buttons of the dialog (Delete, Cancel, Save) while it scans, and gives them back', async () => {
+                    const footer = itemDialog().querySelector('.modal-footer');
+
+                    expect(visible(footer)).toBe(true);
+                    expect(buttons('Save', footer)).toHaveLength(1);
+
+                    await press('Scan a barcode', itemDialog());
+
+                    expect(visible(footer)).toBe(false);
+                    // The attribute is on a wrapper: the footer carries a display of its own, which an attribute on it could not beat.
+                    expect(footer.hidden).toBe(false);
+                    expect(footer.parentElement.hidden).toBe(true);
+
+                    await press('Cancel', panelOf(itemDialog()));
+
+                    expect(visible(footer)).toBe(true);
+                    expect(buttons('Save', footer)).toHaveLength(1);
+                });
+
+                it('closes the scanner and not the dialog when the dialog is asked to close (Escape, a click outside, the cross)', async () => {
+                    await press('Scan a barcode', itemDialog());
+
+                    const closing = new Event('hide.bs.modal', { cancelable: true });
+
+                    itemDialog().dispatchEvent(closing);
+                    await flush();
+
+                    expect(closing.defaultPrevented).toBe(true);
+                    expect(panelOpen(itemDialog())).toBe(false);
+                    expect(visible(details())).toBe(true);
+                    expect(document.activeElement).toBe(control('code'));
+
+                    // One more time, and the dialog closes as it always did.
+                    const again = new Event('hide.bs.modal', { cancelable: true });
+
+                    itemDialog().dispatchEvent(again);
+
+                    expect(again.defaultPrevented).toBe(false);
+                });
+
+                it('offers to start the camera again when the page was hidden, and starts it', async () => {
+                    const tracks = [cameraTrack(), cameraTrack()];
+                    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+                    const panel = () => panelOf(itemDialog());
+
+                    getUserMedia.mockResolvedValueOnce({ getTracks: () => [tracks[0]] });
+                    getUserMedia.mockResolvedValueOnce({ getTracks: () => [tracks[1]] });
+                    readerFinds(null);
+                    await press('Scan a barcode', itemDialog());
+
+                    expect(buttons('Restart the camera', panel())).toHaveLength(0);
+
+                    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await flush();
+                    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await flush();
+
+                    expect(tracks[0].stop).toHaveBeenCalledTimes(1);
+                    expect(panel().querySelector('[aria-live]').textContent).toContain('The camera was stopped');
+                    expect(buttons('Restart the camera', panel())).toHaveLength(1);
+                    expect(visible(panel().querySelector('video'))).toBe(false);
+
+                    await press('Restart the camera', panel());
+
+                    expect(getUserMedia).toHaveBeenCalledTimes(2);
+                    expect(visible(panel().querySelector('video'))).toBe(true);
+                    expect(buttons('Restart the camera', panel())).toHaveLength(0);
+
+                    await press('Cancel', panel());
+                    expect(tracks[1].stop).toHaveBeenCalledTimes(1);
+                    delete document.hidden;
+                    play.mockRestore();
+                });
+
                 it('lets the camera go when the dialog is closed during the scan', async () => {
-                    const track = { stop: vi.fn() };
+                    const track = cameraTrack();
                     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 
                     readerFinds(null);
@@ -3771,7 +3919,7 @@ describe('the pages under the real Alpine CSP build', () => {
                     await flush();
 
                     expect(track.stop).toHaveBeenCalledTimes(1);
-                    expect(visible(panelOf(itemDialog()))).toBe(false);
+                    expect(panelOpen(itemDialog())).toBe(false);
                     play.mockRestore();
                 });
             });
@@ -3787,7 +3935,7 @@ describe('the pages under the real Alpine CSP build', () => {
 
                     expect(showModal).toHaveBeenCalledWith(scanDialog());
                     expect(scanDialog().querySelector('#scan-modal-title').textContent).toBe('Scan a barcode');
-                    expect(visible(panelOf(scanDialog()))).toBe(true);
+                    expect(panelOpen(scanDialog())).toBe(true);
                     expect(panelOf(scanDialog()).dataset.slot).toBe('search');
 
                     http.get.mockClear();

@@ -116,8 +116,11 @@ export function hideModal(element) {
  *
  * @param {HTMLElement} element The `.modal` element.
  * @param {() => void} callback
- * @returns {void}
+ * @returns {() => void} Stops listening. A component that lives shorter than its dialog (one that is taken apart while the dialog
+ *   stays) calls it when it goes; the others, which live as long as the page, may ignore it.
  */
 export function onModalHidden(element, callback) {
     element.addEventListener('hidden.bs.modal', callback);
+
+    return () => element.removeEventListener('hidden.bs.modal', callback);
 }

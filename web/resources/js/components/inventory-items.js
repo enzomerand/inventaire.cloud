@@ -774,12 +774,22 @@ export default function inventoryItems() {
          * on a button that closes it): the answer would find the form gone, and what was chosen for the item lost. The code
          * closes the dialog itself when it is done ({@link closeDialog}).
          *
+         * It also keeps it open while the camera scans a barcode field: what the person closes then is the scan, and the
+         * dialog goes on showing its form.
+         *
          * @param {Event} event The `hide.bs.modal` event, fired before the dialog closes.
          * @returns {void}
          */
         guardClosing(event) {
-            if (this.busy && !this.closingDialog) {
+            if (this.closingDialog) {
+                return;
+            }
+
+            if (this.busy) {
                 event.preventDefault();
+            } else if (this.scanning) {
+                event.preventDefault();
+                this.cancelFieldScan();
             }
         },
 

@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import barcodeScanner, { SCAN_INTERVAL_MS } from '../../../resources/js/components/barcode-scanner.js';
 import { loadDetector } from '../../../resources/js/scanner/decoder.js';
+import { prepareImage } from '../../../resources/js/scanner/photo.js';
 import { deferred } from '../support/inventory.js';
 import { forgetDialogs } from '../support/modal.js';
 
 vi.mock('../../../resources/js/scanner/decoder.js', () => ({ loadDetector: vi.fn() }));
+// jsdom loads no image: the photo goes to the reader as it is, unless a test says otherwise (see photo.test.js for the shrinking).
+vi.mock('../../../resources/js/scanner/photo.js', () => ({ prepareImage: vi.fn(async (file) => file) }));
 vi.mock('../../../resources/js/lib/modal.js', async () => import('../support/modal.js'));
 
 const ORIGINAL_SECURE = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
@@ -18,9 +21,30 @@ const ORIGINAL_DEVICES = Object.getOwnPropertyDescriptor(navigator, 'mediaDevice
 /** A code the reader found. */
 const EAN = { rawValue: '3017620422003', format: 'ean_13' };
 
-/** The camera: a stream with one track, whose `stop` is watched. */
+/** A track of the camera: its `stop` is watched, and a test can fire its `ended` event (`track.end()`). */
+function fakeTrack() {
+    const listeners = new Set();
+
+    return {
+        stop: vi.fn(),
+        addEventListener: vi.fn((type, listener) => {
+            if (type === 'ended') {
+                listeners.add(listener);
+            }
+        }),
+        removeEventListener: vi.fn((type, listener) => {
+            if (type === 'ended') {
+                listeners.delete(listener);
+            }
+        }),
+        listeners,
+        end: () => [...listeners].forEach((listener) => listener(new Event('ended'))),
+    };
+}
+
+/** The camera: a stream with one track. */
 function cameraStream() {
-    const track = { stop: vi.fn() };
+    const track = fakeTrack();
 
     return { track, getTracks: () => [track] };
 }
@@ -136,7 +160,7 @@ describe('the scanner panel', () => {
         document.body.innerHTML = '';
         loadDetector.mockReset();
         forgetDialogs();
-        devices = { getUserMedia: vi.fn() };
+        devices = { getUserMedia: vi.fn(async () => cameraStream()) };
         setDevices(devices);
         setSecure(true);
         listen();
@@ -359,7 +383,8 @@ describe('the scanner panel', () => {
             component.start(startEvent());
             await settle(12 * SCAN_INTERVAL_MS);
 
-            expect(component.message).toBe('scanner.error.reader');
+            // Frames that cannot be read one after the other are a camera that gives nothing, not a reader that did not load.
+            expect(component.message).toBe('scanner.error.camera');
             expect(component.open).toBe(true);
             expect(component.streaming).toBe(false);
             expect(stream.track.stop).toHaveBeenCalledTimes(1);
@@ -734,8 +759,8 @@ describe('the scanner panel', () => {
 
         it('lets go of every track of a camera that has several', async () => {
             const { component } = mountPanel();
-            const first = { stop: vi.fn() };
-            const second = { stop: vi.fn() };
+            const first = fakeTrack();
+            const second = fakeTrack();
 
             reader([]);
             devices.getUserMedia.mockResolvedValue({ getTracks: () => [first, second] });
@@ -816,6 +841,425 @@ describe('the scanner panel', () => {
 
             expect(stream.track.stop).toHaveBeenCalledTimes(1);
             expect(next.track.stop).not.toHaveBeenCalled();
+        });
+    });
+    describe('when the camera stops working', () => {
+        /** A panel whose camera is on, looking at a reader that finds nothing. */
+        async function scanning() {
+            const panel = mountPanel();
+            const stream = cameraStream();
+            const detector = reader([]);
+
+            devices.getUserMedia.mockResolvedValue(stream);
+            panel.component.start(startEvent());
+            await settle(SCAN_INTERVAL_MS);
+
+            return { ...panel, stream, detector };
+        }
+
+        it('says the camera does not work, and lets it go, when its track ends (unplugged, taken by another application)', async () => {
+            const { component, stream } = await scanning();
+
+            stream.track.end();
+
+            expect(component.message).toBe('scanner.error.camera');
+            expect(component.streaming).toBe(false);
+            expect(component.open).toBe(true);
+            expect(stream.track.stop).toHaveBeenCalledTimes(1);
+        });
+
+        it('also hears the track end while the reader is still loading', async () => {
+            const { component } = mountPanel();
+            const stream = cameraStream();
+
+            loadDetector.mockReturnValue(new Promise(() => {}));
+            devices.getUserMedia.mockResolvedValue(stream);
+            component.start(startEvent());
+            await settle();
+            stream.track.end();
+
+            expect(component.message).toBe('scanner.error.camera');
+            expect(component.loading).toBe(false);
+        });
+
+        it('stops listening to the track when the camera is let go: a track that ends later is no business of the panel', async () => {
+            const { component, stream } = await scanning();
+
+            component.cancel();
+
+            expect(stream.track.removeEventListener).toHaveBeenCalledWith('ended', expect.any(Function));
+            expect(stream.track.listeners.size).toBe(0);
+
+            stream.track.end();
+
+            expect(component.message).toBe('');
+        });
+
+        it('says the camera does not work when the picture cannot be played, and lets the camera go', async () => {
+            const { component, video } = mountPanel();
+            const stream = cameraStream();
+
+            video.play = vi.fn(() => Promise.reject(new DOMException('not allowed', 'NotAllowedError')));
+            reader([]);
+            devices.getUserMedia.mockResolvedValue(stream);
+            component.start(startEvent());
+            await settle();
+
+            expect(component.message).toBe('scanner.error.camera');
+            expect(component.streaming).toBe(false);
+            expect(stream.track.stop).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not blame the camera for a play() that a newer start interrupted', async () => {
+            const { component, video } = mountPanel();
+            const interrupted = deferred();
+
+            video.play = vi.fn(() => interrupted.promise);
+            reader([]);
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            component.start(startEvent());
+            await settle();
+            component.stop();
+            interrupted.reject(new DOMException('interrupted by a new load request', 'AbortError'));
+            await settle();
+
+            expect(component.message).toBe('');
+        });
+    });
+
+    describe('when the page is hidden', () => {
+        /** A panel whose camera is on. */
+        async function scanning() {
+            const panel = mountPanel();
+            const stream = cameraStream();
+            const detector = reader([]);
+
+            devices.getUserMedia.mockResolvedValue(stream);
+            panel.component.start(startEvent());
+            await settle(SCAN_INTERVAL_MS);
+
+            return { ...panel, stream, detector };
+        }
+
+        /** The page is hidden (or shown again), as the browser says it. */
+        function setHidden(hidden) {
+            Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+            document.dispatchEvent(new Event('visibilitychange'));
+        }
+
+        afterEach(() => {
+            delete document.hidden;
+        });
+
+        it('lets the camera go and says so, instead of staying on a black picture', async () => {
+            const { component, stream, video, detector } = await scanning();
+
+            setHidden(true);
+
+            expect(stream.track.stop).toHaveBeenCalledTimes(1);
+            expect(video.srcObject).toBeNull();
+            expect(component.streaming).toBe(false);
+            expect(component.paused).toBe(true);
+            expect(component.message).toBe('scanner.paused');
+            expect(component.status).toBe('scanner.paused');
+            // The panel stays open, with its buttons.
+            expect(component.open).toBe(true);
+
+            const passes = detector.detect.mock.calls.length;
+
+            await settle(10 * SCAN_INTERVAL_MS);
+            expect(detector.detect).toHaveBeenCalledTimes(passes);
+        });
+
+        it('leaves it that way when the page comes back: the person restarts the camera', async () => {
+            const { component, stream } = await scanning();
+
+            setHidden(true);
+            setHidden(false);
+
+            expect(component.paused).toBe(true);
+            expect(component.message).toBe('scanner.paused');
+            expect(devices.getUserMedia).toHaveBeenCalledTimes(1);
+            expect(stream.track.stop).toHaveBeenCalledTimes(1);
+        });
+
+        it('starts the camera again, for the same field, when the person asks', async () => {
+            const panel = mountPanel();
+            const first = cameraStream();
+            const second = cameraStream();
+
+            reader([]);
+            devices.getUserMedia.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+            panel.component.start(startEvent('field', 'ean8'));
+            await settle(SCAN_INTERVAL_MS);
+            setHidden(true);
+            setHidden(false);
+            loadDetector.mockClear();
+
+            panel.component.restart();
+            await settle(SCAN_INTERVAL_MS);
+
+            expect(devices.getUserMedia).toHaveBeenCalledTimes(2);
+            expect(loadDetector).toHaveBeenCalledWith(['ean_8']);
+            expect(panel.video.srcObject).toBe(second);
+            expect(panel.component.streaming).toBe(true);
+            expect(panel.component.paused).toBe(false);
+            expect(panel.component.message).toBe('');
+            expect(first.track.stop).toHaveBeenCalledTimes(1);
+            expect(second.track.stop).not.toHaveBeenCalled();
+        });
+
+        it('lets go of a camera that was still being asked for', async () => {
+            const { component } = mountPanel();
+            const answer = deferred();
+            const late = cameraStream();
+
+            reader([]);
+            devices.getUserMedia.mockReturnValue(answer.promise);
+            component.start(startEvent());
+            await settle();
+            setHidden(true);
+
+            expect(component.paused).toBe(true);
+            expect(component.loading).toBe(false);
+
+            answer.resolve(late);
+            await settle();
+
+            expect(late.track.stop).toHaveBeenCalledTimes(1);
+            expect(component.streaming).toBe(false);
+        });
+
+        it('does not touch a photo that is being read: the camera is not on', async () => {
+            const { component, photo } = mountPanel();
+            const slow = deferred();
+
+            loadDetector.mockReturnValue(slow.promise);
+            Object.defineProperty(photo, 'files', {
+                configurable: true,
+                value: [new File(['x'], 'code.jpg', { type: 'image/jpeg' })],
+            });
+            const reading = component.onPhoto({ target: photo });
+
+            setHidden(true);
+
+            expect(component.paused).toBe(false);
+            expect(component.loading).toBe(true);
+
+            slow.resolve({ detect: vi.fn(async () => [EAN]) });
+            await reading;
+
+            expect(heard).toEqual([['barcode-scanned', { slot: 'field', value: EAN.rawValue }]]);
+        });
+
+        it('does nothing when the panel is closed, when the page is shown, or when the camera is not on', async () => {
+            const { component } = mountPanel();
+
+            setHidden(true);
+            expect(component.paused).toBe(false);
+            expect(component.message).toBe('');
+
+            setHidden(false);
+            expect(component.paused).toBe(false);
+
+            setSecure(false);
+            component.start(startEvent());
+            await settle();
+            setHidden(true);
+
+            // The reason it could not scan stays the one the person was told.
+            expect(component.message).toBe('scanner.error.insecure');
+            expect(component.paused).toBe(false);
+        });
+
+        it('forgets the pause when the panel closes', async () => {
+            const { component } = await scanning();
+
+            setHidden(true);
+            component.cancel();
+
+            expect(component.paused).toBe(false);
+            expect(component.message).toBe('');
+        });
+
+        it('stops listening to the page when the panel is taken apart', async () => {
+            const { component } = await scanning();
+
+            component.destroy();
+            setHidden(true);
+
+            expect(component.paused).toBe(false);
+            expect(component.message).toBe('');
+        });
+    });
+
+    describe('when it is taken apart', () => {
+        it('stops listening to the closing of the dialog, which stays on the page', async () => {
+            const { component, dialog } = mountPanel();
+
+            reader([]);
+            component.destroy();
+            await component.start(startEvent());
+            dialog.dispatchEvent(new Event('hidden.bs.modal'));
+
+            // Had the panel still heard it, it would have closed.
+            expect(component.open).toBe(true);
+        });
+
+        it('leaves no reader behind when a start that was replaced finishes loading it', async () => {
+            const { component } = mountPanel();
+            const slow = deferred();
+            const detector = { detect: vi.fn(async () => []) };
+
+            loadDetector.mockReturnValue(slow.promise);
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            component.start(startEvent('field', 'ean8'));
+            await settle();
+            component.stop();
+            slow.resolve(detector);
+            await settle();
+
+            // A pass that still ran would look at the camera of nobody with the symbologies of the field that was left.
+            await component.scan(component.ticket);
+
+            expect(detector.detect).not.toHaveBeenCalled();
+            expect(component.streaming).toBe(false);
+        });
+    });
+
+    describe("when a code is not the field's", () => {
+        const BOTTLE = { rawValue: '3017620422003', format: 'ean_13' };
+        const BOOK = { rawValue: '9780306406157', format: 'ean_13' };
+
+        it('keeps looking with the camera, says so, and takes the next code that fits', async () => {
+            const { component, video } = mountPanel();
+            const detector = reader([BOTTLE], [BOTTLE], [BOOK]);
+
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            component.start(startEvent('field', 'isbn13'));
+            await settle(SCAN_INTERVAL_MS);
+
+            expect(heard).toEqual([]);
+            expect(component.streaming).toBe(true);
+            expect(component.note).toBe('scanner.error.mismatch');
+            expect(component.status).toBe('scanner.error.mismatch');
+            expect(component.statusClass).toContain('alert-warning');
+            expect(video.srcObject).not.toBeNull();
+
+            await settle(2 * SCAN_INTERVAL_MS);
+
+            expect(detector.detect).toHaveBeenCalledTimes(3);
+            expect(heard).toEqual([['barcode-scanned', { slot: 'field', value: BOOK.rawValue }]]);
+        });
+
+        it('takes a code that fits even when the same picture holds one that does not', async () => {
+            const { component } = mountPanel();
+
+            reader([BOTTLE, BOOK]);
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            component.start(startEvent('field', 'isbn13'));
+            await settle(SCAN_INTERVAL_MS);
+
+            expect(heard).toEqual([['barcode-scanned', { slot: 'field', value: BOOK.rawValue }]]);
+        });
+
+        it('forgets the note when it starts again', async () => {
+            const { component } = mountPanel();
+
+            reader([BOTTLE]);
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            component.start(startEvent('field', 'isbn13'));
+            await settle(SCAN_INTERVAL_MS);
+            expect(component.note).toBe('scanner.error.mismatch');
+
+            component.start(startEvent('field', 'isbn13'));
+
+            expect(component.note).toBe('');
+        });
+
+        it('says so about a photo, and stays open for another', async () => {
+            const { component, photo } = mountPanel();
+
+            reader([BOTTLE]);
+            Object.defineProperty(photo, 'files', {
+                configurable: true,
+                value: [new File(['x'], 'code.jpg', { type: 'image/jpeg' })],
+            });
+            component.format = 'isbn10';
+            await component.onPhoto({ target: photo });
+
+            expect(heard).toEqual([]);
+            expect(component.message).toBe('scanner.error.mismatch');
+            expect(component.open).toBe(false);
+        });
+
+        it('takes the code of a photo that fits', async () => {
+            const { component, photo } = mountPanel();
+
+            reader([BOOK]);
+            Object.defineProperty(photo, 'files', {
+                configurable: true,
+                value: [new File(['x'], 'code.jpg', { type: 'image/jpeg' })],
+            });
+            component.start(startEvent('field', 'isbn10'));
+            await settle();
+            await component.onPhoto({ target: photo });
+
+            expect(heard).toEqual([['barcode-scanned', { slot: 'field', value: '0306406152' }]]);
+        });
+
+        it('takes any code in a field that takes any, and in a search', async () => {
+            const { component } = mountPanel('search');
+
+            reader([{ rawValue: 'ABC-123', format: 'code_128' }]);
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            component.start(startEvent('search', null));
+            await settle(SCAN_INTERVAL_MS);
+
+            expect(heard).toEqual([['barcode-scanned', { slot: 'search', value: 'ABC-123' }]]);
+        });
+    });
+
+    describe('the photo handed to the reader', () => {
+        it('is the one prepared from the file (shrunk when it is large), and not the file itself', async () => {
+            const { component, photo } = mountPanel();
+            const detector = reader([EAN]);
+            const file = new File(['x'], 'big.jpg', { type: 'image/jpeg' });
+            const shrunk = document.createElement('canvas');
+
+            prepareImage.mockResolvedValueOnce(shrunk);
+            Object.defineProperty(photo, 'files', { configurable: true, value: [file] });
+            await component.onPhoto({ target: photo });
+
+            expect(prepareImage).toHaveBeenCalledWith(file);
+            expect(detector.detect).toHaveBeenCalledWith(shrunk);
+        });
+    });
+
+    describe('what the panel says', () => {
+        it('is one text for the live region: the hint while the camera is on, the wait, the reason', async () => {
+            const { component } = mountPanel();
+
+            expect(component.status).toBe('');
+            // No box and no margin while there is nothing to say.
+            expect(component.statusClass).toBe('');
+
+            devices.getUserMedia.mockResolvedValue(cameraStream());
+            reader([]);
+            component.start(startEvent());
+
+            expect(component.status).toBe('scanner.starting');
+            expect(component.statusClass).not.toContain('alert');
+
+            await settle(SCAN_INTERVAL_MS);
+
+            expect(component.status).toBe('scanner.hint');
+            expect(component.statusClass).not.toContain('alert');
+
+            component.fail('Something went wrong.');
+
+            expect(component.status).toBe('Something went wrong.');
+            expect(component.statusClass).toContain('alert-warning');
         });
     });
 });

@@ -37,15 +37,16 @@ function pwaValues(DOMXPath $page, string $query, ?string $attribute = null): ar
     return $values;
 }
 
-it('is a page of the language of the instance, with a title, a sentence and a link to try again', function (): void {
+it('is a page of the language of the instance, with a title, a sentence that names the instance and a link to try again', function (): void {
     $response = $this->get('/offline', ['Accept-Language' => ''])->assertOk();
     $page = pwaDom($response);
 
     expect($response->headers->get('Content-Type'))->toStartWith('text/html')
         ->and(pwaValues($page, '/html', 'lang'))->toBe(['fr'])
-        ->and(pwaValues($page, '//title'))->toBe(['Vous êtes hors ligne · '.config('app.name')])
-        ->and(pwaValues($page, '//h1'))->toBe(['Vous êtes hors ligne'])
-        ->and(pwaValues($page, '//main/p'))->toBe(['Vérifiez votre connexion, puis réessayez.'])
+        ->and(pwaValues($page, '//title'))->toBe(['Connexion impossible · '.config('app.name')])
+        ->and(pwaValues($page, '//h1'))->toBe(['Connexion impossible'])
+        // A request that fails can be a network that is down or a server that is: the page does not say which.
+        ->and(pwaValues($page, '//main/p'))->toBe(['Impossible de joindre '.config('app.name').'. Vérifiez votre connexion, puis réessayez.'])
         ->and(pwaValues($page, '//main/a'))->toBe(['Réessayer'])
         // The empty address is the one of the page asked for: the link loads it again, without a script.
         ->and(pwaValues($page, '//main/a', 'href'))->toBe([''])
@@ -57,9 +58,28 @@ it('speaks English to a browser that asks for it', function (): void {
     $page = pwaDom($this->get('/offline', ['Accept-Language' => 'en'])->assertOk());
 
     expect(pwaValues($page, '/html', 'lang'))->toBe(['en'])
-        ->and(pwaValues($page, '//h1'))->toBe(['You are offline'])
-        ->and(pwaValues($page, '//main/p'))->toBe(['Check your connection, then try again.'])
+        ->and(pwaValues($page, '//h1'))->toBe(['Connection unavailable'])
+        ->and(pwaValues($page, '//main/p'))->toBe(['We could not reach '.config('app.name').'. Check your connection, then try again.'])
         ->and(pwaValues($page, '//main/a'))->toBe(['Try again']);
+});
+
+it('names the instance in its sentence, and escapes the name', function (): void {
+    config(['app.name' => 'Stock <b>&</b> Co']);
+
+    $response = $this->get('/offline', ['Accept-Language' => 'en'])->assertOk();
+    $page = pwaDom($response);
+
+    expect(pwaValues($page, '//main/p'))->toBe(['We could not reach Stock <b>&</b> Co. Check your connection, then try again.'])
+        ->and($page->query('//main/p/b')->length)->toBe(0)
+        ->and($response->getContent())->not->toContain('<b>&</b>');
+});
+
+it('does not say that the person is offline: the server may be the one that is down', function (): void {
+    foreach (['', 'en'] as $language) {
+        $content = mb_strtolower($this->get('/offline', ['Accept-Language' => $language])->assertOk()->getContent());
+
+        expect($content)->not->toContain('hors ligne')->not->toContain('offline')->not->toContain('you are off');
+    }
 });
 
 it('is not for search engines, by its tag and by its header', function (): void {

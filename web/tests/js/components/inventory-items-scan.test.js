@@ -204,6 +204,74 @@ describe('scanning barcodes on the page of an inventory', () => {
 
             expect(stopped).toEqual([]);
         });
+
+        it('ignores a code that comes while the form is being saved: the form is given back as it was', () => {
+            component.scanField(CODE);
+            component.busy = true;
+            component.onBarcodeScanned(scanned('field', '012345678905'));
+
+            expect(component.values.code).toBe('');
+            expect(component.scanning).toBe(false);
+        });
+
+        describe('when the person closes the dialog (Escape, a click outside, the cross) during the scan', () => {
+            /** What Bootstrap sends before it closes a dialog. */
+            const closing = () => new Event('hide.bs.modal', { cancelable: true });
+
+            it('keeps the dialog open and ends the scan: the form comes back with the cursor in the box of the field', () => {
+                const box = document.body.appendChild(document.createElement('input'));
+                const event = closing();
+
+                box.id = 'item-field-code';
+                component.scanField(CODE);
+                stopped.length = 0;
+                component.guardClosing(event);
+
+                expect(event.defaultPrevented).toBe(true);
+                expect(component.scanning).toBe(false);
+                expect(stopped).toEqual([{ slot: 'field' }]);
+                expect(document.activeElement).toBe(box);
+            });
+
+            it('closes the dialog the next time, when it no longer scans', () => {
+                const event = closing();
+
+                component.scanField(CODE);
+                component.guardClosing(closing());
+                component.guardClosing(event);
+
+                expect(event.defaultPrevented).toBe(false);
+            });
+
+            it('closes the dialog as it always did when it does not scan', () => {
+                const event = closing();
+
+                component.guardClosing(event);
+
+                expect(event.defaultPrevented).toBe(false);
+                expect(stopped).toEqual([]);
+            });
+
+            it('lets the code close the dialog (the item is saved) even during a scan', () => {
+                const event = closing();
+
+                component.scanField(CODE);
+                component.closingDialog = true;
+                component.guardClosing(event);
+
+                expect(event.defaultPrevented).toBe(false);
+                expect(component.scanning).toBe(true);
+            });
+
+            it('still keeps the dialog open while a request is on its way', () => {
+                const event = closing();
+
+                component.busy = true;
+                component.guardClosing(event);
+
+                expect(event.defaultPrevented).toBe(true);
+            });
+        });
     });
 
     describe('in the search box', () => {
@@ -241,6 +309,24 @@ describe('scanning barcodes on the page of an inventory', () => {
             expect(http.get.mock.lastCall[1].params).toMatchObject({ q: '012345678905' });
             // What was scanned is remembered as the reader gave it, for the item that may be added with it.
             expect(component.scannedCode).toBe('0012345678905');
+        });
+
+        it('searches for the 9 digits that the EAN-13 of a book shares with its ISBN-10: the item may hold either form', async () => {
+            component.onBarcodeScanned(scanned('search', '9780306406157'));
+            await settle();
+
+            expect(component.searchText).toBe('030640615');
+            expect(component.query.q).toBe('030640615');
+            expect(http.get.mock.lastCall[1].params).toMatchObject({ q: '030640615' });
+            // What was scanned is remembered as the reader gave it.
+            expect(component.scannedCode).toBe('9780306406157');
+        });
+
+        it('searches for the whole EAN-13 of a book of the 979 range, which has no ISBN-10', () => {
+            component.onBarcodeScanned(scanned('search', '9791032305690'));
+
+            expect(component.searchText).toBe('9791032305690');
+            expect(component.scannedCode).toBe('9791032305690');
         });
 
         it('searches for no more than the box takes', () => {
@@ -409,6 +495,18 @@ describe('scanning barcodes on the page of an inventory', () => {
             component.addScanned();
 
             expect(component.values.code).toBe('012345678905');
+        });
+
+        it('is made for the code of a book, which is searched as its 9 digits, and the item gets the whole code the reader gave', async () => {
+            await open({ itemsCount: 3, fields: [FIELDS[0], FREE] });
+            await scanUnknown('9780306406157');
+
+            expect(component.query.q).toBe('030640615');
+            expect(component.canAddScanned).toBe(true);
+
+            component.addScanned();
+
+            expect(component.values.tag).toBe('9780306406157');
         });
 
         it('puts a book in an ISBN-10 field as its ISBN-10', async () => {

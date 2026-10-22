@@ -43,7 +43,7 @@ describe('registering the service worker', () => {
         const nav = fakeNavigator();
         const win = fakeWindow();
 
-        registerServiceWorker(nav, win);
+        registerServiceWorker(nav, win, true);
 
         expect(nav.serviceWorker.register).not.toHaveBeenCalled();
 
@@ -58,7 +58,7 @@ describe('registering the service worker', () => {
         const nav = fakeNavigator();
         const win = fakeWindow({ readyState: 'complete' });
 
-        registerServiceWorker(nav, win);
+        registerServiceWorker(nav, win, true);
         await settle();
 
         expect(nav.serviceWorker.register).toHaveBeenCalledWith('/sw.js', { scope: '/' });
@@ -68,7 +68,7 @@ describe('registering the service worker', () => {
     it('does nothing in a browser without service workers', () => {
         const win = fakeWindow();
 
-        registerServiceWorker({}, win);
+        registerServiceWorker({}, win, true);
 
         expect(win.addEventListener).not.toHaveBeenCalled();
     });
@@ -77,7 +77,7 @@ describe('registering the service worker', () => {
         const nav = fakeNavigator();
         const win = fakeWindow({ secure: false });
 
-        registerServiceWorker(nav, win);
+        registerServiceWorker(nav, win, true);
 
         expect(win.addEventListener).not.toHaveBeenCalled();
         expect(nav.serviceWorker.register).not.toHaveBeenCalled();
@@ -91,7 +91,7 @@ describe('registering the service worker', () => {
         );
         const win = fakeWindow();
 
-        registerServiceWorker(nav, win);
+        registerServiceWorker(nav, win, true);
         win.fire('load');
         await settle();
 
@@ -108,15 +108,38 @@ describe('registering the service worker', () => {
         );
         const win = fakeWindow();
 
-        registerServiceWorker(nav, win);
+        registerServiceWorker(nav, win, true);
         win.fire('load');
         await settle();
 
         expect(nav.serviceWorker.register).toHaveBeenCalledTimes(1);
     });
 
+    it('does nothing in a development build: the worker is for the production one', async () => {
+        const nav = fakeNavigator();
+        const win = fakeWindow({ readyState: 'complete' });
+
+        registerServiceWorker(nav, win, false);
+        await settle();
+
+        expect(win.addEventListener).not.toHaveBeenCalled();
+        expect(nav.serviceWorker.register).not.toHaveBeenCalled();
+    });
+
+    it('registers only in a production build by default (Vitest is not one)', async () => {
+        const nav = fakeNavigator();
+        const win = fakeWindow({ readyState: 'complete' });
+
+        registerServiceWorker(nav, win);
+        await settle();
+
+        expect(import.meta.env.PROD).toBe(false);
+        expect(nav.serviceWorker.register).not.toHaveBeenCalled();
+    });
+
     it('works with the navigator and the window of the page by default', () => {
         // jsdom has no service workers: nothing to register, and nothing that throws.
         expect(() => registerServiceWorker()).not.toThrow();
+        expect(() => registerServiceWorker(navigator, window, true)).not.toThrow();
     });
 });

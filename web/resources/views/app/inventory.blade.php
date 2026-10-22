@@ -497,25 +497,29 @@
                             </div>
                         </template>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-danger me-auto" x-show="canDeleteItem" @click="askDelete" :disabled="busy">{{ __('Delete') }}</button>
-                        <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal" :disabled="busy">{{ __('Cancel') }}</button>
-                        <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
-                        <button type="submit" class="btn btn-primary" x-show="isForm && !asking" :disabled="busy || uploading">{{ __('Save') }}</button>
-                        {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor
-                             is put on the confirming button the moment the question is asked. --}}
-                        <template x-if="confirming">
-                            <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
-                        </template>
-                        <template x-if="confirming">
-                            <button type="button" class="btn btn-danger" x-ref="confirmDelete" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
-                        </template>
-                        <template x-if="isRemoving">
-                            <button type="button" class="btn" @click="cancelRemove" :disabled="busy">{{ __('Cancel') }}</button>
-                        </template>
-                        <template x-if="isRemoving">
-                            <button type="button" class="btn btn-danger" x-ref="confirmRemove" @click="confirmRemove" :disabled="busy">{{ __('Delete the file') }}</button>
-                        </template>
+                    {{-- The buttons of the dialog give way to the scanner while it scans a barcode field: the panel has its own Cancel,
+                         and the form they would save is not on screen. The wrapper carries the attribute, not the footer. --}}
+                    <div :hidden="scanning">
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-outline-danger me-auto" x-show="canDeleteItem" @click="askDelete" :disabled="busy">{{ __('Delete') }}</button>
+                            <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal" :disabled="busy">{{ __('Cancel') }}</button>
+                            <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
+                            <button type="submit" class="btn btn-primary" x-show="isForm && !asking" :disabled="busy || uploading">{{ __('Save') }}</button>
+                            {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor
+                                 is put on the confirming button the moment the question is asked. --}}
+                            <template x-if="confirming">
+                                <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
+                            </template>
+                            <template x-if="confirming">
+                                <button type="button" class="btn btn-danger" x-ref="confirmDelete" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
+                            </template>
+                            <template x-if="isRemoving">
+                                <button type="button" class="btn" @click="cancelRemove" :disabled="busy">{{ __('Cancel') }}</button>
+                            </template>
+                            <template x-if="isRemoving">
+                                <button type="button" class="btn btn-danger" x-ref="confirmRemove" @click="confirmRemove" :disabled="busy">{{ __('Delete the file') }}</button>
+                            </template>
+                        </div>
                     </div>
 
                     {{-- The file chooser of the browser, opened by the buttons that add a file (resources/js/item/files.js). --}}

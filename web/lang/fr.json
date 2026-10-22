@@ -19,6 +19,9 @@
     "Scan a barcode": "Scanner un code-barres",
     "Take a photo or choose an image": "Prendre une photo ou choisir une image",
     "Point the camera at the barcode.": "Dirigez la caméra vers le code-barres.",
+    "Restart the camera": "Relancer la caméra",
+    "This code does not match the field format.": "Ce code ne correspond pas au format du champ.",
+    "The camera was stopped while the page was in the background.": "La caméra a été arrêtée pendant que la page était en arrière-plan.",
     "Add an item with this code": "Ajouter un objet avec ce code",
     "Starting the camera…": "Démarrage de la caméra…",
     "Reading the photo…": "Lecture de la photo…",
@@ -1419,6 +1422,6 @@
     "Created by a former member": "Créé par un ancien membre",
     "Its author is no longer an owner of this workspace, but the link works until it expires or you revoke it.": "Son auteur n'est plus propriétaire de cet espace de travail, mais le lien fonctionne jusqu'à son expiration ou jusqu'à ce que vous le révoquiez.",
     "Free inventory tool for professionals and individuals.": "Outil d'inventaire gratuit pour les professionnels et les particuliers.",
-    "You are offline": "Vous êtes hors ligne",
-    "Check your connection, then try again.": "Vérifiez votre connexion, puis réessayez."
+    "Connection unavailable": "Connexion impossible",
+    "We could not reach :app. Check your connection, then try again.": "Impossible de joindre :app. Vérifiez votre connexion, puis réessayez."
 }

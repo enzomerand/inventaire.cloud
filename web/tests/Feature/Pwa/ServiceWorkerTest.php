@@ -71,6 +71,63 @@ it('has another version when the name of the instance changes, since the offline
     expect($second)->not->toBe($first)->and($second)->toMatch('/^[0-9a-f]{16}$/');
 });
 
+it('has another version when a translation file changes, since the offline page it keeps is written with those sentences', function (): void {
+    $directory = sys_get_temp_dir().'/inventaire-lang-'.bin2hex(random_bytes(4));
+    $original = app()->langPath();
+
+    mkdir($directory);
+    copy(lang_path('fr.json'), $directory.'/fr.json');
+    app()->useLangPath($directory);
+
+    try {
+        $script = app(ServiceWorkerScript::class);
+        $first = $script->version();
+
+        expect($script->version())->toBe($first);
+
+        // A sentence of the offline page is worded otherwise.
+        file_put_contents($directory.'/fr.json', str_replace('Connexion impossible', 'Pas de connexion', (string) file_get_contents($directory.'/fr.json')));
+        $second = $script->version();
+
+        // A language is added.
+        file_put_contents($directory.'/de.json', '{}');
+        $third = $script->version();
+
+        expect($second)->not->toBe($first)
+            ->and($third)->not->toBe($second)
+            ->and($third)->not->toBe($first)
+            ->and([$first, $second, $third])->each->toMatch('/^[0-9a-f]{16}$/');
+    } finally {
+        app()->useLangPath($original);
+
+        foreach (glob($directory.'/*') ?: [] as $file) {
+            unlink($file);
+        }
+
+        rmdir($directory);
+    }
+});
+
+it('takes the translation files from the lang directory, whatever their number, in a fixed order', function (): void {
+    $version = app(ServiceWorkerScript::class)->version();
+    $files = glob(lang_path('*.json')) ?: [];
+
+    expect($files)->not->toBe([])
+        ->and(array_map('basename', $files))->toContain('fr.json')
+        ->and((new ServiceWorkerScript)->version())->toBe($version);
+});
+
+it('has another version when a color of the offline page changes', function (): void {
+    $version = app(ServiceWorkerScript::class)->version();
+    $theme = (new ServiceWorkerScript(themeColor: '#123456'))->version();
+    $background = (new ServiceWorkerScript(backgroundColor: '#123456'))->version();
+
+    expect($theme)->not->toBe($version)
+        ->and($background)->not->toBe($version)
+        ->and($background)->not->toBe($theme)
+        ->and((new ServiceWorkerScript)->version())->toBe($version);
+});
+
 it('is the same in every language: the version does not depend on who asks', function (): void {
     $french = $this->get('/sw.js', ['Accept-Language' => '']);
     $english = $this->get('/sw.js', ['Accept-Language' => 'en']);

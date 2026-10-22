@@ -16,8 +16,8 @@ use RuntimeException;
  *
  * The version is what makes browsers replace the worker. A browser checks `/sw.js` each time the application is opened, and installs
  * a new worker as soon as one byte differs: the version is a hash of everything the worker's behaviour is made of (its source, the offline
- * page it keeps and the name of the instance, which that page shows), so a deployment that changes any of them changes the worker, and
- * the one that did not change any of them leaves the installed worker alone.
+ * page it keeps, and what that page shows: the name of the instance, the translations of its sentences and its colors), so a deployment
+ * that changes any of them changes the worker, and the one that did not change any of them leaves the installed worker alone.
  */
 final class ServiceWorkerScript
 {
@@ -37,6 +37,15 @@ final class ServiceWorkerScript
     private const OFFLINE_VIEW = 'views/pwa/offline.blade.php';
 
     /**
+     * The colors the offline page is drawn with are a parameter, so that a test can show that they are part of the version; the
+     * application always uses the ones of the manifest.
+     */
+    public function __construct(
+        private readonly string $themeColor = WebManifest::THEME_COLOR,
+        private readonly string $backgroundColor = WebManifest::BACKGROUND_COLOR,
+    ) {}
+
+    /**
      * The hash that names this state of the worker: the first 16 hexadecimal digits of the SHA-256 of what the worker is made of.
      */
     public function version(): string
@@ -44,6 +53,9 @@ final class ServiceWorkerScript
         return substr(hash('sha256', implode("\0", [
             $this->read(self::WORKER),
             $this->read(self::OFFLINE_VIEW),
+            $this->translations(),
+            $this->themeColor,
+            $this->backgroundColor,
             config()->string('app.name'),
         ])), 0, 16);
     }
@@ -59,6 +71,30 @@ final class ServiceWorkerScript
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
         return 'self.INVENTAIRE_SW = '.$configuration.";\n".$this->read(self::WORKER);
+    }
+
+    /**
+     * The translation files (`lang/*.json`, one per language) with their names, in a fixed order: the offline page is shown in the
+     * language of the request, with the sentences of these files, and the copy the worker keeps is the one of the version it was made in
+     * (a new language is part of the version too, as a file that is added).
+     *
+     * @throws RuntimeException When a file cannot be read.
+     */
+    private function translations(): string
+    {
+        $files = glob(lang_path('*.json')) ?: [];
+
+        sort($files);
+
+        return implode("\0", array_map(function (string $file): string {
+            $content = @file_get_contents($file);
+
+            if ($content === false) {
+                throw new RuntimeException('Cannot read '.basename($file).'.');
+            }
+
+            return basename($file)."\0".$content;
+        }, $files));
     }
 
     /**

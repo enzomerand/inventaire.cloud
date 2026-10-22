@@ -10,7 +10,12 @@
  *
  * A code read for a field goes through `set` like a typed one, and the server stays the only judge of it. A code read for
  * the search is looked for as it is (the searchable text of an item holds the codes of its barcode fields), except that a
- * UPC-A code is looked for as its 12 digits (see `searchTermFor`). `scannedCode`, kept in the criteria, is the code as read.
+ * UPC-A code is looked for as its 12 digits and the EAN-13 of a book as the 9 digits it shares with its ISBN-10 (see
+ * `searchTermFor`). `scannedCode`, kept in the criteria, is the code as read.
+ *
+ * While the panel of the item dialog scans, it takes the place of the form and of the buttons of the dialog (Delete, Cancel,
+ * Save), and Escape, a click outside and the cross of the dialog end the scan and not the dialog (see `cancelFieldScan`): one
+ * more press closes the dialog, as it always did.
  */
 import { isScannable, scanFormatOf } from '../fields/index.js';
 import { hideModal, showModal } from '../lib/modal.js';
@@ -88,6 +93,17 @@ export default function inventoryScan() {
         },
 
         /**
+         * The person asked to close the dialog of the item (Escape, a click outside, the cross) while it scans: the scan ends and
+         * the form comes back, with the cursor in the box of the field, and the dialog stays.
+         *
+         * @returns {void}
+         */
+        cancelFieldScan() {
+            stopScan(FIELD_SLOT);
+            this.returnToField();
+        },
+
+        /**
          * Opens the dialog that scans a code for the search box.
          *
          * @returns {void}
@@ -130,7 +146,8 @@ export default function inventoryScan() {
         },
 
         /**
-         * Puts a scanned code in the field being filled in, and the cursor in its box.
+         * Puts a scanned code in the field being filled in, and the cursor in its box. A code that comes while the form is being
+         * saved is ignored: the request is on its way with the values the person validated, and the form must not change under it.
          *
          * @param {string} value
          * @returns {void}
@@ -138,7 +155,7 @@ export default function inventoryScan() {
         fillScanned(value) {
             const field = this.fields.find((one) => one.id === this.scanningField);
 
-            if (field !== undefined) {
+            if (field !== undefined && !this.busy) {
                 this.set(field, value);
             }
 

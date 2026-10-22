@@ -13,16 +13,21 @@
  * secure connection, and it is decoded the same way. The reader itself is loaded on the first scan (`../scanner/decoder.js`).
  *
  * The camera is let go whatever happens: when the page asks to stop, on a result, on Cancel or Escape, when the dialog that
- * holds the panel is closed, when the page is left or put in the cache, and when the panel is taken apart. An answer that
- * arrives after any of those (a permission granted late, a pass that was running) finds its ticket out of date and lets the
- * camera it was given go at once.
+ * holds the panel is closed, when the page is left or put in the cache, when the page is hidden (another tab, a locked phone: the
+ * panel then says so and offers to restart the camera, instead of showing a black picture), when the camera is taken away
+ * (unplugged, or used by another application), and when the panel is taken apart. An answer that arrives after any of those (a
+ * permission granted late, a pass that was running) finds its ticket out of date and lets the camera it was given go at once.
+ *
+ * What the panel tells the person (the aim, the wait, the reasons it cannot scan) goes through one `aria-live` region that is
+ * always on the page, so that a screen reader reads each new text.
  */
 import { t } from '../lib/i18n.js';
 import { onModalHidden } from '../lib/modal.js';
 import { CAMERA_CONSTRAINTS, cameraAllowed, cameraErrorKey, stopStream } from '../scanner/camera.js';
 import { loadDetector } from '../scanner/decoder.js';
 import { SCAN_CANCELLED, SCAN_DONE } from '../scanner/events.js';
-import { formatsFor, normalizeScan } from '../scanner/formats.js';
+import { fitsFormat, formatsFor, normalizeScan } from '../scanner/formats.js';
+import { prepareImage } from '../scanner/photo.js';
 
 /** The pause between two passes over the video, in milliseconds. */
 export const SCAN_INTERVAL_MS = 150;
@@ -38,13 +43,13 @@ const HAVE_CURRENT_DATA = 2;
  */
 
 /**
- * The first code of a list that holds something.
+ * The codes of a list that hold something.
  *
  * @param {DetectedBarcode[]} codes
- * @returns {DetectedBarcode | undefined}
+ * @returns {DetectedBarcode[]}
  */
-function firstCode(codes) {
-    return codes.find((code) => String(code.rawValue ?? '').trim() !== '');
+function readCodes(codes) {
+    return codes.filter((code) => String(code.rawValue ?? '').trim() !== '');
 }
 
 /**
@@ -61,6 +66,12 @@ export default function barcodeScanner() {
     let detector = null;
     /** @type {ReturnType<typeof setTimeout> | null} The timer of the pause between two passes, null when none is running. */
     let timer = null;
+    /** @type {Array<[MediaStreamTrack, () => void]>} The tracks of the camera that are listened to (`ended`), with their listener. */
+    let watched = [];
+    /** @type {(() => void) | null} Stops listening to the closing of the dialog that holds the panel. */
+    let forgetDialog = null;
+    /** @type {(() => void) | null} Stops listening to the page being hidden and shown. */
+    let forgetVisibility = null;
 
     return {
         /** Which panel of the page this is (`data-slot`). */
@@ -84,6 +95,15 @@ export default function barcodeScanner() {
         /** Why there is nothing to scan (or nothing was found), in words; empty when all is well. */
         message: '',
 
+        /** What the camera is told about the codes it sees while it keeps looking (a code that is not the field's); empty when nothing. */
+        note: '',
+
+        /** True while the camera is stopped because the page was hidden: the panel then offers to restart it. */
+        paused: false,
+
+        /** True while a photo is being read (the camera is not on, and the page being hidden is no reason to stop). */
+        reading: false,
+
         /** Ticket of the last start: whatever was started before it is out of date and lets go of what it holds. */
         ticket: 0,
 
@@ -96,8 +116,38 @@ export default function barcodeScanner() {
         },
 
         /**
+         * The text of the live region of the panel: why there is nothing to scan, what is being waited for, or what to aim at.
+         * Empty while the panel is not doing anything.
+         */
+        get status() {
+            if (this.message !== '') {
+                return this.message;
+            }
+
+            if (this.loading) {
+                return this.loadingText;
+            }
+
+            return this.streaming ? this.note || t('scanner.hint') : '';
+        },
+
+        /**
+         * The classes of the text of the live region: a warning for a reason or a note, a quiet hint for the rest, and none (no
+         * margin, no box) while there is nothing to say.
+         */
+        get statusClass() {
+            if (this.status === '') {
+                return '';
+            }
+
+            return this.message !== '' || this.note !== ''
+                ? 'alert alert-warning mt-2'
+                : 'text-secondary text-center small mt-2';
+        },
+
+        /**
          * Reads the name of the panel, and closes it whenever the dialog that holds it is closed, however it was (a
-         * button, Escape, a click outside): the camera must not outlive the dialog.
+         * button, Escape, a click outside): the camera must not outlive the dialog. It also watches the page being hidden.
          *
          * @returns {void}
          */
@@ -108,17 +158,54 @@ export default function barcodeScanner() {
             const dialog = this.$el.closest('.modal');
 
             if (dialog instanceof HTMLElement) {
-                onModalHidden(dialog, () => this.stop());
+                forgetDialog = onModalHidden(dialog, () => this.stop());
             }
+
+            const onVisibilityChange = () => this.pauseWhenHidden();
+
+            document.addEventListener('visibilitychange', onVisibilityChange);
+            forgetVisibility = () => document.removeEventListener('visibilitychange', onVisibilityChange);
         },
 
         /**
-         * Lets go of the camera when the panel is taken apart.
+         * Lets go of the camera and of the listeners when the panel is taken apart (the dialog it sits in stays, and so does the
+         * page): none of them may call a panel that is gone.
          *
          * @returns {void}
          */
         destroy() {
             this.halt();
+            forgetDialog?.();
+            forgetDialog = null;
+            forgetVisibility?.();
+            forgetVisibility = null;
+        },
+
+        /**
+         * The page was hidden (another tab, a locked screen, another application): a camera that keeps running in the
+         * background is drained battery and a light that stays on, and it comes back as a black picture. It is let go, and the
+         * panel says so and offers to start it again.
+         *
+         * @returns {void}
+         */
+        pauseWhenHidden() {
+            if (!document.hidden || !this.open || this.reading || !(this.streaming || this.loading)) {
+                return;
+            }
+
+            this.fail(t('scanner.paused'));
+            this.paused = true;
+        },
+
+        /**
+         * Starts the camera again, after the panel let it go because the page was hidden.
+         *
+         * @returns {Promise<void>}
+         */
+        restart() {
+            return this.start(
+                new CustomEvent('barcode-scan-start', { detail: { slot: this.slot, format: this.format } }),
+            );
         },
 
         /**
@@ -138,7 +225,7 @@ export default function barcodeScanner() {
             const ticket = this.ticket;
 
             this.format = event.detail.format ?? null;
-            this.message = '';
+            this.forgetStatus();
             this.open = true;
             this.$nextTick(() => this.$refs.cancel?.focus());
 
@@ -175,9 +262,12 @@ export default function barcodeScanner() {
             }
 
             stream = camera;
+            this.watch(camera, ticket);
+
+            let loaded;
 
             try {
-                detector = await reader;
+                loaded = await reader;
             } catch {
                 if (ticket === this.ticket) {
                     this.fail(t('scanner.error.reader'));
@@ -186,9 +276,12 @@ export default function barcodeScanner() {
                 return;
             }
 
+            // A start that is out of date leaves nothing behind: the reader it loaded (for the symbologies of its own field) is not kept.
             if (ticket !== this.ticket) {
                 return;
             }
+
+            detector = loaded;
 
             const video = this.$refs.video;
 
@@ -196,8 +289,34 @@ export default function barcodeScanner() {
             video.srcObject = camera;
             this.loading = false;
             this.streaming = true;
-            video.play()?.catch(() => {});
+            // A picture that cannot be played is a camera that does not work, as much as one that cannot be opened.
+            video.play()?.catch(() => {
+                if (ticket === this.ticket) {
+                    this.fail(t('scanner.error.camera'));
+                }
+            });
             timer = setTimeout(() => this.scan(ticket), SCAN_INTERVAL_MS);
+        },
+
+        /**
+         * Listens to the tracks of the camera ending (it was unplugged, taken by another application, or the permission was
+         * withdrawn): the panel then says the camera does not work, instead of staying on a frozen picture.
+         *
+         * @param {MediaStream} camera
+         * @param {number} ticket The start the camera belongs to.
+         * @returns {void}
+         */
+        watch(camera, ticket) {
+            const onEnded = () => {
+                if (ticket === this.ticket) {
+                    this.fail(t('scanner.error.camera'));
+                }
+            };
+
+            for (const track of camera.getTracks()) {
+                track.addEventListener('ended', onEnded);
+                watched.push([track, onEnded]);
+            }
         },
 
         /**
@@ -218,7 +337,7 @@ export default function barcodeScanner() {
 
             if (video.readyState >= HAVE_CURRENT_DATA && video.videoWidth > 0) {
                 try {
-                    const found = firstCode(await detector.detect(video));
+                    const codes = readCodes(await detector.detect(video));
 
                     if (ticket !== this.ticket) {
                         return;
@@ -226,10 +345,17 @@ export default function barcodeScanner() {
 
                     this.failures = 0;
 
+                    const found = codes.find((code) => fitsFormat(code.rawValue, this.format));
+
                     if (found !== undefined) {
                         this.deliver(found);
 
                         return;
+                    }
+
+                    // A code that is not the field's (the barcode of a bottle in front of an ISBN): the scan goes on, and says why.
+                    if (codes.length > 0) {
+                        this.note = t('scanner.error.mismatch');
                     }
                 } catch {
                     if (ticket !== this.ticket) {
@@ -238,8 +364,9 @@ export default function barcodeScanner() {
 
                     this.failures += 1;
 
+                    // Frames that cannot be read one after the other: what the person sees is a camera that gives nothing to read.
                     if (this.failures >= MAX_FAILURES) {
-                        this.fail(t('scanner.error.reader'));
+                        this.fail(t('scanner.error.camera'));
 
                         return;
                     }
@@ -279,7 +406,8 @@ export default function barcodeScanner() {
 
             const ticket = this.ticket;
 
-            this.message = '';
+            this.forgetStatus();
+            this.reading = true;
             this.loading = true;
             this.loadingText = t('scanner.reading');
 
@@ -295,10 +423,11 @@ export default function barcodeScanner() {
                 return;
             }
 
-            let found;
+            let codes;
 
             try {
-                found = firstCode(await reader.detect(file));
+                // A photo of several megapixels is shrunk first (see `prepareImage`): the reader gets a picture it can take.
+                codes = readCodes(await reader.detect(await prepareImage(file)));
             } catch {
                 if (ticket === this.ticket) {
                     this.fail(t('scanner.error.unreadable'));
@@ -311,10 +440,12 @@ export default function barcodeScanner() {
                 return;
             }
 
-            if (found === undefined) {
-                this.fail(t('scanner.error.not_found'));
-            } else {
+            const found = codes.find((code) => fitsFormat(code.rawValue, this.format));
+
+            if (found !== undefined) {
                 this.deliver(found);
+            } else {
+                this.fail(t(codes.length > 0 ? 'scanner.error.mismatch' : 'scanner.error.not_found'));
             }
         },
 
@@ -373,7 +504,18 @@ export default function barcodeScanner() {
 
             this.halt();
             this.open = false;
+            this.forgetStatus();
+        },
+
+        /**
+         * Forgets what the panel was telling: the reason it could not scan, the note on a code that was not the field's, the pause.
+         *
+         * @returns {void}
+         */
+        forgetStatus() {
             this.message = '';
+            this.note = '';
+            this.paused = false;
         },
 
         /**
@@ -390,6 +532,11 @@ export default function barcodeScanner() {
                 timer = null;
             }
 
+            for (const [track, listener] of watched) {
+                track.removeEventListener('ended', listener);
+            }
+
+            watched = [];
             stopStream(stream);
 
             const video = this.$refs?.video;
@@ -402,6 +549,7 @@ export default function barcodeScanner() {
             detector = null;
             this.streaming = false;
             this.loading = false;
+            this.reading = false;
             this.failures = 0;
         },
 
