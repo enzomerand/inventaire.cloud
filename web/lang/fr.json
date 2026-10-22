@@ -1403,5 +1403,8 @@
     "Link revoked.": "Lien révoqué.",
     "This inventory already has :count share links that work: revoke one to make another.": "Cet inventaire a déjà :count liens de partage actifs : révoquez-en un pour en créer un autre.",
     "Created by a former member": "Créé par un ancien membre",
-    "Its author is no longer an owner of this workspace, but the link works until it expires or you revoke it.": "Son auteur n'est plus propriétaire de cet espace de travail, mais le lien fonctionne jusqu'à son expiration ou jusqu'à ce que vous le révoquiez."
+    "Its author is no longer an owner of this workspace, but the link works until it expires or you revoke it.": "Son auteur n'est plus propriétaire de cet espace de travail, mais le lien fonctionne jusqu'à son expiration ou jusqu'à ce que vous le révoquiez.",
+    "Free inventory tool for professionals and individuals.": "Outil d'inventaire gratuit pour les professionnels et les particuliers.",
+    "You are offline": "Vous êtes hors ligne",
+    "Check your connection, then try again.": "Vérifiez votre connexion, puis réessayez."
 }

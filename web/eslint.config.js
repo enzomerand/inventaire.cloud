@@ -33,6 +33,22 @@ export default [
         },
     },
     {
+        // The service worker is a classic script (no import, no export), served as it is by /sw.js: it runs in a worker, where the page
+        // does not exist. `self.INVENTAIRE_SW` is written in front of it by the server.
+        files: ['resources/js/sw/**/*.js'],
+        languageOptions: {
+            ecmaVersion: 'latest',
+            sourceType: 'script',
+            globals: {
+                ...globals.serviceworker,
+                window: 'off',
+                document: 'off',
+                localStorage: 'off',
+                sessionStorage: 'off',
+            },
+        },
+    },
+    {
         // Tests describe themselves through their titles; helpers need no JSDoc.
         files: ['tests/js/**/*.js'],
         rules: { 'jsdoc/require-jsdoc': 'off' },

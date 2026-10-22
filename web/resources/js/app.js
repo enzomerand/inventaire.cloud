@@ -43,6 +43,7 @@ import workspaceMembers from './components/workspace-members.js';
 import workspaceSwitcher from './components/workspace-switcher.js';
 import workspaces from './components/workspaces.js';
 import { reloadWhenRestored } from './lib/restore.js';
+import { registerServiceWorker } from './lib/service-worker.js';
 import { createToastsStore } from './stores/toasts.js';
 import { createWorkspacesStore } from './stores/workspaces.js';
 
@@ -50,6 +51,9 @@ window.Alpine = Alpine;
 
 // A page restored from the back/forward cache comes back with the state it was left in: reload it instead.
 reloadWhenRestored();
+
+// The service worker only adds the offline page: it is registered once the page has loaded.
+registerServiceWorker();
 
 Alpine.store('toasts', createToastsStore());
 Alpine.store('workspaces', createWorkspacesStore());

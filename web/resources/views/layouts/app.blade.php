@@ -14,6 +14,14 @@
 
     <title>@hasSection('title')@yield('title') · @endif{{ config('app.name') }}</title>
 
+    {{-- The installable app: the manifest (see routes/web.php), the color of the browser around it, and the icons in the formats browsers look for. --}}
+    <link rel="manifest" href="{{ route('pwa.manifest', absolute: false) }}">
+    <meta name="theme-color" content="{{ App\Pwa\WebManifest::THEME_COLOR }}">
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-title" content="{{ config('app.name') }}">
+
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
