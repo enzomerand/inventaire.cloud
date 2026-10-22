@@ -58,6 +58,7 @@ import { t } from '../lib/i18n.js';
  * @property {Control} control
  * @property {string} [inputType] The `type` of the `<input>`; `text` when not given.
  * @property {string} [inputMode] The `inputmode` of the `<input>`.
+ * @property {boolean} [scannable] Whether the form offers to read the value from a barcode with the camera.
  * @property {(value: any, field: Field) => any} toInput
  * @property {(input: any, field: Field) => any} fromInput
  * @property {(value: any, field: Field, options?: DescribeOptions) => import('./cell.js').Cell} describe
@@ -401,8 +402,10 @@ export const FIELD_TYPES = {
                 : cell('text', { text: String(value) }),
     },
 
+    // The form offers to read the code with the camera (see `../scanner`).
     barcode: {
         control: 'input',
+        scannable: true,
         ...TEXT_INPUT,
         describe: (value) => cell('mono', { text: String(value) }),
     },

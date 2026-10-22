@@ -263,6 +263,10 @@ The **choices** of a `select` or `multiselect` have ids made by the server (8 ra
 
 Answers are in the `data` envelope; ids are ULIDs and dates ISO 8601. Item, field and inventory ULIDs that belong to another inventory (or workspace) are a `404`, never a `403`.
 
+**Scanning barcodes** (front only: no schema or API change). Every `barcode` field of the item form has a scan button, and so has the search box of the list. A scan reads the code with the camera, or from a photo (a file chooser that offers the camera app and the gallery of a phone: it is also the way when the camera is refused or missing; a photo of more than 2000 px on its longest side is shrunk before it is read). The camera stops when the page goes to the background (the panel then offers to restart it), and a read that cannot be the code of the field (the barcode of a bottle in an ISBN field) is ignored, with a message. The browser only gives the camera to a secure page, so camera access needs the instance to be served over HTTPS (`localhost` works for development), and a `Permissions-Policy` header you add must not forbid `camera`. The reader is `barcode-detector` used as a ponyfill (the same code on every browser, Safari and Firefox included) on top of ZXing compiled to WebAssembly; it is self-hosted, never fetched from a CDN: Vite emits the `.wasm` file (about 1 MB) under `/build/assets/`, and it is loaded with the reader's own chunk at the first scan only. The format of the field steers what is looked for (`resources/js/scanner/formats.js`): a UPC-A field gets its 12 digits, an ISBN-10 field the ISBN-10 rebuilt from the EAN-13 of the book. The code then goes through the same path as a typed one, and the server stays the only judge of it. A code read in the search box is searched at once (a UPC-A as its 12 digits and the EAN-13 of a book as the 9 digits it shares with its ISBN-10, so that either form an item holds is found), and when no item has it the empty state offers to add an item with that code.
+
+If you add a `Content-Security-Policy` in front of the application, the scan needs: `'wasm-unsafe-eval'` in `script-src` (the reader is WebAssembly, which a policy refuses to compile without it, and `'unsafe-eval'` is not needed), `'self'` in `connect-src` (the `.wasm` file is fetched from `/build/assets/`), and `blob:` in `img-src` (a photo goes through an object URL to be shrunk, and the reader uses one when the browser cannot decode a photo itself). The reader starts no worker and loads no script from a `blob:` URL; the picture of the camera is a stream, which `media-src` does not govern.
+
 ## The public API
 
 Everything the web application does with your data goes through the JSON API under `/api/v1`, and scripts, integrations and apps can use it too, with a **personal access token**.
@@ -299,6 +303,28 @@ A template is a ready-made inventory: the fields of an inventory (types, options
 - **API.** `GET /api/v1/templates` and `GET /api/v1/templates/{slug}` are public, in the language of the request and limited to `INVENTORIES_TEMPLATES_PER_MINUTE` (60) requests per minute (`429`), counted for each signed-in person on their own and for each network when nobody is signed in; the public pages below and `/sitemap.xml` share another one, `INVENTORIES_PUBLIC_PAGES_PER_MINUTE` (300); an unknown slug is a `404` with `"code": "template_not_found"`. `POST /api/v1/workspaces/{workspace}/inventories` takes an optional `template` (a slug; `422` on `template` when unknown): the inventory and **all** its fields are made in one transaction (retried as a whole on a deadlock, nothing is left behind when a field fails), with the field names and choices in the language of the request. A template with more fields than `max_fields` is a `409` `field_limit_reached`. The example rows are never inserted.
 - **Pages.** `/templates` (the gallery, by category) and `/templates/{slug}` are drawn by the server. The language comes from the address alone: no prefix is the language of the instance (`APP_LOCALE`), `/en/templates` is English, the prefixed address of the language of the instance redirects (301, to an address built from `APP_URL`, never from the `Host` header) to the one without prefix, and the language cookie is neither read nor written there. Such a page varies on `Cookie` only (not on `Accept-Language`, which decides nothing there), and every answer of the application is `Cache-Control: private, no-cache` unless it sets its own. A template page in a supported language the template is not written in is served with the text of the fallback language but is `noindex`, with the fallback page as its canonical address. "Use this template" leads to `/app/templates/{slug}`, which sends the person (after the login page if needed) to `/app/w/{workspace}?template={slug}`, a workspace where they may add inventories. After the login page, `/app` takes the person back to the page they were going to only if it is an `/app/...` page of the instance (`APP_URL`); any other remembered address is forgotten.
 - **Search engines.** `APP_INDEXABLE` (`false` by default; `1`, `true`, `on` and `yes` turn it on, anything else leaves it off) decides. Off: `/robots.txt` disallows everything, every page carries `noindex` and `/sitemap.xml` is a `404`. On: `/robots.txt` allows the public pages, keeps robots out of `/app/`, `/api/`, `/install` and `/login` and announces `/sitemap.xml` (the home page, the gallery and each template in every language, with `hreflang` alternates, and the API documentation at `/docs/api`); the public pages carry a title, a description, the canonical address, `hreflang` alternates, Open Graph tags and JSON-LD; the pages of the application itself stay `noindex`. Every answer that is not a public page asking to be indexed (the application, the API, the errors, the sitemap, and everything when indexing is off) also carries the header `X-Robots-Tag: noindex`, from the same decision as the `<meta name="robots">`. Every address in these tags and in the sitemap is built from `APP_URL`, never from the request, so set it to the public address. `robots.txt` is a route: no file of `public/` may stand in front of it.
+
+## Installing the app (PWA)
+
+The web app can be installed from a browser (Chrome, Edge, or "Add to Home Screen" on iOS): it then opens at `/app` in a window of its own, with the name of the instance (`APP_NAME`) and an icon. Browsers offer that only in a secure context: serve the instance over HTTPS (see "Reverse proxy and HTTPS").
+
+- **Files.** `GET /manifest.webmanifest` (name, language, colors, icons), `GET /sw.js` (the service worker, scope `/`) and `GET /offline` are routes: public, the same for everybody, with no session, no cookie and no CSRF token, and served before the installation (the wizard is an application page too). The icons are static files in `public/icons/` and `public/favicon.ico`. No file named `sw.js` may exist in `public/`: a web server would serve it before the application. The worker source is `resources/js/sw/service-worker.js`, a plain script that Vite does not build; `app.js` registers it once the page has loaded and only in a production build (`npm run build`): `composer dev` and the tests never register it (`resources/js/lib/service-worker.js`). The pages of share links do not register it either.
+- **What the worker does.** It only handles navigations (the loading of a page). The network always comes first, and only when it fails (not when the server answers an error status) the worker shows the `/offline` page instead of the browser's error page. It never stores a page, an API response or a file: those are private, on devices that may be shared, and the application has no offline reading or editing. The only thing in its cache is the offline page, in the language of the browser at the time of the installation. The scripts, styles, images and API calls are not intercepted, and neither are the links to files, whose answer is a download and not a page: the files of the API (`/api/...`) and the attachments and thumbnails of a share link (`/s/{token}/items/...`; the page `/s/{token}` itself is handled). Navigation preload is not used: the browser would ask the server for every navigation the worker does not answer (a download, a form) on top of the request of the worker. Because a failed request can also mean that the server is down, the offline page says that the instance could not be reached, not that the person is offline. If the browser evicted the offline page from the cache, the worker puts it back after the next page that loads, without delaying that page.
+- **Updates.** `/sw.js` starts with a line that gives the worker its configuration, including a version: a hash of the worker source, of the source of the offline page, of the translation files (`lang/*.json`), of the colors of the page and of `APP_NAME`. A browser fetches `/sw.js` whenever the application is opened and installs a new worker as soon as one byte differs, which takes over at once. Each version keeps its offline page in its own cache, `inventaire-offline-<version>`, and deletes the `inventaire-*` caches of the other versions when it activates (caches with another prefix are never touched). So a release that changes none of these things leaves the installed workers alone, and one that changes any of them needs nothing from the administrator.
+- **Removing the worker.** To get rid of it for good, remove the `registerServiceWorker()` call of `resources/js/app.js` and replace the content of `resources/js/sw/service-worker.js` with the script below, then deploy and keep it until your users' browsers have fetched it. Browsers do not agree on what a `/sw.js` that answers 404 does to a worker that is already installed, so do not count on deleting the file: to retire the worker, serve this self-unregistering script at `/sw.js` for a while. Do not make it reload the open pages: the pages would register it again.
+
+```js
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        (async () => {
+            const names = await caches.keys();
+            await Promise.all(names.filter((name) => name.startsWith('inventaire-')).map((name) => caches.delete(name)));
+            await self.registration.unregister();
+        })(),
+    );
+});
+```
 
 ## Administration
 
@@ -447,6 +473,8 @@ docker compose restart worker export-worker scheduler
 
 The container speaks plain HTTP on port 8080. Terminate TLS in a reverse proxy in front of it, set `APP_URL` to the public `https://` address, and set `TRUSTED_PROXIES` in `.env` to the proxy's address or CIDR range (see "Behind a reverse proxy"): otherwise every visitor looks like the proxy and the setup token throttle counts them together. Opening the container directly over plain `http` (for instance `http://localhost:8080`) with an `https://` `APP_URL` loses the session: see `SESSION_SECURE_COOKIE` under "Behind a reverse proxy". Keep the proxy from overriding the `Referrer-Policy: same-origin` header the application sends (see "Behind a reverse proxy").
 
+HTTPS is also what makes the application installable and the camera usable: browsers only allow service workers (see "Installing the app (PWA)") and `getUserMedia` (the barcode scan) in a secure context, which means HTTPS, or `localhost` in development. Over plain HTTP on any other address the application works, but it cannot be installed, and scanning falls back to taking a photo.
+
 ### Day-to-day commands
 
 ```bash
@@ -518,6 +546,7 @@ app/
   Models/           User, LoginCode, AccountDeletionCode, Workspace, WorkspaceMember, Inventory, InventoryField, Item (Concerns/: HasUlidRouteKey; Casts/: JsonObject)
   Policies/         WorkspacePolicy and InventoryPolicy: who may do what with a workspace, an inventory, its fields and its items
   Providers/        InstallerServiceProvider: pre-install runtime and application key; AppServiceProvider: the rate limiters (sign-in, account, workspace creation) and the "admin" gate
+  Pwa/              WebManifest (/manifest.webmanifest) and ServiceWorkerScript (/sw.js: the version, and the worker with its configuration in front)
   Services/         LocaleResolver: which language a request is answered in; OneTimeCode: 6-digit codes and their hash
   Settings/         InstanceSettings: the settings of the instance, kept in the settings table
   Support/          DisplayTime: the timezone of the instance, for the dates the server writes for people (everything is stored in UTC); PublicUrls: the absolute addresses of the public pages (from APP_URL); Seo/: what the head of a public page says to search engines
@@ -529,7 +558,8 @@ resources/
   css/app.css       Tabler, the self-hosted Inter font and project tokens
   js/
     app.js          Entry point: Tabler, Alpine, stores, components
-    lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js
+    lib/            http.js (the one HTTP helper), i18n.js, notify.js, page.js, service-worker.js (registration)
+    sw/             service-worker.js: the service worker, a classic script served as it is by /sw.js
     stores/         Alpine stores (toasts, workspaces)
     components/     Alpine components (toasts, locale switcher, install wizard, sign-in page, account menu, workspace switcher, workspaces page, the cards of the account page, the administration's users and settings pages)
   views/
@@ -538,6 +568,7 @@ resources/
     auth/, app/     The sign-in page and the signed-in user's pages (space, workspaces, account, and app/admin/ for administrators)
   openapi/          v1.yaml: the OpenAPI 3.1 description of the public API, written by hand (see "The public API")
 inventory-templates/ The template files of the catalogue, one JSON file each
+public/icons/       The icons of the installable app (SVG, PNG, maskable, Apple touch icon); public/favicon.ico is the 32 px one
 routes/web.php      Web routes
 routes/api.php      JSON API, versioned in the path (/api/v1)
 tests/

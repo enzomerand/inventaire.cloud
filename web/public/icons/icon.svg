@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>inventaire.cloud</title>
+  <rect width="512" height="512" rx="112" fill="#066fd1"/>
+  <g fill="#fff">
+    <rect x="112" y="140" width="18" height="232"/>
+    <rect x="139" y="140" width="9" height="232"/>
+    <rect x="166" y="140" width="27" height="232"/>
+    <rect x="202" y="140" width="9" height="232"/>
+    <rect x="229" y="140" width="18" height="232"/>
+    <rect x="256" y="140" width="27" height="232"/>
+    <rect x="292" y="140" width="9" height="232"/>
+    <rect x="319" y="140" width="18" height="232"/>
+    <rect x="346" y="140" width="9" height="232"/>
+    <rect x="373" y="140" width="27" height="232"/>
+  </g>
+</svg>

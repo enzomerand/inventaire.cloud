@@ -18,6 +18,12 @@
 
     <title>@yield('title') · {{ config('app.name') }}</title>
 
+    {{-- The icons and the color of the browser, as on every page: no manifest (the address of this page is a secret, and it is no page to install) and no worker. --}}
+    <meta name="theme-color" content="{{ App\Pwa\WebManifest::THEME_COLOR }}">
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+
     @vite(['resources/css/app.css'])
 </head>
 <body>

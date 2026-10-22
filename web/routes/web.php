@@ -6,8 +6,10 @@ use App\Http\Controllers\Install\FinalizeController;
 use App\Http\Controllers\Install\InstallController;
 use App\Http\Controllers\Install\InstallStepController;
 use App\Http\Controllers\Install\TokenController;
+use App\Http\Controllers\OfflineController;
 use App\Http\Controllers\RefreshCsrfTokenController;
 use App\Http\Controllers\RobotsController;
+use App\Http\Controllers\ServiceWorkerController;
 use App\Http\Controllers\Share\ShareFileController;
 use App\Http\Controllers\Share\SharePageController;
 use App\Http\Controllers\SitemapController;
@@ -26,6 +28,7 @@ use App\Http\Controllers\Web\TemplateUseController;
 use App\Http\Controllers\Web\WorkspaceMembersPageController;
 use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Controllers\Webhooks\DocumensoWebhookController;
+use App\Http\Controllers\WebManifestController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
@@ -69,6 +72,16 @@ Route::get('/docs/api', ApiDocsController::class)->middleware('throttle:public-p
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
     Route::get('/robots.txt', RobotsController::class)->name('robots');
     Route::get('/sitemap.xml', SitemapController::class)->middleware('throttle:public-pages')->name('sitemap');
+});
+
+// What makes the application installable: the manifest a browser reads to offer the installation, the service worker, and the page that
+// worker shows when the network is down. All three are public and the same for everybody, and a browser fetches them on its own (the
+// worker's updates and its copy of the offline page do not come from a page): nothing here starts a session, sets a cookie or checks a CSRF
+// token. They are served before the installation too (RedirectIfNotInstalled), since the wizard is a page of the application as well.
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
+    Route::get('/manifest.webmanifest', WebManifestController::class)->name('pwa.manifest');
+    Route::get('/sw.js', ServiceWorkerController::class)->name('pwa.worker');
+    Route::get('/offline', OfflineController::class)->name('pwa.offline');
 });
 
 // What Documenso (the e-signature service) calls when something happens to an envelope: a machine, with no session and no cookie, that

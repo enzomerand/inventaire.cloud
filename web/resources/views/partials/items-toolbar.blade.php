@@ -10,6 +10,8 @@
     direction are the way to sort on a phone, where the headers of the table are out of reach; the table shows them below
     the "sm" breakpoint only, the gallery always.
 
+    The barcode button next to the search box opens the dialog that scans a code and searches for it (resources/js/scanner/inventory-scan.js).
+
     Do not put a display utility (d-flex...) on an element that carries :hidden: the utility wins and it never hides.
 
     A chip wraps (a long name must not push the page sideways on a phone), and its close button never shrinks. Removing a
@@ -34,6 +36,9 @@
                 >
                 <button type="button" class="btn btn-icon" :hidden="!hasSearchText" aria-label="{{ __('Clear the search') }}" title="{{ __('Clear the search') }}" @click="clearSearch">
                     <x-tabler-x aria-hidden="true" />
+                </button>
+                <button type="button" class="btn btn-icon" aria-label="{{ __('Scan a barcode') }}" title="{{ __('Scan a barcode') }}" @click="scanSearch">
+                    <x-tabler-barcode aria-hidden="true" />
                 </button>
             </div>
         </div>

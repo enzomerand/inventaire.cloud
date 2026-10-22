@@ -35,6 +35,10 @@
  * (for the people who may edit) opens a third, `../import/dialog.js`: a spreadsheet goes in, its columns are matched with
  * the fields (or with fields it creates), and the grid is read again when the items have come in.
  *
+ * A barcode field of the form has a button that reads the code with the camera, and the search box has one too (a code
+ * that no item has can then be added at once): that is `../scanner/inventory-scan.js`, which talks to the scanner panels
+ * (`./barcode-scanner.js`) set in the dialog of the item and in a dialog of their own.
+ *
  * The dialog cannot be closed by hand (Escape, a click outside, a button) while a request that holds it is on its way: it
  * closes itself when the request is done. A request belongs to the dialog that was open when it began (`dialogToken`): an
  * answer that finds another dialog in its place leaves it alone.
@@ -70,6 +74,7 @@ import { hasTotals, totalCells } from '../grid/totals.js';
 import itemFiles from '../item/files.js';
 import itemHistory from '../item/history.js';
 import itemTabs from '../item/tabs.js';
+import inventoryScan from '../scanner/inventory-scan.js';
 
 /** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
 const FIRST_COLOR = '#000000';
@@ -102,8 +107,9 @@ function summedIds(fields) {
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    // The two dialogs of the toolbar, which export the items and import some, as one part.
-    const dialogs = compose(exportDialog(), importDialog());
+    // What the toolbar opens (the dialogs that export the items, import some and scan a code for the search) and the scan of
+    // the barcode fields of the item dialog, as one part.
+    const dialogs = compose(exportDialog(), importDialog(), inventoryScan());
 
     return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), dialogs, {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
@@ -733,7 +739,7 @@ export default function inventoryItems() {
         },
 
         /**
-         * Forgets the refusals, the unfinished tags, the confirmation, the files and the history: the dialog starts clean.
+         * Forgets the refusals, the unfinished tags, the confirmation, the files, the history and the scan of a barcode: the dialog starts clean.
          *
          * @returns {void}
          */
@@ -745,6 +751,7 @@ export default function inventoryItems() {
             this.resetTabs();
             this.resetFiles();
             this.resetHistory();
+            this.stopFieldScan();
         },
 
         /**
@@ -767,12 +774,22 @@ export default function inventoryItems() {
          * on a button that closes it): the answer would find the form gone, and what was chosen for the item lost. The code
          * closes the dialog itself when it is done ({@link closeDialog}).
          *
+         * It also keeps it open while the camera scans a barcode field: what the person closes then is the scan, and the
+         * dialog goes on showing its form.
+         *
          * @param {Event} event The `hide.bs.modal` event, fired before the dialog closes.
          * @returns {void}
          */
         guardClosing(event) {
-            if (this.busy && !this.closingDialog) {
+            if (this.closingDialog) {
+                return;
+            }
+
+            if (this.busy) {
                 event.preventDefault();
+            } else if (this.scanning) {
+                event.preventDefault();
+                this.cancelFieldScan();
             }
         },
 

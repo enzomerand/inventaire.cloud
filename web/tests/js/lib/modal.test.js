@@ -271,4 +271,16 @@ describe('the dialogs', () => {
 
         expect(callback).toHaveBeenCalledTimes(2);
     });
+
+    it('hands back the function that stops listening, for a component that goes before its dialog', () => {
+        const element = dialog();
+        const callback = vi.fn();
+
+        const forget = onModalHidden(element, callback);
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+        forget();
+        element.dispatchEvent(new Event('hidden.bs.modal'));
+
+        expect(callback).toHaveBeenCalledTimes(1);
+    });
 });

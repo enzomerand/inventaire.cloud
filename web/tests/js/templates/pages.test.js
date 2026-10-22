@@ -19,6 +19,7 @@ import { notify } from '../../../resources/js/lib/notify.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { hideOffcanvas, showOffcanvas } from '../../../resources/js/lib/offcanvas.js';
 import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
+import { loadDetector } from '../../../resources/js/scanner/decoder.js';
 import { attachment, deferred, queryFacts, ulid, withUlids } from '../support/inventory.js';
 import { MESSAGES as INVENTORY_MESSAGES } from '../support/messages.js';
 import { useMemoryStorage, useRefusingStorage } from '../support/storage.js';
@@ -41,6 +42,10 @@ vi.mock('../../../resources/js/lib/modal.js', () => ({
     onModalHidden: vi.fn(),
 }));
 vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
+// The barcode reader is WebAssembly that jsdom cannot run: a scan is given the reader the test chooses.
+vi.mock('../../../resources/js/scanner/decoder.js', () => ({ loadDetector: vi.fn() }));
+// jsdom loads no image: a photo goes to the reader as it is.
+vi.mock('../../../resources/js/scanner/photo.js', () => ({ prepareImage: vi.fn(async (file) => file) }));
 // The page of the versions asks again every two seconds: a test cannot wait that long, nor fake the timers under Alpine.
 vi.mock('../../../resources/js/versions/versions.js', async (importOriginal) => ({
     ...(await importOriginal()),
@@ -225,11 +230,13 @@ function escape(value) {
  * Turns the Blade source of a template into plain HTML. Only the constructs the three templates use are supported.
  *
  * @param {string} path Template, relative to resources/views.
+ * @param {{ scannerSlot?: string }} [variables] What the template is given when it is included (the name of the scanner panel).
  * @returns {string}
  */
-function render(path) {
+function render(path, { scannerSlot = '' } = {}) {
     let html = readFileSync(join(VIEWS, path), 'utf8')
         .replace(/\{\{--[\s\S]*?--\}\}/g, '')
+        .replaceAll('{{ $scannerSlot }}', scannerSlot)
         .replace(/@php[\s\S]*?@endphp/g, '')
         .replace(/@extends\([^)]*\)/g, '')
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
@@ -237,6 +244,10 @@ function render(path) {
         .replace(
             /@include\('partials\.(field-value|items-toolbar|items-filters|export-dialog|import-dialog|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
             (_match, name) => render(`partials/${name}.blade.php`),
+        )
+        // The scanner panel sits twice in the page of an inventory, under the name of the part of the page it serves.
+        .replace(/@include\('partials\.barcode-scanner', \['scannerSlot' => '(\w+)'\]\)/g, (_match, slot) =>
+            render('partials/barcode-scanner.blade.php', { scannerSlot: slot }),
         )
         // The tabs of the administration are not under test.
         .replace(/@include\([^\n]*\)\n/g, '')
@@ -383,6 +394,7 @@ describe('the pages under the real Alpine CSP build', () => {
             accountTokens: '../../../resources/js/components/account-tokens.js',
             adminSettings: '../../../resources/js/components/admin-settings.js',
             adminUsers: '../../../resources/js/components/admin-users.js',
+            barcodeScanner: '../../../resources/js/components/barcode-scanner.js',
             inventoryFields: '../../../resources/js/components/inventory-fields.js',
             inventoryHeader: '../../../resources/js/components/inventory-header.js',
             inventoryItems: '../../../resources/js/components/inventory-items.js',
@@ -3566,6 +3578,444 @@ describe('the pages under the real Alpine CSP build', () => {
             });
         });
 
+        describe('scanning barcodes', () => {
+            const CODE = {
+                id: 'code',
+                name: 'Code',
+                type: 'barcode',
+                options: { format: 'upca' },
+                required: false,
+                position: 11,
+                ...queryFacts('barcode'),
+            };
+            const WITH_CODE = [...FIELDS, CODE];
+            const scanDialog = () => document.querySelector('#scan-modal-title').closest('.modal');
+            const panelOf = (dialog) => dialog.querySelector('[data-slot]');
+            // The panel is always on the page (its live region must be); what a scan shows and the buttons that go with it are not.
+            const panelOpen = (dialog) => visible(panelOf(dialog).querySelector('.btn-list'));
+            const searchBox = () => document.querySelector('input[type="search"]');
+            const toolbar = () => searchBox().closest('.card-body');
+            const details = () => itemDialog().querySelector('#item-panel-details');
+            const lastParams = () => http.get.mock.lastCall[1].params;
+            const originalSecure = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
+            const originalDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+            let getUserMedia;
+
+            /** A track of the camera, which can be listened to. */
+            function cameraTrack() {
+                return { stop: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() };
+            }
+
+            /** The reader finds this code in whatever it is given. */
+            function readerFinds(rawValue, format = 'ean_13') {
+                const detector = { detect: vi.fn(async () => (rawValue === null ? [] : [{ rawValue, format }])) };
+
+                loadDetector.mockResolvedValue(detector);
+
+                return detector;
+            }
+
+            /** The person takes a photo (or picks an image) for the panel. */
+            async function takePhoto(panel) {
+                const input = panel.querySelector('input[type="file"]');
+
+                Object.defineProperty(input, 'files', {
+                    configurable: true,
+                    value: [new File(['x'], 'code.jpg', { type: 'image/jpeg' })],
+                });
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+            }
+
+            beforeEach(() => {
+                loadDetector.mockReset();
+                readerFinds(null);
+                // The camera is refused: the photo is what is left, and it is what these tests use unless they say otherwise.
+                getUserMedia = vi.fn().mockRejectedValue(new DOMException('refused', 'NotAllowedError'));
+                Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+                Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
+            });
+
+            afterEach(() => {
+                for (const [owner, name, original] of [
+                    [window, 'isSecureContext', originalSecure],
+                    [navigator, 'mediaDevices', originalDevices],
+                ]) {
+                    if (original) {
+                        Object.defineProperty(owner, name, original);
+                    } else {
+                        delete owner[name];
+                    }
+                }
+            });
+
+            describe('in the dialog of an item', () => {
+                beforeEach(async () => {
+                    await open({ fields: WITH_CODE, items: [HAMMER] });
+                    await press('Add item');
+                });
+
+                it('puts a scan button next to each barcode field, and next to no other field', () => {
+                    const scanButtons = [...itemDialog().querySelectorAll('button[aria-label="Scan a barcode"]')];
+
+                    expect(scanButtons).toHaveLength(1);
+                    expect(scanButtons[0].type).toBe('button');
+                    expect(scanButtons[0].getAttribute('title')).toBe('Scan a barcode');
+                    expect(scanButtons[0].closest('[data-field]').dataset.field).toBe('code');
+                    expect(control('code').parentElement.classList.contains('input-group')).toBe(true);
+                    expect(control('name').parentElement.classList.contains('input-group')).toBe(false);
+                    expect(panelOpen(itemDialog())).toBe(false);
+                });
+
+                it('shows the scanner in place of the form, and says why the camera did not open', async () => {
+                    await press('Scan a barcode', itemDialog());
+
+                    expect(getUserMedia).toHaveBeenCalledTimes(1);
+                    expect(panelOpen(itemDialog())).toBe(true);
+                    expect(visible(details())).toBe(false);
+                    expect(panelOf(itemDialog()).textContent).toContain('Camera access was denied');
+                    // The photo is still there, and so is the way out.
+                    expect(buttons('Take a photo or choose an image', panelOf(itemDialog()))).toHaveLength(1);
+                    expect(buttons('Cancel', panelOf(itemDialog()))).toHaveLength(1);
+                    // The cursor is on the way out, the form being out of reach.
+                    expect(document.activeElement.textContent.trim()).toBe('Cancel');
+                });
+
+                it('puts the code of a photo in the field, as the field takes it, and gives the form back with the cursor in the box', async () => {
+                    readerFinds('0012345678905');
+                    await type(control('name'), 'Hammer');
+                    await press('Scan a barcode', itemDialog());
+                    await takePhoto(panelOf(itemDialog()));
+
+                    expect(loadDetector).toHaveBeenCalledWith(['upc_a', 'ean_13']);
+                    expect(control('code').value).toBe('012345678905');
+                    expect(control('name').value).toBe('Hammer');
+                    expect(panelOpen(itemDialog())).toBe(false);
+                    expect(visible(details())).toBe(true);
+                    expect(document.activeElement).toBe(control('code'));
+
+                    http.post.mockResolvedValue({ data: { id: 'new', values: {} } });
+                    await submit(itemDialog().querySelector('form'));
+
+                    expect(http.post).toHaveBeenCalledWith('/api/v1/inventories/tools/items', {
+                        values: { name: 'Hammer', code: '012345678905' },
+                    });
+                });
+
+                it('closes the scanner and not the dialog around it on Escape', async () => {
+                    const reachedTheDialog = vi.fn();
+
+                    itemDialog().addEventListener('keydown', reachedTheDialog);
+                    await press('Scan a barcode', itemDialog());
+                    document.activeElement.dispatchEvent(
+                        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+                    );
+                    await flush();
+
+                    expect(reachedTheDialog).not.toHaveBeenCalled();
+                    expect(panelOpen(itemDialog())).toBe(false);
+                    expect(visible(details())).toBe(true);
+                });
+
+                it('shows the picture of the camera, and lets the camera go when the person gives up', async () => {
+                    const track = cameraTrack();
+                    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+
+                    readerFinds(null);
+                    getUserMedia.mockResolvedValue({ getTracks: () => [track] });
+                    await press('Scan a barcode', itemDialog());
+
+                    const video = panelOf(itemDialog()).querySelector('video');
+
+                    expect(visible(video)).toBe(true);
+                    expect(video.hasAttribute('playsinline')).toBe(true);
+                    expect(video.muted).toBe(true);
+                    expect(panelOf(itemDialog()).textContent).toContain('Point the camera at the barcode.');
+                    expect(track.stop).not.toHaveBeenCalled();
+
+                    await press('Cancel', panelOf(itemDialog()));
+
+                    expect(track.stop).toHaveBeenCalledTimes(1);
+                    expect(visible(video)).toBe(false);
+                    play.mockRestore();
+                });
+
+                it('offers the camera and the gallery for a photo: the file chooser has no "capture", which would only offer the camera', () => {
+                    for (const dialog of [itemDialog(), document.body]) {
+                        for (const input of panelOf(dialog).querySelectorAll('input[type="file"]')) {
+                            expect(input.hasAttribute('capture')).toBe(false);
+                            expect(input.accept).toBe('image/*');
+                        }
+                    }
+                });
+
+                it('tells everything in one live region that is on the page before the scan, with nothing hidden around it', async () => {
+                    const panel = panelOf(itemDialog());
+                    const region = panel.querySelector('[aria-live]');
+                    const hiddenAround = (element) => {
+                        for (let node = element; node && node !== document.body; node = node.parentElement) {
+                            if (node.hidden || node.style.display === 'none') {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    };
+
+                    expect(panel.querySelectorAll('[aria-live]')).toHaveLength(1);
+                    expect(region.getAttribute('aria-live')).toBe('polite');
+                    expect(hiddenAround(region)).toBe(false);
+                    expect(region.textContent.trim()).toBe('');
+
+                    await press('Scan a barcode', itemDialog());
+
+                    // The same region, now with the reason the camera did not open.
+                    expect(panel.querySelector('[aria-live]')).toBe(region);
+                    expect(hiddenAround(region)).toBe(false);
+                    expect(region.textContent).toContain('Camera access was denied');
+                });
+
+                it("says what to aim at in the live region while the camera is on, and says when a code is not the field's", async () => {
+                    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+                    const video = () => panelOf(itemDialog()).querySelector('video');
+                    const region = panelOf(itemDialog()).querySelector('[aria-live]');
+
+                    getUserMedia.mockResolvedValue({ getTracks: () => [cameraTrack()] });
+                    const detector = readerFinds(null);
+                    await press('Scan a barcode', itemDialog());
+
+                    Object.defineProperty(video(), 'readyState', { configurable: true, value: 4 });
+                    Object.defineProperty(video(), 'videoWidth', { configurable: true, value: 640 });
+                    expect(region.textContent.trim()).toBe('Point the camera at the barcode.');
+                    expect(region.firstElementChild.classList.contains('alert')).toBe(false);
+
+                    // A European product in a UPC-A field: not the code of the field.
+                    detector.detect.mockResolvedValue([{ rawValue: '3017620422003', format: 'ean_13' }]);
+                    await new Promise((resolve) => setTimeout(resolve, 400));
+                    await flush();
+
+                    expect(region.textContent.trim()).toBe('This code does not match the field format.');
+                    expect(region.firstElementChild.classList.contains('alert-warning')).toBe(true);
+                    expect(panelOpen(itemDialog())).toBe(true);
+                    expect(control('code').value).toBe('');
+
+                    await press('Cancel', panelOf(itemDialog()));
+                    play.mockRestore();
+                });
+
+                it('hides the buttons of the dialog (Delete, Cancel, Save) while it scans, and gives them back', async () => {
+                    const footer = itemDialog().querySelector('.modal-footer');
+
+                    expect(visible(footer)).toBe(true);
+                    expect(buttons('Save', footer)).toHaveLength(1);
+
+                    await press('Scan a barcode', itemDialog());
+
+                    expect(visible(footer)).toBe(false);
+                    // The attribute is on a wrapper: the footer carries a display of its own, which an attribute on it could not beat.
+                    expect(footer.hidden).toBe(false);
+                    expect(footer.parentElement.hidden).toBe(true);
+
+                    await press('Cancel', panelOf(itemDialog()));
+
+                    expect(visible(footer)).toBe(true);
+                    expect(buttons('Save', footer)).toHaveLength(1);
+                });
+
+                it('closes the scanner and not the dialog when the dialog is asked to close (Escape, a click outside, the cross)', async () => {
+                    await press('Scan a barcode', itemDialog());
+
+                    const closing = new Event('hide.bs.modal', { cancelable: true });
+
+                    itemDialog().dispatchEvent(closing);
+                    await flush();
+
+                    expect(closing.defaultPrevented).toBe(true);
+                    expect(panelOpen(itemDialog())).toBe(false);
+                    expect(visible(details())).toBe(true);
+                    expect(document.activeElement).toBe(control('code'));
+
+                    // One more time, and the dialog closes as it always did.
+                    const again = new Event('hide.bs.modal', { cancelable: true });
+
+                    itemDialog().dispatchEvent(again);
+
+                    expect(again.defaultPrevented).toBe(false);
+                });
+
+                it('offers to start the camera again when the page was hidden, and starts it', async () => {
+                    const tracks = [cameraTrack(), cameraTrack()];
+                    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+                    const panel = () => panelOf(itemDialog());
+
+                    getUserMedia.mockResolvedValueOnce({ getTracks: () => [tracks[0]] });
+                    getUserMedia.mockResolvedValueOnce({ getTracks: () => [tracks[1]] });
+                    readerFinds(null);
+                    await press('Scan a barcode', itemDialog());
+
+                    expect(buttons('Restart the camera', panel())).toHaveLength(0);
+
+                    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await flush();
+                    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+                    document.dispatchEvent(new Event('visibilitychange'));
+                    await flush();
+
+                    expect(tracks[0].stop).toHaveBeenCalledTimes(1);
+                    expect(panel().querySelector('[aria-live]').textContent).toContain('The camera was stopped');
+                    expect(buttons('Restart the camera', panel())).toHaveLength(1);
+                    expect(visible(panel().querySelector('video'))).toBe(false);
+
+                    await press('Restart the camera', panel());
+
+                    expect(getUserMedia).toHaveBeenCalledTimes(2);
+                    expect(visible(panel().querySelector('video'))).toBe(true);
+                    expect(buttons('Restart the camera', panel())).toHaveLength(0);
+
+                    await press('Cancel', panel());
+                    expect(tracks[1].stop).toHaveBeenCalledTimes(1);
+                    delete document.hidden;
+                    play.mockRestore();
+                });
+
+                it('lets the camera go when the dialog is closed during the scan', async () => {
+                    const track = cameraTrack();
+                    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+
+                    readerFinds(null);
+                    getUserMedia.mockResolvedValue({ getTracks: () => [track] });
+                    await press('Scan a barcode', itemDialog());
+
+                    // What Bootstrap does once the dialog is closed, however it was: its page asks to forget the item.
+                    const hidden = onModalHidden.mock.calls.filter(([element]) => element === itemDialog());
+
+                    expect(hidden.length).toBeGreaterThan(0);
+
+                    for (const [, callback] of hidden) {
+                        callback();
+                    }
+
+                    await flush();
+
+                    expect(track.stop).toHaveBeenCalledTimes(1);
+                    expect(panelOpen(itemDialog())).toBe(false);
+                    play.mockRestore();
+                });
+            });
+
+            describe('in the search box', () => {
+                beforeEach(async () => {
+                    await open({ fields: WITH_CODE, items: [HAMMER], itemsCount: 3 });
+                });
+
+                it('opens a dialog of its own with the scanner, and searches for the code of a photo', async () => {
+                    readerFinds('3017620422003');
+                    await press('Scan a barcode', toolbar());
+
+                    expect(showModal).toHaveBeenCalledWith(scanDialog());
+                    expect(scanDialog().querySelector('#scan-modal-title').textContent).toBe('Scan a barcode');
+                    expect(panelOpen(scanDialog())).toBe(true);
+                    expect(panelOf(scanDialog()).dataset.slot).toBe('search');
+
+                    http.get.mockClear();
+                    await takePhoto(panelOf(scanDialog()));
+
+                    // Any symbology: it is a search.
+                    expect(loadDetector.mock.calls.at(-1)[0]).toContain('qr_code');
+                    expect(hideModal).toHaveBeenCalledWith(scanDialog());
+                    expect(searchBox().value).toBe('3017620422003');
+                    expect(lastParams()).toMatchObject({ page: 1, q: '3017620422003' });
+                    expect(window.location.search).toContain('q=3017620422003');
+                });
+
+                it('closes the dialog when the person gives up, and searches for nothing', async () => {
+                    await press('Scan a barcode', toolbar());
+                    http.get.mockClear();
+                    await press('Cancel', panelOf(scanDialog()));
+
+                    expect(hideModal).toHaveBeenCalledWith(scanDialog());
+                    expect(http.get).not.toHaveBeenCalled();
+                    expect(searchBox().value).toBe('');
+                });
+
+                describe('for a code that no item has', () => {
+                    beforeEach(async () => {
+                        readerFinds('0012345678905');
+                        await press('Scan a barcode', toolbar());
+                        http.get.mockImplementation(async (url) =>
+                            url === '/api/v1/inventories/tools'
+                                ? { data: { id: 'tools', name: 'Tools', items_count: 3, fields: WITH_CODE } }
+                                : itemsPage([], { total: 0, from: null, to: null }),
+                        );
+                        await takePhoto(panelOf(scanDialog()));
+                    });
+
+                    it('offers to add an item with the code, and opens the form with the code in the barcode field', async () => {
+                        const empty = [...document.querySelectorAll('.empty')].filter((element) => visible(element));
+
+                        expect(empty).toHaveLength(1);
+                        expect(empty[0].textContent).toContain('No result');
+                        expect(buttons('Add an item with this code')).toHaveLength(1);
+                        // The way out stays, as a secondary choice now.
+                        const clear = buttons('Clear the search and the filters')[0];
+
+                        expect(clear.classList.contains('btn-primary')).toBe(false);
+
+                        showModal.mockClear();
+                        await press('Add an item with this code');
+
+                        expect(showModal).toHaveBeenCalledWith(itemDialog());
+                        expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('New item');
+                        expect(control('code').value).toBe('012345678905');
+                        expect(control('name').value).toBe('');
+                    });
+
+                    it('stops offering it once the words are changed by hand', async () => {
+                        await type(searchBox(), 'zzz');
+                        searchBox().dispatchEvent(
+                            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+                        );
+                        await flush();
+
+                        expect(buttons('Add an item with this code')).toHaveLength(0);
+                        expect(buttons('Clear the search and the filters')[0].classList.contains('btn-primary')).toBe(
+                            true,
+                        );
+                    });
+                });
+            });
+
+            describe('for a person who may not edit the items', () => {
+                beforeEach(async () => {
+                    PAGE.abilities = { edit_items: false };
+                    await open({ fields: WITH_CODE, items: [HAMMER], itemsCount: 3 });
+                });
+
+                it('has the scan button of the search box, and no scanner in the dialog of an item', async () => {
+                    expect(buttons('Scan a barcode', toolbar())).toHaveLength(1);
+                    expect(itemDialog().querySelector('[data-slot]')).toBeNull();
+                    expect(itemDialog().querySelector('input[type="file"]')).toBeNull();
+                });
+
+                it('is not offered to add an item with a code that matches nothing', async () => {
+                    readerFinds('0012345678905');
+                    await press('Scan a barcode', toolbar());
+                    http.get.mockImplementation(async (url) =>
+                        url === '/api/v1/inventories/tools'
+                            ? { data: { id: 'tools', name: 'Tools', items_count: 3, fields: WITH_CODE } }
+                            : itemsPage([], { total: 0, from: null, to: null }),
+                    );
+                    await takePhoto(panelOf(scanDialog()));
+
+                    expect(buttons('Add an item with this code')).toHaveLength(0);
+                    expect([...document.querySelectorAll('.empty')].filter((element) => visible(element))).toHaveLength(
+                        1,
+                    );
+                });
+            });
+        });
+
         describe('changing an item', () => {
             beforeEach(async () => {
                 await open({ items: [HAMMER] });
@@ -5290,7 +5740,8 @@ describe('the pages under the real Alpine CSP build', () => {
 
             const tab = (name) => itemDialog().querySelector('#item-tab-' + name);
             const panel = (name) => itemDialog().querySelector('#item-panel-' + name);
-            const picker = () => itemDialog().querySelector('input[type="file"]');
+            // The file chooser of the files of the item: not the one of the scanner panel, which also sits in the dialog.
+            const picker = () => itemDialog().querySelector('input[type="file"][x-ref="picker"]');
             const field = (id) => itemDialog().querySelector(`[data-field="${id}"]`);
 
             /** Chooses files the way the file chooser of the browser hands them over. */

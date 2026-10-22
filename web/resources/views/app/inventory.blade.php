@@ -23,6 +23,11 @@
     (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
     partials/item-file-field. data-max-attachment-size is the largest file the server takes, in bytes.
 
+    The barcode fields of the form have a scan button (resources/js/scanner/inventory-scan.js): the picture of the camera
+    (partials/barcode-scanner, slot "field") takes the place of the form while it scans. The scan button of the toolbar opens
+    a dialog of its own with another panel (slot "search"); a code that matches no item can be added from the empty state.
+    The panels answer with bubbling events, heard on the root of "inventoryItems".
+
     Do not put a display utility (d-flex...) on an element that carries :hidden: the utility wins and it never hides.
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
@@ -154,6 +159,8 @@
         data-can-manage-fields="{{ $abilities['manage_fields'] ? '1' : '0' }}"
         data-max-attachment-size="{{ config('inventories.max_attachment_size', 20 * 1024 * 1024) }}"
         data-import-max-size="{{ config('inventories.import_max_size', 10 * 1048576) }}"
+        @barcode-scanned="onBarcodeScanned"
+        @barcode-scan-cancelled="onBarcodeCancelled"
     >
         <div class="card">
             <div class="card-header">
@@ -243,10 +250,17 @@
                     <p class="empty-title">{{ __('No result') }}</p>
                     <p class="empty-subtitle text-secondary">{{ __('No item matches your search or your filters.') }}</p>
                     <div class="empty-action">
-                        <button type="button" class="btn btn-primary" @click="clearCriteria">
-                            <x-tabler-filter-off aria-hidden="true" />
-                            {{ __('Clear the search and the filters') }}
-                        </button>
+                        <div class="btn-list justify-content-center">
+                            {{-- The search is for a code that was scanned and no item holds it. --}}
+                            <button type="button" class="btn btn-primary" x-show="canAddScanned" @click="addScanned">
+                                <x-tabler-plus aria-hidden="true" />
+                                {{ __('Add an item with this code') }}
+                            </button>
+                            <button type="button" class="btn" :class="{ 'btn-primary': !canAddScanned }" @click="clearCriteria">
+                                <x-tabler-filter-off aria-hidden="true" />
+                                {{ __('Clear the search and the filters') }}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -272,6 +286,21 @@
 
         @include('partials.import-dialog')
 
+        {{-- The dialog of the scan button of the search box: the panel starts when it opens (resources/js/scanner/inventory-scan.js). --}}
+        <div class="modal modal-blur fade" tabindex="-1" x-ref="scanModal" role="dialog" aria-labelledby="scan-modal-title" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title" id="scan-modal-title">{{ __('Scan a barcode') }}</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ __('Close') }}"></button>
+                    </div>
+                    <div class="modal-body">
+                        @include('partials.barcode-scanner', ['scannerSlot' => 'search'])
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="modal modal-blur fade" tabindex="-1" x-ref="modal" role="dialog" aria-labelledby="item-modal-title" aria-hidden="true">
             <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
                 <form class="modal-content" @submit.prevent="save" novalidate>
@@ -280,7 +309,7 @@
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ __('Close') }}" :disabled="busy"></button>
                     </div>
                     {{-- The tabs of an item that exists: its details, its attachments, its history. The dialog that adds an item has none. --}}
-                    <div class="px-3 px-sm-4 pt-2" x-show="showTabs">
+                    <div class="px-3 px-sm-4 pt-2" x-show="showTabs" :hidden="scanning">
                         <ul class="nav nav-tabs flex-nowrap overflow-x-auto" role="tablist" aria-label="{{ __('Item') }}" @keydown="moveTab($event)">
                             <li class="nav-item" role="presentation">
                                 <button type="button" role="tab" id="item-tab-details" aria-controls="item-panel-details" :class="tabClass('details')" :aria-selected="tabSelected('details')" :tabindex="tabIndex('details')" @click="selectTab('details')">{{ __('Item details') }}</button>
@@ -300,6 +329,13 @@
 
                         <div class="alert alert-danger" role="alert" x-show="formError" x-text="formError"></div>
 
+                        {{-- Reads the code of a barcode field with the camera: shown in place of the form while it scans. Only the people
+                             who may edit have a form to fill in, so only they have it; it is not inside the x-if that follows, so that it is
+                             not taken apart when the dialog changes what it shows. --}}
+                        <template x-if="canEdit">
+                            @include('partials.barcode-scanner', ['scannerSlot' => 'field'])
+                        </template>
+
                         <template x-if="confirming">
                             <p class="m-0" role="alert">{{ __('Delete this item? This cannot be undone.') }}</p>
                         </template>
@@ -310,24 +346,32 @@
 
                         <template x-if="!asking">
                             <div>
-                                <div id="item-panel-details" :role="panelRole" :aria-labelledby="panelLabel('details')" :tabindex="panelTabIndex" x-show="onDetails">
+                                <div id="item-panel-details" :role="panelRole" :aria-labelledby="panelLabel('details')" :tabindex="panelTabIndex" x-show="onDetails" :hidden="scanning">
                                     <template x-if="isForm">
                                         <div>
                                             <template x-for="field in fields" :key="field.id">
                                                 <div class="mb-3" :data-field="field.id">
                                                     <label class="form-label" :class="{ required: field.required }" :id="labelId(field)" :for="labelTarget(field)" x-text="field.name"></label>
 
+                                                    {{-- A barcode field gets a button that reads the code with the camera, in an input group. --}}
                                                     <template x-if="control(field) === 'input'">
-                                                        <input
-                                                            :id="controlId(field)"
-                                                            :type="inputType(field)"
-                                                            :inputmode="inputMode(field)"
-                                                            :maxlength="maxLength(field)"
-                                                            :class="controlClass(field)"
-                                                            :value="inputValue(field)"
-                                                            @input="onInput(field, $event)"
-                                                            autocomplete="off"
-                                                        >
+                                                        <div :class="{ 'input-group': isScannable(field) }">
+                                                            <input
+                                                                :id="controlId(field)"
+                                                                :type="inputType(field)"
+                                                                :inputmode="inputMode(field)"
+                                                                :maxlength="maxLength(field)"
+                                                                :class="controlClass(field)"
+                                                                :value="inputValue(field)"
+                                                                @input="onInput(field, $event)"
+                                                                autocomplete="off"
+                                                            >
+                                                            <template x-if="isScannable(field)">
+                                                                <button type="button" class="btn btn-icon" aria-label="{{ __('Scan a barcode') }}" title="{{ __('Scan a barcode') }}" :disabled="busy" @click="scanField(field)">
+                                                                    <x-tabler-barcode aria-hidden="true" />
+                                                                </button>
+                                                            </template>
+                                                        </div>
                                                     </template>
 
                                                     <template x-if="control(field) === 'textarea'">
@@ -453,25 +497,29 @@
                             </div>
                         </template>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-danger me-auto" x-show="canDeleteItem" @click="askDelete" :disabled="busy">{{ __('Delete') }}</button>
-                        <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal" :disabled="busy">{{ __('Cancel') }}</button>
-                        <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
-                        <button type="submit" class="btn btn-primary" x-show="isForm && !asking" :disabled="busy || uploading">{{ __('Save') }}</button>
-                        {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor
-                             is put on the confirming button the moment the question is asked. --}}
-                        <template x-if="confirming">
-                            <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
-                        </template>
-                        <template x-if="confirming">
-                            <button type="button" class="btn btn-danger" x-ref="confirmDelete" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
-                        </template>
-                        <template x-if="isRemoving">
-                            <button type="button" class="btn" @click="cancelRemove" :disabled="busy">{{ __('Cancel') }}</button>
-                        </template>
-                        <template x-if="isRemoving">
-                            <button type="button" class="btn btn-danger" x-ref="confirmRemove" @click="confirmRemove" :disabled="busy">{{ __('Delete the file') }}</button>
-                        </template>
+                    {{-- The buttons of the dialog give way to the scanner while it scans a barcode field: the panel has its own Cancel,
+                         and the form they would save is not on screen. The wrapper carries the attribute, not the footer. --}}
+                    <div :hidden="scanning">
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-outline-danger me-auto" x-show="canDeleteItem" @click="askDelete" :disabled="busy">{{ __('Delete') }}</button>
+                            <button type="button" class="btn" x-show="isForm && !asking" data-bs-dismiss="modal" :disabled="busy">{{ __('Cancel') }}</button>
+                            <button type="button" class="btn" x-show="!isForm" data-bs-dismiss="modal">{{ __('Close') }}</button>
+                            <button type="submit" class="btn btn-primary" x-show="isForm && !asking" :disabled="busy || uploading">{{ __('Save') }}</button>
+                            {{-- Added to the page (x-if), not shown (x-show): Alpine shows an element a tick late, and the cursor
+                                 is put on the confirming button the moment the question is asked. --}}
+                            <template x-if="confirming">
+                                <button type="button" class="btn" @click="cancelDelete" :disabled="busy">{{ __('Cancel') }}</button>
+                            </template>
+                            <template x-if="confirming">
+                                <button type="button" class="btn btn-danger" x-ref="confirmDelete" @click="confirmDelete" :disabled="busy">{{ __('Delete the item') }}</button>
+                            </template>
+                            <template x-if="isRemoving">
+                                <button type="button" class="btn" @click="cancelRemove" :disabled="busy">{{ __('Cancel') }}</button>
+                            </template>
+                            <template x-if="isRemoving">
+                                <button type="button" class="btn btn-danger" x-ref="confirmRemove" @click="confirmRemove" :disabled="busy">{{ __('Delete the file') }}</button>
+                            </template>
+                        </div>
                     </div>
 
                     {{-- The file chooser of the browser, opened by the buttons that add a file (resources/js/item/files.js). --}}

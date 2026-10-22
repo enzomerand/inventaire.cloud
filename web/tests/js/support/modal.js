@@ -44,9 +44,11 @@ export const hideModal = vi.fn((element) => {
     return true;
 });
 
-/** Calls a function whenever the dialog has been closed. */
+/** Calls a function whenever the dialog has been closed; returns the function that stops listening. */
 export const onModalHidden = vi.fn((element, callback) => {
     element.addEventListener('hidden.bs.modal', callback);
+
+    return () => element.removeEventListener('hidden.bs.modal', callback);
 });
 
 /**
