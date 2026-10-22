@@ -263,6 +263,8 @@ The **choices** of a `select` or `multiselect` have ids made by the server (8 ra
 
 Answers are in the `data` envelope; ids are ULIDs and dates ISO 8601. Item, field and inventory ULIDs that belong to another inventory (or workspace) are a `404`, never a `403`.
 
+**Scanning barcodes** (front only: no schema or API change). Every `barcode` field of the item form has a scan button, and so has the search box of the list. A scan reads the code with the camera, or from a photo (a file chooser that opens the camera app of a phone: it is also the way when the camera is refused or missing). The browser only gives the camera to a secure page, so an instance must be served over HTTPS (`localhost` works for development). The reader is `barcode-detector` used as a ponyfill (the same code on every browser, Safari and Firefox included) on top of ZXing compiled to WebAssembly; it is self-hosted, never fetched from a CDN: Vite emits the `.wasm` file (about 1 MB) under `/build/assets/`, and it is loaded with the reader's own chunk at the first scan only. The format of the field steers what is looked for (`resources/js/scanner/formats.js`): a UPC-A field gets its 12 digits, an ISBN-10 field the ISBN-10 rebuilt from the EAN-13 of the book. The code then goes through the same path as a typed one, and the server stays the only judge of it. A code read in the search box is searched at once (a UPC-A as its 12 digits, found whichever form an item holds), and when no item has it the empty state offers to add an item with that code.
+
 ## The public API
 
 Everything the web application does with your data goes through the JSON API under `/api/v1`, and scripts, integrations and apps can use it too, with a **personal access token**.

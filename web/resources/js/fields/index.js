@@ -104,6 +104,27 @@ export function inputModeOf(field) {
 }
 
 /**
+ * Whether the form offers to read the value of a field from a barcode with the camera (the barcode fields, and only them).
+ *
+ * @param {Field} field
+ * @returns {boolean}
+ */
+export function isScannable(field) {
+    return typeOf(field).scannable === true;
+}
+
+/**
+ * The `format` option of a barcode field (`any`, `ean13`, `ean8`, `upca`, `isbn10`, `isbn13`), which says which symbologies
+ * a scan looks for. The server is the only judge of a code: the format only steers the scan.
+ *
+ * @param {Field} field
+ * @returns {string}
+ */
+export function scanFormatOf(field) {
+    return String(field.options?.format ?? 'any');
+}
+
+/**
  * The longest text the `<input>` of a field takes, or null when it has no limit of its own.
  *
  * @param {Field} field

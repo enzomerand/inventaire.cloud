@@ -52,6 +52,9 @@ export default function gridCriteria() {
         /** The timer of the pause that ends the typing, null when none is running. */
         searchTimer: null,
 
+        /** The code the search box got from a scan, as the reader gave it (see `../scanner/inventory-scan.js`); empty once the text is changed by hand. */
+        scannedCode: '',
+
         /** The way to lay the items out that the address asks for, or that the person chose: null for the default one. */
         urlView: null,
 
@@ -207,6 +210,7 @@ export default function gridCriteria() {
          */
         onSearchInput(event) {
             this.searchText = /** @type {HTMLInputElement} */ (event.target).value;
+            this.scannedCode = '';
             this.stopSearchTimer();
             this.searchTimer = setTimeout(() => this.runSearch(), SEARCH_DELAY_MS);
         },
@@ -228,6 +232,7 @@ export default function gridCriteria() {
          */
         clearSearch() {
             this.searchText = '';
+            this.scannedCode = '';
             this.submitSearch();
             this.$refs.search?.focus();
         },
@@ -358,6 +363,7 @@ export default function gridCriteria() {
 
             this.stopSearchTimer();
             this.searchText = '';
+            this.scannedCode = '';
             this.query = { ...this.query, q: '', filters: {} };
             this.loadItems(1);
 
