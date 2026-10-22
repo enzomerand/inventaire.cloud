@@ -42,7 +42,7 @@
     </div>
 
     <div class="btn-list justify-content-center mt-3" :hidden="!open">
-        <button type="button" class="btn btn-primary" x-ref="restart" :hidden="!paused" @click="restart">
+        <button type="button" class="btn btn-primary" :hidden="!paused" @click="restart">
             <x-tabler-refresh aria-hidden="true" />
             {{ __('Restart the camera') }}
         </button>

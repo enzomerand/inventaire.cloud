@@ -36,13 +36,6 @@ describe('the pages of the application', function (): void {
             expect(is_file(public_path(ltrim($href, '/'))))->toBeTrue("{$href} is not in public/");
         }
     });
-
-    it('keep the same head on the home page', function (): void {
-        $page = shareDom($this->get('/')->assertOk());
-
-        expect(shareAttributes($page, '//head/link[@rel="manifest"]', 'href'))->toBe(['/manifest.webmanifest'])
-            ->and(shareAttributes($page, '//head/meta[@name="theme-color"]', 'content'))->toBe(['#066fd1']);
-    });
 });
 
 describe('the page of a share link', function (): void {

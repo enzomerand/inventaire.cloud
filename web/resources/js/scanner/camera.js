@@ -33,14 +33,11 @@ export function cameraErrorKey(error) {
     switch (/** @type {{ name?: string } | null} */ (error)?.name) {
         case 'NotAllowedError':
         case 'SecurityError':
-        case 'PermissionDeniedError':
             return 'scanner.error.denied';
         case 'NotFoundError':
         case 'OverconstrainedError':
-        case 'DevicesNotFoundError':
             return 'scanner.error.no_camera';
         case 'NotReadableError':
-        case 'TrackStartError':
         case 'AbortError':
             return 'scanner.error.busy';
         default:

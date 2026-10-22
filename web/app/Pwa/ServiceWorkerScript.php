@@ -37,25 +37,16 @@ final class ServiceWorkerScript
     private const OFFLINE_VIEW = 'views/pwa/offline.blade.php';
 
     /**
-     * The colors the offline page is drawn with are a parameter, so that a test can show that they are part of the version; the
-     * application always uses the ones of the manifest.
-     */
-    public function __construct(
-        private readonly string $themeColor = WebManifest::THEME_COLOR,
-        private readonly string $backgroundColor = WebManifest::BACKGROUND_COLOR,
-    ) {}
-
-    /**
      * The hash that names this state of the worker: the first 16 hexadecimal digits of the SHA-256 of what the worker is made of.
      */
     public function version(): string
     {
         return substr(hash('sha256', implode("\0", [
-            $this->read(self::WORKER),
-            $this->read(self::OFFLINE_VIEW),
+            $this->read(resource_path(self::WORKER)),
+            $this->read(resource_path(self::OFFLINE_VIEW)),
             $this->translations(),
-            $this->themeColor,
-            $this->backgroundColor,
+            WebManifest::THEME_COLOR,
+            WebManifest::BACKGROUND_COLOR,
             config()->string('app.name'),
         ])), 0, 16);
     }
@@ -70,7 +61,7 @@ final class ServiceWorkerScript
             'offlineUrl' => self::OFFLINE_PATH,
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
-        return 'self.INVENTAIRE_SW = '.$configuration.";\n".$this->read(self::WORKER);
+        return 'self.INVENTAIRE_SW = '.$configuration.";\n".$this->read(resource_path(self::WORKER));
     }
 
     /**
@@ -86,28 +77,20 @@ final class ServiceWorkerScript
 
         sort($files);
 
-        return implode("\0", array_map(function (string $file): string {
-            $content = @file_get_contents($file);
-
-            if ($content === false) {
-                throw new RuntimeException('Cannot read '.basename($file).'.');
-            }
-
-            return basename($file)."\0".$content;
-        }, $files));
+        return implode("\0", array_map(fn (string $file): string => basename($file)."\0".$this->read($file), $files));
     }
 
     /**
-     * The content of a file of `resources/`.
+     * The content of a file, given by its absolute path.
      *
      * @throws RuntimeException When the file cannot be read: a worker that is not the real one must never be served.
      */
     private function read(string $path): string
     {
-        $content = @file_get_contents(resource_path($path));
+        $content = @file_get_contents($path);
 
         if ($content === false) {
-            throw new RuntimeException("Cannot read resources/{$path}.");
+            throw new RuntimeException('Cannot read '.basename($path).'.');
         }
 
         return $content;

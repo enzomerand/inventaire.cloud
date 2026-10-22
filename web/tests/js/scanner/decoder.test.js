@@ -30,7 +30,7 @@ async function freshLoader() {
     vi.resetModules();
     // Registered again each time: a module that is mocked with a factory is evaluated once per registration.
     vi.doMock('barcode-detector/ponyfill', ponyfill);
-    vi.doMock('../../../resources/js/scanner/wasm-url.js', () => ({
+    vi.doMock('zxing-wasm/reader/zxing_reader.wasm?url', () => ({
         default: '/build/assets/zxing_reader-3f2a9c.wasm',
     }));
 

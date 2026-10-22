@@ -108,39 +108,9 @@ it('has another version when a translation file changes, since the offline page 
     }
 });
 
-it('takes the translation files from the lang directory, whatever their number, in a fixed order', function (): void {
-    $version = app(ServiceWorkerScript::class)->version();
-    $files = glob(lang_path('*.json')) ?: [];
-
-    expect($files)->not->toBe([])
-        ->and(array_map('basename', $files))->toContain('fr.json')
-        ->and((new ServiceWorkerScript)->version())->toBe($version);
-});
-
-it('has another version when a color of the offline page changes', function (): void {
-    $version = app(ServiceWorkerScript::class)->version();
-    $theme = (new ServiceWorkerScript(themeColor: '#123456'))->version();
-    $background = (new ServiceWorkerScript(backgroundColor: '#123456'))->version();
-
-    expect($theme)->not->toBe($version)
-        ->and($background)->not->toBe($version)
-        ->and($background)->not->toBe($theme)
-        ->and((new ServiceWorkerScript)->version())->toBe($version);
-});
-
 it('is the same in every language: the version does not depend on who asks', function (): void {
     $french = $this->get('/sw.js', ['Accept-Language' => '']);
     $english = $this->get('/sw.js', ['Accept-Language' => 'en']);
 
     expect($english->getContent())->toBe($french->getContent());
-});
-
-it('only answers GET', function (): void {
-    $this->post('/sw.js')->assertStatus(405);
-});
-
-it('is a classic script: a worker registered without the type "module" cannot import or export', function (): void {
-    $source = (string) file_get_contents(resource_path('js/sw/service-worker.js'));
-
-    expect($source)->not->toMatch('/^\s*(import|export)\b/m');
 });

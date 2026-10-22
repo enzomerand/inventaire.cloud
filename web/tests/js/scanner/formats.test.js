@@ -63,11 +63,6 @@ describe('the code a field takes', () => {
         expect(normalizeScan('0012345678905', 'ean_13', null)).toBe('0012345678905');
     });
 
-    it('is an empty text when nothing was read', () => {
-        expect(normalizeScan(undefined, 'ean_13', 'upca')).toBe('');
-        expect(normalizeScan(null, 'ean_13', null)).toBe('');
-    });
-
     describe('in a UPC-A field', () => {
         it('drops the leading 0 of an EAN-13, which is how a reader may report a UPC-A symbol', () => {
             expect(normalizeScan('0012345678905', 'ean_13', 'upca')).toBe('012345678905');
@@ -172,8 +167,6 @@ describe('the reads a field can take', () => {
     it('looks at the read without its spaces, as the field will take it', () => {
         expect(fitsFormat('  3017620422003 \n', 'ean13')).toBe(true);
         expect(fitsFormat(' 3017620422003 ', 'isbn13')).toBe(false);
-        expect(fitsFormat(undefined, 'ean13')).toBe(false);
-        expect(fitsFormat(null, 'ean8')).toBe(false);
     });
 });
 

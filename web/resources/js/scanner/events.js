@@ -8,10 +8,10 @@
  */
 
 /** The page asks a panel to start looking: `detail` is `{ slot, format }`. */
-export const SCAN_START = 'barcode-scan-start';
+const SCAN_START = 'barcode-scan-start';
 
 /** The page asks the panels to stop and close: `detail` is `{ slot }`, no slot meaning every panel. */
-export const SCAN_STOP = 'barcode-scan-stop';
+const SCAN_STOP = 'barcode-scan-stop';
 
 /** A panel read a code: `detail` is `{ slot, value }`. Bubbles up from the panel. */
 export const SCAN_DONE = 'barcode-scanned';
@@ -31,9 +31,9 @@ export function requestScan(slot, format) {
 }
 
 /**
- * Asks the panel of a slot to stop the camera and close (every panel when no slot is given).
+ * Asks the panel of a slot to stop the camera and close.
  *
- * @param {string} [slot]
+ * @param {string} slot Which panel.
  * @returns {void}
  */
 export function stopScan(slot) {

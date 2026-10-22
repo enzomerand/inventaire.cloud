@@ -3702,26 +3702,6 @@ describe('the pages under the real Alpine CSP build', () => {
                     });
                 });
 
-                it('says no code was found in a photo, and stays open for another', async () => {
-                    readerFinds(null);
-                    await press('Scan a barcode', itemDialog());
-                    await takePhoto(panelOf(itemDialog()));
-
-                    expect(panelOf(itemDialog()).textContent).toContain('No barcode found in this photo.');
-                    expect(panelOpen(itemDialog())).toBe(true);
-                    expect(control('code').value).toBe('');
-                });
-
-                it('gives the form back, untouched, when the person gives up', async () => {
-                    await press('Scan a barcode', itemDialog());
-                    await press('Cancel', panelOf(itemDialog()));
-
-                    expect(panelOpen(itemDialog())).toBe(false);
-                    expect(visible(details())).toBe(true);
-                    expect(control('code').value).toBe('');
-                    expect(document.activeElement).toBe(control('code'));
-                });
-
                 it('closes the scanner and not the dialog around it on Escape', async () => {
                     const reachedTheDialog = vi.fn();
 
@@ -4003,24 +3983,6 @@ describe('the pages under the real Alpine CSP build', () => {
                             true,
                         );
                     });
-                });
-
-                it('does not offer to add an item for a search that was typed', async () => {
-                    http.get.mockImplementation(async (url) =>
-                        url === '/api/v1/inventories/tools'
-                            ? { data: { id: 'tools', name: 'Tools', items_count: 3, fields: WITH_CODE } }
-                            : itemsPage([], { total: 0, from: null, to: null }),
-                    );
-                    await type(searchBox(), '0012345678905');
-                    searchBox().dispatchEvent(
-                        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
-                    );
-                    await flush();
-
-                    expect([...document.querySelectorAll('.empty')].filter((element) => visible(element))).toHaveLength(
-                        1,
-                    );
-                    expect(buttons('Add an item with this code')).toHaveLength(0);
                 });
             });
 

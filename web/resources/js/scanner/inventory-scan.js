@@ -193,8 +193,9 @@ export default function inventoryScan() {
         },
 
         /**
-         * Opens the dialog that adds an item with the code that was scanned in the first barcode field. A code read as an
-         * EAN-13 is turned into what that field takes (UPC-A, ISBN-10), like a code scanned for the field itself.
+         * Opens the dialog that adds an item with the code that was scanned in the first barcode field. The code is turned into
+         * what that field takes (UPC-A, ISBN-10) like a code scanned for the field itself, as an EAN-13: the conversions only
+         * apply to a code of 13 digits.
          *
          * @returns {void}
          */
@@ -207,7 +208,7 @@ export default function inventoryScan() {
             }
 
             this.startCreate();
-            this.set(field, normalizeScan(code, /^\d{13}$/.test(code) ? 'ean_13' : '', scanFormatOf(field)));
+            this.set(field, normalizeScan(code, 'ean_13', scanFormatOf(field)));
         },
     };
 }

@@ -63,6 +63,10 @@ it('is not indexed, and says so in the header', function (string $name, string $
     $this->get($path)->assertOk()->assertHeader('X-Robots-Tag', 'noindex');
 })->with('pwa routes');
 
+it('only answers GET', function (string $name, string $path): void {
+    $this->post($path)->assertStatus(405);
+})->with('pwa routes');
+
 describe('on a fresh instance', function (): void {
     beforeEach(function (): void {
         $this->bootInstaller(installed: false);

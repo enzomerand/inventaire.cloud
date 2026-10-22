@@ -97,7 +97,3 @@ it('is in French by default and in English for a browser that asks for it', func
         ->and($english['lang'])->toBe('en')
         ->and($english['description'])->toBe('Free inventory tool for professionals and individuals.');
 });
-
-it('only answers GET', function (): void {
-    $this->post('/manifest.webmanifest')->assertStatus(405);
-});

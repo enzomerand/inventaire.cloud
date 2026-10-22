@@ -49,7 +49,7 @@ const HAVE_CURRENT_DATA = 2;
  * @returns {DetectedBarcode[]}
  */
 function readCodes(codes) {
-    return codes.filter((code) => String(code.rawValue ?? '').trim() !== '');
+    return codes.filter((code) => code.rawValue.trim() !== '');
 }
 
 /**
@@ -109,11 +109,6 @@ export default function barcodeScanner() {
 
         /** How many passes in a row have failed. */
         failures: 0,
-
-        /** Whether the panel has something to tell. */
-        get hasMessage() {
-            return this.message !== '';
-        },
 
         /**
          * The text of the live region of the panel: why there is nothing to scan, what is being waited for, or what to aim at.
@@ -203,28 +198,34 @@ export default function barcodeScanner() {
          * @returns {Promise<void>}
          */
         restart() {
-            return this.start(
-                new CustomEvent('barcode-scan-start', { detail: { slot: this.slot, format: this.format } }),
-            );
+            return this.begin(this.format);
         },
 
         /**
-         * Opens the panel and starts looking for a code (the page asked, for this slot). The reader is loaded while the
-         * person answers the question of the browser about the camera.
+         * The page asked a panel to start looking for a code: this one does, when the message is for its slot.
          *
          * @param {CustomEvent} event `detail`: `{ slot, format }`.
          * @returns {Promise<void>}
          */
         async start(event) {
-            if (event.detail?.slot !== this.slot) {
-                return;
+            if (event.detail?.slot === this.slot) {
+                await this.begin(event.detail.format ?? null);
             }
+        },
 
+        /**
+         * Opens the panel and starts looking for a code. The reader is loaded while the person answers the question of the
+         * browser about the camera.
+         *
+         * @param {string | null} format The `format` option of the barcode field being filled in, null for a search.
+         * @returns {Promise<void>}
+         */
+        async begin(format) {
             this.halt();
 
             const ticket = this.ticket;
 
-            this.format = event.detail.format ?? null;
+            this.format = format;
             this.forgetStatus();
             this.open = true;
             this.$nextTick(() => this.$refs.cancel?.focus());
@@ -329,7 +330,7 @@ export default function barcodeScanner() {
         async scan(ticket) {
             timer = null;
 
-            if (ticket !== this.ticket || detector === null) {
+            if (ticket !== this.ticket) {
                 return;
             }
 
@@ -345,11 +346,7 @@ export default function barcodeScanner() {
 
                     this.failures = 0;
 
-                    const found = codes.find((code) => fitsFormat(code.rawValue, this.format));
-
-                    if (found !== undefined) {
-                        this.deliver(found);
-
+                    if (this.deliverFirstFit(codes)) {
                         return;
                     }
 
@@ -439,26 +436,31 @@ export default function barcodeScanner() {
                 return;
             }
 
-            const found = codes.find((code) => fitsFormat(code.rawValue, this.format));
-
-            if (found !== undefined) {
-                this.deliver(found);
-            } else {
+            if (!this.deliverFirstFit(codes)) {
                 this.fail(t(codes.length > 0 ? 'scanner.error.mismatch' : 'scanner.error.not_found'));
             }
         },
 
         /**
-         * A code was read: the camera is let go, the panel closes and the page gets the code the field takes.
+         * Hands the page the first of the codes that the field takes: the camera is let go, the panel closes and the page gets the
+         * code the field takes. When none of them fits, nothing happens.
          *
-         * @param {DetectedBarcode} found
-         * @returns {void}
+         * @param {DetectedBarcode[]} codes
+         * @returns {boolean} Whether a code was handed over.
          */
-        deliver(found) {
+        deliverFirstFit(codes) {
+            const found = codes.find((code) => fitsFormat(code.rawValue, this.format));
+
+            if (found === undefined) {
+                return false;
+            }
+
             const value = normalizeScan(found.rawValue, found.format, this.format);
 
             this.stop();
             this.announce(SCAN_DONE, { slot: this.slot, value });
+
+            return true;
         },
 
         /**

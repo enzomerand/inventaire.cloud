@@ -43,6 +43,16 @@
     }
 
     /**
+     * The copy of the offline page in the cache of this version. The copy was written with a `Vary` (the language, the cookies) that
+     * the request asking for it does not have to match, which `ignoreVary` allows.
+     *
+     * @returns {Promise<Response | undefined>} Undefined when the cache has no copy.
+     */
+    function cachedOfflinePage() {
+        return caches.match(offlineUrl, { cacheName: CACHE_NAME, ignoreVary: true });
+    }
+
+    /**
      * Deletes the caches of the other versions of the worker. Caches that do not start with the prefix are not ours and stay.
      *
      * @returns {Promise<void>}
@@ -68,7 +78,7 @@
     function restoreOfflinePage() {
         restoring ??= (async () => {
             try {
-                if (!(await caches.match(offlineUrl, { cacheName: CACHE_NAME, ignoreVary: true }))) {
+                if (!(await cachedOfflinePage())) {
                     await keepOfflinePage();
                 }
             } catch {
@@ -97,10 +107,7 @@
         try {
             page = await fetch(event.request);
         } catch {
-            // The page of the cache was written with a `Vary` (the language, the cookies) that this request does not have to match.
-            const offline = await caches.match(offlineUrl, { cacheName: CACHE_NAME, ignoreVary: true });
-
-            return offline || Response.error();
+            return (await cachedOfflinePage()) || Response.error();
         }
 
         // Still allowed here (the answer is not settled yet), but the page must never fail because of the repair.

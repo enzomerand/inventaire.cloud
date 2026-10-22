@@ -10,28 +10,25 @@
  * context (plain HTTP, except on localhost). A registration that fails (a private window, a browser setting, a network error) is
  * ignored: the application works without the worker, which only adds the offline page.
  *
- * @param {Navigator} [nav] The navigator, a parameter for the tests.
- * @param {Window} [win] The window, a parameter for the tests.
- * @param {boolean} [enabled] Whether to register at all: only the production build does, a parameter for the tests.
  * @returns {void}
  */
-export function registerServiceWorker(nav = navigator, win = window, enabled = import.meta.env.PROD) {
-    if (!enabled || !('serviceWorker' in nav) || !win.isSecureContext) {
+export function registerServiceWorker() {
+    if (!import.meta.env.PROD || !('serviceWorker' in navigator) || !window.isSecureContext) {
         return;
     }
 
     const register = async () => {
         try {
-            await nav.serviceWorker.register('/sw.js', { scope: '/' });
+            await navigator.serviceWorker.register('/sw.js', { scope: '/' });
         } catch {
             // The offline page is a bonus: there is nothing to tell the person.
         }
     };
 
     // A script that runs after the load event (a module imported late) would wait for an event that already happened.
-    if (win.document.readyState === 'complete') {
+    if (window.document.readyState === 'complete') {
         register();
     } else {
-        win.addEventListener('load', register, { once: true });
+        window.addEventListener('load', register, { once: true });
     }
 }

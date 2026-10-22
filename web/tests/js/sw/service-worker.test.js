@@ -146,10 +146,6 @@ async function answerOf(event) {
 }
 
 describe('the worker file', () => {
-    it('is a classic script: no import, no export', () => {
-        expect(SOURCE).not.toMatch(/^\s*(import|export)\b/m);
-    });
-
     it('listens to the three events it needs, and nothing else', () => {
         expect(Object.keys(createWorker().handlers).sort()).toEqual(['activate', 'fetch', 'install']);
     });

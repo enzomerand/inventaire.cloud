@@ -33,13 +33,19 @@ const FIELD_FORMATS = {
     isbn10: ['ean_13'],
 };
 
+/** A UPC-A symbol as the reader gives it: an EAN-13 made of a 0 and the 12 digits of the code. */
+const UPC_A_AS_EAN_13 = /^0\d{12}$/;
+
+/** The barcode of a book that has an ISBN-10: an EAN-13 that starts with 978 (a 979 one has none). */
+const BOOK_EAN_13 = /^978\d{10}$/;
+
 /**
  * The shape of the reads a field with a format can take. The reader gives a UPC-A symbol as 13 digits (a 0 and the 12 digits) or
  * as 12, and the barcode of a book is an EAN-13 that starts with 978 or 979 (only 978 has an ISBN-10).
  */
 const FIELD_SHAPES = {
     upca: /^0?\d{12}$/,
-    isbn10: /^978\d{10}$/,
+    isbn10: BOOK_EAN_13,
     ean13: /^\d{13}$/,
     isbn13: /^97[89]\d{10}$/,
     ean8: /^\d{8}$/,
@@ -69,7 +75,7 @@ export function formatsFor(fieldFormat = null) {
 export function fitsFormat(rawValue, fieldFormat = null) {
     const shape = Object.hasOwn(FIELD_SHAPES, fieldFormat ?? '') ? FIELD_SHAPES[fieldFormat ?? ''] : undefined;
 
-    return shape === undefined || shape.test(String(rawValue ?? '').trim());
+    return shape === undefined || shape.test(rawValue.trim());
 }
 
 /**
@@ -107,13 +113,17 @@ function isbn10CheckDigit(digits) {
  * @returns {string}
  */
 export function normalizeScan(rawValue, detectedFormat, fieldFormat = null) {
-    const value = String(rawValue ?? '').trim();
+    const value = rawValue.trim();
 
-    if (fieldFormat === 'upca' && ['ean_13', 'upc_a', 'upc_e'].includes(detectedFormat) && /^0\d{12}$/.test(value)) {
+    if (
+        fieldFormat === 'upca' &&
+        ['ean_13', 'upc_a', 'upc_e'].includes(detectedFormat) &&
+        UPC_A_AS_EAN_13.test(value)
+    ) {
         return value.slice(1);
     }
 
-    if (fieldFormat === 'isbn10' && detectedFormat === 'ean_13' && /^978\d{10}$/.test(value)) {
+    if (fieldFormat === 'isbn10' && detectedFormat === 'ean_13' && BOOK_EAN_13.test(value)) {
         const digits = value.slice(3, 12);
 
         return digits + isbn10CheckDigit(digits);
@@ -136,9 +146,9 @@ export function normalizeScan(rawValue, detectedFormat, fieldFormat = null) {
  * @returns {string}
  */
 export function searchTermFor(code) {
-    if (/^0\d{12}$/.test(code)) {
+    if (UPC_A_AS_EAN_13.test(code)) {
         return code.slice(1);
     }
 
-    return /^978\d{10}$/.test(code) ? code.slice(3, 12) : code;
+    return BOOK_EAN_13.test(code) ? code.slice(3, 12) : code;
 }

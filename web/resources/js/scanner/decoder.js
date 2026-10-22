@@ -4,7 +4,8 @@
  * The reader is `barcode-detector` used as a ponyfill (the same code path and the same symbologies on every browser: the
  * native `BarcodeDetector` is missing from Safari and Firefox) on top of ZXing compiled to WebAssembly. Both are imported
  * dynamically, so they are chunks of their own that a page without a scan never fetches, and the `.wasm` file (about 1 MB)
- * comes from this instance (see `wasm-url.js`), never from the CDN the library points to by default.
+ * comes from this instance (Vite copies it into the build, with a hash in its name, and hands its address over), never from the CDN
+ * the library points to by default.
  */
 
 /**
@@ -31,8 +32,10 @@ let ready = null;
  * @returns {Promise<typeof import('barcode-detector/ponyfill')>}
  */
 async function prepare() {
-    const [ponyfill, wasm] = await Promise.all([import('barcode-detector/ponyfill'), import('./wasm-url.js')]);
-    const wasmUrl = wasm.default;
+    const [ponyfill, { default: wasmUrl }] = await Promise.all([
+        import('barcode-detector/ponyfill'),
+        import('zxing-wasm/reader/zxing_reader.wasm?url'),
+    ]);
 
     await ponyfill.prepareZXingModule({
         overrides: {

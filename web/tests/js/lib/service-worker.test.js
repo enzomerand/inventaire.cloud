@@ -1,19 +1,28 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { registerServiceWorker } from '../../../resources/js/lib/service-worker.js';
 
 /**
- * A window that keeps its listeners, to fire `load` when the test says so.
+ * Puts a window that keeps its listeners (to fire `load` when the test says so) and a navigator that has service workers in the
+ * place of the ones of the page (the globals are put back by the configuration of Vitest, the build by `afterEach`).
  *
  * @param {object} [options]
  * @param {boolean} [options.secure] Whether the page is in a secure context.
  * @param {string} [options.readyState] The state of the document.
- * @returns {object} The window.
+ * @param {Function} [options.register] What `serviceWorker.register` does.
+ * @param {boolean} [options.serviceWorker] Whether the browser has service workers at all.
+ * @param {boolean} [options.production] Whether this is the production build.
+ * @returns {{ win: object, nav: object }} The window (with `fire`) and the navigator.
  */
-function fakeWindow({ secure = true, readyState = 'loading' } = {}) {
+function stubPage({
+    secure = true,
+    readyState = 'loading',
+    register = vi.fn(async () => ({})),
+    serviceWorker = true,
+    production = true,
+} = {}) {
     const listeners = {};
-
-    return {
+    const win = {
         isSecureContext: secure,
         document: { readyState },
         addEventListener: vi.fn((type, handler) => {
@@ -21,16 +30,13 @@ function fakeWindow({ secure = true, readyState = 'loading' } = {}) {
         }),
         fire: (type) => listeners[type](),
     };
-}
+    const nav = serviceWorker ? { serviceWorker: { register } } : {};
 
-/**
- * A navigator that has service workers, and the function that registers them.
- *
- * @param {Function} [register] What `serviceWorker.register` does.
- * @returns {object} The navigator.
- */
-function fakeNavigator(register = vi.fn(async () => ({}))) {
-    return { serviceWorker: { register } };
+    vi.stubEnv('PROD', production);
+    vi.stubGlobal('window', win);
+    vi.stubGlobal('navigator', nav);
+
+    return { win, nav };
 }
 
 /** Lets the promises that are waiting settle. */
@@ -39,11 +45,14 @@ async function settle() {
 }
 
 describe('registering the service worker', () => {
-    it('registers /sw.js for the whole site once the page has loaded, not before', async () => {
-        const nav = fakeNavigator();
-        const win = fakeWindow();
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
 
-        registerServiceWorker(nav, win, true);
+    it('registers /sw.js for the whole site once the page has loaded, not before', async () => {
+        const { win, nav } = stubPage();
+
+        registerServiceWorker();
 
         expect(nav.serviceWorker.register).not.toHaveBeenCalled();
 
@@ -55,10 +64,9 @@ describe('registering the service worker', () => {
     });
 
     it('registers at once when the page has already loaded', async () => {
-        const nav = fakeNavigator();
-        const win = fakeWindow({ readyState: 'complete' });
+        const { win, nav } = stubPage({ readyState: 'complete' });
 
-        registerServiceWorker(nav, win, true);
+        registerServiceWorker();
         await settle();
 
         expect(nav.serviceWorker.register).toHaveBeenCalledWith('/sw.js', { scope: '/' });
@@ -66,18 +74,17 @@ describe('registering the service worker', () => {
     });
 
     it('does nothing in a browser without service workers', () => {
-        const win = fakeWindow();
+        const { win } = stubPage({ serviceWorker: false });
 
-        registerServiceWorker({}, win, true);
+        registerServiceWorker();
 
         expect(win.addEventListener).not.toHaveBeenCalled();
     });
 
     it('does nothing outside a secure context (plain HTTP)', () => {
-        const nav = fakeNavigator();
-        const win = fakeWindow({ secure: false });
+        const { win, nav } = stubPage({ secure: false });
 
-        registerServiceWorker(nav, win, true);
+        registerServiceWorker();
 
         expect(win.addEventListener).not.toHaveBeenCalled();
         expect(nav.serviceWorker.register).not.toHaveBeenCalled();
@@ -86,12 +93,11 @@ describe('registering the service worker', () => {
     it('ignores a registration that fails, without a word', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const nav = fakeNavigator(
-            vi.fn(() => Promise.reject(new DOMException('The operation is insecure.', 'SecurityError'))),
-        );
-        const win = fakeWindow();
+        const { win, nav } = stubPage({
+            register: vi.fn(() => Promise.reject(new DOMException('The operation is insecure.', 'SecurityError'))),
+        });
 
-        registerServiceWorker(nav, win, true);
+        registerServiceWorker();
         win.fire('load');
         await settle();
 
@@ -100,46 +106,13 @@ describe('registering the service worker', () => {
         expect(error).not.toHaveBeenCalled();
     });
 
-    it('ignores a browser that refuses at once, by throwing', async () => {
-        const nav = fakeNavigator(
-            vi.fn(() => {
-                throw new TypeError('Failed to register a ServiceWorker');
-            }),
-        );
-        const win = fakeWindow();
-
-        registerServiceWorker(nav, win, true);
-        win.fire('load');
-        await settle();
-
-        expect(nav.serviceWorker.register).toHaveBeenCalledTimes(1);
-    });
-
     it('does nothing in a development build: the worker is for the production one', async () => {
-        const nav = fakeNavigator();
-        const win = fakeWindow({ readyState: 'complete' });
+        const { win, nav } = stubPage({ readyState: 'complete', production: false });
 
-        registerServiceWorker(nav, win, false);
+        registerServiceWorker();
         await settle();
 
         expect(win.addEventListener).not.toHaveBeenCalled();
         expect(nav.serviceWorker.register).not.toHaveBeenCalled();
-    });
-
-    it('registers only in a production build by default (Vitest is not one)', async () => {
-        const nav = fakeNavigator();
-        const win = fakeWindow({ readyState: 'complete' });
-
-        registerServiceWorker(nav, win);
-        await settle();
-
-        expect(import.meta.env.PROD).toBe(false);
-        expect(nav.serviceWorker.register).not.toHaveBeenCalled();
-    });
-
-    it('works with the navigator and the window of the page by default', () => {
-        // jsdom has no service workers: nothing to register, and nothing that throws.
-        expect(() => registerServiceWorker()).not.toThrow();
-        expect(() => registerServiceWorker(navigator, window, true)).not.toThrow();
     });
 });

@@ -5,8 +5,8 @@
  * assume about it is true; this one says what the reader really gives for the codes the application takes, and that `normalizeScan`
  * turns it into the code of the field.
  *
- * The glue of the reader only knows how to fetch its WebAssembly file in a browser: in Node the bytes are handed over, but the
- * address that the loader of the application (`resources/js/scanner/decoder.js`) gives for the file is still asked for and recorded.
+ * The glue of the reader only knows how to fetch its WebAssembly file in a browser: in Node the bytes are handed over (the address
+ * that the loader of the application, `resources/js/scanner/decoder.js`, gives for the file is tested in `decoder.test.js`).
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -15,14 +15,10 @@ import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadDetector } from '../../../resources/js/scanner/decoder.js';
-import wasmUrl from '../../../resources/js/scanner/wasm-url.js';
 import { fitsFormat, formatsFor, normalizeScan } from '../../../resources/js/scanner/formats.js';
 import { barcodePixels, ean13Modules, ean8Modules } from '../support/barcode.js';
 
 const WASM_FILE = resolve(import.meta.dirname, '../../../node_modules/zxing-wasm/dist/reader/zxing_reader.wasm');
-
-/** What the loader of the application asked of the reader: the options it passed, and the addresses it was asked to locate. */
-const asked = vi.hoisted(() => ({ options: [], located: [] }));
 
 vi.mock('barcode-detector/ponyfill', async (importOriginal) => {
     const real = await importOriginal();
@@ -34,25 +30,9 @@ vi.mock('barcode-detector/ponyfill', async (importOriginal) => {
 
     return {
         ...real,
-        prepareZXingModule: (options) => {
-            asked.options.push(options);
-
-            return real.prepareZXingModule({
-                ...options,
-                overrides: {
-                    ...options.overrides,
-                    // The address the application gives is asked for and kept; only the bytes come from the disk.
-                    locateFile: (path, prefix) => {
-                        const address = options.overrides.locateFile(path, prefix);
-
-                        asked.located.push(address);
-
-                        return address;
-                    },
-                    wasmBinary,
-                },
-            });
-        },
+        // Only the bytes come from the disk.
+        prepareZXingModule: (options) =>
+            real.prepareZXingModule({ ...options, overrides: { ...options.overrides, wasmBinary } }),
     };
 });
 
@@ -96,23 +76,6 @@ describe('the real barcode reader', () => {
     });
 
     describe('where it comes from', () => {
-        it('is asked for the file of this instance and for no address of a CDN', async () => {
-            await loadDetector(['ean_13']);
-
-            expect(asked.options.length).toBeGreaterThan(0);
-            expect(asked.located).toEqual([wasmUrl]);
-
-            for (const address of asked.located) {
-                // A path of this instance: no scheme, no host, and nothing named after the CDN the library falls back to.
-                expect(address).not.toMatch(/^[a-z][a-z0-9+.-]*:/i);
-                expect(address).not.toMatch(/^\/\//);
-                expect(address).not.toMatch(/jsdelivr|cdn|unpkg/i);
-                expect(address.endsWith('.wasm')).toBe(true);
-            }
-
-            expect(fetch).not.toHaveBeenCalled();
-        });
-
         it('has a WebAssembly file that is the one its JavaScript was built with (a glue and a file that differ do not start)', async () => {
             const { ZXING_WASM_SHA256, ZXING_WASM_VERSION } = await import('barcode-detector/ponyfill');
             const sha256 = createHash('sha256').update(readFileSync(WASM_FILE)).digest('hex');

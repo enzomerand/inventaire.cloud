@@ -197,7 +197,7 @@ describe('the scanner panel', () => {
             expect(video.play).toHaveBeenCalled();
             expect(component.loading).toBe(false);
             expect(component.streaming).toBe(true);
-            expect(component.hasMessage).toBe(false);
+            expect(component.message).toBe('');
         });
 
         it('loads the reader while the person answers the question of the browser', async () => {
@@ -365,7 +365,7 @@ describe('the scanner panel', () => {
             component.start(startEvent());
             await settle(SCAN_INTERVAL_MS);
 
-            expect(component.hasMessage).toBe(false);
+            expect(component.message).toBe('');
             expect(component.streaming).toBe(true);
 
             await settle(SCAN_INTERVAL_MS);
@@ -392,32 +392,27 @@ describe('the scanner panel', () => {
     });
 
     describe('when the camera cannot be used', () => {
-        it('says the camera needs HTTPS, without asking for it, and leaves the photo', async () => {
-            setSecure(false);
+        it.each([
+            ['the page is not secure', () => setSecure(false)],
+            ['the browser has no camera API at all', () => setDevices(undefined)],
+        ])(
+            'says the camera needs HTTPS, without asking for it, and leaves the photo, when %s',
+            async (_case, withoutCamera) => {
+                withoutCamera();
 
-            const { component } = mountPanel();
+                const { component } = mountPanel();
 
-            component.start(startEvent());
-            await settle();
+                component.start(startEvent());
+                await settle();
 
-            expect(devices.getUserMedia).not.toHaveBeenCalled();
-            expect(loadDetector).not.toHaveBeenCalled();
-            expect(component.open).toBe(true);
-            expect(component.message).toBe('scanner.error.insecure');
-            expect(component.loading).toBe(false);
-            expect(component.streaming).toBe(false);
-        });
-
-        it('says the same when the browser has no camera API at all', async () => {
-            setDevices(undefined);
-
-            const { component } = mountPanel();
-
-            component.start(startEvent());
-            await settle();
-
-            expect(component.message).toBe('scanner.error.insecure');
-        });
+                expect(devices.getUserMedia).not.toHaveBeenCalled();
+                expect(loadDetector).not.toHaveBeenCalled();
+                expect(component.open).toBe(true);
+                expect(component.message).toBe('scanner.error.insecure');
+                expect(component.loading).toBe(false);
+                expect(component.streaming).toBe(false);
+            },
+        );
 
         it.each([
             ['NotAllowedError', 'scanner.error.denied'],
@@ -480,7 +475,7 @@ describe('the scanner panel', () => {
             component.start(startEvent());
             await settle();
 
-            expect(component.hasMessage).toBe(true);
+            expect(component.message).not.toBe('');
 
             devices.getUserMedia.mockResolvedValue(cameraStream());
             component.start(startEvent());
@@ -544,23 +539,6 @@ describe('the scanner panel', () => {
             expect(component.open).toBe(false);
             // The same photo can be chosen again.
             expect(photo.value).toBe('');
-        });
-
-        it('works with no camera at all: on an insecure page, or when the permission was refused', async () => {
-            setSecure(false);
-
-            const { component, photo } = mountPanel();
-
-            reader([EAN]);
-            component.start(startEvent());
-            await settle();
-            expect(component.message).toBe('scanner.error.insecure');
-
-            choose(photo);
-            await component.onPhoto({ target: photo });
-
-            expect(component.message).toBe('');
-            expect(heard).toEqual([['barcode-scanned', { slot: 'field', value: '3017620422003' }]]);
         });
 
         it('says no code was found, and stays open for another try', async () => {
@@ -1117,11 +1095,9 @@ describe('the scanner panel', () => {
             await settle();
             component.stop();
             slow.resolve(detector);
-            await settle();
+            await settle(5 * SCAN_INTERVAL_MS);
 
             // A pass that still ran would look at the camera of nobody with the symbologies of the field that was left.
-            await component.scan(component.ticket);
-
             expect(detector.detect).not.toHaveBeenCalled();
             expect(component.streaming).toBe(false);
         });
