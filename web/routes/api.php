@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\V1\WorkspaceController;
 use App\Http\Controllers\Api\V1\WorkspaceInvitationController;
 use App\Http\Controllers\Api\V1\WorkspaceMemberController;
 use App\Http\Controllers\Api\V1\WorkspaceOwnershipController;
+use App\Http\Controllers\Api\V1\WorkspacePhotoEntryController;
 use App\Http\Middleware\PaceApiTokens;
 use App\Http\Middleware\RefuseApiTokens;
 use App\Http\Middleware\RequireStatefulRequest;
@@ -91,6 +92,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 // Handing the ownership of a workspace over: the person decides it at their browser. A leaked token, whatever its abilities,
                 // must not be able to make somebody else the owner of a workspace and lock its real owner out.
                 Route::post('/workspaces/{workspace}/transfer', WorkspaceOwnershipController::class)->name('workspaces.transfer');
+
+                // The consent of a workspace to the photo entry (its photos go to a third party, Anthropic, and every analysis is paid for by the
+                // instance): its owner chooses at their browser, a token cannot.
+                Route::put('/workspaces/{workspace}/photo-entry', WorkspacePhotoEntryController::class)->name('workspaces.photo-entry.update');
             });
         });
 

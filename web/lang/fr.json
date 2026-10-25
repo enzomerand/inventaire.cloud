@@ -1416,6 +1416,7 @@
     "No API key: set ANTHROPIC_API_KEY": "Aucune clé d'API : définissez ANTHROPIC_API_KEY",
     "Until a key is set in the environment of the instance, the photo entry stays unavailable, whatever this switch says.": "Tant qu'aucune clé n'est définie dans l'environnement de l'instance, la saisie par photos reste indisponible, quelle que soit la position de ce réglage.",
     "Photo entry is on: owners can now turn it on for their workspace.": "La saisie par photos est activée : les propriétaires peuvent maintenant l'activer pour leur espace de travail.",
+    "The photo entry is not available on this instance: ask its administrator.": "La saisie par photos n'est pas disponible sur cette instance : demandez à son administrateur.",
     "Photo entry is off: no photo is sent to Anthropic.": "La saisie par photos est désactivée : aucune photo n'est envoyée à Anthropic.",
     "Untitled link": "Lien sans libellé",
     "Active": "Actif",
