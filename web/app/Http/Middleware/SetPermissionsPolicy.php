@@ -13,14 +13,11 @@ use Symfony\Component\HttpFoundation\Response;
  * application, and any frame inside it, may ask for.
  *
  * The camera stays allowed for the application's own pages (the barcode scanner, `resources/js/scanner/`) and for nobody
- * else: a frame of another site, should one ever be embedded, cannot open it. The other features the application never
- * uses (the microphone, the location, the motion sensors, the devices plugged in, payments, screen capture) are turned
- * off, so that a script that should not be there (an injected one, a compromised dependency) cannot ask for them either.
+ * else: a frame of another site, should one ever be embedded, cannot open it. The features the application never uses
+ * are turned off, so that a script that should not be there cannot ask for them either.
  *
- * Features the front does use are left out of the list, so they keep the browser's default (the page itself only):
- * writing to the clipboard (the "copy" buttons), and those a later front may need, such as the full screen, the web
- * share sheet or passkeys. Only names Chromium knows are listed, since it reports an unknown one in the console (the
- * other browsers ignore the names they do not know).
+ * Features the front uses, such as writing to the clipboard (the "copy" buttons), stay out of the list and keep the
+ * browser's default. Only names Chromium knows are listed: it reports an unknown one in the console.
  */
 final class SetPermissionsPolicy
 {
