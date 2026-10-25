@@ -34,7 +34,7 @@ function workspacePageOffersPhotoEntry(): void
 /**
  * The workspaces page as the user reads it.
  */
-function workspacePage(object $test, User $user, string $language = 'en'): TestResponse
+function workspacesPageFor(object $test, User $user, string $language = 'en'): TestResponse
 {
     return $test->actingAs($user)->get(route('app.workspaces'), ['Accept-Language' => $language])->assertOk();
 }
@@ -75,7 +75,7 @@ describe('when the instance does not offer the photo entry', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
         ownedWorkspace($user, 'Shop', true);
 
-        $page = workspacePage($this, $user);
+        $page = workspacesPageFor($this, $user);
 
         expect(workspacePageConsents($page))->toBeNull();
         $page->assertSee('data-photo-entry="null"', false);
@@ -99,7 +99,7 @@ describe('when the instance offers the photo entry', function (): void {
         $shop = ownedWorkspace($user, 'Shop', true);
         $depot = ownedWorkspace($user, 'Depot', false);
 
-        $consents = workspacePageConsents(workspacePage($this, $user));
+        $consents = workspacePageConsents(workspacesPageFor($this, $user));
 
         expect($consents)->toBe([$personal->ulid => false, $shop->ulid => true, $depot->ulid => false]);
     });
@@ -108,12 +108,12 @@ describe('when the instance offers the photo entry', function (): void {
         $user = User::factory()->withPersonalWorkspace()->create();
         $shop = ownedWorkspace($user, 'Shop', false);
 
-        expect(workspacePageConsents(workspacePage($this, $user->fresh()))[$shop->ulid])->toBeFalse();
+        expect(workspacePageConsents(workspacesPageFor($this, $user->fresh()))[$shop->ulid])->toBeFalse();
 
         $shop->forceFill(['photo_entry_enabled' => true])->save();
         $this->flushSession();
 
-        expect(workspacePageConsents(workspacePage($this, $user->fresh()))[$shop->ulid])->toBeTrue();
+        expect(workspacePageConsents(workspacesPageFor($this, $user->fresh()))[$shop->ulid])->toBeTrue();
     });
 
     it('leaves out the workspaces the person only edits or reads: the owner alone chooses', function (): void {
@@ -125,7 +125,7 @@ describe('when the instance offers the photo entry', function (): void {
         $edited->members()->attach($user->id, ['role' => WorkspaceRole::Editor->value]);
         $read->members()->attach($user->id, ['role' => WorkspaceRole::Viewer->value]);
 
-        $consents = workspacePageConsents(workspacePage($this, $user->fresh()));
+        $consents = workspacePageConsents(workspacesPageFor($this, $user->fresh()));
 
         expect($consents)->toHaveKey($mine->ulid)
             ->and($consents)->not->toHaveKey($edited->ulid)
@@ -138,7 +138,7 @@ describe('when the instance offers the photo entry', function (): void {
         $stranger = User::factory()->withPersonalWorkspace()->create();
         $theirs = ownedWorkspace($stranger, 'Theirs', true);
 
-        $page = workspacePage($this, $user);
+        $page = workspacesPageFor($this, $user);
 
         expect(workspacePageConsents($page))->not->toHaveKey($theirs->ulid);
         $page->assertDontSee($theirs->ulid)->assertDontSee('Theirs');
@@ -147,16 +147,16 @@ describe('when the instance offers the photo entry', function (): void {
     it('renders an empty object, not a list, for somebody who owns nothing', function (): void {
         $user = User::factory()->create();
 
-        workspacePage($this, $user)->assertSee('data-photo-entry="{}"', false);
+        workspacesPageFor($this, $user)->assertSee('data-photo-entry="{}"', false);
     });
 
     it('gives the address of the switch, with the place of the ULID', function (): void {
-        workspacePage($this, User::factory()->withPersonalWorkspace()->create())
+        workspacesPageFor($this, User::factory()->withPersonalWorkspace()->create())
             ->assertSee('data-photo-entry-url="/api/v1/workspaces/__id__/photo-entry"', false);
     });
 
     it('has the switch in the row of a workspace, with its note', function (): void {
-        workspacePage($this, User::factory()->withPersonalWorkspace()->create())
+        workspacesPageFor($this, User::factory()->withPersonalWorkspace()->create())
             ->assertSee('Photo entry (AI)')
             ->assertSee('Photos sent by the editors are read by Claude (Anthropic), then deleted.')
             ->assertSee('@change="togglePhotoEntry(item, $event)"', false)
@@ -164,17 +164,17 @@ describe('when the instance offers the photo entry', function (): void {
     });
 
     it('never writes the key in the page', function (): void {
-        workspacePage($this, User::factory()->withPersonalWorkspace()->create())->assertDontSee('sk-ant-test-secret');
+        workspacesPageFor($this, User::factory()->withPersonalWorkspace()->create())->assertDontSee('sk-ant-test-secret');
     });
 
     it('is translated', function (): void {
-        workspacePage($this, User::factory()->withPersonalWorkspace()->create(), 'fr')
+        workspacesPageFor($this, User::factory()->withPersonalWorkspace()->create(), 'fr')
             ->assertSee('Saisie par photos (IA)')
             ->assertSee('Les photos envoyées par les éditeurs sont lues par Claude (Anthropic), puis supprimées.');
     });
 
     it('gives the scripts the messages the switch needs', function (): void {
-        workspacePage($this, User::factory()->withPersonalWorkspace()->create())
+        workspacesPageFor($this, User::factory()->withPersonalWorkspace()->create())
             ->assertSee('workspaces.photo_entry_named', false)
             ->assertSee('workspaces.notice.photo_entry_on', false)
             ->assertSee('workspaces.notice.photo_entry_off', false);
