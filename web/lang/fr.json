@@ -1430,5 +1430,8 @@
     "The analysis service is not available right now. Try again in a moment.": "Le service d'analyse n'est pas disponible pour le moment. Réessayez dans un instant.",
     "The photo analysis is not set up properly on this instance. Ask the administrator.": "L'analyse des photos n'est pas correctement configurée sur cette instance. Demandez à l'administrateur.",
     "The photos could not be analysed. Try again.": "Les photos n'ont pas pu être analysées. Réessayez.",
-    "The analysis took too long and was given up. Try again.": "L'analyse a pris trop de temps et a été abandonnée. Réessayez."
+    "The analysis took too long and was given up. Try again.": "L'analyse a pris trop de temps et a été abandonnée. Réessayez.",
+    "This file is not a photo: send a JPEG, PNG or WebP image.": "Ce fichier n'est pas une photo : envoyez une image JPEG, PNG ou WebP.",
+    "This photo cannot be read.": "Cette photo ne peut pas être lue.",
+    "This photo is too large to be analysed: send a smaller one.": "Cette photo est trop grande pour être analysée : envoyez-en une plus petite."
 }

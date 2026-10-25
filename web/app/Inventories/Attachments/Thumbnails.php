@@ -7,7 +7,8 @@ namespace App\Inventories\Attachments;
 use GdImage;
 
 /**
- * Makes the thumbnail of an image with GD: a JPEG whose longest side is 480 pixels at most, without any metadata.
+ * Makes the thumbnail of an image with GD: a JPEG whose longest side is 480 pixels at most, without any metadata. The same work, at
+ * another size and quality, prepares the photos the photo entry sends to Claude ({@see self::reencode()}).
  *
  * - JPEG, PNG, WebP and GIF are supported (the first image of an animation);
  * - the orientation of a JPEG that the camera recorded in its EXIF data is applied to the pixels, so that the thumbnail
@@ -68,6 +69,24 @@ final class Thumbnails
      */
     public function make(string $path, string $mime, ImageInfo $info): ?string
     {
+        return $this->reencode($path, $mime, $info, self::MAX_SIDE, self::QUALITY);
+    }
+
+    /**
+     * The image as a JPEG without any metadata (no EXIF, so no place, no date, no camera), turned upright, and brought down to
+     * `$maxSide` pixels on its longest side if it is larger (a smaller image is never enlarged). A thumbnail is the same work at 480
+     * pixels and quality 80 ({@see self::make()}). Null on purpose when GD is not there, the image has too many pixels, or PHP has not
+     * the memory to decode it.
+     *
+     * @param  string  $mime  The type detected from the content.
+     * @param  ImageInfo  $info  What {@see self::inspect()} said about the file.
+     * @param  int  $maxSide  Longest side of the result, in pixels.
+     * @param  int  $quality  Quality of the JPEG, from 0 to 100.
+     *
+     * @throws UnreadableImageException When the image cannot be decoded.
+     */
+    public function reencode(string $path, string $mime, ImageInfo $info, int $maxSide, int $quality): ?string
+    {
         if (! function_exists('imagecreatetruecolor') || $info->width * $info->height > self::MAX_PIXELS || ! $this->fitsInMemory($info)) {
             return null;
         }
@@ -86,7 +105,7 @@ final class Thumbnails
         $source = $this->orient($source, $info->orientation);
         $width = imagesx($source);
         $height = imagesy($source);
-        $scale = min(1.0, self::MAX_SIDE / max($width, $height));
+        $scale = min(1.0, $maxSide / max($width, $height));
         $thumbWidth = max(1, (int) round($width * $scale));
         $thumbHeight = max(1, (int) round($height * $scale));
 
@@ -95,7 +114,7 @@ final class Thumbnails
         imagecopyresampled($canvas, $source, 0, 0, 0, 0, $thumbWidth, $thumbHeight, $width, $height);
 
         ob_start();
-        $encoded = imagejpeg($canvas, null, self::QUALITY);
+        $encoded = imagejpeg($canvas, null, $quality);
         $jpeg = (string) ob_get_clean();
 
         if (! $encoded || $jpeg === '') {
