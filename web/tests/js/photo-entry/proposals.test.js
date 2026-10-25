@@ -98,6 +98,16 @@ describe('the words of a failure', () => {
         });
     });
 
+    it('says the instance is out of analyses, without offering to try again, when the API says so (429)', () => {
+        expect(
+            requestFailure({ status: 429, code: 'photo_analyses_instance_limit', message: 'Slow', retryAfter: 600 }),
+        ).toEqual({
+            text: 'The instance reached its daily number of photo analyses; try again tomorrow.',
+            retry: false,
+            resume: false,
+        });
+    });
+
     it('tells how long to wait when the API says (429)', () => {
         expect(requestFailure({ status: 429, message: 'Slow', retryAfter: 600 }).text).toBe(
             'Too many attempts. Try again in 10 minutes.',

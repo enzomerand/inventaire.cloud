@@ -6,7 +6,9 @@ use App\Jobs\AnalyzePhotos;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\PhotoAnalysis;
+use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\FakePhotoAnalyzer;
+use App\PhotoEntry\PhotoAnalysisQuota;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\PhotoAnalyzer;
 use App\Settings\InstanceSettings;
@@ -366,6 +368,81 @@ describe('the pace', function (): void {
         photoPost($this, $editor, $case['inventory'], [photoUpload()])->assertStatus(202);
         // A photo that would be refused as unreadable is not even looked at: the day is used up.
         photoPost($this, $editor, $case['inventory'], [attachmentUploadedAs('x.jpg', substr(attachmentImageBytes('jpeg', 200, 200), 0, 160).str_repeat("\x00", 40), 'image/jpeg')])->assertStatus(429);
+    });
+});
+
+describe('the cap of the instance', function (): void {
+    it('is 200 analyses a day unless the configuration says otherwise', function (): void {
+        expect(config('inventories.photo_analyses_per_day_instance'))->toBe(200);
+    });
+
+    it('stops everybody once the instance has run its analyses of the day, with a message and a code of its own', function (): void {
+        Queue::fake();
+        config(['inventories.photo_analyses_per_day' => 100, 'inventories.photo_analyses_per_day_instance' => 2]);
+        $case = photoReady();
+        $editor = $case['team']['editor'];
+        $owner = $case['team']['owner'];
+
+        photoPost($this, $editor, $case['inventory'], [photoUpload()])->assertStatus(202);
+        photoPost($this, $owner, $case['inventory'], [photoUpload()])->assertStatus(202);
+        $refused = photoPost($this, $editor, $case['inventory'], [photoUpload()])->assertStatus(429);
+
+        expect($refused->json())->toBe(['message' => 'The instance reached its daily number of photo analyses; try again tomorrow.', 'code' => 'photo_analyses_instance_limit'])
+            ->and((int) $refused->headers->get('Retry-After'))->toBeGreaterThan(0)->toBeLessThanOrEqual(86400)
+            ->and($refused->headers->get('X-RateLimit-Limit'))->toBe('2')
+            ->and(PhotoAnalysis::query()->count())->toBe(2)
+            ->and(storedFiles())->toHaveCount(2);
+
+        // The other person is refused as well: the cap is the instance's, not the person's.
+        photoPost($this, $owner, $case['inventory'], [photoUpload()])->assertStatus(429)->assertJsonPath('code', 'photo_analyses_instance_limit');
+    });
+
+    it('is told before the photos are worked on, like the limit of a person', function (): void {
+        Queue::fake();
+        config(['inventories.photo_analyses_per_day_instance' => 1]);
+        $case = photoReady();
+
+        photoPost($this, $case['team']['owner'], $case['inventory'], [photoUpload()])->assertStatus(202);
+        photoPost($this, $case['team']['editor'], $case['inventory'], [attachmentUploadedAs('x.jpg', substr(attachmentImageBytes('jpeg', 200, 200), 0, 160).str_repeat("\x00", 40), 'image/jpeg')])
+            ->assertStatus(429)
+            ->assertJsonPath('code', 'photo_analyses_instance_limit');
+    });
+
+    it('gives the place back to the person who was refused because of it', function (): void {
+        Queue::fake();
+        config(['inventories.photo_analyses_per_day_instance' => 1]);
+        $case = photoReady();
+        $quota = app(PhotoAnalysisQuota::class);
+        $editor = $case['team']['editor'];
+
+        photoPost($this, $case['team']['owner'], $case['inventory'], [photoUpload()])->assertStatus(202);
+
+        // The check made before the photos were prepared passed (another request had not counted yet): the reservation is what refuses.
+        expect(fn () => $quota->reserve($editor))->toThrow(InstanceQuotaReachedException::class)
+            ->and(RateLimiter::attempts('photo-analyses-per-day:'.$editor->id))->toBe(0);
+    });
+
+    it('counts only the analyses that are accepted', function (): void {
+        Queue::fake();
+        config(['inventories.photo_analyses_per_day_instance' => 5]);
+        $case = photoReady();
+
+        photoPost($this, $case['team']['editor'], $case['inventory'], [attachmentUploadedAs('x.jpg', 'text', 'image/jpeg')])->assertStatus(422);
+        photoPost($this, $case['team']['editor'], $case['inventory'], [photoUpload()])->assertStatus(202);
+
+        expect(RateLimiter::attempts('photo-analyses-per-day:instance'))->toBe(1);
+    });
+
+    it('is no cap when it is 0', function (): void {
+        Queue::fake();
+        config(['inventories.photo_analyses_per_day' => 100, 'inventories.photo_analyses_per_day_instance' => 0]);
+        $case = photoReady();
+
+        foreach ([1, 2, 3] as $ignored) {
+            photoPost($this, $case['team']['editor'], $case['inventory'], [photoUpload()])->assertStatus(202);
+        }
+
+        expect(PhotoAnalysis::query()->count())->toBe(3)->and(RateLimiter::attempts('photo-analyses-per-day:instance'))->toBe(0);
     });
 });
 

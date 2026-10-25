@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Responses;
 
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
+use Illuminate\Http\JsonResponse;
 
 /**
  * The refusal of a request that went beyond a pace, the same for every pace of the application: the framework renders the exception
@@ -27,5 +28,19 @@ final class TooManyRequests
             'Retry-After' => $retryAfter,
             'X-RateLimit-Reset' => time() + $retryAfter,
         ]);
+    }
+
+    /**
+     * The `429` of a pace that is used up, with a message and a `code` of its own, for a limit the person should be told apart from the
+     * others (the exception above is rendered with the general message). The headers are the same.
+     *
+     * @param  string  $message  What the person is told, already translated.
+     * @param  string  $code  Why, for a program.
+     * @param  int  $limit  What the pace allows (`X-RateLimit-Limit`).
+     * @param  int  $retryAfter  The seconds until the pace allows a request again (`Retry-After`).
+     */
+    public static function response(string $message, string $code, int $limit, int $retryAfter): JsonResponse
+    {
+        return new JsonResponse(['message' => $message, 'code' => $code], 429, self::exception($message, $limit, $retryAfter)->getHeaders());
     }
 }

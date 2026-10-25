@@ -203,6 +203,7 @@ class ClientMessages extends Component
             'photoEntry.error.misconfigured' => __('The analysis service is not set up correctly. Ask the administrator of this instance.'),
             'photoEntry.error.failed' => __('The analysis failed. Please try again.'),
             'photoEntry.error.disabled' => __('Adding items from photos is turned off.'),
+            'photoEntry.error.instance_limit' => __('The instance reached its daily number of photo analyses; try again tomorrow.'),
             'photoEntry.error.no_fields' => __('This inventory has no field the photos could fill in.'),
             'photoEntry.error.gone' => __('This analysis is no longer available. Send the photos again.'),
             'photoEntry.error.lost' => __('The connection to the analysis was lost.'),

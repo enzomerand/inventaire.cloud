@@ -9,6 +9,7 @@ use App\Jobs\AnalyzePhotos;
 use App\Models\Inventory;
 use App\Models\PhotoAnalysis;
 use App\Models\User;
+use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\Exceptions\NoFieldsToFillException;
 use App\PhotoEntry\Exceptions\PhotoEntryDisabledException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
@@ -20,7 +21,7 @@ use Throwable;
  * Receives the photos of an object and starts their analysis.
  *
  * In this order, so that nothing is spent on a request that cannot be served: the workspace must have the photo entry on and the
- * inventory a field to fill (`409`), the person must have analyses left today (`429`), every photo is decoded and drawn again without any
+ * inventory a field to fill (`409`), the person and the instance must have analyses left today (`429`), every photo is decoded and drawn again without any
  * metadata ({@see PhotoImages}, `422`), the analysis is counted ({@see PhotoAnalysisQuota}), the photos are written to the disk, under the
  * folder of the inventory, then the row is created `pending` and the job {@see AnalyzePhotos} queued once that is committed. The job reads
  * the photos back, asks Claude, stores the proposals and deletes the photos; the row is kept `inventories.photo_analysis_ttl_hours`.
@@ -50,6 +51,7 @@ final class PhotoAnalyses
      * @throws PhotoEntryDisabledException When the workspace of the inventory may not use the photo entry.
      * @throws NoFieldsToFillException When no field of the inventory can be filled from a photo.
      * @throws ThrottleRequestsException When the person has asked for all the analyses they may today.
+     * @throws InstanceQuotaReachedException When the instance has run all the analyses it may today.
      * @throws UnreadablePhotoException When a photo is not an image that can be read; it says which one.
      */
     public function request(Inventory $inventory, User $user, array $photos, string $locale): PhotoAnalysis

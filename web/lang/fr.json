@@ -1493,5 +1493,6 @@
     "This inventory has no field that photos can fill.": "Cet inventaire n'a aucun champ qu'une photo puisse remplir.",
     "You can send :count photo at a time.|You can send :count photos at a time.": "Vous pouvez envoyer :count photo à la fois.|Vous pouvez envoyer :count photos à la fois.",
     "Each photo must not be larger than :size.": "Chaque photo ne doit pas dépasser :size.",
+    "The instance reached its daily number of photo analyses; try again tomorrow.": "L'instance a atteint son nombre quotidien d'analyses de photos ; réessayez demain.",
     "The photo entry was turned off before the analysis could start. The photos were deleted without being sent.": "La saisie par photos a été désactivée avant le début de l'analyse. Les photos ont été supprimées sans être envoyées."
 }

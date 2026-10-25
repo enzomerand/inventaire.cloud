@@ -26,6 +26,9 @@ export const DISABLED_CODE = 'photo_entry_disabled';
 /** The code the API gives to a request when the inventory has no field the photos could fill. */
 export const NO_FIELDS_CODE = 'no_fields_to_fill';
 
+/** The code of the `429` that says the instance, not the person, is out of analyses for today. */
+export const INSTANCE_LIMIT_CODE = 'photo_analyses_instance_limit';
+
 /** The classes of the badge of each level of confidence. */
 const LEVEL_CLASSES = {
     low: 'badge bg-orange-lt',
@@ -157,6 +160,11 @@ export function requestFailure(error) {
 
     if (error.status === 409 && error.code === NO_FIELDS_CODE) {
         return { text: t('photoEntry.error.no_fields'), retry: false, resume: false };
+    }
+
+    if (error.status === 429 && error.code === INSTANCE_LIMIT_CODE) {
+        // Trying again now cannot work: it is the whole instance that has run its analyses of the day.
+        return { text: t('photoEntry.error.instance_limit'), retry: false, resume: false };
     }
 
     if (error.status === 429) {

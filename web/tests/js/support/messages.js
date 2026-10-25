@@ -167,6 +167,7 @@ export const MESSAGES = {
         'The analysis service is not set up correctly. Ask the administrator of this instance.',
     'photoEntry.error.failed': 'The analysis failed. Please try again.',
     'photoEntry.error.disabled': 'Adding items from photos is turned off.',
+    'photoEntry.error.instance_limit': 'The instance reached its daily number of photo analyses; try again tomorrow.',
     'photoEntry.error.no_fields': 'This inventory has no field the photos could fill in.',
     'photoEntry.error.gone': 'This analysis is no longer available. Send the photos again.',
     'photoEntry.error.lost': 'The connection to the analysis was lost.',

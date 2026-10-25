@@ -306,6 +306,8 @@ return [
     | - `photo_analyses_per_day`: analyses one person may ask for in a day, in all their workspaces
     |   (`INVENTORIES_PHOTO_ANALYSES_PER_DAY`, 20), `429` beyond. Counted for 24 hours from the first analysis of a window; only an
     |   analysis that is accepted counts.
+    | - `photo_analyses_per_day_instance`: analyses the whole instance runs in a day, whoever asks
+    |   (`INVENTORIES_PHOTO_ANALYSES_PER_DAY_INSTANCE`, 200, 0 is no cap), `429` beyond with a message of its own. The same window.
     | - `photo_analysis_ttl_hours`: hours the proposals of an analysis are kept, then purged by `inventaire:prune-photo-analyses`
     |   (`INVENTORIES_PHOTO_ANALYSIS_TTL_HOURS`, 24).
     | - `max_photos_per_analysis`: photos one analysis may hold (`INVENTORIES_MAX_PHOTOS_PER_ANALYSIS`, 5), `422` beyond.
@@ -314,6 +316,8 @@ return [
     |
     */
     'photo_analyses_per_day' => (int) env('INVENTORIES_PHOTO_ANALYSES_PER_DAY', 20),
+
+    'photo_analyses_per_day_instance' => (int) env('INVENTORIES_PHOTO_ANALYSES_PER_DAY_INSTANCE', 200),
 
     'photo_analysis_ttl_hours' => (int) env('INVENTORIES_PHOTO_ANALYSIS_TTL_HOURS', 24),
 
