@@ -58,15 +58,23 @@ final class PhotoAnalysisResource extends JsonResource
     }
 
     /**
-     * The proposals as the job stored them (the four keys and nothing else), for the fields that are still there.
+     * The proposals the job stored, for the fields that are still there. Each is rebuilt key by key so that the answer has the same
+     * shape on every engine: MySQL hands a JSON object back with its keys in its own order.
      *
      * @return list<array{field: string, value: mixed, confidence: string, evidence: string}>
      */
     private function proposals(PhotoAnalysis $analysis): array
     {
-        return array_values(array_filter(
+        $kept = array_filter(
             $analysis->proposals ?? [],
             fn (array $proposal): bool => $this->fieldIds === null || in_array($proposal['field'], $this->fieldIds, true),
-        ));
+        );
+
+        return array_values(array_map(fn (array $proposal): array => [
+            'field' => $proposal['field'],
+            'value' => $proposal['value'],
+            'confidence' => $proposal['confidence'],
+            'evidence' => $proposal['evidence'],
+        ], $kept));
     }
 }
