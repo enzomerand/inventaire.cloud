@@ -6,11 +6,13 @@ use App\Jobs\AnalyzePhotos;
 use App\Models\Inventory;
 use App\Models\InventoryField;
 use App\Models\PhotoAnalysis;
+use App\Models\Workspace;
 use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisException;
 use App\PhotoEntry\PhotoAnalysisRunner;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\PhotoReading;
+use App\Settings\InstanceSettings;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -35,6 +37,7 @@ uses(RefreshDatabase::class);
 function analysisCase(array $attributes = []): array
 {
     $case = photoCase();
+    photoTurnedOn($case['team']['workspace']);
     $name = fieldIn($case['inventory'], 'text', 'Name');
     $weight = fieldIn($case['inventory'], 'number', 'Weight', ['decimals' => 1]);
     $condition = fieldIn($case['inventory'], 'select', 'Condition', ['choices' => [['label' => 'New'], ['label' => 'Used']]]);
@@ -234,6 +237,35 @@ describe('an analysis that fails', function (): void {
         (new AnalyzePhotos($case['analysis']))->failed(new RuntimeException('Timed out'));
 
         expect($case['analysis']->fresh()->status)->toBe(PhotoAnalysisStatus::Completed)->and($case['analysis']->fresh()->error)->toBeNull();
+    });
+});
+
+describe('an analysis whose workspace may not use the photo entry any more', function (): void {
+    it('is failed "disabled" without any call, and the photos are deleted, whoever switched it off', function (Closure $switchOff): void {
+        $case = analysisCase();
+        $calls = [];
+        photoAnalyzerSaying(analysisReading([]), $calls);
+        $switchOff($case['team']['workspace']);
+
+        $analysis = analysisRun($case['analysis']);
+
+        expect($analysis->status)->toBe(PhotoAnalysisStatus::Failed)
+            ->and($analysis->error)->toBe('disabled')
+            ->and($analysis->failure())->toBe(PhotoAnalysisError::Disabled)
+            ->and($analysis->proposals)->toBeNull()
+            ->and($analysis->model)->toBeNull()
+            ->and($calls)->toBe([])
+            ->and(storedFiles())->toBe([]);
+    })->with([
+        'the owner withdrew consent' => [fn (Workspace $workspace) => $workspace->forceFill(['photo_entry_enabled' => false])->save()],
+        'the administrator switched it off' => [fn () => app(InstanceSettings::class)->update([InstanceSettings::PHOTO_ENTRY_ENABLED => false])],
+        'the key was removed' => [fn () => config(['services.anthropic.key' => null])],
+    ]);
+
+    it('tells the person in their language', function (): void {
+        app()->setLocale('fr');
+
+        expect(PhotoAnalysisError::Disabled->message())->toContain('désactivée');
     });
 });
 

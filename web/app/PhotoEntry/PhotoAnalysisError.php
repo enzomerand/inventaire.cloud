@@ -33,6 +33,9 @@ enum PhotoAnalysisError: string
     /** An analysis that never ended: its worker was lost (see {@see PhotoAnalysisPruner}). */
     case Stale = 'stale';
 
+    /** The photo entry was turned off between the moment the photos were received and the moment the job ran: the owner withdrew consent, the administrator switched it off or removed the key. */
+    case Disabled = 'disabled';
+
     /**
      * What the person is told, in the language of the request.
      */
@@ -46,6 +49,7 @@ enum PhotoAnalysisError: string
             self::Misconfigured => __('The photo analysis is not set up properly on this instance. Ask the administrator.'),
             self::Failed => __('The photos could not be analysed. Try again.'),
             self::Stale => __('The analysis took too long and was given up. Try again.'),
+            self::Disabled => __('The photo entry was turned off before the analysis could start. The photos were deleted without being sent.'),
         };
     }
 }

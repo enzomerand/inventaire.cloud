@@ -28,7 +28,8 @@ use Throwable;
 final class PhotoAnalysisRunner
 {
     /**
-     * Gets the analyzer, the code that judges what it read, the one that tells which fields to fill and the cleanup that deletes the photos.
+     * Gets the analyzer, the code that judges what it read, the one that tells which fields to fill, the cleanup that deletes the photos,
+     * the storage they are read from and the code that tells whether the photo entry is still on.
      */
     public function __construct(
         private readonly PhotoAnalyzer $analyzer,
@@ -36,10 +37,14 @@ final class PhotoAnalysisRunner
         private readonly PhotoFields $fields,
         private readonly PhotoAnalysisCleanup $cleanup,
         private readonly AttachmentStorage $storage,
+        private readonly PhotoEntry $photoEntry,
     ) {}
 
     /**
-     * Does the analysis. One that is not waiting any more (it was given up on, deleted, or another worker took it) is left alone.
+     * Does the analysis. One that is not waiting any more (it was given up on, deleted, or another worker took it) is left alone. One
+     * whose workspace may not use the photo entry any more (the owner withdrew consent, the administrator turned it off or removed the key
+     * while it waited in the queue) is failed `disabled` before anything is read or sent: consent is judged when the photos leave, not only
+     * when they came.
      */
     public function run(PhotoAnalysis $analysis): void
     {
@@ -104,11 +109,16 @@ final class PhotoAnalysisRunner
      *
      * @return array{0: PhotoReading, 1: list<array{field: string, value: mixed, confidence: string, evidence: string}>}
      *
-     * @throws PhotoAnalysisException When the photos are not there any more, no field is left to fill, or the analyzer failed.
+     * @throws PhotoAnalysisException When the photo entry was turned off, the photos are not there any more, no field is left to fill, or the analyzer failed.
      */
     private function read(PhotoAnalysis $analysis): array
     {
         $inventory = $analysis->inventory()->firstOrFail();
+
+        if (! $this->photoEntry->enabledFor($inventory->workspace()->firstOrFail())) {
+            throw new PhotoAnalysisException(PhotoAnalysisError::Disabled, 'The photo entry was turned off while the analysis waited.');
+        }
+
         $fields = $inventory->fields()->get();
         $eligible = $this->fields->eligible($fields);
 
