@@ -525,22 +525,14 @@ function report(error, silent) {
  * so that a page whose session is gone is not left standing with buttons that can only fail.
  *
  * @param {HttpError} error
- * @returns {boolean} Whether the page is about to reload or leave.
+ * @returns {void}
  */
 export function leaveStalePage(error) {
     if (error.status === 419) {
         scheduleNavigation(reloadPage);
-
-        return true;
-    }
-
-    if (error.status === 401) {
+    } else if (error.status === 401) {
         scheduleNavigation(leaveExpiredSession);
-
-        return true;
     }
-
-    return false;
 }
 
 /**

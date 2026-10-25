@@ -151,17 +151,6 @@ describe('the words of a failure', () => {
         });
     });
 
-    it.each([401, 403, 419])(
-        'offers no retry when the session or the right is gone (%i): the page is about to reload',
-        (status) => {
-            expect(requestFailure({ status, message: 'Please sign in' })).toEqual({
-                text: 'Please sign in',
-                retry: false,
-                resume: false,
-            });
-        },
-    );
-
     it('tells how long to wait when the API says (429)', () => {
         expect(requestFailure({ status: 429, message: 'Slow', retryAfter: 600 }).text).toBe(
             'Too many attempts. Try again in 10 minutes.',

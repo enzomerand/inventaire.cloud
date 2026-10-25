@@ -219,7 +219,7 @@ final class Proposals
 
         $pattern = "/^(?<s1>{$sign})?\\s*(?:(?<pre>{$decoration})\\s*)?(?<s2>{$sign})?\\s*(?<core>[0-9](?:[0-9 .,\\x{00A0}\\x{202F}\\x{2009}]*[0-9])?)(?:\\s*(?<post>{$decoration}))?$/Diu";
 
-        if (preg_match($pattern, trim($text), $parts) !== 1) {
+        if (preg_match($pattern, $text, $parts) !== 1) {
             return null;
         }
 
@@ -323,7 +323,7 @@ final class Proposals
      */
     private function boolean(string $text): ?bool
     {
-        return match (mb_strtolower(trim($text))) {
+        return match (mb_strtolower($text)) {
             'true', 'yes', 'y', 'oui', 'o', 'vrai', 'on', '1' => true,
             'false', 'no', 'n', 'non', 'faux', 'off', '0' => false,
             default => null,
@@ -377,7 +377,7 @@ final class Proposals
      */
     private function time(string $text): ?string
     {
-        if (preg_match('/^([0-9]{1,2})[:h]([0-9]{2})(?::[0-9]{2})?$/Di', trim($text), $parts) !== 1) {
+        if (preg_match('/^([0-9]{1,2})[:h]([0-9]{2})(?::[0-9]{2})?$/Di', $text, $parts) !== 1) {
             return null;
         }
 
@@ -407,7 +407,7 @@ final class Proposals
         }
 
         foreach ($choices as $choice) {
-            if ($choice['id'] === strtolower(trim($text))) {
+            if ($choice['id'] === strtolower($text)) {
                 return $choice['id'];
             }
         }
@@ -464,7 +464,7 @@ final class Proposals
      */
     private function rating(string $text): ?int
     {
-        return preg_match('~^([0-9]{1,2})(?:\s*/\s*[0-9]{1,2})?$~D', trim($text), $parts) === 1 ? (int) $parts[1] : null;
+        return preg_match('~^([0-9]{1,2})(?:\s*/\s*[0-9]{1,2})?$~D', $text, $parts) === 1 ? (int) $parts[1] : null;
     }
 
     /**
@@ -472,7 +472,7 @@ final class Proposals
      */
     private function color(string $text): ?string
     {
-        if (preg_match('/^#?([0-9a-f]{3}|[0-9a-f]{6})$/Di', trim($text), $parts) !== 1) {
+        if (preg_match('/^#?([0-9a-f]{3}|[0-9a-f]{6})$/Di', $text, $parts) !== 1) {
             return null;
         }
 

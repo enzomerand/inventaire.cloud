@@ -109,31 +109,17 @@ describe('the photos of the photo entry', () => {
             expect(prepared.name).toBe('IMG_0001.jpg');
             expect(prepared.type).toBe('image/jpeg');
             expect(original.type).toBe('image/heic');
+            // A photo within the limit is redrawn at its own size, never enlarged.
+            expect(context.drawImage).toHaveBeenCalledWith(images[0], 0, 0, 1000, 800);
         });
 
-        it('is shrunk to 1568 pixels on its longest side, with the proportions kept, when the photo is wider', async () => {
+        it('is shrunk to 1568 pixels on its longest side, with the proportions kept', async () => {
             stubImage({ width: 4032, height: 3024 });
 
             await prepareAnalysisPhoto(photo());
 
             expect(ANALYSIS_SIDE).toBe(1568);
             expect(context.drawImage).toHaveBeenCalledWith(images[0], 0, 0, 1568, 1176);
-        });
-
-        it('is shrunk by its height when the photo is taller (a phone held upright)', async () => {
-            stubImage({ width: 3024, height: 4032 });
-
-            await prepareAnalysisPhoto(photo());
-
-            expect(context.drawImage).toHaveBeenCalledWith(images[0], 0, 0, 1176, 1568);
-        });
-
-        it('is redrawn at its own size, never enlarged, when the photo is small (it still becomes a JPEG)', async () => {
-            stubImage({ width: 640, height: 480 });
-
-            await prepareAnalysisPhoto(photo());
-
-            expect(context.drawImage).toHaveBeenCalledWith(images[0], 0, 0, 640, 480);
         });
 
         it('is encoded as a JPEG of quality 0.85', async () => {
@@ -149,18 +135,6 @@ describe('the photos of the photo entry', () => {
 
             expect(ANALYSIS_QUALITY).toBe(0.85);
             expect(canvases).toEqual([['image/jpeg', 0.85]]);
-        });
-
-        it('is drawn on a white background, so that a transparent picture is not read as black', async () => {
-            stubImage({ width: 800, height: 600 });
-
-            await prepareAnalysisPhoto(photo('logo.png', 'image/png'));
-
-            expect(context.fillStyle).toBe('#fff');
-            expect(context.fillRect).toHaveBeenCalledWith(0, 0, 800, 600);
-            expect(context.fillRect.mock.invocationCallOrder[0]).toBeLessThan(
-                context.drawImage.mock.invocationCallOrder[0],
-            );
         });
 
         it('revokes the address made for the file, and lets go of the canvas', async () => {

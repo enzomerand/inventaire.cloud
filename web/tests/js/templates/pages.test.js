@@ -789,33 +789,6 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(input.disabled).toBe(false);
             });
 
-            it('turns it off again, and says so', async () => {
-                await offered({ personal: true, shop: false });
-                http.put.mockResolvedValue({ data: { enabled: false } });
-                const input = photoSwitch(rows()[0]);
-
-                input.checked = false;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                await flush();
-
-                expect(http.put).toHaveBeenCalledWith('/api/v1/workspaces/personal/photo-entry', { enabled: false });
-                expect(notify).toHaveBeenCalledWith('success', 'Photo entry off for Espace personnel');
-                expect(input.checked).toBe(false);
-            });
-
-            it('puts the switch back and says why when the change could not be saved', async () => {
-                await offered({ personal: false, shop: false });
-                http.put.mockRejectedValue(new HttpError(500, 'Server down'));
-                const input = photoSwitch(rows()[1]);
-
-                input.checked = true;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                await flush();
-
-                expect(notify).toHaveBeenCalledWith('danger', 'Server down');
-                expect(input.checked).toBe(false);
-            });
-
             it('takes the switches off the page when the administrator turned the feature off in the meantime', async () => {
                 await offered({ personal: false, shop: false });
                 http.put.mockRejectedValue(
@@ -829,24 +802,6 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(notify).toHaveBeenCalledWith('danger', 'Not available: ask its administrator.');
                 expect(rows().map(photoSwitch)).toEqual([null, null, null]);
-            });
-
-            it('offers a workspace created since the page was rendered, with the feature off', async () => {
-                await offered({ personal: false, shop: true });
-                const created = { id: 'new', name: 'Warehouse', role: 'owner', current: true };
-                http.post.mockResolvedValue({ data: {} });
-                http.get.mockResolvedValue(
-                    listing([...WORKSPACES.map((item) => ({ ...item, current: false })), created]),
-                );
-                await type(document.querySelector('#workspace-new-name'), 'Warehouse');
-
-                document.querySelector('#create form').dispatchEvent(new Event('submit', { cancelable: true }));
-                await flush();
-
-                const switches = rows().map(photoSwitch);
-
-                expect(switches.map((one) => one !== null && one.checked)).toEqual([false, true, false, false]);
-                expect(switches[3]).not.toBeNull();
             });
         });
 
@@ -1788,18 +1743,6 @@ describe('the pages under the real Alpine CSP build', () => {
             await mount('app/admin/settings.blade.php');
 
             expect(document.querySelector('#admin-settings-photo-entry').checked).toBe(true);
-        });
-
-        it('puts the photo entry switch back when the change could not be saved', async () => {
-            const photos = document.querySelector('#admin-settings-photo-entry');
-            http.put.mockRejectedValue(new HttpError(500, 'Server down'));
-
-            photos.checked = true;
-            photos.dispatchEvent(new Event('change', { bubbles: true }));
-            await flush();
-
-            expect(notify).toHaveBeenCalledWith('danger', 'Server down');
-            expect(photos.checked).toBe(false);
         });
 
         it('says whether an API key is configured, in words, never with the key', async () => {

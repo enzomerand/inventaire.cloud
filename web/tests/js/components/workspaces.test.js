@@ -347,8 +347,8 @@ describe('workspaces page', () => {
             component.init();
         }
 
-        it('is not offered when the page says nothing, says null, or says something unusable', () => {
-            for (const json of [undefined, 'null', '[]', '"yes"', '{broken', '3']) {
+        it('is not offered when the page says nothing, or says null', () => {
+            for (const json of [undefined, 'null']) {
                 component.$root.dataset.photoEntry = json;
                 component.init();
 

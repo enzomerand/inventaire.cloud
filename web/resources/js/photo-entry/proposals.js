@@ -11,8 +11,8 @@ import { isBlank } from '../fields/types.js';
 import { throttledMessage } from '../lib/forms.js';
 import { t } from '../lib/i18n.js';
 
-/** How long the dialog waits between two readings of an analysis that is on its way. */
-export const POLL_INTERVAL_MS = 2000;
+/** How long the dialog waits between two readings of an analysis that is on its way, in milliseconds: as for the exports. */
+export { POLL_INTERVAL_MS } from '../export/exports.js';
 
 /** How long the dialog follows one analysis before it gives up (the server gives up on its own at five minutes). */
 export const MAX_WAIT_MS = 6 * 60 * 1000;
@@ -21,13 +21,13 @@ export const MAX_WAIT_MS = 6 * 60 * 1000;
 export const MAX_POLL_FAILURES = 3;
 
 /** The code the API gives to a request when the photo entry is off for the workspace (or the instance). */
-export const DISABLED_CODE = 'photo_entry_disabled';
+const DISABLED_CODE = 'photo_entry_disabled';
 
 /** The code the API gives to a request when the inventory has no field the photos could fill. */
-export const NO_FIELDS_CODE = 'no_fields_to_fill';
+const NO_FIELDS_CODE = 'no_fields_to_fill';
 
 /** The code of the `429` that says the instance, not the person, is out of analyses for today. */
-export const INSTANCE_LIMIT_CODE = 'photo_analyses_instance_limit';
+const INSTANCE_LIMIT_CODE = 'photo_analyses_instance_limit';
 
 /** The statuses of a failure after which doing the same again cannot work: the session ended, the CSRF token is stale or the right is gone. */
 export const STALE_STATUSES = [401, 403, 419];
@@ -199,11 +199,6 @@ export function requestFailure(error) {
         const messages = Object.values(error.errors ?? {}).flat();
 
         return { text: messages[0] ?? error.message, retry: false, resume: false };
-    }
-
-    // The session is gone, or the right to add items: the page is about to reload or leave, and sending the photos again would only fail.
-    if (STALE_STATUSES.includes(error.status)) {
-        return { text: error.message, retry: false, resume: false };
     }
 
     return { text: error.message, retry: true, resume: false };

@@ -37,12 +37,4 @@ final class UpdatePhotoEntryRequest extends FormRequest
             'enabled' => ['required', 'boolean'],
         ];
     }
-
-    /**
-     * Whether the owner wants the photo entry on.
-     */
-    public function enabled(): bool
-    {
-        return $this->boolean('enabled');
-    }
 }

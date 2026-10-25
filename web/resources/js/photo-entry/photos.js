@@ -54,18 +54,6 @@ export function jpegName(name) {
 }
 
 /**
- * Waits for a canvas to be turned into an image file.
- *
- * @param {HTMLCanvasElement} canvas
- * @param {string} type
- * @param {number} quality
- * @returns {Promise<Blob | null>} Null when the browser cannot encode the canvas.
- */
-function encode(canvas, type, quality) {
-    return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
-}
-
-/**
  * Gets a photo ready for the analysis: a JPEG of at most {@link ANALYSIS_SIDE} pixels on its longest side, same proportions, on a
  * white background where the photo is transparent. The address made for the file is revoked, and the canvas let go of (a phone
  * keeps the memory of a canvas until it is told it is not needed), once the photo has been drawn.
@@ -82,10 +70,15 @@ export async function prepareAnalysisPhoto(file) {
         url = URL.createObjectURL(file);
 
         const image = await loadImage(url);
+        const drawn = drawScaled(image, ANALYSIS_SIDE);
 
-        canvas = drawScaled(image, ANALYSIS_SIDE);
+        canvas = drawn;
 
-        const blob = canvas === null ? null : await encode(canvas, 'image/jpeg', ANALYSIS_QUALITY);
+        // Null when the browser cannot encode the canvas.
+        const blob =
+            drawn === null
+                ? null
+                : await new Promise((resolve) => drawn.toBlob(resolve, 'image/jpeg', ANALYSIS_QUALITY));
 
         if (blob === null) {
             throw new Error('The photo could not be encoded.');

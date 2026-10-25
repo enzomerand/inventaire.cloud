@@ -225,11 +225,6 @@ export default function photoEntryDialog() {
             return this.photoRows.length > 0;
         },
 
-        /** Whether the review has nothing to show: Claude found no value on the photos. */
-        get photoNoRows() {
-            return this.photoRows.length === 0;
-        },
-
         /** How many proposals the person checked. */
         get photoCheckedCount() {
             return this.photoRows.filter((row) => this.photoChecked[row.key] === true).length;
@@ -530,16 +525,12 @@ export default function photoEntryDialog() {
 
         /**
          * Plans the next reading of the analysis, two seconds from now, when the dialog is open and waiting for it; plans nothing
-         * otherwise (and forgets the reading that was planned).
+         * otherwise. Every way into the dialog's work starts by cancelling the reading that was planned (`cancelWork`), and a reading that
+         * fires has forgotten its timer, so there is never one to replace.
          *
          * @returns {void}
          */
         planPhotoPoll() {
-            if (pollTimer !== null) {
-                clearTimeout(pollTimer);
-                pollTimer = null;
-            }
-
             if (this.photoOpen && this.photoStep === 'working' && analysisId !== null) {
                 pollTimer = setTimeout(() => {
                     pollTimer = null;
@@ -567,13 +558,6 @@ export default function photoEntryDialog() {
 
                 return;
             }
-
-            if (pollTimer !== null) {
-                clearTimeout(pollTimer);
-                pollTimer = null;
-            }
-
-            working?.abort();
 
             const mine = run;
             const controller = new AbortController();
@@ -669,11 +653,6 @@ export default function photoEntryDialog() {
          * @returns {void}
          */
         failPhotoEntry(failure) {
-            if (pollTimer !== null) {
-                clearTimeout(pollTimer);
-                pollTimer = null;
-            }
-
             this.photoBusy = '';
             this.photoFailure = failure;
             this.goToPhotoStep('error');
@@ -694,7 +673,7 @@ export default function photoEntryDialog() {
             if (this.photoFailure.resume && analysisId !== null) {
                 failures = 0;
                 startedAt = Date.now();
-                this.photoFailure = { text: '', retry: false, resume: false };
+                this.clearPhotoOutcome();
                 this.photoBusy = 'analysing';
                 this.goToPhotoStep('working');
                 this.announcePhoto(t('photoEntry.working.analysing'));
@@ -817,15 +796,10 @@ export default function photoEntryDialog() {
          * @returns {void}
          */
         goToPhotoStep(step) {
-            const refs = this.$refs;
-
             this.photoStep = step;
-            this.$nextTick(() => {
-                const selector =
-                    step === 'choose' ? '#photo-entry-pick' : `[data-photo-step="${step}"] [data-photo-heading]`;
-
-                refs.photoModal?.querySelector?.(selector)?.focus();
-            });
+            this.focusPhoto(
+                step === 'choose' ? '#photo-entry-pick' : `[data-photo-step="${step}"] [data-photo-heading]`,
+            );
         },
 
         /**

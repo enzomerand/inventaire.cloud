@@ -118,9 +118,9 @@ PROMPT;
      */
     public function analyze(array $photos, array $fields, string $locale): PhotoReading
     {
-        $key = config('services.anthropic.key');
+        $key = $this->setting('key', '');
 
-        if (! is_string($key) || trim($key) === '') {
+        if ($key === '') {
             throw new PhotoAnalysisException(PhotoAnalysisError::Misconfigured, 'There is no API key.');
         }
 
@@ -147,7 +147,7 @@ PROMPT;
         $fallback = config()->boolean('services.anthropic.fallbacks', true) && in_array($model, self::FALLBACK_MODELS, true);
 
         try {
-            $message = $this->client(trim($key))->beta->messages->create(
+            $message = $this->client($key)->beta->messages->create(
                 maxTokens: self::MAX_TOKENS,
                 messages: [['role' => 'user', 'content' => $content]],
                 model: $model,
@@ -359,8 +359,6 @@ PROMPT;
      */
     private function failure(Throwable $exception): PhotoAnalysisException
     {
-        $status = $exception instanceof APIStatusException ? $exception->status : null;
-
         $error = match (true) {
             $exception instanceof RateLimitException, $exception instanceof InternalServerException, $exception instanceof APIConnectionException => PhotoAnalysisError::Unavailable,
             $exception instanceof AuthenticationException, $exception instanceof PermissionDeniedException, $exception instanceof NotFoundException => PhotoAnalysisError::Misconfigured,
@@ -375,7 +373,7 @@ PROMPT;
         Log::warning('The photo analysis request failed.', [
             'error' => $error->value,
             'exception' => $exception::class,
-            'status' => $status,
+            'status' => $exception instanceof APIStatusException ? $exception->status : null,
             'type' => $exception instanceof APIStatusException ? $exception->type?->value : null,
             'message' => mb_substr($exception->getMessage(), 0, 500),
         ]);

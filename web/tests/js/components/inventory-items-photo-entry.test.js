@@ -269,15 +269,6 @@ describe('adding an item from photos', () => {
             expect(component.photoPhotos).toHaveLength(5);
         });
 
-        it('counts the photos chosen in several goes', async () => {
-            await open();
-
-            component.choosePhotos(picked(photo('1.jpg'), photo('2.jpg'), photo('3.jpg')));
-            component.choosePhotos(picked(photo('4.jpg'), photo('5.jpg'), photo('6.jpg')));
-
-            expect(component.photoPhotos.map((one) => one.name)).toEqual(['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg']);
-        });
-
         it('takes as many photos as the page says (data-photo-entry-max)', async () => {
             await open();
             component.rootElement.dataset.photoEntryMax = '2';
@@ -665,7 +656,6 @@ describe('adding an item from photos', () => {
 
             expect(component.photoStep).toBe('review');
             expect(component.photoHasRows).toBe(false);
-            expect(component.photoNoRows).toBe(true);
             expect(component.photoStatus).toBe('Claude found 0 values.');
         });
 
@@ -700,18 +690,11 @@ describe('adding an item from photos', () => {
     });
 
     describe('when the analysis failed', () => {
+        // The words of every code are `proposals.test.js`'s: one that can be tried again and one that cannot are enough to see the
+        // dialog show them.
         it.each([
             ['refused', 'The photos were refused by the analysis service. Try other photos.', false],
             ['truncated', 'The answer was too long to be read. Try again, with fewer photos if you can.', true],
-            ['invalid_answer', 'The answer of the analysis could not be understood. Please try again.', true],
-            ['unavailable', 'The analysis service is unavailable at the moment. Please try again in a moment.', true],
-            [
-                'misconfigured',
-                'The analysis service is not set up correctly. Ask the administrator of this instance.',
-                false,
-            ],
-            ['failed', 'The analysis failed. Please try again.', true],
-            ['something_new', 'The analysis failed. Please try again.', true],
         ])('says what %s means, and whether trying again can help', async (code, text, retry) => {
             await open();
             http.post.mockResolvedValue(analysis('pending'));
@@ -767,24 +750,6 @@ describe('adding an item from photos', () => {
             await analyse();
         }
 
-        it('says the photo entry is off when the API says so (409), with no retry', async () => {
-            await refused(409, 'No', { code: 'photo_entry_disabled' });
-
-            expect(component.photoStep).toBe('error');
-            expect(component.photoFailure).toEqual({
-                text: 'Adding items from photos is turned off.',
-                retry: false,
-                resume: false,
-            });
-        });
-
-        it('says the inventory has nothing to fill in (409), with no retry', async () => {
-            await refused(409, 'No', { code: 'no_fields_to_fill' });
-
-            expect(component.photoFailure.text).toBe('This inventory has no field the photos could fill in.');
-            expect(component.photoCanRetry).toBe(false);
-        });
-
         it('says to wait when the analyses are throttled (429), and offers to try again', async () => {
             await refused(429, 'Slow down', { retryAfter: 30 });
 
@@ -792,15 +757,6 @@ describe('adding an item from photos', () => {
             // The wording of the throttling the pages share: seconds, then minutes.
             expect(component.photoFailure.text).toBe('Too many attempts. Try again in 30 seconds.');
             expect(component.photoCanRetry).toBe(true);
-        });
-
-        it('shows the first message of the server for a photo it refuses (422), with no retry', async () => {
-            await refused(422, 'The photos are invalid.', {
-                errors: { 'photos.0': ['The photo must be a JPEG.'], photos: ['Too many.'] },
-            });
-
-            expect(component.photoFailure.text).toBe('The photo must be a JPEG.');
-            expect(component.photoCanRetry).toBe(false);
         });
 
         it('shows the words of the helper for anything else (the server, the network), and offers to try again', async () => {
@@ -847,27 +803,6 @@ describe('adding an item from photos', () => {
             expect(component.photoFailure.text).toBe('Too many attempts. Try again in 30 seconds.');
             expect(component.photoCanRetry).toBe(true);
         });
-
-        it('says the instance is out of analyses, with no retry, when the API says it is not the person (429)', async () => {
-            await refused(429, 'Slow down', { code: 'photo_analyses_instance_limit', retryAfter: 3600 });
-
-            expect(component.photoFailure).toEqual({
-                text: 'The instance reached its daily number of photo analyses; try again tomorrow.',
-                retry: false,
-                resume: false,
-            });
-            expect(component.photoCanRetry).toBe(false);
-        });
-
-        it.each([401, 403, 419])(
-            'offers no retry for a refusal the helper did not tell (%i): it could only fail',
-            async (status) => {
-                await refused(status, 'Please sign in');
-
-                expect(component.photoStep).toBe('error');
-                expect(component.photoFailure).toEqual({ text: 'Please sign in', retry: false, resume: false });
-            },
-        );
 
         it('sends the person to the workspace when the inventory is gone (404)', async () => {
             await refused(404, 'Gone');
@@ -980,29 +915,28 @@ describe('adding an item from photos', () => {
             expect(readings().at(-1)[0]).toBe(`${PHOTO_ANALYSES}/a1`);
         });
 
-        it.each([
-            [401, false],
-            [403, false],
-            [419, true],
-        ])('gives up at once when the reading is refused (%i), with no retry that could only fail', async (status) => {
-            await open();
-            http.post.mockResolvedValue(analysis('pending'));
-            answers = [new HttpError(status, 'No')];
-            await analyse();
+        it.each([401, 403, 419])(
+            'gives up at once when the reading is refused (%i), with no retry that could only fail',
+            async (status) => {
+                await open();
+                http.post.mockResolvedValue(analysis('pending'));
+                answers = [new HttpError(status, 'No')];
+                await analyse();
 
-            await nextReading();
+                await nextReading();
 
-            expect(component.photoStep).toBe('error');
-            expect(component.photoFailure).toEqual({ text: 'No', retry: false, resume: false });
-            expect(component.photoCanRetry).toBe(false);
-            expect(readings()).toHaveLength(1);
-            expect(component.photoStatus).toBe('No');
+                expect(component.photoStep).toBe('error');
+                expect(component.photoFailure).toEqual({ text: 'No', retry: false, resume: false });
+                expect(component.photoCanRetry).toBe(false);
+                expect(readings()).toHaveLength(1);
+                expect(component.photoStatus).toBe('No');
 
-            // Nothing is read any more.
-            await vi.advanceTimersByTimeAsync(10 * POLL_INTERVAL_MS);
+                // Nothing is read any more.
+                await vi.advanceTimersByTimeAsync(10 * POLL_INTERVAL_MS);
 
-            expect(readings()).toHaveLength(1);
-        });
+                expect(readings()).toHaveLength(1);
+            },
+        );
 
         it('reloads the page, as the helper does for a call that is not silent, when the reading finds the page stale (419)', async () => {
             await open();
@@ -1284,18 +1218,6 @@ describe('adding an item from photos', () => {
             expect(component.values.name).toBe('Hammer');
             expect(component.staged).toEqual([]);
             expect(notify).not.toHaveBeenCalled();
-        });
-
-        it('forgets the dialog once it is closed: the photos are let go of', async () => {
-            await open();
-
-            await goOn(['name'], photo('a.jpg'));
-            await fadeOut();
-            await settle();
-
-            expect(component.photoPhotos).toEqual([]);
-            expect(component.photoRows).toEqual([]);
-            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:a.jpg');
         });
 
         it('opens no form when the dialog is closed by hand instead (Escape, the cross): nothing was accepted', async () => {

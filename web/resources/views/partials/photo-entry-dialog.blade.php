@@ -95,7 +95,7 @@
                         </ul>
                     </div>
 
-                    <div :hidden="!photoNoRows">
+                    <div :hidden="photoHasRows">
                         <div class="empty">
                             <div class="empty-icon hero-icon text-primary">
                                 <x-tabler-photo-search aria-hidden="true" />

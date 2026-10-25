@@ -435,10 +435,11 @@ describe('http helper', () => {
     });
 
     describe('leaving a stale page after a silent call', () => {
-        it('reloads after the time to read a message when the CSRF token is stale (419), and says the page is about to', () => {
+        it('reloads after the time to read a message when the CSRF token is stale (419)', () => {
             vi.useFakeTimers();
 
-            expect(leaveStalePage(new HttpError(419, 'Session expired'))).toBe(true);
+            leaveStalePage(new HttpError(419, 'Session expired'));
+
             expect(reloadPage).not.toHaveBeenCalled();
 
             vi.runAllTimers();
@@ -451,7 +452,7 @@ describe('http helper', () => {
             vi.useFakeTimers();
             document.head.insertAdjacentHTML('beforeend', '<meta name="login-url" content="/login">');
 
-            expect(leaveStalePage(new HttpError(401, 'Please sign in'))).toBe(true);
+            leaveStalePage(new HttpError(401, 'Please sign in'));
             vi.runAllTimers();
 
             expect(redirectTo).toHaveBeenCalledWith('/login');
@@ -462,7 +463,7 @@ describe('http helper', () => {
             vi.useFakeTimers();
 
             for (const status of [0, 403, 404, 422, 429, 500]) {
-                expect(leaveStalePage(new HttpError(status, 'No'))).toBe(false);
+                leaveStalePage(new HttpError(status, 'No'));
             }
 
             vi.runAllTimers();

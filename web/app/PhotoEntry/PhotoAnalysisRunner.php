@@ -182,7 +182,6 @@ final class PhotoAnalysisRunner
             ->where('status', PhotoAnalysisStatus::Running->value)
             ->update([
                 'status' => PhotoAnalysisStatus::Completed->value,
-                'error' => null,
                 'model' => $reading->model === null ? null : mb_substr($reading->model, 0, 64),
                 'input_tokens' => $reading->inputTokens,
                 'output_tokens' => $reading->outputTokens,

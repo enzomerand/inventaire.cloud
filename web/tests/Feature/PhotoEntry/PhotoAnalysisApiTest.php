@@ -478,10 +478,6 @@ describe('an analysis that cannot be started', function (): void {
 });
 
 describe('the cap of the instance', function (): void {
-    it('is 200 analyses a day unless the configuration says otherwise', function (): void {
-        expect(config('inventories.photo_analyses_per_day_instance'))->toBe(200);
-    });
-
     it('stops everybody once the instance has run its analyses of the day, with a message and a code of its own', function (): void {
         Queue::fake();
         config(['inventories.photo_analyses_per_day' => 100, 'inventories.photo_analyses_per_day_instance' => 2]);

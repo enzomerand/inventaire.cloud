@@ -25,22 +25,6 @@ import { reloadPage } from '../lib/page.js';
 import { fromApi } from '../stores/workspaces.js';
 
 /**
- * Reads the consent to the photo entry the page was rendered with.
- *
- * @param {string | undefined} json The `data-photo-entry` attribute: an object of booleans by ULID, or `null`.
- * @returns {Record<string, boolean> | null} Null when the instance does not offer the feature (or the attribute is missing or unusable).
- */
-function parseConsents(json) {
-    try {
-        const parsed = JSON.parse(json ?? 'null');
-
-        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-    } catch {
-        return null;
-    }
-}
-
-/**
  * @returns {Record<string, any>}
  */
 export default function workspaces() {
@@ -105,7 +89,9 @@ export default function workspaces() {
          * @returns {void}
          */
         init() {
-            this.photoEntry = parseConsents(this.$root.dataset.photoEntry);
+            // `data-photo-entry` is rendered by the server: an object of booleans by ULID, or `null` when the instance does not offer the
+            // feature (an attribute that is missing means the same).
+            this.photoEntry = JSON.parse(this.$root.dataset.photoEntry ?? 'null');
 
             if (window.location.hash === '#create') {
                 this.$nextTick(() => this.$refs.name?.focus());

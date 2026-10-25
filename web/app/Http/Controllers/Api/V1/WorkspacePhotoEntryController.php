@@ -32,7 +32,7 @@ final class WorkspacePhotoEntryController extends Controller
     public function __invoke(UpdatePhotoEntryRequest $request, Workspace $workspace): JsonResponse
     {
         try {
-            $this->photoEntry->setConsent($workspace, $request->enabled());
+            $this->photoEntry->setConsent($workspace, $request->boolean('enabled'));
         } catch (PhotoEntryUnavailableException) {
             return ApiError::conflict(__('The photo entry is not available on this instance: ask its administrator.'), PhotoEntryUnavailableException::CODE);
         }

@@ -58,27 +58,15 @@ final class PhotoAnalysisResource extends JsonResource
     }
 
     /**
-     * The proposals, each with the four keys and nothing else, for the fields that are still there.
+     * The proposals as the job stored them (the four keys and nothing else), for the fields that are still there.
      *
      * @return list<array{field: string, value: mixed, confidence: string, evidence: string}>
      */
     private function proposals(PhotoAnalysis $analysis): array
     {
-        $proposals = [];
-
-        foreach ($analysis->proposals ?? [] as $proposal) {
-            if ($this->fieldIds !== null && ! in_array($proposal['field'], $this->fieldIds, true)) {
-                continue;
-            }
-
-            $proposals[] = [
-                'field' => $proposal['field'],
-                'value' => $proposal['value'],
-                'confidence' => $proposal['confidence'],
-                'evidence' => $proposal['evidence'],
-            ];
-        }
-
-        return $proposals;
+        return array_values(array_filter(
+            $analysis->proposals ?? [],
+            fn (array $proposal): bool => $this->fieldIds === null || in_array($proposal['field'], $this->fieldIds, true),
+        ));
     }
 }
