@@ -513,14 +513,26 @@ function report(error, silent) {
     // Statuses with a dedicated message are expected conditions (warning); the rest are errors.
     notify(error.status in STATUS_MESSAGE_KEYS ? 'warning' : 'danger', error.message);
     error.reported = true;
+    leaveStalePage(error);
 
+    return error;
+}
+
+/**
+ * Sends the page where a failure that makes it stale calls for, after the feedback had time to be read: a reload for an expired CSRF
+ * token (419), the login page (or a reload) for a session that ended (401). Any other failure leaves the page alone. The helper does
+ * this for every call that is not silent; exported for the components that make `silent` calls and handle the failures themselves,
+ * so that a page whose session is gone is not left standing with buttons that can only fail.
+ *
+ * @param {HttpError} error
+ * @returns {void}
+ */
+export function leaveStalePage(error) {
     if (error.status === 419) {
         scheduleNavigation(reloadPage);
     } else if (error.status === 401) {
         scheduleNavigation(leaveExpiredSession);
     }
-
-    return error;
 }
 
 /**

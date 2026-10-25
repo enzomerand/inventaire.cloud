@@ -26,6 +26,9 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
             'workspaces.notice.renamed': 'Renamed',
             'workspaces.notice.deleted': 'Deleted',
             'workspaces.error.last': 'Keep one',
+            'workspaces.photo_entry_named': 'Photo entry for :name',
+            'workspaces.notice.photo_entry_on': 'Photo entry on for :name',
+            'workspaces.notice.photo_entry_off': 'Photo entry off for :name',
         };
 
         return Object.entries(replacements).reduce(
@@ -324,6 +327,182 @@ describe('workspaces page', () => {
             expect(notify).toHaveBeenCalledWith('danger', 'Espace de travail invalide.');
             expect(reloadPage).not.toHaveBeenCalled();
             expect(component.busy).toBe(false);
+        });
+    });
+
+    describe('the photo entry', () => {
+        const URL = '/api/v1/workspaces/__id__/photo-entry';
+
+        /** A checkbox the way the browser hands it to the change handler. */
+        const box = (checked) => ({ target: { checked } });
+
+        /** Renders the page the way the server does, with the consent of the owned workspaces (or null). */
+        function render(consents) {
+            component.$root.dataset.photoEntryUrl = URL;
+
+            if (consents !== undefined) {
+                component.$root.dataset.photoEntry = JSON.stringify(consents);
+            }
+
+            component.init();
+        }
+
+        it('is not offered when the page says nothing, or says null', () => {
+            for (const json of [undefined, 'null']) {
+                component.$root.dataset.photoEntry = json;
+                component.init();
+
+                expect(component.photoEntry).toBeNull();
+                expect(component.canPhotoEntry(MINE)).toBe(false);
+            }
+        });
+
+        it('is offered, for the workspaces the person owns only, when the instance offers it', () => {
+            render({ mine: true });
+
+            expect(component.canPhotoEntry(MINE)).toBe(true);
+            expect(component.canPhotoEntry(SHARED)).toBe(false);
+            expect(component.canPhotoEntry({ id: 'editing', name: 'Editing', role: 'editor', current: false })).toBe(
+                false,
+            );
+        });
+
+        it('starts from the consent the page was rendered with, a workspace the page does not know having none', () => {
+            render({ mine: true, other: false });
+
+            expect(component.photoEntryOn(MINE)).toBe(true);
+            expect(component.photoEntryOn({ id: 'other', name: 'Other', role: 'owner', current: false })).toBe(false);
+            expect(component.photoEntryOn({ id: 'new', name: 'New', role: 'owner', current: false })).toBe(false);
+        });
+
+        it('says it has nothing on when the instance does not offer it', () => {
+            render('null');
+
+            expect(component.photoEntryOn(MINE)).toBe(false);
+        });
+
+        it('names the switch of each workspace', () => {
+            render({ mine: false });
+
+            expect(component.photoEntryLabel(MINE)).toBe('Photo entry for Mine');
+        });
+
+        it('turns it on for that workspace, shows what the server answers, and says so', async () => {
+            render({ mine: false, other: false });
+            http.put.mockResolvedValue({ data: { enabled: true } });
+            const checkbox = box(true);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/workspaces/mine/photo-entry', { enabled: true });
+            expect(component.photoEntry).toEqual({ mine: true, other: false });
+            expect(checkbox.target.checked).toBe(true);
+            expect(notify).toHaveBeenCalledWith('success', 'Photo entry on for Mine');
+            expect(component.busy).toBe(false);
+        });
+
+        it('turns it off, and says so', async () => {
+            render({ mine: true });
+            http.put.mockResolvedValue({ data: { enabled: false } });
+            const checkbox = box(false);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/workspaces/mine/photo-entry', { enabled: false });
+            expect(component.photoEntryOn(MINE)).toBe(false);
+            expect(checkbox.target.checked).toBe(false);
+            expect(notify).toHaveBeenCalledWith('success', 'Photo entry off for Mine');
+        });
+
+        it('shows what the server answers, whatever the switch said', async () => {
+            render({ mine: false });
+            http.put.mockResolvedValue({ data: { enabled: false } });
+            const checkbox = box(true);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(component.photoEntryOn(MINE)).toBe(false);
+            expect(checkbox.target.checked).toBe(false);
+        });
+
+        it('puts the switch back and says why when the change could not be saved', async () => {
+            render({ mine: false });
+            http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+            const checkbox = box(true);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(component.photoEntryOn(MINE)).toBe(false);
+            expect(checkbox.target.checked).toBe(false);
+            expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+            expect(component.busy).toBe(false);
+        });
+
+        it('takes the switches off the page when the instance no longer offers the feature', async () => {
+            render({ mine: false });
+            http.put.mockRejectedValue(
+                new HttpError(409, 'Not available: ask its administrator.', { code: 'photo_entry_unavailable' }),
+            );
+            const checkbox = box(true);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(component.photoEntry).toBeNull();
+            expect(component.canPhotoEntry(MINE)).toBe(false);
+            expect(checkbox.target.checked).toBe(false);
+            expect(notify).toHaveBeenCalledWith('danger', 'Not available: ask its administrator.');
+        });
+
+        it('keeps the switches for another conflict', async () => {
+            render({ mine: false });
+            http.put.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'something_else' }));
+
+            await component.togglePhotoEntry(MINE, box(true));
+
+            expect(component.canPhotoEntry(MINE)).toBe(true);
+        });
+
+        it('does not repeat what the HTTP helper already told the person', async () => {
+            render({ mine: false });
+            const failure = new HttpError(0, 'Network error', { kind: 'network' });
+            failure.reported = true;
+            http.put.mockRejectedValue(failure);
+
+            await component.togglePhotoEntry(MINE, box(true));
+
+            expect(notify).not.toHaveBeenCalled();
+        });
+
+        it('stays silent when a request was cancelled', async () => {
+            render({ mine: false });
+            http.put.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+            const checkbox = box(true);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(notify).not.toHaveBeenCalled();
+            expect(checkbox.target.checked).toBe(false);
+            expect(component.busy).toBe(false);
+        });
+
+        it('ignores a change made while another is being saved, and keeps the switch where it was', async () => {
+            render({ mine: true });
+            component.busy = true;
+            const checkbox = box(false);
+
+            await component.togglePhotoEntry(MINE, checkbox);
+
+            expect(http.put).not.toHaveBeenCalled();
+            expect(checkbox.target.checked).toBe(true);
+        });
+
+        it('keeps the consent when the list is read again after another change', async () => {
+            render({ mine: true });
+            http.get.mockResolvedValue(listing([MINE, SHARED]));
+
+            await component.refresh();
+
+            expect(component.photoEntryOn(MINE)).toBe(true);
         });
     });
 

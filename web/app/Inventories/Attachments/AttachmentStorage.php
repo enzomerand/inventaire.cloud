@@ -115,6 +115,15 @@ final class AttachmentStorage
     }
 
     /**
+     * The folder of a photo analysis: the photos of the analysis (`1.jpg`, `2.jpg`...) are in it, alone, until the job that sends them
+     * ends. It is under the folder of the inventory, so that the purge of an inventory or of a workspace takes the analyses with it.
+     */
+    public static function analysisDirectory(string $workspace, string $inventory, string $analysis): string
+    {
+        return self::inventoryDirectory($workspace, $inventory)."/analyses/{$analysis}";
+    }
+
+    /**
      * The folder of an official version: its snapshot, its PDF and its signed PDF are in it, alone. It is under the folder of the
      * inventory, so that the purge of an inventory or of a workspace takes the versions with it.
      */

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Settings;
 
 use App\Inventories\SearchText;
+use App\PhotoEntry\PhotoEntry;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
 
@@ -43,6 +44,12 @@ final class InstanceSettings
 
     /** Whether the owners of an inventory can share it read-only through a secret link. Off, every link answers as if it did not exist. */
     public const SHARE_LINKS_ENABLED = 'share_links_enabled';
+
+    /**
+     * Whether the editors may add an item from photos analysed by Claude (App\PhotoEntry). Unlike the other switches it is off until
+     * an administrator turns it on: the photos would leave for a third party (Anthropic), and every analysis is paid for.
+     */
+    public const PHOTO_ENTRY_ENABLED = 'photo_entry_enabled';
 
     /**
      * The version ({@see SearchText::VERSION}) the stored search texts of the items were built with (a bookkeeping value of
@@ -99,6 +106,15 @@ final class InstanceSettings
     }
 
     /**
+     * Whether the photo entry is turned on for the instance: off unless an administrator turned it on, which is the case when there is no
+     * row at all. It is only one of its conditions: {@see PhotoEntry} also wants an API key and the workspace's consent.
+     */
+    public function photoEntryEnabled(): bool
+    {
+        return $this->flag(self::PHOTO_ENTRY_ENABLED, default: false);
+    }
+
+    /**
      * The version of the search text the items were last built with, or null when it was never recorded (or the row is
      * unusable: the texts are then built again, which is the safe thing to do).
      */
@@ -133,7 +149,7 @@ final class InstanceSettings
      * Changes the settings that are given, and only those, in one statement. A setting that is not in `$changes` keeps
      * what it holds.
      *
-     * @param  array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool}  $changes  The new values by name.
+     * @param  array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool, photo_entry_enabled?: bool}  $changes  The new values by name.
      */
     public function update(array $changes): void
     {
@@ -166,7 +182,7 @@ final class InstanceSettings
     /**
      * Every setting with its current value, as the API shows them.
      *
-     * @return array{registration_open: bool, invitation_sign_up: bool, share_links_enabled: bool}
+     * @return array{registration_open: bool, invitation_sign_up: bool, share_links_enabled: bool, photo_entry_enabled: bool}
      */
     public function all(): array
     {
@@ -174,19 +190,20 @@ final class InstanceSettings
             self::REGISTRATION_OPEN => $this->registrationOpen(),
             self::INVITATION_SIGN_UP => $this->invitationSignUp(),
             self::SHARE_LINKS_ENABLED => $this->shareLinksEnabled(),
+            self::PHOTO_ENTRY_ENABLED => $this->photoEntryEnabled(),
         ];
     }
 
     /**
-     * The value of a setting that holds a boolean: what it is when it has a row, else true (every flag is on until the administrator
-     * turns it off), and false (reported once in the log) when the row holds something else.
+     * The value of a setting that holds a boolean: what it is when it has a row, else its default (on for most flags, which stay on until
+     * the administrator turns them off), and false (reported once in the log) when the row holds something else.
      */
-    private function flag(string $key): bool
+    private function flag(string $key, bool $default = true): bool
     {
         $this->stored ??= $this->load();
 
         if (! array_key_exists($key, $this->stored)) {
-            return true;
+            return $default;
         }
 
         $value = $this->stored[$key];

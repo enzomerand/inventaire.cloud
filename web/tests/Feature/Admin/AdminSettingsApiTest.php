@@ -62,7 +62,7 @@ describe('the settings', function (): void {
     it('are open to sign-ups until an administrator says otherwise', function (): void {
         $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('close registration, and are answered as they now are', function (): void {
@@ -70,7 +70,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
@@ -84,7 +84,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['invitation_sign_up' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => false, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => false, 'share_links_enabled' => true, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
@@ -93,7 +93,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['invitation_sign_up' => true, 'registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('refuse an invitation_sign_up that is not a boolean, and change nothing', function (): void {
@@ -109,7 +109,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['share_links_enabled' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
 
         $this->flushSession();
 
@@ -119,7 +119,7 @@ describe('the settings', function (): void {
 
         $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['share_links_enabled' => true, 'registration_open' => false], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
     });
 
     it('refuse a share_links_enabled that is not a boolean, or null, and change nothing', function (mixed $value): void {
@@ -135,6 +135,56 @@ describe('the settings', function (): void {
             ->assertUnprocessable();
 
         expect($response->json('errors.share_links_enabled.0'))->toContain('vrai ou faux');
+    });
+
+    it('keep the photo entry off until an administrator turns it on, unlike the other switches that start on', function (): void {
+        $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())
+            ->assertOk()
+            ->assertJsonPath('data.photo_entry_enabled', false)
+            ->assertJsonPath('data.share_links_enabled', true);
+
+        expect(DB::table('settings')->count())->toBe(0)
+            ->and(app(InstanceSettings::class)->photoEntryEnabled())->toBeFalse();
+    });
+
+    it('let an administrator turn the photo entry on and off, apart from the other settings', function (): void {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['photo_entry_enabled' => true], frontend())
+            ->assertOk()
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+
+        $this->flushSession();
+
+        $this->actingAs($admin)->getJson('/api/v1/admin/settings', frontend())->assertOk()->assertJsonPath('data.photo_entry_enabled', true)->assertJsonPath('data.registration_open', true);
+        expect(DB::table('settings')->pluck('key')->all())->toBe(['photo_entry_enabled'])
+            ->and(app(InstanceSettings::class)->photoEntryEnabled())->toBeTrue();
+
+        $this->actingAs($admin)->putJson('/api/v1/admin/settings', ['photo_entry_enabled' => false, 'share_links_enabled' => false], frontend())
+            ->assertOk()
+            ->assertExactJson(['data' => ['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
+    });
+
+    it('refuse a photo_entry_enabled that is not a boolean, or null, and change nothing', function (mixed $value): void {
+        $this->actingAs(User::factory()->admin()->create())->putJson('/api/v1/admin/settings', ['photo_entry_enabled' => $value], frontend())
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('photo_entry_enabled');
+
+        expect(DB::table('settings')->count())->toBe(0);
+    })->with(['a word' => 'maybe', 'null' => null, 'a list' => [[true]]]);
+
+    it('refuse the photo entry to an account that does not administer the instance, and change nothing', function (): void {
+        $this->actingAs(User::factory()->withPersonalWorkspace()->create())->putJson('/api/v1/admin/settings', ['photo_entry_enabled' => true], frontend())->assertForbidden();
+
+        expect(DB::table('settings')->count())->toBe(0)->and(app(InstanceSettings::class)->photoEntryEnabled())->toBeFalse();
+    });
+
+    it('never give the Anthropic API key', function (): void {
+        config(['services.anthropic.key' => 'sk-ant-test-secret']);
+
+        $response = $this->actingAs(User::factory()->admin()->create())->getJson('/api/v1/admin/settings', frontend())->assertOk();
+
+        expect($response->getContent())->not->toContain('sk-ant-test-secret');
     });
 
     it('open registration again', function (): void {
@@ -203,7 +253,7 @@ describe('the settings', function (): void {
         $this->actingAs(User::factory()->admin()->create())
             ->putJson('/api/v1/admin/settings', ['registration_open' => false, 'something_else' => 'x'], frontend())
             ->assertOk()
-            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'documenso' => adminNoDocumenso()]]);
+            ->assertExactJson(['data' => ['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false, 'documenso' => adminNoDocumenso()]]);
 
         expect(DB::table('settings')->pluck('key')->all())->toBe(['registration_open']);
     });
@@ -253,6 +303,83 @@ describe('the settings page', function (): void {
             ->assertOk()
             ->assertSee('Les propriétaires peuvent partager un inventaire par un lien')
             ->assertSee('Un lien de partage montre un inventaire, en lecture seule');
+    });
+
+    describe('the card of the photo entry', function (): void {
+        it('shows the switch as it is, next to the other ones, and the messages its script needs', function (bool $enabled): void {
+            app(InstanceSettings::class)->update([InstanceSettings::PHOTO_ENTRY_ENABLED => $enabled]);
+
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+                ->assertOk()
+                ->assertSee('data-photo-entry-enabled="'.($enabled ? '1' : '0').'"', false)
+                ->assertSee('data-share-links-enabled', false)
+                ->assertSee('id="admin-settings-photo-entry"', false)
+                ->assertSee('@change="togglePhotoEntry"', false)
+                ->assertSee('Photo entry (AI)')
+                ->assertSee('admin.settings.notice.photo_entry_on', false)
+                ->assertSee('admin.settings.notice.photo_entry_off', false);
+        })->with(['on' => [true], 'off' => [false]]);
+
+        it('is off on an instance that never chose', function (): void {
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+                ->assertOk()
+                ->assertSee('data-photo-entry-enabled="0"', false)
+                ->assertSee('data-share-links-enabled="1"', false);
+        });
+
+        it('says the photos are sent to Anthropic (Claude), then deleted, and billed to the key of the instance', function (): void {
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+                ->assertOk()
+                ->assertSee('the photos are sent to Anthropic (Claude) to be read, then deleted')
+                ->assertSee('billed to the API key of this instance');
+        });
+
+        it('says there is a key when one is configured', function (mixed $key): void {
+            config(['services.anthropic.key' => $key]);
+
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+                ->assertOk()
+                ->assertSee('API key configured')
+                ->assertDontSee('No API key: set ANTHROPIC_API_KEY');
+        })->with(['a key' => ['sk-ant-test-secret'], 'a key with spaces around' => ['  sk-ant-test-secret  ']]);
+
+        it('says there is none when the key is missing, empty or blank', function (mixed $key): void {
+            config(['services.anthropic.key' => $key]);
+
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+                ->assertOk()
+                ->assertSee('No API key: set ANTHROPIC_API_KEY')
+                ->assertSee('the photo entry stays unavailable, whatever this switch says')
+                ->assertDontSee('API key configured');
+        })->with(['null' => [null], 'empty' => [''], 'spaces' => ['   ']]);
+
+        it('never writes the key in the page', function (): void {
+            config(['services.anthropic.key' => 'sk-ant-test-secret']);
+
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'en'])
+                ->assertOk()
+                ->assertDontSee('sk-ant-test-secret');
+        });
+
+        it('is translated', function (mixed $key, string $status): void {
+            config(['services.anthropic.key' => $key]);
+
+            $this->actingAs(User::factory()->admin()->withPersonalWorkspace()->create())
+                ->get(route('app.admin.settings'), ['Accept-Language' => 'fr'])
+                ->assertOk()
+                ->assertSee('Saisie par photos (IA)')
+                ->assertSee('envoyées à Anthropic (Claude) pour être lues, puis supprimées')
+                ->assertSee($status);
+        })->with([
+            'no key' => [null, "Aucune clé d'API : définissez ANTHROPIC_API_KEY"],
+            'a key' => ['sk-ant-test-secret', "Clé d'API configurée"],
+        ]);
     });
 
     describe('the card of the e-signature service', function (): void {

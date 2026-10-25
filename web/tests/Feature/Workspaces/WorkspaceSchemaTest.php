@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
 
 describe('the tables', function (): void {
     it('have the columns the application relies on', function (): void {
-        expect(Schema::getColumnListing('workspaces'))->toEqualCanonicalizing(['id', 'ulid', 'name', 'storage_used', 'created_at', 'updated_at'])
+        expect(Schema::getColumnListing('workspaces'))->toEqualCanonicalizing(['id', 'ulid', 'name', 'storage_used', 'photo_entry_enabled', 'created_at', 'updated_at'])
             ->and(Schema::getColumnListing('workspace_user'))->toEqualCanonicalizing(['id', 'workspace_id', 'user_id', 'role', 'created_at', 'updated_at'])
             ->and(Schema::hasColumn('users', 'current_workspace_id'))->toBeTrue();
     });
@@ -78,6 +78,12 @@ describe('the migrations', function (): void {
         $invitations = require database_path('migrations/2026_11_13_000000_create_workspace_invitations_table.php');
         // The share links hang from inventories and accounts.
         $shareLinks = require database_path('migrations/2026_11_20_000000_create_share_links_table.php');
+        // The analyses of photos hang from inventories and accounts.
+        $photoAnalyses = require database_path('migrations/2026_12_01_000000_create_photo_analyses_table.php');
+        // The consent to the photo entry is a column of workspaces: it goes before them and comes back after them.
+        $photoEntry = require database_path('migrations/2026_12_01_000100_add_photo_entry_enabled_to_workspaces_table.php');
+        $photoEntry->down();
+        $photoAnalyses->down();
         $shareLinks->down();
         $invitations->down();
         $versions->down();
@@ -107,6 +113,8 @@ describe('the migrations', function (): void {
             $versions->up();
             $invitations->up();
             $shareLinks->up();
+            $photoAnalyses->up();
+            $photoEntry->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

@@ -6,6 +6,11 @@
     store, which the switcher of the header fills from the list the server rendered. Everything goes through the API;
     deleting asks for a confirmation in the row. The name of a workspace links to its page (the inventories it holds).
 
+    The photo entry: when the instance offers it ($photoEntry, see WorkspaceListPageController, is then the consent of each workspace
+    the person owns by ULID, else null), the owner of a workspace gets a switch in its row. The list endpoint does not carry the consent
+    (it is a token route), so the page reads it from data-photo-entry. Never put a display utility (d-flex...) on an element that carries
+    x-show: the utility wins and it never hides.
+
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
 @extends('layouts.app')
@@ -22,6 +27,8 @@
         data-current-url="{{ route('api.v1.me.current-workspace', absolute: false) }}"
         data-workspace-url="{{ route('app.workspace', ['workspace' => '__id__'], absolute: false) }}"
         data-members-url="{{ route('app.workspace.members', ['workspace' => '__id__'], absolute: false) }}"
+        data-photo-entry-url="{{ route('api.v1.workspaces.photo-entry.update', ['workspace' => '__id__'], absolute: false) }}"
+        data-photo-entry="{{ json_encode($photoEntry, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR) }}"
     >
         <div class="col-12 col-lg-8">
             <div class="card">
@@ -54,6 +61,24 @@
                                             <a class="fw-bold text-break" :href="pageUrl(item)" x-text="item.name"></a>
                                             <span class="badge bg-primary-lt" x-show="item.current">{{ __('Current') }}</span>
                                             <span class="badge" x-text="roleLabel(item)"></span>
+                                        </div>
+                                        <div class="mt-2" x-show="canPhotoEntry(item)">
+                                            <label class="form-check form-switch mb-0">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    :checked="photoEntryOn(item)"
+                                                    :disabled="busy"
+                                                    :aria-label="photoEntryLabel(item)"
+                                                    :aria-describedby="'workspace-photo-entry-hint-' + item.id"
+                                                    @change="togglePhotoEntry(item, $event)"
+                                                >
+                                                <span class="form-check-label">{{ __('Photo entry (AI)') }}</span>
+                                            </label>
+                                            <div class="form-hint" :id="'workspace-photo-entry-hint-' + item.id">
+                                                {{ __('Photos sent by the editors are read by Claude (Anthropic), then deleted.') }}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

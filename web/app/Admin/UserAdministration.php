@@ -12,6 +12,7 @@ use App\Database\CaseInsensitiveSearch;
 use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\WorkspaceMember;
+use App\PhotoEntry\PhotoEntry;
 use App\Services\LocaleResolver;
 use App\Workspaces\Locks;
 use App\Workspaces\WorkspaceRole;
@@ -49,6 +50,7 @@ final class UserAdministration
         private readonly Accounts $accounts,
         private readonly Locks $locks,
         private readonly LocaleResolver $locales,
+        private readonly PhotoEntry $photoEntry,
     ) {}
 
     /**
@@ -245,7 +247,7 @@ final class UserAdministration
 
         $byWorkspace = $members->groupBy('workspace_id');
 
-        foreach ($workspaces->keys() as $id) {
+        foreach ($workspaces as $id => $workspace) {
             /** @var Collection<int, WorkspaceMember> $present */
             $present = $byWorkspace->get($id, new Collection);
             $mine = $present->first(fn (WorkspaceMember $member): bool => (int) $member->user_id === (int) $user->getKey());
@@ -265,6 +267,9 @@ final class UserAdministration
             $successor = ($editors->isEmpty() ? $companions : $editors)->sortBy('id')->firstOrFail();
 
             WorkspaceMember::query()->whereKey($successor->getKey())->update(['role' => WorkspaceRole::Owner->value, 'updated_at' => now()]);
+
+            // The consent of the owner who is going is not the one of their successor, who gives their own.
+            $this->photoEntry->withdrawConsent($workspace);
         }
     }
 

@@ -19,6 +19,8 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
             'admin.settings.notice.invitations_off': 'Invitations are off',
             'admin.settings.notice.sharing_on': 'Sharing is on',
             'admin.settings.notice.sharing_off': 'Sharing is off',
+            'admin.settings.notice.photo_entry_on': 'Photo entry is on',
+            'admin.settings.notice.photo_entry_off': 'Photo entry is off',
             'admin.settings.select_hint': 'The address is selected: copy it with your keyboard.',
             'tokens.copy': 'Copy',
             'tokens.copied': 'Copied',
@@ -137,6 +139,79 @@ describe('administration settings page', () => {
         expect(http.put).toHaveBeenLastCalledWith(URL, { share_links_enabled: true });
         expect(component.shareLinksEnabled).toBe(true);
         expect(notify).toHaveBeenLastCalledWith('success', 'Sharing is on');
+    });
+
+    it('starts the photo entry switch off when the page says nothing, then from the value the page was rendered with', () => {
+        expect(component.photoEntryEnabled).toBe(false);
+
+        component.$root.dataset.photoEntryEnabled = '1';
+        component.init();
+
+        expect(component.photoEntryEnabled).toBe(true);
+
+        component.$root.dataset.photoEntryEnabled = '0';
+        component.init();
+
+        expect(component.photoEntryEnabled).toBe(false);
+    });
+
+    it('turns the photo entry on and off, without touching the other switches, and says so', async () => {
+        component.$root.dataset.shareLinksEnabled = '1';
+        component.init();
+        http.put.mockResolvedValue({
+            data: {
+                registration_open: true,
+                invitation_sign_up: true,
+                share_links_enabled: true,
+                photo_entry_enabled: true,
+            },
+        });
+
+        await component.togglePhotoEntry(box(true));
+
+        expect(http.put).toHaveBeenCalledWith(URL, { photo_entry_enabled: true });
+        expect(component.photoEntryEnabled).toBe(true);
+        expect(component.shareLinksEnabled).toBe(true);
+        expect(component.registrationOpen).toBe(true);
+        expect(notify).toHaveBeenCalledWith('success', 'Photo entry is on');
+
+        http.put.mockResolvedValue({
+            data: {
+                registration_open: true,
+                invitation_sign_up: true,
+                share_links_enabled: true,
+                photo_entry_enabled: false,
+            },
+        });
+
+        await component.togglePhotoEntry(box(false));
+
+        expect(http.put).toHaveBeenLastCalledWith(URL, { photo_entry_enabled: false });
+        expect(component.photoEntryEnabled).toBe(false);
+        expect(notify).toHaveBeenLastCalledWith('success', 'Photo entry is off');
+    });
+
+    it('puts the photo entry switch back when the change could not be saved, and blocks a second change meanwhile', async () => {
+        component.$root.dataset.photoEntryEnabled = '1';
+        component.init();
+        http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+        const checkbox = box(false);
+
+        await component.togglePhotoEntry(checkbox);
+
+        expect(component.photoEntryEnabled).toBe(true);
+        expect(checkbox.target.checked).toBe(true);
+        expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+        expect(component.busy).toBe(false);
+
+        component.busy = true;
+        http.put.mockClear();
+        const other = box(false);
+
+        await component.togglePhotoEntry(other);
+
+        expect(http.put).not.toHaveBeenCalled();
+        expect(other.target.checked).toBe(true);
     });
 
     it('puts the sharing switch back when the change could not be saved', async () => {

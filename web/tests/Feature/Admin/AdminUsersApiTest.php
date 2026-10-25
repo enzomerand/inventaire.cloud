@@ -627,6 +627,32 @@ describe('handing workspaces over before deleting their only owner', function ()
             ->and(WorkspaceMember::query()->where('workspace_id', $shared->id)->count())->toBe(3);
     });
 
+    it('withdraws the consent to the photo entry of a workspace whose owner is replaced, and only of those', function (): void {
+        $admin = adminAccount();
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        $successor = User::factory()->withPersonalWorkspace()->create();
+        $coOwner = User::factory()->withPersonalWorkspace()->create();
+        $guest = User::factory()->withPersonalWorkspace()->create();
+        $handed = app(Workspaces::class)->create($owner, 'Handed over');
+        adminJoin($handed, $successor, WorkspaceRole::Editor);
+        $co = app(Workspaces::class)->create($owner, 'Co-owned');
+        adminJoin($co, $coOwner, WorkspaceRole::Owner);
+        $theirs = app(Workspaces::class)->create($guest, 'Theirs');
+        adminJoin($theirs, $owner, WorkspaceRole::Editor);
+
+        foreach ([$handed, $co, $theirs] as $workspace) {
+            $workspace->forceFill(['photo_entry_enabled' => true])->save();
+        }
+
+        adminCall($this, $admin, 'DELETE', "/api/v1/admin/users/{$owner->id}")->assertNoContent();
+
+        // The successor did not consent; the workspace that keeps its owner keeps what its owner said.
+        expect(adminRoleOf($successor, $handed))->toBe('owner')
+            ->and($handed->fresh()->photo_entry_enabled)->toBeFalse()
+            ->and($co->fresh()->photo_entry_enabled)->toBeTrue()
+            ->and($theirs->fresh()->photo_entry_enabled)->toBeTrue();
+    });
+
     it('falls back to the member of the longest standing when the workspace has no editor', function (): void {
         $admin = adminAccount();
         $owner = User::factory()->withPersonalWorkspace()->create();

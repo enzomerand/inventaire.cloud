@@ -63,6 +63,7 @@ function tokenSessionOnlyRoutes(): array
         'auth.code', 'auth.verify', 'auth.logout', 'me.update', 'me.export', 'me.current-workspace', 'me.sign-out-everywhere',
         'me.deletion-code', 'me.destroy', 'admin.users.index', 'admin.users.store', 'admin.users.update', 'admin.users.destroy',
         'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy', 'workspaces.transfer',
+        'workspaces.photo-entry.update', 'inventories.photo-analyses.store', 'inventories.photo-analyses.show',
     ]);
 }
 

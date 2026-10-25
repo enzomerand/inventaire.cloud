@@ -14,10 +14,15 @@ use App\Inventories\Sharing\ShareLinks;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Jobs\GenerateExport;
 use App\Models\User;
+use App\PhotoEntry\ClaudePhotoAnalyzer;
+use App\PhotoEntry\FakePhotoAnalyzer;
+use App\PhotoEntry\PhotoAnalyzer;
+use App\PhotoEntry\PhotoFields;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
@@ -45,6 +50,12 @@ class AppServiceProvider extends ServiceProvider
 
         // The catalogue of inventory templates is read from its files once per process (see the class).
         $this->app->singleton(TemplateCatalogue::class);
+
+        // What reads the photos of the photo entry: Claude, or on a development machine that asks for it (ANTHROPIC_FAKE, and only when
+        // APP_ENV is local: never in production) an analyzer that makes the proposals up, so the whole flow can be tried without a key.
+        $this->app->bind(PhotoAnalyzer::class, fn (Application $app): PhotoAnalyzer => $app->isLocal() && config()->boolean('services.anthropic.fake')
+            ? new FakePhotoAnalyzer(delay: 1.5)
+            : new ClaudePhotoAnalyzer($app->make(PhotoFields::class)));
     }
 
     /**
@@ -109,6 +120,11 @@ class AppServiceProvider extends ServiceProvider
         // Sending a file to import, or reading it again with other options, reads a whole file (`imports_per_minute`), keyed on the user.
         RateLimiter::for('imports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.imports_per_minute'))
             ->by('imports:'.$this->signedInKey($request)));
+
+        // Sending photos to be read by Claude (Anthropic) is a paid request: five a minute per person (the day's count is the quota of
+        // App\PhotoEntry\PhotoAnalysisQuota, `photo_analyses_per_day`).
+        RateLimiter::for('photo-analyses', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by('photo-analyses:'.$this->signedInKey($request)));
 
         // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
         RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))

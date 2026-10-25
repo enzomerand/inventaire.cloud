@@ -5,6 +5,7 @@ import { useMemoryStorage } from './storage.js';
 
 export const INVENTORY = '/api/v1/inventories/tools';
 export const ITEMS = INVENTORY + '/items';
+export const PHOTO_ANALYSES = INVENTORY + '/photo-analyses';
 
 /**
  * How the API says the list treats each type of field (`query_kind` and `summable` of a field): the answer of the server,
@@ -157,10 +158,11 @@ export function page(
  * runs at once.
  *
  * @param {() => Record<string, any>} factory The component function.
- * @param {{ canEdit?: boolean, canManageFields?: boolean, maxAttachmentSize?: number, importMaxSize?: number, laterTick?: boolean }} [options]
+ * @param {{ canEdit?: boolean, canManageFields?: boolean, maxAttachmentSize?: number, importMaxSize?: number, photoEntry?: boolean, laterTick?: boolean }} [options]
  *   `canManageFields`: whether the person may create and change the fields (they may when not given). `maxAttachmentSize`: the
  *   largest file the page says the server takes, in bytes (the page says nothing when not given). `importMaxSize`: the same
- *   for a spreadsheet to import. `laterTick`: `$nextTick` runs the function after the code that asked is done, as Alpine's
+ *   for a spreadsheet to import. `photoEntry`: whether the page offers to add an item from photos (`data-photo-entry`, with the
+ *   address of the analyses; the page says nothing when not given). `laterTick`: `$nextTick` runs the function after the code that asked is done, as Alpine's
  *   does, instead of at once (which hides the bugs of what is assumed to have happened by the time the function runs).
  * @returns {Record<string, any>}
  */
@@ -171,6 +173,7 @@ export function mountComponent(
         canManageFields = true,
         maxAttachmentSize = undefined,
         importMaxSize = undefined,
+        photoEntry = undefined,
         laterTick = false,
     } = {},
 ) {
@@ -195,12 +198,21 @@ export function mountComponent(
         root.dataset.importMaxSize = String(importMaxSize);
     }
 
+    if (photoEntry !== undefined) {
+        root.dataset.photoEntry = photoEntry ? '1' : '0';
+
+        if (photoEntry) {
+            root.dataset.photoEntryUrl = PHOTO_ANALYSES;
+        }
+    }
+
     component.$root = root;
     component.$refs = {
         modal: document.createElement('div'),
         filters: document.createElement('div'),
         search: document.createElement('input'),
         picker: document.createElement('input'),
+        photoModal: document.createElement('div'),
     };
     component.$nextTick = laterTick ? (callback) => void queueMicrotask(callback) : (callback) => callback();
     document.documentElement.lang = 'en';

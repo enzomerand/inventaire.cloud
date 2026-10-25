@@ -1,12 +1,17 @@
 /**
- * Alpine component of the workspaces page: list them, create one, rename or delete the ones the person owns, and
- * choose the one to work in.
+ * Alpine component of the workspaces page: list them, create one, rename or delete the ones the person owns, choose
+ * the one to work in, and let the owners decide whether their editors may use the photo entry.
  *
  * The list lives in the shared `workspaces` store (see stores/workspaces.js), which the header shows as well; after
  * every change the component asks the API for the list again, so what is shown is what the server holds. Deleting
  * asks for a confirmation in the row itself. The endpoints come from the markup (`data-url`, `data-current-url`,
  * `data-workspace-url` on the root), because the CSP build of Alpine does not allow Blade to inject values into
  * expressions.
+ *
+ * The photo entry (editors add an item from photos that Claude, at Anthropic, reads) is the owner's choice for each workspace, a
+ * switch in its row. The list endpoint does not carry it (it is a token route), so the page renders it: `data-photo-entry` is the
+ * consent of each workspace the person owns, as `{ulid: bool}`, or `null` when the instance does not offer the feature (no switch is
+ * shown then). `data-photo-entry-url` is the endpoint with `__id__` where the ULID goes.
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are
  * shown as a toast, with the server's translated validation message when there is one, and a message of our own for
@@ -39,6 +44,9 @@ export default function workspaces() {
         /** Id of the workspace waiting for the confirmation of its deletion, or null. */
         confirmingId: null,
 
+        /** The consent of the workspaces the person owns to the photo entry, by ULID; null when the instance does not offer it. */
+        photoEntry: null,
+
         /** Endpoint of the workspaces (GET, POST, PATCH, DELETE), from `data-url` on the component root. */
         get url() {
             return this.$root.dataset.url;
@@ -59,6 +67,11 @@ export default function workspaces() {
             return this.$root.dataset.membersUrl;
         },
 
+        /** Endpoint of the photo entry of a workspace (PUT), with `__id__` where its ULID goes, from `data-photo-entry-url` on the component root. */
+        get photoEntryUrl() {
+            return this.$root.dataset.photoEntryUrl;
+        },
+
         /** The workspaces of the person, from the shared store. */
         get items() {
             return this.$store.workspaces.items;
@@ -70,11 +83,16 @@ export default function workspaces() {
         },
 
         /**
-         * Puts the cursor in the creation box when the page was opened from "New workspace" in the header.
+         * Reads the consent to the photo entry the page was rendered with, and puts the cursor in the creation box when the page was
+         * opened from "New workspace" in the header.
          *
          * @returns {void}
          */
         init() {
+            // `data-photo-entry` is rendered by the server: an object of booleans by ULID, or `null` when the instance does not offer the
+            // feature (an attribute that is missing means the same).
+            this.photoEntry = JSON.parse(this.$root.dataset.photoEntry ?? 'null');
+
             if (window.location.hash === '#create') {
                 this.$nextTick(() => this.$refs.name?.focus());
             }
@@ -88,6 +106,38 @@ export default function workspaces() {
          */
         canManage(item) {
             return item.role === 'owner';
+        },
+
+        /**
+         * Whether the switch of the photo entry is offered for a workspace: the instance offers the feature, and the person owns the
+         * workspace (the owner alone chooses).
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {boolean}
+         */
+        canPhotoEntry(item) {
+            return this.photoEntry !== null && this.canManage(item);
+        },
+
+        /**
+         * Whether the owner turned the photo entry on for a workspace. A workspace the page does not know (one created since it was
+         * rendered) has it off, as a new workspace does.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {boolean}
+         */
+        photoEntryOn(item) {
+            return this.photoEntry?.[item.id] === true;
+        },
+
+        /**
+         * The accessible name of the photo entry switch of a workspace.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        photoEntryLabel(item) {
+            return t('workspaces.photo_entry_named', { name: item.name });
         },
 
         /**
@@ -299,6 +349,49 @@ export default function workspaces() {
             }
 
             reloadPage();
+        },
+
+        /**
+         * Saves the position the photo entry switch of a workspace was put in. The switch then shows what the server answers, and goes
+         * back to what it was if the change could not be saved. When the server says the instance no longer offers the feature (`409`),
+         * the switches are taken off the page: the administrator turned it off since it was rendered.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @param {Event} event The change event of the checkbox.
+         * @returns {Promise<void>}
+         */
+        async togglePhotoEntry(item, event) {
+            const box = event.target;
+
+            if (this.busy) {
+                box.checked = this.photoEntryOn(item);
+
+                return;
+            }
+
+            this.busy = true;
+
+            try {
+                const answer = await http.put(fillUrl(this.photoEntryUrl, item.id), { enabled: box.checked === true });
+                const enabled = answer.data.enabled === true;
+
+                this.photoEntry = { ...this.photoEntry, [item.id]: enabled };
+                notify(
+                    'success',
+                    t(enabled ? 'workspaces.notice.photo_entry_on' : 'workspaces.notice.photo_entry_off', {
+                        name: item.name,
+                    }),
+                );
+            } catch (error) {
+                if (error instanceof HttpError && error.status === 409 && error.code === 'photo_entry_unavailable') {
+                    this.photoEntry = null;
+                }
+
+                this.fail(error);
+            } finally {
+                box.checked = this.photoEntryOn(item);
+                this.busy = false;
+            }
         },
 
         /**

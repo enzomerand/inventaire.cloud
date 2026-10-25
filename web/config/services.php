@@ -45,6 +45,22 @@ return [
         'webhook_secret' => env('DOCUMENSO_WEBHOOK_SECRET'),
     ],
 
+    // The photo entry (App\PhotoEntry): Claude reads the photos of an object and proposes the values of its fields. The key stays in
+    // the environment, never in the database nor in a log; without it the feature is unavailable whatever the admin switch says.
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_MODEL', 'claude-sonnet-5-5'),
+        'effort' => env('ANTHROPIC_EFFORT', 'low'),
+        // Seconds a request may take. ClaudePhotoAnalyzer holds it between 10 and 120 whatever is set here: the job that runs the analysis is
+        // killed after 300 seconds, and a request may be retried once.
+        'timeout' => (int) env('ANTHROPIC_TIMEOUT', 90),
+        // Whether the models that accept it are sent the server-side fallback (a request the model declines for policy reasons is retried on
+        // a substitute, which means a dated beta header). false stops sending it without changing the model; unset or empty is the default (on).
+        'fallbacks' => in_array(env('ANTHROPIC_FALLBACKS'), [null, ''], true) || filter_var(env('ANTHROPIC_FALLBACKS'), FILTER_VALIDATE_BOOLEAN),
+        // Development aid: answers with made-up proposals instead of calling Claude. Honoured only when APP_ENV is local.
+        'fake' => (bool) env('ANTHROPIC_FAKE', false),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

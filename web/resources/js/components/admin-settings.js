@@ -2,11 +2,12 @@
  * Alpine component of the administration's settings page: the choices that apply to the whole instance, and where the
  * e-signature service (Documenso) stands.
  *
- * There are three choices: whether new addresses can create an account, while they cannot whether an invitation to a
- * workspace still lets its address create one ("on invitation"), and whether the owners of an inventory can share it through a
- * secret read-only link. Flipping a switch saves it at once; the switch then shows what the server answers, and goes back to
- * what it was if the change could not be saved. The endpoint and the current values come from the markup (`data-url`,
- * `data-registration-open`, `data-invitation-sign-up` and `data-share-links-enabled`, "1" or "0", on the root), because the CSP
+ * There are four choices: whether new addresses can create an account, while they cannot whether an invitation to a
+ * workspace still lets its address create one ("on invitation"), whether the owners of an inventory can share it through a
+ * secret read-only link, and whether editors can add an item from photos that Claude reads (off until turned on). Flipping a
+ * switch saves it at once; the switch then shows what the server answers, and goes back to what it was if the change could not
+ * be saved. The endpoint and the current values come from the markup (`data-url`, `data-registration-open`,
+ * `data-invitation-sign-up`, `data-share-links-enabled` and `data-photo-entry-enabled`, "1" or "0", on the root), because the CSP
  * build of Alpine does not allow Blade to inject values into expressions.
  *
  * The state of Documenso is read-only (it is set in the environment of the instance): whether the instance can ask for
@@ -34,6 +35,9 @@ export default function adminSettings() {
 
         /** Whether the owners of an inventory can share it through a share link, as the server holds it. */
         shareLinksEnabled: true,
+
+        /** Whether editors can add an item from photos analysed by Claude, as the server holds it (off until an administrator turns it on). */
+        photoEntryEnabled: false,
 
         /** True while a change is being saved; blocks the switches. */
         busy: false,
@@ -77,6 +81,7 @@ export default function adminSettings() {
             this.registrationOpen = data.registrationOpen === '1';
             this.invitationSignUp = data.invitationSignUp === '1';
             this.shareLinksEnabled = data.shareLinksEnabled === '1';
+            this.photoEntryEnabled = data.photoEntryEnabled === '1';
             this.documensoConfigured = data.documensoConfigured === '1';
             this.webhookSecretConfigured = data.documensoSecret === '1';
             this.webhookUrl = data.webhookUrl ?? '';
@@ -157,12 +162,25 @@ export default function adminSettings() {
         },
 
         /**
+         * Saves the position the photo entry switch was put in.
+         *
+         * @param {Event} event The change event of the checkbox.
+         * @returns {Promise<void>}
+         */
+        async togglePhotoEntry(event) {
+            await this.saveSwitch(event.target, 'photo_entry_enabled', 'photoEntryEnabled', {
+                on: 'admin.settings.notice.photo_entry_on',
+                off: 'admin.settings.notice.photo_entry_off',
+            });
+        },
+
+        /**
          * Sends one setting and shows what the server holds afterwards: the switch is put back to the stored value, whether the change
          * was saved or not.
          *
          * @param {HTMLInputElement} box The checkbox that was flipped.
          * @param {string} setting Name of the setting in the API.
-         * @param {'registrationOpen' | 'invitationSignUp' | 'shareLinksEnabled'} property The state that mirrors it.
+         * @param {'registrationOpen' | 'invitationSignUp' | 'shareLinksEnabled' | 'photoEntryEnabled'} property The state that mirrors it.
          * @param {{ on: string, off: string }} notices The messages that say it was turned on or off.
          * @returns {Promise<void>}
          */
