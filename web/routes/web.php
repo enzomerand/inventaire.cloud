@@ -25,6 +25,7 @@ use App\Http\Controllers\Web\InventoryVersionsPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
+use App\Http\Controllers\Web\WorkspaceListPageController;
 use App\Http\Controllers\Web\WorkspaceMembersPageController;
 use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Controllers\Webhooks\DocumensoWebhookController;
@@ -111,7 +112,7 @@ Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, Pr
 Route::view('/login', 'auth.login')->middleware('guest')->name('login');
 Route::middleware(['auth', AuthenticateSession::class])->group(function (): void {
     Route::get('/app', CurrentWorkspaceRedirectController::class)->name('app');
-    Route::view('/app/workspaces', 'app.workspaces')->name('app.workspaces');
+    Route::get('/app/workspaces', WorkspaceListPageController::class)->name('app.workspaces');
     Route::view('/app/account', 'app.account')->name('app.account');
 
     // The invitations addressed to the address of the account. The invitation mail links to this path (WorkspaceInvitationMail::PAGE, kept

@@ -87,6 +87,7 @@ const ROUTE_PATTERNS = {
         '/api/v1/inventories/{inventory}/versions/{version}/signature/cancel',
     'api.v1.inventories.versions.signature.retry': '/api/v1/inventories/{inventory}/versions/{version}/signature/retry',
     'api.v1.workspaces.inventories.index': '/api/v1/workspaces/{workspace}/inventories',
+    'api.v1.workspaces.photo-entry.update': '/api/v1/workspaces/{workspace}/photo-entry',
     'api.v1.templates.show': '/api/v1/templates/{slug}',
     'api.v1.inventories.show': '/api/v1/inventories/{inventory}',
     'api.v1.inventories.items.index': '/api/v1/inventories/{inventory}/items',
@@ -126,6 +127,8 @@ const PAGE = {
     },
     photoEntryEnabled: false,
     photoEntryKey: true,
+    // The consent of the workspaces the person owns, by ULID, as the page of the workspaces is rendered; null when the instance does not offer it.
+    photoEntry: null,
 };
 
 /** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
@@ -167,6 +170,9 @@ const MESSAGES = {
     'workspaces.notice.renamed': 'Workspace renamed.',
     'workspaces.notice.deleted': 'Workspace deleted.',
     'workspaces.error.last': 'Keep one workspace',
+    'workspaces.photo_entry_named': 'Photo entry (AI) for :name',
+    'workspaces.notice.photo_entry_on': 'Photo entry on for :name',
+    'workspaces.notice.photo_entry_off': 'Photo entry off for :name',
     'account.notice.saved': 'Account updated',
     'account.notice.signed_out_everywhere': 'Signed out everywhere else',
     'account.notice.code_sent': 'Code sent',
@@ -309,6 +315,10 @@ function render(path, { scannerSlot = '' } = {}) {
 
         if (expression === 'json_encode($currencies, JSON_THROW_ON_ERROR)') {
             return escape(JSON.stringify(PAGE.currencies));
+        }
+
+        if (expression === 'json_encode($photoEntry, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR)') {
+            return escape(JSON.stringify(PAGE.photoEntry));
         }
 
         if (expression.startsWith('json_encode($list')) {
@@ -504,6 +514,7 @@ describe('the pages under the real Alpine CSP build', () => {
         };
         PAGE.photoEntryEnabled = false;
         PAGE.photoEntryKey = true;
+        PAGE.photoEntry = null;
     });
 
     describe('the switcher of the header', () => {
@@ -702,6 +713,121 @@ describe('the pages under the real Alpine CSP build', () => {
 
             expect(notify).toHaveBeenCalledWith('danger', 'Keep one workspace');
             expect(rows()).toHaveLength(3);
+        });
+
+        describe('the photo entry', () => {
+            /** The switch of the photo entry in a row of the list, or null when the row has none that a person sees. */
+            const photoSwitch = (row) => {
+                const input = row.querySelector('input[role="switch"]');
+
+                return input !== null && visible(input) ? input : null;
+            };
+
+            /** Mounts the page as the server renders it when the instance offers the photo entry. */
+            async function offered(consents) {
+                PAGE.photoEntry = consents;
+                await mount('components/workspace-switcher.blade.php', 'app/workspaces.blade.php');
+            }
+
+            it('shows no switch when the instance does not offer it', () => {
+                expect(rows().map(photoSwitch)).toEqual([null, null, null]);
+                expect([...document.querySelectorAll('.form-hint')].filter(visible)).toEqual([]);
+            });
+
+            it('shows a switch for each workspace the person owns, as the page was rendered, and none for the others', async () => {
+                await offered({ personal: false, shop: true });
+
+                const switches = rows().map(photoSwitch);
+
+                expect(switches.map((input) => input !== null && input.checked)).toEqual([false, true, false]);
+                expect(switches[2]).toBeNull();
+                expect(switches[0].getAttribute('role')).toBe('switch');
+                expect(switches[0].getAttribute('aria-label')).toBe('Photo entry (AI) for Espace personnel');
+                expect(rows()[1].textContent).toContain('Photo entry (AI)');
+                // The note is the description of the switch.
+                expect(document.getElementById(switches[0].getAttribute('aria-describedby')).textContent).toContain(
+                    'Photos sent by the editors are read by Claude (Anthropic), then deleted.',
+                );
+            });
+
+            it('turns it on for that workspace alone, and says so', async () => {
+                await offered({ personal: false, shop: false });
+                http.put.mockResolvedValue({ data: { enabled: true } });
+                const input = photoSwitch(rows()[1]);
+
+                input.checked = true;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+
+                expect(http.put).toHaveBeenCalledWith('/api/v1/workspaces/shop/photo-entry', { enabled: true });
+                expect(notify).toHaveBeenCalledWith('success', 'Photo entry on for Shop');
+                expect(
+                    rows()
+                        .map(photoSwitch)
+                        .map((one) => one !== null && one.checked),
+                ).toEqual([false, true, false]);
+                expect(input.disabled).toBe(false);
+            });
+
+            it('turns it off again, and says so', async () => {
+                await offered({ personal: true, shop: false });
+                http.put.mockResolvedValue({ data: { enabled: false } });
+                const input = photoSwitch(rows()[0]);
+
+                input.checked = false;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+
+                expect(http.put).toHaveBeenCalledWith('/api/v1/workspaces/personal/photo-entry', { enabled: false });
+                expect(notify).toHaveBeenCalledWith('success', 'Photo entry off for Espace personnel');
+                expect(input.checked).toBe(false);
+            });
+
+            it('puts the switch back and says why when the change could not be saved', async () => {
+                await offered({ personal: false, shop: false });
+                http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+                const input = photoSwitch(rows()[1]);
+
+                input.checked = true;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+
+                expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+                expect(input.checked).toBe(false);
+            });
+
+            it('takes the switches off the page when the administrator turned the feature off in the meantime', async () => {
+                await offered({ personal: false, shop: false });
+                http.put.mockRejectedValue(
+                    new HttpError(409, 'Not available: ask its administrator.', { code: 'photo_entry_unavailable' }),
+                );
+                const input = photoSwitch(rows()[1]);
+
+                input.checked = true;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+
+                expect(notify).toHaveBeenCalledWith('danger', 'Not available: ask its administrator.');
+                expect(rows().map(photoSwitch)).toEqual([null, null, null]);
+            });
+
+            it('offers a workspace created since the page was rendered, with the feature off', async () => {
+                await offered({ personal: false, shop: true });
+                const created = { id: 'new', name: 'Warehouse', role: 'owner', current: true };
+                http.post.mockResolvedValue({ data: {} });
+                http.get.mockResolvedValue(
+                    listing([...WORKSPACES.map((item) => ({ ...item, current: false })), created]),
+                );
+                await type(document.querySelector('#workspace-new-name'), 'Warehouse');
+
+                document.querySelector('#create form').dispatchEvent(new Event('submit', { cancelable: true }));
+                await flush();
+
+                const switches = rows().map(photoSwitch);
+
+                expect(switches.map((one) => one !== null && one.checked)).toEqual([false, true, false, false]);
+                expect(switches[3]).not.toBeNull();
+            });
         });
 
         it('focuses the creation box when opened from "New workspace"', async () => {
