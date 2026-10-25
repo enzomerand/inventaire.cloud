@@ -7,6 +7,7 @@ namespace App\PhotoEntry;
 use App\Inventories\Attachments\IncomingFile;
 use App\Inventories\Attachments\Thumbnails;
 use App\Inventories\Attachments\UnreadableImageException;
+use RuntimeException;
 
 /**
  * Prepares a photo for the analysis: the image as a JPEG of 1568 pixels on its longest side at most (the size Claude reads best: a larger
@@ -41,6 +42,8 @@ final class PhotoImages
      * @param  string  $path  Where the photo is on the server.
      *
      * @throws UnreadablePhotoException When the file is not a JPEG, PNG or WebP image, cannot be decoded or is too large to be.
+     * @throws RuntimeException When the server cannot do it whatever the photo (GD is missing, the JPEG cannot be written): a fault of the
+     *                          instance, not of the photo, reported and answered with a 500.
      */
     public function prepare(string $path): string
     {
@@ -63,7 +66,14 @@ final class PhotoImages
         }
 
         if ($jpeg === null) {
-            throw new UnreadablePhotoException(UnreadablePhotoException::TOO_LARGE, __('This photo is too large to be analysed: send a smaller one.'));
+            // Null on purpose for an image with too many pixels, or more than the memory of PHP can decode: that is the photo's fault.
+            if ($this->thumbnails->tooLargeToDecode($info)) {
+                throw new UnreadablePhotoException(UnreadablePhotoException::TOO_LARGE, __('This photo is too large to be analysed: send a smaller one.'));
+            }
+
+            // Anything else (GD is not installed, the encoder failed) is the server's: telling the person the photo is too large would be
+            // false, and nothing they send would work. The administrator hears of it through the report of the application (a 500).
+            throw new RuntimeException('The photo could not be prepared: the GD extension is missing, or it could not write the JPEG.');
         }
 
         return $jpeg;

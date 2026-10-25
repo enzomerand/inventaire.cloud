@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 
 require_once __DIR__.'/../../Support/photo-entry.php';
+require_once __DIR__.'/../../Support/imagejpeg-failure.php';
 require_once __DIR__.'/../../Support/tokens.php';
 
 /*
@@ -371,6 +372,33 @@ describe('the pace', function (): void {
         photoPost($this, $editor, $case['inventory'], [photoUpload()])->assertStatus(202);
         // A photo that would be refused as unreadable is not even looked at: the day is used up.
         photoPost($this, $editor, $case['inventory'], [attachmentUploadedAs('x.jpg', substr(attachmentImageBytes('jpeg', 200, 200), 0, 160).str_repeat("\x00", 40), 'image/jpeg')])->assertStatus(429);
+    });
+});
+
+describe('a photo the server cannot prepare', function (): void {
+    afterEach(function (): void {
+        unset($GLOBALS['photo_imagejpeg_fails']);
+    });
+
+    it('is a 500 that is reported, not a 422 that blames the photo, and costs nothing', function (): void {
+        Queue::fake();
+        $case = photoReady();
+        $reported = [];
+        app()->make(ExceptionHandler::class)->reportable(function (Throwable $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+        $GLOBALS['photo_imagejpeg_fails'] = true;
+
+        $response = photoPost($this, $case['team']['editor'], $case['inventory'], [photoUpload()])->assertStatus(500);
+
+        expect($response->json('code'))->toBeNull()
+            ->and($response->json('errors'))->toBeNull()
+            ->and($reported)->toHaveCount(1)
+            ->and($reported[0])->toContain('could not be prepared')
+            ->and(PhotoAnalysis::query()->count())->toBe(0)
+            ->and(RateLimiter::attempts('photo-analyses-per-day:'.$case['team']['editor']->id))->toBe(0);
     });
 });
 

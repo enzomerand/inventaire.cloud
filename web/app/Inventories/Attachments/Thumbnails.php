@@ -87,7 +87,7 @@ final class Thumbnails
      */
     public function reencode(string $path, string $mime, ImageInfo $info, int $maxSide, int $quality): ?string
     {
-        if (! function_exists('imagecreatetruecolor') || $info->width * $info->height > self::MAX_PIXELS || ! $this->fitsInMemory($info)) {
+        if (! function_exists('imagecreatetruecolor') || $this->tooLargeToDecode($info)) {
             return null;
         }
 
@@ -122,6 +122,17 @@ final class Thumbnails
         }
 
         return $jpeg;
+    }
+
+    /**
+     * Whether the image has too many pixels to be decoded, or more than PHP has the memory for. It is what makes {@see self::reencode()}
+     * answer null on purpose, as opposed to GD missing or an encoder that fails, which are faults of the server.
+     *
+     * @param  ImageInfo  $info  What {@see self::inspect()} said about the file.
+     */
+    public function tooLargeToDecode(ImageInfo $info): bool
+    {
+        return $info->width * $info->height > self::MAX_PIXELS || ! $this->fitsInMemory($info);
     }
 
     /**

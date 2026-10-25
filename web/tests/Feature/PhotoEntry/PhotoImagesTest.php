@@ -7,6 +7,7 @@ use App\PhotoEntry\UnreadablePhotoException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 require_once __DIR__.'/../../Support/photo-entry.php';
+require_once __DIR__.'/../../Support/imagejpeg-failure.php';
 
 /*
  * The photos as they are sent to Claude: a JPEG of 1568 pixels at most, upright, and nothing but the pixels (no EXIF, no GPS).
@@ -130,5 +131,46 @@ describe('a photo', function (): void {
         }
 
         expect($refused)->toBe(UnreadablePhotoException::TOO_LARGE);
+    });
+
+    it('is refused as too large when PHP has not the memory to decode it', function (): void {
+        // A JPEG header that announces 12 million pixels (3000 x 4000): fine for the pixel limit, not for a PHP with little memory left.
+        $jpeg = attachmentImageBytes('jpeg', 10, 10);
+        $big = substr_replace($jpeg, pack('nn', 3000, 4000), strpos($jpeg, "\xFF\xC0") + 5, 4);
+        $path = photoScratch($big);
+        $limit = (string) ini_get('memory_limit');
+        $refused = null;
+
+        ini_set('memory_limit', (string) (memory_get_usage() + 40_000_000));
+
+        try {
+            app(PhotoImages::class)->prepare($path);
+        } catch (UnreadablePhotoException $exception) {
+            $refused = $exception->reason;
+        } finally {
+            ini_set('memory_limit', $limit);
+        }
+
+        expect($refused)->toBe(UnreadablePhotoException::TOO_LARGE);
+    });
+});
+
+describe('a photo the server cannot prepare', function (): void {
+    afterEach(function (): void {
+        unset($GLOBALS['photo_imagejpeg_fails']);
+    });
+
+    it('is no fault of the photo: a failure of the JPEG encoder is thrown, never told as a photo that is too large', function (): void {
+        $GLOBALS['photo_imagejpeg_fails'] = true;
+        $thrown = null;
+
+        try {
+            app(PhotoImages::class)->prepare(photoScratch(attachmentImageBytes('jpeg', 64, 64)));
+        } catch (Throwable $exception) {
+            $thrown = $exception;
+        }
+
+        expect($thrown)->toBeInstanceOf(RuntimeException::class)->not->toBeInstanceOf(UnreadablePhotoException::class)
+            ->and($thrown->getMessage())->toContain('could not be prepared');
     });
 });
