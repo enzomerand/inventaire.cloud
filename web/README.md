@@ -95,7 +95,7 @@ The public pages of the share links live at `/s/{token}`, with the secret token 
 
 The application sends `Referrer-Policy: same-origin` with every answer. Leave it as it is: Sanctum recognizes the web front (the requests that get a session) by the `Origin` or `Referer` header, so a proxy that overrides the policy with `no-referrer` makes the front's own same-origin `GET` calls (such as `/api/v1/me`) look like those of a stranger, and the signed-in pages stop working.
 
-It also sends a `Permissions-Policy` header (`app/Http/Middleware/SetPermissionsPolicy.php`): the camera is allowed for the application's own pages only (the barcode scanner), and the features it never uses (microphone, location, motion sensors, USB/serial/HID/Bluetooth/MIDI devices, payments, screen capture, Chrome's Topics API) are turned off. A proxy that sets its own policy in its place must keep `camera=(self)`, or the scan from the camera stops working (the scan from a photo still works), and must not forbid `clipboard-write` (the "copy" buttons).
+It also sends a `Permissions-Policy` header (`app/Http/Middleware/SetPermissionsPolicy.php`): the camera is allowed for the application's own pages only (the barcode scanner), and the features it never uses (microphone, location, motion sensors, USB/serial/HID/Bluetooth/MIDI devices, payments, screen capture) are turned off. A proxy that sets its own policy in its place must keep `camera=(self)`, or the scan from the camera stops working (the scan from a photo still works), and must not forbid `clipboard-write` (the "copy" buttons).
 
 ### Trust model
 

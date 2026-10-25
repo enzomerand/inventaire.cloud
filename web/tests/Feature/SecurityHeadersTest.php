@@ -15,6 +15,8 @@ uses(RefreshDatabase::class);
  */
 function permissionsPolicy(TestResponse $response): array
 {
+    $response->assertHeader('Permissions-Policy');
+
     $directives = [];
 
     foreach (explode(',', (string) $response->headers->get('Permissions-Policy')) as $directive) {
@@ -66,23 +68,23 @@ describe('the Permissions-Policy header', function (): void {
         $this->get('/')->assertRedirect()->assertHeader('Permissions-Policy', SetPermissionsPolicy::POLICY);
     });
 
-    it('keeps the camera for the application alone, for the barcode scanner', function (): void {
-        expect(permissionsPolicy($this->get('/login')))->toHaveKey('camera', '(self)');
-    });
-
-    it('turns off the features the application never uses', function (): void {
-        expect(permissionsPolicy($this->get('/login')))->toMatchArray([
+    it('keeps the camera for the application alone and turns off the features it never uses', function (): void {
+        // Exact: a feature the front uses (the clipboard for the "copy" buttons, the full screen) must stay out of the
+        // list, so that it keeps the browser's default.
+        expect(permissionsPolicy($this->get('/login')))->toBe([
+            'camera' => '(self)',
             'microphone' => '()',
             'geolocation' => '()',
             'display-capture' => '()',
             'payment' => '()',
-            'browsing-topics' => '()',
+            'usb' => '()',
+            'serial' => '()',
+            'hid' => '()',
+            'bluetooth' => '()',
+            'midi' => '()',
+            'accelerometer' => '()',
+            'gyroscope' => '()',
+            'magnetometer' => '()',
         ]);
-    });
-
-    it('leaves the clipboard and the full screen to the browser default', function (): void {
-        expect(permissionsPolicy($this->get('/login')))
-            ->not->toHaveKey('clipboard-write')
-            ->not->toHaveKey('fullscreen');
     });
 });
