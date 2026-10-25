@@ -8,6 +8,7 @@ use App\Models\InventoryField;
 use App\Models\PhotoAnalysis;
 use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\FakePhotoAnalyzer;
+use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisQuota;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\PhotoAnalyzer;
@@ -603,19 +604,39 @@ describe('reading an analysis', function (): void {
 
         $failure = inventoryCall($this, $editor, 'GET', photoUri($inventory, $failed))->assertOk();
         expect($failure->json('data.status'))->toBe('failed')
-            ->and($failure->json('data.error'))->toBe('The analysis service is not available right now. Try again in a moment.')
+            ->and($failure->json('data.error'))->toBe('unavailable')
             ->and($failure->json('data.proposals'))->toBe([]);
     });
 
-    it('tells a failure in the language of the request, and a code it does not know as the general failure', function (): void {
+    it('gives the code of a failure, whatever the language of the request', function (): void {
         $case = photoReady();
         $editor = $case['team']['editor'];
         $failed = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $editor->id, 'status' => PhotoAnalysisStatus::Failed, 'error' => 'refused']);
+
+        foreach (['en', 'fr'] as $language) {
+            expect(inventoryCall($this, $editor, 'GET', photoUri($case['inventory'], $failed), headers: ['Accept-Language' => $language])->json('data.error'))->toBe('refused');
+        }
+    });
+
+    it('gives each code an analysis can fail with as it was stored', function (PhotoAnalysisError $error): void {
+        $case = photoReady();
+        $editor = $case['team']['editor'];
+        $failed = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $editor->id, 'status' => PhotoAnalysisStatus::Failed, 'error' => $error->value, 'completed_at' => now()]);
+
+        $data = inventoryCall($this, $editor, 'GET', photoUri($case['inventory'], $failed))->assertOk()->json('data');
+
+        expect($data['status'])->toBe('failed')->and($data['error'])->toBe($error->value)->and($data['proposals'])->toBe([]);
+    })->with(array_map(fn (PhotoAnalysisError $error): array => [$error], PhotoAnalysisError::cases()));
+
+    it('tells a code it does not know, and a failure with no code, as the general failure', function (): void {
+        $case = photoReady();
+        $editor = $case['team']['editor'];
         $strange = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $editor->id, 'status' => PhotoAnalysisStatus::Failed, 'error' => 'from_a_later_version']);
+        $nothing = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $editor->id, 'status' => PhotoAnalysisStatus::Failed, 'error' => null]);
 
-        expect(inventoryCall($this, $editor, 'GET', photoUri($case['inventory'], $failed), headers: ['Accept-Language' => 'fr'])->json('data.error'))->toBe("Les photos n'ont pas pu être analysées : la demande a été refusée.");
-
-        expect(inventoryCall($this, $editor, 'GET', photoUri($case['inventory'], $strange))->json('data.error'))->toBe('The photos could not be analysed. Try again.');
+        foreach ([$strange, $nothing] as $analysis) {
+            expect(inventoryCall($this, $editor, 'GET', photoUri($case['inventory'], $analysis))->json('data.error'))->toBe('failed');
+        }
     });
 
     it('leaves out a proposal for a field that was deleted since', function (): void {

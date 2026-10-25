@@ -10,6 +10,7 @@ use App\Models\Inventory;
 use App\Models\PhotoAnalysis;
 use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisStatus;
+use App\View\Components\ClientMessages;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -69,9 +70,17 @@ describe('the model', function (): void {
         expect($analysis->failure())->toBeNull();
     });
 
-    it('has a message for every failure code', function (): void {
-        foreach (PhotoAnalysisError::cases() as $error) {
-            expect($error->message())->toBeString()->not->toBe('');
+    it('has a message and a retry rule in the front for every failure code, and only for those', function (): void {
+        $script = (string) file_get_contents(resource_path('js/photo-entry/proposals.js'));
+        preg_match('/const ANALYSIS_FAILURES = \{(.*?)\n\};/s', $script, $table);
+        preg_match_all("/^\s+(\w+): \['(photoEntry\.error\.\w+)', (?:true|false)\],$/m", $table[1] ?? '', $rows, PREG_SET_ORDER);
+        $keys = array_column($rows, 2, 1);
+        $messages = (new ClientMessages)->messages();
+
+        expect(array_keys($keys))->toEqualCanonicalizing(array_map(fn (PhotoAnalysisError $error): string => $error->value, PhotoAnalysisError::cases()));
+
+        foreach ($keys as $key) {
+            expect($messages)->toHaveKey($key);
         }
     });
 

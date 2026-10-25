@@ -202,6 +202,8 @@ class ClientMessages extends Component
             'photoEntry.error.unavailable' => __('The analysis service is unavailable at the moment. Please try again in a moment.'),
             'photoEntry.error.misconfigured' => __('The analysis service is not set up correctly. Ask the administrator of this instance.'),
             'photoEntry.error.failed' => __('The analysis failed. Please try again.'),
+            'photoEntry.error.stale' => __('The analysis took too long and was given up. Please try again.'),
+            'photoEntry.error.turned_off' => __('Adding items from photos was turned off before the analysis could start. The photos were deleted without being sent.'),
             'photoEntry.error.disabled' => __('Adding items from photos is turned off.'),
             'photoEntry.error.instance_limit' => __('The instance reached its daily number of photo analyses; try again tomorrow.'),
             'photoEntry.error.no_fields' => __('This inventory has no field the photos could fill in.'),

@@ -17,8 +17,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * {"id", "status", "error", "proposals", "created_at", "completed_at"}
  * ```
  *
- * `status` is `pending`, `running`, `completed` or `failed`. `error` is the message to show for a failed analysis, in the language of the
- * request, and null otherwise. `proposals` is a list of `{field, value, confidence, evidence}` (the ULID of the field, the value in the
+ * `status` is `pending`, `running`, `completed` or `failed`. `error` is the code of the failure of a failed analysis (`refused`, `truncated`, `invalid_answer`,
+ * `unavailable`, `misconfigured`, `failed`, `stale` or `disabled`, see {@see PhotoAnalysisError}; `failed` for a failure with no known
+ * code), and null otherwise: the words, and whether trying again can help, are the front's. `proposals` is a list of `{field, value, confidence, evidence}` (the ULID of the field, the value in the
  * canonical form the field stores, so that the form of the field takes it like any stored value; `low`, `medium` or `high`; where it was
  * read, one short line), empty until the analysis is `completed` and when it found nothing. The ids are the ULIDs; nothing numeric is
  * given out.
@@ -49,7 +50,7 @@ final class PhotoAnalysisResource extends JsonResource
             'id' => $analysis->ulid,
             'status' => $analysis->status->value,
             // A code a later version wrote is told as the general failure.
-            'error' => $analysis->status === PhotoAnalysisStatus::Failed ? ($analysis->failure() ?? PhotoAnalysisError::Failed)->message() : null,
+            'error' => $analysis->status === PhotoAnalysisStatus::Failed ? ($analysis->failure() ?? PhotoAnalysisError::Failed)->value : null,
             'proposals' => $analysis->status === PhotoAnalysisStatus::Completed ? $this->proposals($analysis) : [],
             'created_at' => $analysis->created_at?->toIso8601String(),
             'completed_at' => $analysis->completed_at?->toIso8601String(),

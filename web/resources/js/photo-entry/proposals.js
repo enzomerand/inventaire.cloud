@@ -51,7 +51,7 @@ const LEVEL_CLASSES = {
  * @typedef {object} Analysis An analysis, as the API describes it.
  * @property {string} id
  * @property {'pending' | 'running' | 'completed' | 'failed'} status
- * @property {string | null} error Why it failed.
+ * @property {string | null} error The code of why it failed (`refused`, `truncated`, `invalid_answer`, `unavailable`, `misconfigured`, `failed`, `stale` or `disabled`), null when it did not.
  * @property {Proposal[]} proposals
  *
  * @typedef {object} Failure What the dialog says when something went wrong, and what it offers.
@@ -135,7 +135,17 @@ export function reviewRows(proposals, fields) {
     return rows;
 }
 
-/** What each reason an analysis failed gives: the message, and whether trying again can end differently. */
+/**
+ * What each code the API gives as the `error` of a failed analysis (`App\PhotoEntry\PhotoAnalysisError`) says, and whether trying again
+ * (sending the photos again) can end differently:
+ *
+ * - tried again: `truncated` (fewer photos may fit), `invalid_answer`, `unavailable`, `failed` and `stale` (the worker was lost, a new
+ *   analysis has its own);
+ * - never: `refused` (the same photos are declined again), `misconfigured` (only the administrator can mend it) and `disabled` (the
+ *   feature was turned off, the next request is refused with `photo_entry_disabled`).
+ *
+ * A code that is not here (a later version of the server) is told as `failed`, with a retry.
+ */
 const ANALYSIS_FAILURES = {
     refused: ['photoEntry.error.refused', false],
     truncated: ['photoEntry.error.truncated', true],
@@ -143,6 +153,8 @@ const ANALYSIS_FAILURES = {
     unavailable: ['photoEntry.error.unavailable', true],
     misconfigured: ['photoEntry.error.misconfigured', false],
     failed: ['photoEntry.error.failed', true],
+    stale: ['photoEntry.error.stale', true],
+    disabled: ['photoEntry.error.turned_off', false],
 };
 
 /**
@@ -152,7 +164,9 @@ const ANALYSIS_FAILURES = {
  * @returns {Failure}
  */
 export function failureOf(analysis) {
-    const [key, retry] = ANALYSIS_FAILURES[analysis.error ?? 'failed'] ?? ANALYSIS_FAILURES.failed;
+    const code = analysis.error ?? 'failed';
+    // `hasOwn`: a code is read from the server, and `constructor` or `__proto__` are not entries of the table.
+    const [key, retry] = Object.hasOwn(ANALYSIS_FAILURES, code) ? ANALYSIS_FAILURES[code] : ANALYSIS_FAILURES.failed;
 
     return { text: t(key), retry, resume: false };
 }

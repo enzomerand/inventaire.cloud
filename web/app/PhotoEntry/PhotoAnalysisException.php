@@ -7,7 +7,7 @@ namespace App\PhotoEntry;
 use RuntimeException;
 
 /**
- * The photos could not be analysed. `error` is the reason the person is told, and the code stored with the failed analysis.
+ * The photos could not be analysed. `error` is the reason, the code stored with the failed analysis and given out by the API (the front tells the person what it means).
  *
  * It carries no trace of the request that failed: the photos and the key of the instance must not end up in a log or in the failed jobs.
  */

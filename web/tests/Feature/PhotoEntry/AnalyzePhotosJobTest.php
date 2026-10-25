@@ -263,12 +263,6 @@ describe('an analysis whose workspace may not use the photo entry any more', fun
         'the administrator switched it off' => [fn () => app(InstanceSettings::class)->update([InstanceSettings::PHOTO_ENTRY_ENABLED => false])],
         'the key was removed' => [fn () => config(['services.anthropic.key' => null])],
     ]);
-
-    it('tells the person in their language', function (): void {
-        app()->setLocale('fr');
-
-        expect(PhotoAnalysisError::Disabled->message())->toContain('désactivée');
-    });
 });
 
 describe('an analysis that is not waiting', function (): void {

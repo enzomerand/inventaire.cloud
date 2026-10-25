@@ -94,6 +94,44 @@ describe('the words of a failure', () => {
         });
     });
 
+    it.each([
+        // Worth sending the photos again: a shorter or a later try may end differently.
+        ['truncated', 'The answer was too long to be read. Try again, with fewer photos if you can.', true],
+        ['invalid_answer', 'The answer of the analysis could not be understood. Please try again.', true],
+        ['unavailable', 'The analysis service is unavailable at the moment. Please try again in a moment.', true],
+        ['failed', 'The analysis failed. Please try again.', true],
+        ['stale', 'The analysis took too long and was given up. Please try again.', true],
+        // Not worth it: the same photos are declined again, only the administrator can mend it, or the feature is off.
+        ['refused', 'The photos were refused by the analysis service. Try other photos.', false],
+        [
+            'misconfigured',
+            'The analysis service is not set up correctly. Ask the administrator of this instance.',
+            false,
+        ],
+        [
+            'disabled',
+            'Adding items from photos was turned off before the analysis could start. The photos were deleted without being sent.',
+            false,
+        ],
+    ])(
+        'tells the code %s of a failed analysis in words, and offers a retry only when it can help',
+        (error, text, retry) => {
+            expect(failureOf({ id: 'a1', status: 'failed', error, proposals: [] })).toEqual({
+                text,
+                retry,
+                resume: false,
+            });
+        },
+    );
+
+    it('tells a code it does not know as the general failure, with a retry', () => {
+        const general = { text: 'The analysis failed. Please try again.', retry: true, resume: false };
+
+        for (const error of ['from_a_later_version', 'constructor', '__proto__', 'toString', '']) {
+            expect(failureOf({ id: 'a1', status: 'failed', error, proposals: [] })).toEqual(general);
+        }
+    });
+
     it('says what the API said of a request that was refused, and the general words for a refusal it does not explain', () => {
         expect(requestFailure({ status: 422, message: 'Invalid.', errors: {} }).text).toBe('Invalid.');
         expect(requestFailure({ status: 409, code: 'something_else', message: 'Nope.' })).toEqual({
