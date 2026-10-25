@@ -134,14 +134,17 @@ describe('a photo', function (): void {
     });
 
     it('is refused as too large when PHP has not the memory to decode it', function (): void {
-        // A JPEG header that announces 12 million pixels (3000 x 4000): fine for the pixel limit, not for a PHP with little memory left.
+        // A JPEG header that announces 36 million pixels (6000 x 6000): under the pixel limit, but about 300 MB to decode, far more than
+        // a PHP with little memory left has, however much the earlier tests of the run left allocated.
         $jpeg = attachmentImageBytes('jpeg', 10, 10);
-        $big = substr_replace($jpeg, pack('nn', 3000, 4000), strpos($jpeg, "\xFF\xC0") + 5, 4);
+        $big = substr_replace($jpeg, pack('nn', 6000, 6000), strpos($jpeg, "\xFF\xC0") + 5, 4);
         $path = photoScratch($big);
         $limit = (string) ini_get('memory_limit');
         $refused = null;
 
-        ini_set('memory_limit', (string) (memory_get_usage() + 40_000_000));
+        // PHP refuses a limit under the memory it really holds (`memory_get_usage(true)`), which a long run makes larger than the
+        // memory in use.
+        ini_set('memory_limit', (string) (memory_get_usage(true) + 20_000_000));
 
         try {
             app(PhotoImages::class)->prepare($path);
