@@ -201,6 +201,7 @@ Inventories live in workspaces. Every account belongs to at least one, in which 
 | `PATCH /api/v1/workspaces/{id}`     | `name`: renames it (owners only).                                                              |
 | `DELETE /api/v1/workspaces/{id}`    | Deletes it, and everything in it (owners only; `204`).                                         |
 | `PUT /api/v1/me/current-workspace`  | `workspace` (a ULID): the workspace to work in. One you do not belong to is refused like one that does not exist (`422`). |
+| `PUT /api/v1/workspaces/{id}/photo-entry` | `enabled` (boolean): the owner lets the editors add items from photos that Claude reads ([Photo entry (AI)](#photo-entry-ai)), or withdraws that; answers `{"data": {"enabled": true}}`. Session only (no API token, not in the OpenAPI document), owners only (`403` for the others). `409` `photo_entry_unavailable` when turning it on while the instance does not offer the feature (the administrator's switch is off or there is no API key); turning it off always works. |
 
 Answers are in the `data` envelope. Errors have a `message` in the language of the request and, for conflicts, a machine-readable `code`.
 
@@ -338,8 +339,10 @@ The administrators of the instance (`users.is_admin`) have an "Administration" e
 | `POST /api/v1/admin/users`        | `email`, `name` (one line: no control character, the rule of the account page): creates the account (`201`). `409` `account_exists` when the address already has one, `429` beyond 60 accounts an hour per administrator (`ADMIN_USER_CREATION_PER_HOUR`). |
 | `PATCH /api/v1/admin/users/{id}`  | `is_admin`: makes the account an administrator or takes that away. `409` `last_administrator` when it is the last, `403` `not_administrator` when the caller was demoted meanwhile. |
 | `DELETE /api/v1/admin/users/{id}` | Deletes the account (`204`). `409` `self_deletion` for the caller's own account, `409` `last_administrator`, `403` `not_administrator` when the caller was demoted meanwhile. |
-| `GET /api/v1/admin/settings`      | The settings: `{"data": {"registration_open": true, "invitation_sign_up": true, "share_links_enabled": true}}`.  |
-| `PUT /api/v1/admin/settings`      | `registration_open`, `invitation_sign_up` and `share_links_enabled` (all optional, but at least one setting is required, `422` otherwise): changes the settings that are sent, leaves the others alone, and answers with all of them as they are now. |
+| `GET /api/v1/admin/settings`      | The settings: `{"data": {"registration_open": true, "invitation_sign_up": true, "share_links_enabled": true, "photo_entry_enabled": false}}`.  |
+| `PUT /api/v1/admin/settings`      | `registration_open`, `invitation_sign_up`, `share_links_enabled` and `photo_entry_enabled` (all optional, but at least one setting is required, `422` otherwise): changes the settings that are sent, leaves the others alone, and answers with all of them as they are now. |
+
+The settings page also holds the "Photo entry (AI)" switch (`photo_entry_enabled`, **off** until you turn it on, unlike the other switches) and says whether `ANTHROPIC_API_KEY` is set, never showing the key: the photos are sent to Anthropic (Claude) to be read, then deleted, and every analysis is billed to that key; see [Photo entry (AI)](#photo-entry-ai) for how it works and what it costs.
 
 Accounts are identified by their numeric `id` here, which administrators see for every account (anybody else only gets their own, from `GET /api/v1/me`); anything but digits in the path is a `404`. The rules live in `App\Admin\UserAdministration`, whoever asks:
 
