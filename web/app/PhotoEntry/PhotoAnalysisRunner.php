@@ -20,8 +20,10 @@ use Throwable;
  * the analysis needs them. {@see self::fail()} is where a failure is recorded when something else gives up on the analysis (the queue
  * killed the job, the pruner found its worker lost).
  *
- * Every change of state is one conditional update that wants the analysis to be where it was left, so that a late worker, a pruner and a
- * person who deleted the analysis never undo each other's work.
+ * Every change of state is one conditional update that wants the analysis to be where it was left (the worker's: `pending` to `running`,
+ * then `running` to `completed` or `failed`; the queue's: `pending` or `running` to `failed`), so that a late worker, a pruner and a
+ * person who deleted the analysis never undo each other's work. When the worker finds that the analysis is not where it left it when it
+ * has to end it, it logs what became of the analysis, not what it would have made of it.
  *
  * One line is logged for each analysis: its ULID, the model, the tokens and how it ended. Never the photos, the proposals or the key.
  */
@@ -60,12 +62,13 @@ final class PhotoAnalysisRunner
         $reading = null;
         $count = 0;
         $error = null;
+        $completed = false;
 
         try {
             [$reading, $proposals] = $this->read($analysis);
             $count = count($proposals);
 
-            $this->complete($analysis, $reading, $proposals);
+            $completed = $this->complete($analysis, $reading, $proposals);
         } catch (PhotoAnalysisException $failure) {
             $error = $failure->error;
         } catch (Throwable $exception) {
@@ -73,17 +76,26 @@ final class PhotoAnalysisRunner
             report($exception);
             $error = PhotoAnalysisError::Failed;
         } finally {
-            $this->cleanup->deleteNow($analysis);
+            $this->deletePhotos($analysis);
         }
 
-        if ($error !== null) {
-            $this->markFailed($analysis, $error);
+        // The analysis is `running` since this worker took it: it is ended only if it still is. When it is not, somebody else ended it while
+        // Claude was being asked (the pruner gave up on it, or the person deleted it), and that is what the log says became of it.
+        $ended = $error === null ? $completed : $this->markFailed($analysis, $error, [PhotoAnalysisStatus::Running]);
+        $status = $error === null ? PhotoAnalysisStatus::Completed->value : PhotoAnalysisStatus::Failed->value;
+        $code = $error?->value;
+
+        if (! $ended) {
+            $current = PhotoAnalysis::query()->whereKey($analysis->getKey())->first();
+            $status = $current === null ? 'deleted' : $current->status->value;
+            $code = $current?->error;
+            $count = 0;
         }
 
         Log::info('Photo analysis finished.', [
             'analysis' => $analysis->ulid,
-            'status' => $error === null ? PhotoAnalysisStatus::Completed->value : PhotoAnalysisStatus::Failed->value,
-            'error' => $error?->value,
+            'status' => $status,
+            'error' => $code,
             'model' => $reading?->model,
             'input_tokens' => $reading?->inputTokens,
             'output_tokens' => $reading?->outputTokens,
@@ -99,9 +111,11 @@ final class PhotoAnalysisRunner
      */
     public function fail(PhotoAnalysis $analysis, PhotoAnalysisError $error): void
     {
-        $this->markFailed($analysis, $error);
-
-        $this->cleanup->deleteNow($analysis);
+        try {
+            $this->markFailed($analysis, $error, [PhotoAnalysisStatus::Pending, PhotoAnalysisStatus::Running]);
+        } finally {
+            $this->deletePhotos($analysis);
+        }
     }
 
     /**
@@ -149,10 +163,11 @@ final class PhotoAnalysisRunner
      * Ends the analysis `completed`, if it is still running.
      *
      * @param  list<array{field: string, value: mixed, confidence: string, evidence: string}>  $proposals
+     * @return bool Whether it was: false when somebody else ended or deleted the analysis meanwhile.
      */
-    private function complete(PhotoAnalysis $analysis, PhotoReading $reading, array $proposals): void
+    private function complete(PhotoAnalysis $analysis, PhotoReading $reading, array $proposals): bool
     {
-        PhotoAnalysis::query()
+        return PhotoAnalysis::query()
             ->whereKey($analysis->getKey())
             ->where('status', PhotoAnalysisStatus::Running->value)
             ->update([
@@ -163,21 +178,37 @@ final class PhotoAnalysisRunner
                 'output_tokens' => $reading->outputTokens,
                 'proposals' => json_encode($proposals, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'completed_at' => now(),
-            ]);
+            ]) === 1;
     }
 
     /**
-     * Ends the analysis `failed`, if it is still waiting or running.
+     * Ends the analysis `failed`, if it is in one of the states it is expected to be in.
+     *
+     * @param  list<PhotoAnalysisStatus>  $from  The states the analysis may be in for this failure to apply.
+     * @return bool Whether it was.
      */
-    private function markFailed(PhotoAnalysis $analysis, PhotoAnalysisError $error): void
+    private function markFailed(PhotoAnalysis $analysis, PhotoAnalysisError $error, array $from): bool
     {
-        PhotoAnalysis::query()
+        return PhotoAnalysis::query()
             ->whereKey($analysis->getKey())
-            ->whereIn('status', [PhotoAnalysisStatus::Pending->value, PhotoAnalysisStatus::Running->value])
+            ->whereIn('status', array_map(fn (PhotoAnalysisStatus $status): string => $status->value, $from))
             ->update([
                 'status' => PhotoAnalysisStatus::Failed->value,
                 'error' => $error->value,
                 'completed_at' => now(),
-            ]);
+            ]) === 1;
+    }
+
+    /**
+     * Deletes the photos of the analysis. What goes wrong here (the database that says where they are, the disk) is reported but never
+     * thrown: it must not hide the failure of the analysis that led here, nor stop it from being recorded.
+     */
+    private function deletePhotos(PhotoAnalysis $analysis): void
+    {
+        try {
+            $this->cleanup->deleteNow($analysis);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 }

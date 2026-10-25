@@ -45,14 +45,13 @@ describe('the model', function (): void {
             ->and($case['inventory']->photoAnalyses()->count())->toBe(1);
     });
 
-    it('lists the analyses whose time is not up', function (): void {
+    it('knows whether its time is up', function (): void {
         $case = photoCase();
         $fresh = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'expires_at' => now()->addHour()]);
         $open = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'expires_at' => null]);
         $old = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $case['team']['owner']->id, 'expires_at' => now()->subSecond()]);
 
-        expect(PhotoAnalysis::query()->unexpired()->pluck('id')->all())->toEqualCanonicalizing([$fresh->id, $open->id])
-            ->and($old->isExpired())->toBeTrue()
+        expect($old->isExpired())->toBeTrue()
             ->and($fresh->isExpired())->toBeFalse()
             ->and($open->isExpired())->toBeFalse();
     });

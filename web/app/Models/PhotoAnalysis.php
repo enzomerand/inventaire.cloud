@@ -10,7 +10,6 @@ use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\PhotoImages;
 use Database\Factories\PhotoAnalysisFactory;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -98,18 +97,6 @@ final class PhotoAnalysis extends Model
     public function inventory(): BelongsTo
     {
         return $this->belongsTo(Inventory::class);
-    }
-
-    /**
-     * The analyses whose time is not up: the ones without an end date yet and those that have not expired. They are what the person is
-     * shown.
-     *
-     * @param  Builder<self>  $query
-     * @return Builder<self>
-     */
-    public function scopeUnexpired(Builder $query): Builder
-    {
-        return $query->where(fn (Builder $live): Builder => $live->whereNull('expires_at')->orWhere('expires_at', '>', now()));
     }
 
     /**

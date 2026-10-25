@@ -18,6 +18,9 @@ use App\Settings\InstanceSettings;
  */
 final class PhotoEntry
 {
+    /**
+     * Gets the settings of the instance, where the administrator's switch is.
+     */
     public function __construct(private readonly InstanceSettings $settings) {}
 
     /**

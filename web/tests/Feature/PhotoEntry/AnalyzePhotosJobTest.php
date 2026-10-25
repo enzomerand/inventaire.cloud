@@ -11,11 +11,13 @@ use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisException;
 use App\PhotoEntry\PhotoAnalysisRunner;
 use App\PhotoEntry\PhotoAnalysisStatus;
+use App\PhotoEntry\PhotoAnalyzer;
 use App\PhotoEntry\PhotoReading;
 use App\Settings\InstanceSettings;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -293,6 +295,157 @@ describe('an analysis that is not waiting', function (): void {
         (new AnalyzePhotos($stale))->handle(app(PhotoAnalysisRunner::class));
 
         expect($calls)->toHaveCount(1);
+    });
+});
+
+describe('an analysis that someone else ended meanwhile', function (): void {
+    /**
+     * Has the analyzer do this while it is asked, the way the pruner or a person would while Claude is being waited for.
+     */
+    function analysisInterruptedBy(Closure $meanwhile, PhotoReading $reading): void
+    {
+        app()->instance(PhotoAnalyzer::class, new class($meanwhile, $reading) implements PhotoAnalyzer
+        {
+            public function __construct(private readonly Closure $meanwhile, private readonly PhotoReading $reading) {}
+
+            public function analyze(array $photos, array $fields, string $locale): PhotoReading
+            {
+                ($this->meanwhile)();
+
+                return $this->reading;
+            }
+        });
+    }
+
+    it('is not completed over what the pruner decided, and the log tells the real outcome', function (): void {
+        Log::spy();
+        $case = analysisCase();
+        $analysis = $case['analysis'];
+        analysisInterruptedBy(
+            fn () => DB::table('photo_analyses')->where('id', $analysis->id)->update(['status' => 'failed', 'error' => 'stale', 'completed_at' => now()]),
+            analysisReading([['field' => $case['name']->ulid, 'values' => ['Drill'], 'confidence' => 'high', 'evidence' => '']]),
+        );
+
+        $after = analysisRun($analysis);
+
+        expect($after->status)->toBe(PhotoAnalysisStatus::Failed)
+            ->and($after->error)->toBe('stale')
+            ->and($after->proposals)->toBeNull()
+            ->and(storedFiles())->toBe([]);
+
+        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $context['status'] === 'failed'
+            && $context['error'] === 'stale'
+            && $context['proposals'] === 0
+            // The request was made and paid for all the same.
+            && $context['input_tokens'] === 1200);
+    });
+
+    it('is not failed over what the pruner decided either', function (): void {
+        Log::spy();
+        $case = analysisCase();
+        $analysis = $case['analysis'];
+        // The pruner gave up on it before the worker could say why it failed.
+        app()->instance(PhotoAnalyzer::class, new class($analysis) implements PhotoAnalyzer
+        {
+            public function __construct(private readonly PhotoAnalysis $analysis) {}
+
+            public function analyze(array $photos, array $fields, string $locale): PhotoReading
+            {
+                DB::table('photo_analyses')->where('id', $this->analysis->id)->update(['status' => 'failed', 'error' => 'stale']);
+
+                throw new PhotoAnalysisException(PhotoAnalysisError::Refused);
+            }
+        });
+
+        $after = analysisRun($analysis);
+
+        expect($after->error)->toBe('stale');
+
+        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $context['status'] === 'failed' && $context['error'] === 'stale');
+    });
+
+    it('is logged as deleted when the person deleted it, and nothing is brought back', function (): void {
+        Log::spy();
+        $case = analysisCase();
+        $analysis = $case['analysis'];
+        analysisInterruptedBy(fn () => DB::table('photo_analyses')->where('id', $analysis->id)->delete(), analysisReading([]));
+
+        (new AnalyzePhotos($analysis))->handle(app(PhotoAnalysisRunner::class));
+
+        expect(PhotoAnalysis::query()->count())->toBe(0);
+
+        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $context['status'] === 'deleted' && $context['error'] === null);
+    });
+});
+
+describe('photos that cannot be deleted', function (): void {
+    /**
+     * Makes the query that tells where the photos are fail the second time it is made (the first is the job reading them back).
+     */
+    function analysisFailingToLocatePhotos(): void
+    {
+        $asked = 0;
+
+        DB::beforeExecuting(function (string $query) use (&$asked): void {
+            if (str_contains($query, 'as "workspace"') || str_contains($query, 'as `workspace`')) {
+                if (++$asked === 2) {
+                    throw new RuntimeException('The database went away');
+                }
+            }
+        });
+    }
+
+    it('neither hide the reason an analysis failed nor keep it from being recorded, and are reported', function (): void {
+        $case = analysisCase();
+        photoAnalyzerSaying(new PhotoAnalysisException(PhotoAnalysisError::Refused));
+        $reported = [];
+        app()->make(ExceptionHandler::class)->reportable(function (RuntimeException $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+        analysisFailingToLocatePhotos();
+
+        $analysis = analysisRun($case['analysis']);
+
+        expect($analysis->status)->toBe(PhotoAnalysisStatus::Failed)
+            ->and($analysis->error)->toBe('refused')
+            ->and($reported)->toBe(['The database went away']);
+    });
+
+    it('do not undo an analysis that is completed', function (): void {
+        $case = analysisCase();
+        photoAnalyzerSaying(analysisReading([['field' => $case['name']->ulid, 'values' => ['Drill'], 'confidence' => 'high', 'evidence' => '']]));
+        $reported = [];
+        app()->make(ExceptionHandler::class)->reportable(function (RuntimeException $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+        analysisFailingToLocatePhotos();
+
+        $analysis = analysisRun($case['analysis']);
+
+        expect($analysis->status)->toBe(PhotoAnalysisStatus::Completed)->and($reported)->toBe(['The database went away']);
+    });
+
+    it('are reported, not thrown, when the queue gives up on the job, and the analysis still ends failed', function (): void {
+        $case = analysisCase();
+        $reported = [];
+        app()->make(ExceptionHandler::class)->reportable(function (RuntimeException $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+        DB::beforeExecuting(function (string $query): void {
+            if (str_contains($query, 'as "workspace"') || str_contains($query, 'as `workspace`')) {
+                throw new RuntimeException('The database went away');
+            }
+        });
+
+        (new AnalyzePhotos($case['analysis']))->failed(new RuntimeException('Timed out'));
+
+        expect($case['analysis']->fresh()->status)->toBe(PhotoAnalysisStatus::Failed)->and($reported)->toBe(['The database went away']);
     });
 });
 

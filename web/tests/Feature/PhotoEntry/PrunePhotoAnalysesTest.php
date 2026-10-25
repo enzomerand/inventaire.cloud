@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Jobs\PurgeStoredFiles;
 use App\Models\PhotoAnalysis;
 use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisPruner;
@@ -10,6 +11,8 @@ use App\PhotoEntry\PhotoAnalysisStatus;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
 require_once __DIR__.'/../../Support/photo-entry.php';
@@ -36,8 +39,9 @@ function prunePhotoCase(): array
 
     $case['fresh'] = photoAnalysisWithFiles($inventory, $owner, ['expires_at' => now()->addHour()]);
     $case['expired'] = photoAnalysisWithFiles($inventory, $owner, ['expires_at' => now()->subMinute()]);
-    $case['expiredReport'] = photoAnalysisWithFiles($inventory, $owner, ['status' => PhotoAnalysisStatus::Completed, 'expires_at' => now()->subHour()]);
-    $case['expiredFailure'] = photoAnalysisWithFiles($inventory, $owner, ['status' => PhotoAnalysisStatus::Failed, 'error' => 'unavailable', 'expires_at' => now()->subHour()]);
+    // The job deleted the photos of an analysis when it ended: those rows have no folder.
+    $case['expiredReport'] = photoAnalysisWithFiles($inventory, $owner, ['status' => PhotoAnalysisStatus::Completed, 'expires_at' => now()->subHour()], count: 0);
+    $case['expiredFailure'] = photoAnalysisWithFiles($inventory, $owner, ['status' => PhotoAnalysisStatus::Failed, 'error' => 'unavailable', 'expires_at' => now()->subHour()], count: 0);
     $case['stalePending'] = photoAnalysisWithFiles($inventory, $owner, ['created_at' => now()->subMinutes(16)]);
     $case['staleRunning'] = photoAnalysisWithFiles($inventory, $owner, ['status' => PhotoAnalysisStatus::Running, 'started_at' => now()->subMinutes(16), 'created_at' => now()->subMinutes(17)]);
     $case['staleNeverStarted'] = photoAnalysisWithFiles($inventory, $owner, ['status' => PhotoAnalysisStatus::Running, 'started_at' => null, 'created_at' => now()->subMinutes(20)]);
@@ -49,7 +53,7 @@ function prunePhotoCase(): array
 }
 
 describe('the analyses that expired', function (): void {
-    it('are deleted with their photos, whatever their state, and the others are left alone', function (): void {
+    it('are deleted, whatever their state, and the others are left alone; one that may still have photos has them purged', function (): void {
         $case = prunePhotoCase();
 
         $result = app(PhotoAnalysisPruner::class)->prune();
@@ -58,12 +62,38 @@ describe('the analyses that expired', function (): void {
 
         foreach (['expired', 'expiredReport', 'expiredFailure'] as $gone) {
             expect(PhotoAnalysis::query()->whereKey($case[$gone]->id)->exists())->toBeFalse();
-            expect(Storage::disk(ATTACHMENT_TEST_DISK)->exists(photoFolder($case[$gone]).'/1.jpg'))->toBeFalse();
         }
+
+        // Still waiting when it expired: its photos could be there, and they are gone.
+        expect(Storage::disk(ATTACHMENT_TEST_DISK)->exists(photoFolder($case['expired']).'/1.jpg'))->toBeFalse();
 
         foreach (['fresh', 'young', 'waiting', 'done'] as $kept) {
             expect(PhotoAnalysis::query()->whereKey($case[$kept]->id)->exists())->toBeTrue();
         }
+    });
+
+    it('queue no purge of a folder for a row that is over: its photos went when it ended', function (): void {
+        Queue::fake();
+        prunePhotoCase();
+
+        app(PhotoAnalysisPruner::class)->prune();
+
+        // One: the analysis that was still waiting when it expired. The two that ended (completed, failed) are deleted in bulk.
+        Queue::assertPushed(PurgeStoredFiles::class, 1);
+    });
+
+    it('delete the ones that are over in bulk, without a query for each', function (): void {
+        $case = photoCase();
+
+        foreach (range(1, 30) as $ignored) {
+            photoAnalysisWithFiles($case['inventory'], $case['team']['owner'], ['status' => PhotoAnalysisStatus::Completed, 'expires_at' => now()->subHour()], count: 0);
+        }
+
+        DB::enableQueryLog();
+        $result = app(PhotoAnalysisPruner::class)->prune();
+        $deletes = array_filter(DB::getQueryLog(), fn (array $query): bool => str_starts_with((string) $query['query'], 'delete'));
+
+        expect($result['expired'])->toBe(30)->and(PhotoAnalysis::query()->count())->toBe(0)->and($deletes)->toHaveCount(1);
     });
 });
 
@@ -100,6 +130,35 @@ describe('the analyses that never ended', function (): void {
         app(PhotoAnalysisRunner::class)->fail($stale, PhotoAnalysisError::Stale);
 
         expect($done->fresh()->status)->toBe(PhotoAnalysisStatus::Completed)->and($done->fresh()->error)->toBeNull();
+    });
+});
+
+describe('an analysis a worker takes while the pruner is deciding', function (): void {
+    it('is not failed under its feet: the update repeats the test of being stuck', function (): void {
+        $case = prunePhotoCase();
+        $stale = $case['stalePending'];
+        // The pruner has read the analysis as waiting for sixteen minutes; a worker claims it before the pruner writes anything.
+        PhotoAnalysis::retrieved(function (PhotoAnalysis $analysis) use ($stale): void {
+            if ($analysis->id === $stale->id) {
+                DB::table('photo_analyses')->where('id', $stale->id)->update(['status' => 'running', 'started_at' => now()]);
+            }
+        });
+
+        $result = app(PhotoAnalysisPruner::class)->prune();
+
+        expect($result['stale'])->toBe(2)
+            ->and($stale->fresh()->status)->toBe(PhotoAnalysisStatus::Running)
+            ->and($stale->fresh()->error)->toBeNull()
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->exists(photoFolder($stale).'/1.jpg'))->toBeTrue();
+    });
+
+    it('is failed when it is still stuck, and its photos deleted', function (): void {
+        $case = prunePhotoCase();
+
+        app(PhotoAnalysisPruner::class)->prune();
+
+        expect($case['stalePending']->fresh()->status)->toBe(PhotoAnalysisStatus::Failed)
+            ->and(Storage::disk(ATTACHMENT_TEST_DISK)->exists(photoFolder($case['stalePending']).'/1.jpg'))->toBeFalse();
     });
 });
 
