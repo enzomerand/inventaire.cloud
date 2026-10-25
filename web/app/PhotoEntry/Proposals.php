@@ -33,7 +33,8 @@ use Illuminate\Validation\ValidationException;
  *    out of its range, a barcode whose check digit is wrong, a date that does not exist, a text too long) is dropped, not corrected.
  *
  * The result is what the person is shown to review, in the order of the fields of the inventory, `value` being the canonical form (so
- * the front puts it in the form like any stored value). Nothing here guesses: a value that cannot be read with certainty is left out.
+ * the front puts it in the form like any stored value). What cannot be read with certainty is left out rather than guessed, but this only
+ * judges the *form* of a value, never its truth: a digit misread by Claude is a valid number. The review of the person is the safeguard.
  */
 final class Proposals
 {
