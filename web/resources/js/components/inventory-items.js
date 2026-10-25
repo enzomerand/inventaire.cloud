@@ -35,6 +35,10 @@
  * (for the people who may edit) opens a third, `../import/dialog.js`: a spreadsheet goes in, its columns are matched with
  * the fields (or with fields it creates), and the grid is read again when the items have come in.
  *
+ * When the instance and the workspace allow it (`data-photo-entry`), the "Add from photos" button opens a dialog of its own,
+ * `../photo-entry/dialog.js`: one to five photos of an object go to the analysis, the person reviews the values it proposes
+ * and the form that adds an item opens with the ones they accepted, and the photos in its photo field.
+ *
  * A barcode field of the form has a button that reads the code with the camera, and the search box has one too (a code
  * that no item has can then be added at once): that is `../scanner/inventory-scan.js`, which talks to the scanner panels
  * (`./barcode-scanner.js`) set in the dialog of the item and in a dialog of their own.
@@ -74,6 +78,7 @@ import { hasTotals, totalCells } from '../grid/totals.js';
 import itemFiles from '../item/files.js';
 import itemHistory from '../item/history.js';
 import itemTabs from '../item/tabs.js';
+import photoEntryDialog from '../photo-entry/dialog.js';
 import inventoryScan from '../scanner/inventory-scan.js';
 
 /** The color a field gets when a person chooses to give it one: the picker then lets them move on from there. */
@@ -107,9 +112,9 @@ function summedIds(fields) {
  * @returns {Record<string, any>}
  */
 export default function inventoryItems() {
-    // What the toolbar opens (the dialogs that export the items, import some and scan a code for the search) and the scan of
-    // the barcode fields of the item dialog, as one part.
-    const dialogs = compose(exportDialog(), importDialog(), inventoryScan());
+    // What the toolbar opens (the dialogs that export the items, import some, add one from photos and scan a code for the search)
+    // and the scan of the barcode fields of the item dialog, as one part.
+    const dialogs = compose(exportDialog(), importDialog(), photoEntryDialog(), inventoryScan());
 
     return compose(gridCriteria(), gridInline(), gridView(), itemTabs(), itemFiles(), itemHistory(), dialogs, {
         /** The fields of the inventory, in order: the columns, and the controls of the form. */
@@ -409,6 +414,7 @@ export default function inventoryItems() {
             this.stopSearchTimer();
             this.stopExportPolling();
             this.stopImportPolling();
+            this.stopPhotoEntry();
         },
 
         /**
