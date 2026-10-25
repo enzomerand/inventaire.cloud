@@ -12,7 +12,10 @@ use App\PhotoEntry\PhotoAnalysisQuota;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\PhotoAnalyzer;
 use App\Settings\InstanceSettings;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -371,6 +374,74 @@ describe('the pace', function (): void {
     });
 });
 
+describe('an analysis that cannot be started', function (): void {
+    /**
+     * What the application reports while the test runs.
+     *
+     * @param  list<string>  $reported
+     */
+    function photoReports(array &$reported): void
+    {
+        app()->make(ExceptionHandler::class)->reportable(function (Throwable $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+    }
+
+    it('answers 503 when a photo cannot be written, leaves no folder without a row, and reports the cause', function (): void {
+        $case = photoReady();
+        $disk = Storage::disk(ATTACHMENT_TEST_DISK);
+        $calls = 0;
+        attachmentDiskProxy()->shouldReceive('put')->twice()->andReturnUsing(function (string $path, mixed $contents) use ($disk, &$calls): bool {
+            return ++$calls === 1 ? (bool) $disk->put($path, $contents) : false;
+        });
+        $reported = [];
+        photoReports($reported);
+
+        $response = photoPost($this, $case['team']['editor'], $case['inventory'], [photoUpload(), photoUpload()])->assertStatus(503);
+
+        $analysis = PhotoAnalysis::query()->sole();
+
+        expect($response->json())->toBe(['message' => 'The photos could not be sent for analysis right now. Try again in a moment.', 'code' => 'photo_analysis_unavailable'])
+            ->and($analysis->status)->toBe(PhotoAnalysisStatus::Failed)
+            ->and($analysis->error)->toBe('failed')
+            ->and(storedFiles())->toBe([])
+            ->and($reported)->toContain('A file could not be written to the disk ['.ATTACHMENT_TEST_DISK.'].');
+    });
+
+    it('answers 503 when the job cannot be queued, and the photos go with the analysis that ends failed', function (): void {
+        $case = photoReady();
+        Bus::shouldReceive('dispatch')->once()->andThrow(new RuntimeException('The queue is down'));
+        $reported = [];
+        photoReports($reported);
+
+        photoPost($this, $case['team']['editor'], $case['inventory'], [photoUpload()])
+            ->assertStatus(503)
+            ->assertJsonPath('code', 'photo_analysis_unavailable');
+
+        expect(PhotoAnalysis::query()->sole()->status)->toBe(PhotoAnalysisStatus::Failed)
+            ->and(storedFiles())->toBe([])
+            ->and($reported)->toContain('The queue is down');
+    });
+
+    it('creates the row before it writes anything: a folder is never on the disk without one', function (): void {
+        $case = photoReady();
+        $disk = Storage::disk(ATTACHMENT_TEST_DISK);
+        $rows = [];
+        attachmentDiskProxy()->shouldReceive('put')->once()->andReturnUsing(function (string $path, mixed $contents) use ($disk, &$rows): bool {
+            $rows[] = PhotoAnalysis::query()->count();
+
+            return (bool) $disk->put($path, $contents);
+        });
+        Queue::fake();
+
+        photoPost($this, $case['team']['editor'], $case['inventory'], [photoUpload()])->assertStatus(202);
+
+        expect($rows)->toBe([1]);
+    });
+});
+
 describe('the cap of the instance', function (): void {
     it('is 200 analyses a day unless the configuration says otherwise', function (): void {
         expect(config('inventories.photo_analyses_per_day_instance'))->toBe(200);
@@ -447,6 +518,26 @@ describe('the cap of the instance', function (): void {
 });
 
 describe('reading an analysis', function (): void {
+    it('reads the fields of the inventory only for an analysis that is completed, not at every poll', function (): void {
+        $case = photoReady();
+        $editor = $case['team']['editor'];
+        $pending = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $editor->id]);
+        $done = PhotoAnalysis::factory()->create(['inventory_id' => $case['inventory']->id, 'user_id' => $editor->id, 'status' => PhotoAnalysisStatus::Completed, 'proposals' => [], 'completed_at' => now()]);
+        $fieldQueries = function (PhotoAnalysis $analysis) use ($editor, $case): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            inventoryCall($this, $editor, 'GET', photoUri($case['inventory'], $analysis))->assertOk();
+
+            return count(array_filter(DB::getQueryLog(), fn (array $query): bool => str_contains((string) $query['query'], 'inventory_fields')));
+        };
+
+        // The permission check reads the fields in neither case; the ULIDs for the proposals are asked for only when there are some.
+        $whilePending = $fieldQueries($pending);
+        $whenDone = $fieldQueries($done);
+
+        expect($whenDone)->toBeGreaterThan($whilePending);
+    });
+
     it('gives the analysis of the person who sent the photos, in every state', function (): void {
         $case = photoReady();
         $editor = $case['team']['editor'];

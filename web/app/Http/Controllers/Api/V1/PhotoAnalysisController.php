@@ -11,10 +11,12 @@ use App\Http\Responses\ApiError;
 use App\Http\Responses\TooManyRequests;
 use App\Models\Inventory;
 use App\Models\PhotoAnalysis;
+use App\PhotoEntry\Exceptions\AnalysisNotStartedException;
 use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\Exceptions\NoFieldsToFillException;
 use App\PhotoEntry\Exceptions\PhotoEntryDisabledException;
 use App\PhotoEntry\PhotoAnalyses;
+use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\UnreadablePhotoException;
 use App\Policies\InventoryPolicy;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -44,7 +46,7 @@ final class PhotoAnalysisController extends Controller
      * `422` for a mistake in the request (`photos`, `photos.<n>`) and for a photo that cannot be read (on `photos.<n>`, with a `code`:
      * `unsupported_type`, `unreadable_photo`, `photo_too_large`); `409` when the workspace may not use the photo entry
      * (`photo_entry_disabled`: the administrator turned it off, there is no key, or the owner did not turn it on) and when no field of
-     * the inventory can be filled from a photo (`no_fields_to_fill`); `429` beyond the pace of requests, beyond the analyses of the day of the
+     * the inventory can be filled from a photo (`no_fields_to_fill`); `503` (`photo_analysis_unavailable`) when the photos could not be written or the job queued; `429` beyond the pace of requests, beyond the analyses of the day of the
      * person and beyond those of the instance (the latter with its own message and `code`: `photo_analyses_instance_limit`).
      */
     public function store(StorePhotoAnalysisRequest $request, Inventory $inventory): JsonResponse
@@ -57,6 +59,8 @@ final class PhotoAnalysisController extends Controller
             return ApiError::conflict(__('This inventory has no field that photos can fill.'), NoFieldsToFillException::CODE);
         } catch (InstanceQuotaReachedException $reached) {
             return TooManyRequests::response(__('The instance reached its daily number of photo analyses; try again tomorrow.'), InstanceQuotaReachedException::CODE, $reached->limit, $reached->retryAfter);
+        } catch (AnalysisNotStartedException) {
+            return ApiError::unavailable(__('The photos could not be sent for analysis right now. Try again in a moment.'), AnalysisNotStartedException::CODE);
         } catch (UnreadablePhotoException $refused) {
             return ApiError::invalid($refused->getMessage(), 'photos.'.($refused->photo ?? 0), $refused->reason);
         }
@@ -76,6 +80,12 @@ final class PhotoAnalysisController extends Controller
             throw (new ModelNotFoundException)->setModel(PhotoAnalysis::class, [$photoAnalysis->ulid]);
         }
 
-        return new PhotoAnalysisResource($photoAnalysis, array_map(strval(...), array_values($inventory->fields()->pluck('ulid')->all())));
+        // The fields are read only to leave out the proposals for one that was deleted: an analysis that is not over has none, and it is
+        // read every two seconds until it is.
+        $fieldIds = $photoAnalysis->status === PhotoAnalysisStatus::Completed
+            ? array_map(strval(...), array_values($inventory->fields()->pluck('ulid')->all()))
+            : null;
+
+        return new PhotoAnalysisResource($photoAnalysis, $fieldIds);
     }
 }
