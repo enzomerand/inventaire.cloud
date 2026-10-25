@@ -149,7 +149,7 @@ final class InstanceSettings
      * Changes the settings that are given, and only those, in one statement. A setting that is not in `$changes` keeps
      * what it holds.
      *
-     * @param  array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool}  $changes  The new values by name.
+     * @param  array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool, photo_entry_enabled?: bool}  $changes  The new values by name.
      */
     public function update(array $changes): void
     {
@@ -182,7 +182,7 @@ final class InstanceSettings
     /**
      * Every setting with its current value, as the API shows them.
      *
-     * @return array{registration_open: bool, invitation_sign_up: bool, share_links_enabled: bool}
+     * @return array{registration_open: bool, invitation_sign_up: bool, share_links_enabled: bool, photo_entry_enabled: bool}
      */
     public function all(): array
     {
@@ -190,6 +190,7 @@ final class InstanceSettings
             self::REGISTRATION_OPEN => $this->registrationOpen(),
             self::INVITATION_SIGN_UP => $this->invitationSignUp(),
             self::SHARE_LINKS_ENABLED => $this->shareLinksEnabled(),
+            self::PHOTO_ENTRY_ENABLED => $this->photoEntryEnabled(),
         ];
     }
 

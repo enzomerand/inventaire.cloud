@@ -87,6 +87,8 @@ class ClientMessages extends Component
             'admin.settings.notice.invitations_off' => __('Invitations no longer let new addresses create an account.'),
             'admin.settings.notice.sharing_on' => __('Sharing by link is on.'),
             'admin.settings.notice.sharing_off' => __('Sharing by link is off: every link answers as if it did not exist.'),
+            'admin.settings.notice.photo_entry_on' => __('Photo entry is on: owners can now turn it on for their workspace.'),
+            'admin.settings.notice.photo_entry_off' => __('Photo entry is off: no photo is sent to Anthropic.'),
             'admin.settings.select_hint' => __('The address is selected: copy it with your keyboard.'),
             'sharing.untitled' => __('Untitled link'),
             'sharing.state.active' => __('Active'),

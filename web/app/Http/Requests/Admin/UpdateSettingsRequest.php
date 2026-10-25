@@ -23,6 +23,7 @@ final class UpdateSettingsRequest extends FormRequest
             InstanceSettings::REGISTRATION_OPEN => ['sometimes', 'required', 'boolean'],
             InstanceSettings::INVITATION_SIGN_UP => ['sometimes', 'required', 'boolean'],
             InstanceSettings::SHARE_LINKS_ENABLED => ['sometimes', 'required', 'boolean'],
+            InstanceSettings::PHOTO_ENTRY_ENABLED => ['sometimes', 'required', 'boolean'],
         ];
     }
 
@@ -45,13 +46,13 @@ final class UpdateSettingsRequest extends FormRequest
     /**
      * The settings that were sent, with their new values: only those, so that the others are left alone.
      *
-     * @return array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool}
+     * @return array{registration_open?: bool, invitation_sign_up?: bool, share_links_enabled?: bool, photo_entry_enabled?: bool}
      */
     public function settings(): array
     {
         $settings = [];
 
-        foreach ([InstanceSettings::REGISTRATION_OPEN, InstanceSettings::INVITATION_SIGN_UP, InstanceSettings::SHARE_LINKS_ENABLED] as $key) {
+        foreach (array_keys($this->rules()) as $key) {
             if ($this->has($key)) {
                 $settings[$key] = $this->boolean($key);
             }

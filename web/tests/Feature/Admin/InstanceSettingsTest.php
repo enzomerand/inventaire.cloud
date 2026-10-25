@@ -58,7 +58,7 @@ describe('the registration setting', function (): void {
         // Asked many times, in many ways, during one request: it is said once.
         expect($settings->registrationOpen())->toBeFalse()
             ->and($settings->registrationOpen())->toBeFalse()
-            ->and($settings->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true]);
+            ->and($settings->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false]);
 
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'registration_open'])->once();
     })->with([
@@ -108,7 +108,7 @@ describe('the registration setting', function (): void {
 
         $settings->update([InstanceSettings::REGISTRATION_OPEN => false, InstanceSettings::INVITATION_SIGN_UP => true]);
 
-        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true])
+        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false])
             ->and(DB::table('settings')->count())->toBe(2);
     });
 
@@ -174,7 +174,7 @@ describe('the registration setting', function (): void {
         DB::table('settings')->insert(['key' => 'something_else', 'value' => '{"a":1}', 'created_at' => now(), 'updated_at' => now()]);
         freshSettings()->update([InstanceSettings::REGISTRATION_OPEN => false]);
 
-        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true]);
+        expect(freshSettings()->all())->toBe(['registration_open' => false, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => false]);
     });
 });
 
@@ -205,9 +205,50 @@ describe('the share links setting', function (): void {
 
         expect($settings->shareLinksEnabled())->toBeFalse()
             ->and($settings->shareLinksEnabled())->toBeFalse()
-            ->and($settings->all())->toBe(['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false]);
+            ->and($settings->all())->toBe(['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => false, 'photo_entry_enabled' => false]);
 
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'share_links_enabled'])->once();
+    })->with([
+        'a string' => ['"yes"'],
+        'the word true as a string' => ['"true"'],
+        'a number' => ['1'],
+        'null' => ['null'],
+        'a list' => ['[true]'],
+    ]);
+});
+
+describe('the photo entry setting', function (): void {
+    it('is off when nothing was ever stored: unlike the other switches, an administrator has to turn it on', function (): void {
+        expect(DB::table('settings')->count())->toBe(0)
+            ->and(freshSettings()->photoEntryEnabled())->toBeFalse()
+            ->and(freshSettings()->shareLinksEnabled())->toBeTrue();
+    });
+
+    it('can be turned on and off, apart from the other settings, for the next request as well', function (): void {
+        freshSettings()->update([InstanceSettings::PHOTO_ENTRY_ENABLED => true]);
+
+        expect(freshSettings()->photoEntryEnabled())->toBeTrue()
+            ->and(freshSettings()->registrationOpen())->toBeTrue()
+            ->and(freshSettings()->shareLinksEnabled())->toBeTrue()
+            ->and(DB::table('settings')->pluck('key')->all())->toBe(['photo_entry_enabled'])
+            ->and(json_decode((string) DB::table('settings')->value('value')))->toBeTrue()
+            ->and(freshSettings()->all())->toBe(['registration_open' => true, 'invitation_sign_up' => true, 'share_links_enabled' => true, 'photo_entry_enabled' => true]);
+
+        freshSettings()->update([InstanceSettings::PHOTO_ENTRY_ENABLED => false]);
+
+        expect(freshSettings()->photoEntryEnabled())->toBeFalse();
+    });
+
+    it('is off, with one warning, when the stored value is not a flag: photos are not sent away on the strength of a value nobody understands', function (string $stored): void {
+        Log::spy();
+        DB::table('settings')->insert(['key' => 'photo_entry_enabled', 'value' => $stored, 'created_at' => now(), 'updated_at' => now()]);
+        $settings = freshSettings();
+
+        expect($settings->photoEntryEnabled())->toBeFalse()
+            ->and($settings->photoEntryEnabled())->toBeFalse()
+            ->and($settings->shareLinksEnabled())->toBeTrue();
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context === ['setting' => 'photo_entry_enabled'])->once();
     })->with([
         'a string' => ['"yes"'],
         'the word true as a string' => ['"true"'],

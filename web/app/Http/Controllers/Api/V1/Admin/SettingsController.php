@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Api\V1\Auth\RequestCodeController;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateSettingsRequest;
+use App\PhotoEntry\PhotoEntry;
 use App\Settings\InstanceSettings;
 use App\Signatures\Documenso;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +23,10 @@ use Illuminate\Http\JsonResponse;
  *
  * `share_links_enabled` (on by default): whether the owners of an inventory can share it through a secret read-only link. Turned off, no link
  * can be made (`409`, `share_links_disabled`) and every link that exists answers as if it did not; they work again when it is turned back on.
+ *
+ * `photo_entry_enabled` (off by default, unlike the others): whether editors may add an item from photos that Claude (Anthropic) reads. It is one of
+ * the three conditions of {@see PhotoEntry}: the instance also needs an API key (`ANTHROPIC_API_KEY`, set in the environment and never given here,
+ * the settings page only says whether there is one) and the owner of each workspace opts in. Turned off, nothing is sent to Anthropic.
  *
  * The answer also tells, read-only, where the e-signature service (Documenso) stands: `documenso.configured` (the instance has its
  * address and API token), `documenso.webhook_secret_configured` (the webhook is open) and `documenso.webhook_url`, the address to give

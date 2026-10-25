@@ -7,7 +7,8 @@
     referenced by name and gets its endpoint and the current values from the data-* attributes of its root, which holds
     all the cards. Flipping a switch saves it through the API. The card of the e-signature service (Documenso) is
     read-only: where it stands comes from the environment of the instance ($documenso, see AdminSettingsPageController),
-    and the address of its webhook can be copied.
+    and the address of its webhook can be copied. The photo entry card says, read-only too, whether an Anthropic API key is
+    configured ($photoEntryKey): the page never carries the key itself.
 
     Do not put a display utility (d-flex...) on an element that carries :hidden: the utility wins and it never hides.
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
@@ -30,6 +31,7 @@
         data-registration-open="{{ $settings->registrationOpen() ? '1' : '0' }}"
         data-invitation-sign-up="{{ $settings->invitationSignUp() ? '1' : '0' }}"
         data-share-links-enabled="{{ $settings->shareLinksEnabled() ? '1' : '0' }}"
+        data-photo-entry-enabled="{{ $settings->photoEntryEnabled() ? '1' : '0' }}"
         data-documenso-configured="{{ $documenso['configured'] ? '1' : '0' }}"
         data-documenso-secret="{{ $documenso['webhook_secret_configured'] ? '1' : '0' }}"
         data-webhook-url="{{ $documenso['webhook_url'] }}"
@@ -97,6 +99,44 @@
                     </label>
                     <div class="form-hint mt-2" id="admin-settings-share-links-hint">
                         {{ __('A share link shows an inventory, read-only, to anybody who holds its address, without an account. When this is off, no link can be made and every existing link answers as if it did not exist; they work again when it is turned back on.') }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">{{ __('Artificial intelligence') }}</h2>
+                </div>
+                <div class="card-body">
+                    <label class="form-check form-switch">
+                        <input
+                            id="admin-settings-photo-entry"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="photoEntryEnabled"
+                            :disabled="busy"
+                            aria-describedby="admin-settings-photo-entry-hint"
+                            @change="togglePhotoEntry"
+                        >
+                        <span class="form-check-label">{{ __('Photo entry (AI)') }}</span>
+                    </label>
+                    <div class="form-hint mt-2" id="admin-settings-photo-entry-hint">
+                        {{ __('Editors can add an item from photos: the photos are sent to Anthropic (Claude) to be read, then deleted, and every analysis is billed to the API key of this instance. The owner of each workspace must also turn it on for that workspace.') }}
+                    </div>
+
+                    <div class="mt-3" id="admin-settings-photo-entry-key">
+                        <div class="form-label">{{ __('Anthropic API key') }}</div>
+                        @if ($photoEntryKey)
+                            <span class="badge bg-green-lt">{{ __('API key configured') }}</span>
+                        @else
+                            <span class="badge bg-secondary-lt">{{ __('No API key: set ANTHROPIC_API_KEY') }}</span>
+                            <div class="form-hint mt-1">
+                                {{ __('Until a key is set in the environment of the instance, the photo entry stays unavailable, whatever this switch says.') }}
+                            </div>
+                        @endif
                     </div>
                 </div>
             </div>

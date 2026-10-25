@@ -124,6 +124,8 @@ const PAGE = {
         webhook_secret_configured: true,
         webhook_url: 'https://inventaire.example/webhooks/documenso',
     },
+    photoEntryEnabled: false,
+    photoEntryKey: true,
 };
 
 /** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
@@ -192,6 +194,8 @@ const MESSAGES = {
     'admin.settings.notice.invitations_off': 'Invitations are off',
     'admin.settings.notice.sharing_on': 'Sharing is on',
     'admin.settings.notice.sharing_off': 'Sharing is off',
+    'admin.settings.notice.photo_entry_on': 'Photo entry is on',
+    'admin.settings.notice.photo_entry_off': 'Photo entry is off',
     'sharing.untitled': 'Untitled link',
     'sharing.state.active': 'Active',
     'sharing.state.expired': 'Expired',
@@ -257,6 +261,11 @@ function render(path, { scannerSlot = '' } = {}) {
     // The content section is the page; the layout around it is not under test.
     html = html.replace(/@section\('content'\)([\s\S]*)@endsection/, '$1');
 
+    // The status line of the Anthropic API key says one thing or the other.
+    html = html.replace(/@if \(\$photoEntryKey\)([\s\S]*?)@else([\s\S]*?)@endif/g, (_match, configured, missing) =>
+        PAGE.photoEntryKey ? configured : missing,
+    );
+
     // What only the owners are offered (the link to the sharing page) is in the markup, or not.
     html = html.replace(/@if \(\$abilities\['(\w+)'\]\)([\s\S]*?)@endif/g, (_match, ability, body) =>
         abilitiesOfPage()[ability] ? body : '',
@@ -310,6 +319,7 @@ function render(path, { scannerSlot = '' } = {}) {
             "$settings->registrationOpen() ? '1' : '0'": '1',
             "$settings->invitationSignUp() ? '1' : '0'": '1',
             "$settings->shareLinksEnabled() ? '1' : '0'": '1',
+            "$settings->photoEntryEnabled() ? '1' : '0'": PAGE.photoEntryEnabled ? '1' : '0',
             "$enabled ? '1' : '0'": PAGE.sharing.enabled ? '1' : '0',
             $limit: String(PAGE.sharing.limit),
             "$signaturesAvailable ? '1' : '0'": PAGE.signaturesAvailable ? '1' : '0',
@@ -492,6 +502,8 @@ describe('the pages under the real Alpine CSP build', () => {
             webhook_secret_configured: true,
             webhook_url: 'https://inventaire.example/webhooks/documenso',
         };
+        PAGE.photoEntryEnabled = false;
+        PAGE.photoEntryKey = true;
     });
 
     describe('the switcher of the header', () => {
@@ -1593,6 +1605,69 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(sharing.checked).toBe(false);
             expect(registrationSwitch().checked).toBe(true);
             expect(document.querySelector('#admin-settings-invitation-sign-up').checked).toBe(true);
+        });
+
+        it('has a fourth switch for the photo entry, off as the page was rendered, that saves apart from the others', async () => {
+            const photos = document.querySelector('#admin-settings-photo-entry');
+            http.put.mockResolvedValue({
+                data: {
+                    registration_open: true,
+                    invitation_sign_up: true,
+                    share_links_enabled: true,
+                    photo_entry_enabled: true,
+                },
+            });
+
+            expect(photos.checked).toBe(false);
+            expect(photos.getAttribute('role')).toBe('switch');
+            expect(document.body.textContent).toContain('Photo entry (AI)');
+            // The hint is the description of the switch, and says where the photos go.
+            expect(document.getElementById(photos.getAttribute('aria-describedby')).textContent).toContain(
+                'the photos are sent to Anthropic (Claude) to be read, then deleted',
+            );
+
+            photos.checked = true;
+            photos.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(http.put).toHaveBeenCalledWith('/api/v1/admin/settings', { photo_entry_enabled: true });
+            expect(notify).toHaveBeenCalledWith('success', 'Photo entry is on');
+            expect(photos.checked).toBe(true);
+            expect(registrationSwitch().checked).toBe(true);
+            expect(document.querySelector('#admin-settings-share-links').checked).toBe(true);
+        });
+
+        it('shows the photo entry on when the page was rendered with it on', async () => {
+            PAGE.photoEntryEnabled = true;
+            await mount('app/admin/settings.blade.php');
+
+            expect(document.querySelector('#admin-settings-photo-entry').checked).toBe(true);
+        });
+
+        it('puts the photo entry switch back when the change could not be saved', async () => {
+            const photos = document.querySelector('#admin-settings-photo-entry');
+            http.put.mockRejectedValue(new HttpError(500, 'Server down'));
+
+            photos.checked = true;
+            photos.dispatchEvent(new Event('change', { bubbles: true }));
+            await flush();
+
+            expect(notify).toHaveBeenCalledWith('danger', 'Server down');
+            expect(photos.checked).toBe(false);
+        });
+
+        it('says whether an API key is configured, in words, never with the key', async () => {
+            const status = () => document.querySelector('#admin-settings-photo-entry-key').textContent;
+
+            expect(status()).toContain('API key configured');
+            expect(status()).not.toContain('No API key');
+
+            PAGE.photoEntryKey = false;
+            await mount('app/admin/settings.blade.php');
+
+            expect(status()).toContain('No API key: set ANTHROPIC_API_KEY');
+            expect(status()).toContain('stays unavailable');
+            expect(status()).not.toContain('API key configured');
         });
 
         it('turns the switch back on when the change could not be saved', async () => {
