@@ -8,6 +8,7 @@ use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMember;
+use App\PhotoEntry\PhotoEntry;
 use App\Workspaces\Exceptions\MembershipRefused;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\DatabaseManager;
@@ -37,6 +38,7 @@ final class Members
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
         private readonly Workspaces $workspaces,
+        private readonly PhotoEntry $photoEntry,
     ) {}
 
     /**
@@ -163,7 +165,8 @@ final class Members
     }
 
     /**
-     * Hands the ownership over to another member: they become the owner, and the actor becomes an editor. Both happen together.
+     * Hands the ownership over to another member: they become the owner, and the actor becomes an editor. Both happen together. The
+     * consent of the workspace to the photo entry is withdrawn: the new owner has to give their own ({@see PhotoEntry::withdrawConsent()}).
      *
      * @throws AuthorizationException With status 404 when the actor does not belong to the workspace.
      * @throws MembershipRefused With `not_owner` when the actor is not the owner, and `already_owner` when the member is the owner already.
@@ -182,6 +185,8 @@ final class Members
 
             $this->setRole($theirs, WorkspaceRole::Owner);
             $this->setRole($mine, WorkspaceRole::Editor);
+            // What the previous owner consented to is not the new owner's decision.
+            $this->photoEntry->withdrawConsent($workspace);
         }));
     }
 

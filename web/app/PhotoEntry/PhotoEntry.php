@@ -58,6 +58,22 @@ final class PhotoEntry
     }
 
     /**
+     * Withdraws the consent of a workspace: the photo entry is off for it until its owner turns it on again.
+     *
+     * The consent is the owner's, given by the person who owned the workspace at the time: when the ownership changes hands (the owner hands
+     * it over, or an administrator deletes the account of the only owner and a member succeeds them), the new owner has to consent
+     * himself, since the photos of their editors would go to a third party on a decision they did not take. The caller holds the lock of
+     * the workspace and has judged; the model it passed is brought in line.
+     */
+    public function withdrawConsent(Workspace $workspace): void
+    {
+        Workspace::query()->whereKey($workspace->getKey())->where('photo_entry_enabled', true)->update(['photo_entry_enabled' => false]);
+
+        $workspace->setAttribute('photo_entry_enabled', false);
+        $workspace->syncOriginalAttribute('photo_entry_enabled');
+    }
+
+    /**
      * Whether an API key is configured (its value is never shown: the administration only says whether there is one).
      */
     public function hasKey(): bool

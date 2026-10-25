@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Workspace;
+use App\PhotoEntry\PhotoEntry;
 use App\Settings\InstanceSettings;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -280,5 +281,48 @@ describe('the token API', function (): void {
         inventoryCall($this, $team['owner'], 'PATCH', "/api/v1/workspaces/{$team['workspace']->ulid}", ['name' => 'Renamed', 'photo_entry_enabled' => true])->assertOk();
 
         expect($team['workspace']->fresh()->name)->toBe('Renamed')->and(photoEntryStored($team['workspace']))->toBeFalse();
+    });
+});
+
+describe('when the ownership changes hands', function (): void {
+    it('withdraws the consent: the new owner has to give their own', function (): void {
+        photoEntryOffered();
+        $team = inventoryTeam();
+        $other = app(Workspaces::class)->create($team['owner'], 'Warehouse');
+        inventoryCall($this, $team['owner'], 'PUT', photoEntryUri($team['workspace']), ['enabled' => true])->assertOk();
+        inventoryCall($this, $team['owner'], 'PUT', photoEntryUri($other), ['enabled' => true])->assertOk();
+
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/workspaces/{$team['workspace']->ulid}/transfer", ['member_id' => $team['editor']->ulid])->assertOk();
+
+        // Off for the workspace that changed hands, still on for the other one, which is still theirs.
+        expect(photoEntryStored($team['workspace']))->toBeFalse()
+            ->and(app(PhotoEntry::class)->enabledFor($team['workspace']->fresh()))->toBeFalse()
+            ->and(photoEntryStored($other))->toBeTrue();
+
+        // The old owner is an editor now: it is not theirs to say. The new owner turns it on if they want it.
+        inventoryCall($this, $team['owner'], 'PUT', photoEntryUri($team['workspace']), ['enabled' => true])->assertForbidden();
+        inventoryCall($this, $team['editor'], 'PUT', photoEntryUri($team['workspace']), ['enabled' => true])->assertOk()->assertJsonPath('data.enabled', true);
+
+        expect(photoEntryStored($team['workspace']))->toBeTrue();
+    });
+
+    it('has nothing to withdraw from a workspace that never consented', function (): void {
+        photoEntryOffered();
+        $team = inventoryTeam();
+
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/workspaces/{$team['workspace']->ulid}/transfer", ['member_id' => $team['editor']->ulid])->assertOk();
+
+        expect(photoEntryStored($team['workspace']))->toBeFalse();
+    });
+
+    it('leaves the consent alone when the transfer is refused', function (): void {
+        photoEntryOffered();
+        $team = inventoryTeam();
+        inventoryCall($this, $team['owner'], 'PUT', photoEntryUri($team['workspace']), ['enabled' => true])->assertOk();
+
+        inventoryCall($this, $team['editor'], 'POST', "/api/v1/workspaces/{$team['workspace']->ulid}/transfer", ['member_id' => $team['viewer']->ulid])->assertForbidden();
+        inventoryCall($this, $team['owner'], 'POST', "/api/v1/workspaces/{$team['workspace']->ulid}/transfer", ['member_id' => $team['owner']->ulid])->assertStatus(409);
+
+        expect(photoEntryStored($team['workspace']))->toBeTrue();
     });
 });
