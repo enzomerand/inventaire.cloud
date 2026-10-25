@@ -4109,16 +4109,34 @@ describe('the pages under the real Alpine CSP build', () => {
                     expect(step('review').textContent).toContain('0 of 3 values checked');
                 });
 
-                it('ties each box to the name of its field', async () => {
+                it('names each box after its field and the value it would put there, and describes it by the confidence and the evidence', async () => {
                     await analyse();
 
-                    for (const row of reviewRows()) {
-                        const box = row.querySelector('input[type="checkbox"]');
+                    const text = (ids) =>
+                        ids
+                            .split(' ')
+                            .map((id) => document.getElementById(id).textContent.replace(/\s+/g, ' ').trim())
+                            .join(' | ');
 
-                        expect(document.getElementById(box.getAttribute('aria-labelledby')).textContent).toBe(
-                            row.querySelector('label .fw-medium').textContent,
+                    expect(
+                        reviewRows().map((row) => {
+                            const box = row.querySelector('input[type="checkbox"]');
+
+                            return [
+                                text(box.getAttribute('aria-labelledby')),
+                                text(box.getAttribute('aria-describedby')),
+                            ];
+                        }),
+                    ).toEqual([
+                        ['Name | Saw', 'High confidence | printed on the blade'],
+                        ['State | Used', 'Medium confidence | worn handle'],
+                        ['Weight | 2.50 kg', 'Low confidence | <b>2.5 kg</b> on a sticker'],
+                    ]);
+
+                    for (const row of reviewRows()) {
+                        expect(row.querySelector('label').getAttribute('for')).toBe(
+                            row.querySelector('input[type="checkbox"]').id,
                         );
-                        expect(row.querySelector('label').getAttribute('for')).toBe(box.id);
                     }
                 });
 

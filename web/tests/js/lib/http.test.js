@@ -50,6 +50,7 @@ describe('http helper', () => {
     const fetchMock = vi.fn();
     let http;
     let HttpError;
+    let leaveStalePage;
     let DEFAULT_TIMEOUT_MS;
     let notify;
     let reloadPage;
@@ -59,7 +60,7 @@ describe('http helper', () => {
         // Fresh modules each time: the helper keeps module-level state (pending
         // navigation, shared CSRF refresh) that must not leak between cases.
         vi.resetModules();
-        ({ http, HttpError, DEFAULT_TIMEOUT_MS } = await import('../../../resources/js/lib/http.js'));
+        ({ http, HttpError, DEFAULT_TIMEOUT_MS, leaveStalePage } = await import('../../../resources/js/lib/http.js'));
         ({ notify } = await import('../../../resources/js/lib/notify.js'));
         ({ reloadPage, redirectTo } = await import('../../../resources/js/lib/page.js'));
 
@@ -428,6 +429,54 @@ describe('http helper', () => {
 
             await Promise.allSettled([http.get('/a'), http.get('/b')]);
             await vi.runAllTimersAsync();
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('leaving a stale page after a silent call', () => {
+        it('reloads after the time to read a message when the CSRF token is stale (419), and says the page is about to', () => {
+            vi.useFakeTimers();
+
+            expect(leaveStalePage(new HttpError(419, 'Session expired'))).toBe(true);
+            expect(reloadPage).not.toHaveBeenCalled();
+
+            vi.runAllTimers();
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+            expect(notify).not.toHaveBeenCalled();
+        });
+
+        it('sends the person to the login page when the session is over (401), or reloads when there is none', () => {
+            vi.useFakeTimers();
+            document.head.insertAdjacentHTML('beforeend', '<meta name="login-url" content="/login">');
+
+            expect(leaveStalePage(new HttpError(401, 'Please sign in'))).toBe(true);
+            vi.runAllTimers();
+
+            expect(redirectTo).toHaveBeenCalledWith('/login');
+            expect(reloadPage).not.toHaveBeenCalled();
+        });
+
+        it('leaves the page alone for any other failure', () => {
+            vi.useFakeTimers();
+
+            for (const status of [0, 403, 404, 422, 429, 500]) {
+                expect(leaveStalePage(new HttpError(status, 'No'))).toBe(false);
+            }
+
+            vi.runAllTimers();
+
+            expect(reloadPage).not.toHaveBeenCalled();
+            expect(redirectTo).not.toHaveBeenCalled();
+        });
+
+        it('schedules one navigation at a time, like the helper does for the calls that are not silent', () => {
+            vi.useFakeTimers();
+
+            leaveStalePage(new HttpError(419, 'Session expired'));
+            leaveStalePage(new HttpError(419, 'Session expired'));
+            vi.runAllTimers();
 
             expect(reloadPage).toHaveBeenCalledTimes(1);
         });

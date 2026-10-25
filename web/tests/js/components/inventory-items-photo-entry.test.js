@@ -10,7 +10,7 @@ import { toInput } from '../../../resources/js/fields/index.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
-import { redirectTo } from '../../../resources/js/lib/page.js';
+import { redirectTo, reloadPage } from '../../../resources/js/lib/page.js';
 import { jpegName, prepareAnalysisPhoto, UnreadablePhoto } from '../../../resources/js/photo-entry/photos.js';
 import { MAX_WAIT_MS, POLL_INTERVAL_MS } from '../../../resources/js/photo-entry/proposals.js';
 import {
@@ -31,7 +31,7 @@ vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     return { ...original, http: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } };
 });
 vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
-vi.mock('../../../resources/js/lib/page.js', () => ({ redirectTo: vi.fn() }));
+vi.mock('../../../resources/js/lib/page.js', () => ({ redirectTo: vi.fn(), reloadPage: vi.fn() }));
 vi.mock('../../../resources/js/lib/modal.js', async () => import('../support/modal.js'));
 vi.mock('../../../resources/js/lib/offcanvas.js', () => ({ showOffcanvas: vi.fn(), hideOffcanvas: vi.fn() }));
 vi.mock('../../../resources/js/lib/i18n.js', async () => import('../support/messages.js'));
@@ -809,6 +809,66 @@ describe('adding an item from photos', () => {
             expect(component.photoFailure).toEqual({ text: 'The server hit an error.', retry: true, resume: false });
         });
 
+        it.each([
+            ['the network', 0, 'Network down', { kind: 'network' }],
+            ['the server', 500, 'The server hit an error.', {}],
+            ['an ended session', 401, 'Please sign in', {}],
+            ['a stale page', 419, 'Session expired', {}],
+            ['a right that is gone', 403, 'Not allowed', {}],
+        ])(
+            'does not tell twice what the helper already told with a toast (%s): the photos stay chosen, to send again',
+            async (_what, status, message, details) => {
+                await open();
+                const error = new HttpError(status, message, details);
+                error.reported = true;
+                http.post.mockRejectedValue(error);
+
+                await analyse(photo('a.jpg'));
+
+                expect(component.photoStep).toBe('choose');
+                expect(component.photoBusy).toBe('');
+                expect(component.photoWorking).toBe(false);
+                expect(component.photoFailure.text).toBe('');
+                expect(component.photoCanRetry).toBe(false);
+                expect(component.photoPhotos.map((one) => one.name)).toEqual(['a.jpg']);
+                expect(component.canAnalysePhotos).toBe(true);
+            },
+        );
+
+        it('tells the wait of the throttling in the dialog although the helper toasted it too (429)', async () => {
+            await open();
+            const error = new HttpError(429, 'Slow down', { retryAfter: 30 });
+            error.reported = true;
+            http.post.mockRejectedValue(error);
+
+            await analyse();
+
+            expect(component.photoStep).toBe('error');
+            expect(component.photoFailure.text).toBe('Too many attempts. Try again in 30 seconds.');
+            expect(component.photoCanRetry).toBe(true);
+        });
+
+        it('says the instance is out of analyses, with no retry, when the API says it is not the person (429)', async () => {
+            await refused(429, 'Slow down', { code: 'photo_analyses_instance_limit', retryAfter: 3600 });
+
+            expect(component.photoFailure).toEqual({
+                text: 'The instance reached its daily number of photo analyses; try again tomorrow.',
+                retry: false,
+                resume: false,
+            });
+            expect(component.photoCanRetry).toBe(false);
+        });
+
+        it.each([401, 403, 419])(
+            'offers no retry for a refusal the helper did not tell (%i): it could only fail',
+            async (status) => {
+                await refused(status, 'Please sign in');
+
+                expect(component.photoStep).toBe('error');
+                expect(component.photoFailure).toEqual({ text: 'Please sign in', retry: false, resume: false });
+            },
+        );
+
         it('sends the person to the workspace when the inventory is gone (404)', async () => {
             await refused(404, 'Gone');
 
@@ -920,7 +980,11 @@ describe('adding an item from photos', () => {
             expect(readings().at(-1)[0]).toBe(`${PHOTO_ANALYSES}/a1`);
         });
 
-        it.each([401, 403, 419])('gives up at once when the reading is refused (%i)', async (status) => {
+        it.each([
+            [401, false],
+            [403, false],
+            [419, true],
+        ])('gives up at once when the reading is refused (%i), with no retry that could only fail', async (status) => {
             await open();
             http.post.mockResolvedValue(analysis('pending'));
             answers = [new HttpError(status, 'No')];
@@ -929,8 +993,94 @@ describe('adding an item from photos', () => {
             await nextReading();
 
             expect(component.photoStep).toBe('error');
-            expect(component.photoFailure.resume).toBe(true);
+            expect(component.photoFailure).toEqual({ text: 'No', retry: false, resume: false });
+            expect(component.photoCanRetry).toBe(false);
             expect(readings()).toHaveLength(1);
+            expect(component.photoStatus).toBe('No');
+
+            // Nothing is read any more.
+            await vi.advanceTimersByTimeAsync(10 * POLL_INTERVAL_MS);
+
+            expect(readings()).toHaveLength(1);
+        });
+
+        it('reloads the page, as the helper does for a call that is not silent, when the reading finds the page stale (419)', async () => {
+            await open();
+            reloadPage.mockClear();
+            http.post.mockResolvedValue(analysis('pending'));
+            answers = [new HttpError(419, 'Session expired')];
+            await analyse();
+            await nextReading();
+
+            expect(reloadPage).not.toHaveBeenCalled();
+
+            // After the time to read what the dialog says.
+            await vi.advanceTimersByTimeAsync(1500);
+
+            expect(reloadPage).toHaveBeenCalledTimes(1);
+        });
+
+        it('sends the person to the login page when the reading finds the session over (401)', async () => {
+            document.head.insertAdjacentHTML('beforeend', '<meta name="login-url" content="/login">');
+            await open();
+            redirectTo.mockClear();
+            http.post.mockResolvedValue(analysis('pending'));
+            answers = [new HttpError(401, 'Please sign in')];
+            await analyse();
+            await nextReading();
+            await vi.advanceTimersByTimeAsync(1500);
+
+            expect(redirectTo).toHaveBeenCalledWith('/login');
+            document.head.querySelector('meta[name="login-url"]').remove();
+        });
+
+        it('does not reload the page when the reading is only refused (403): the person keeps what they read', async () => {
+            await open();
+            reloadPage.mockClear();
+            redirectTo.mockClear();
+            http.post.mockResolvedValue(analysis('pending'));
+            answers = [new HttpError(403, 'Not allowed')];
+            await analyse();
+            await nextReading();
+            await vi.advanceTimersByTimeAsync(5000);
+
+            expect(reloadPage).not.toHaveBeenCalled();
+            expect(redirectTo).not.toHaveBeenCalled();
+        });
+
+        it('announces that the analysis is followed again when the person retries after the connection was lost', async () => {
+            await open();
+            http.post.mockResolvedValue(analysis('pending'));
+            answers = [new HttpError(0, 'Network', { kind: 'network' })];
+            await analyse();
+            await nextReading();
+            await nextReading();
+            await nextReading();
+
+            expect(component.photoStatus).toBe('The connection to the analysis was lost.');
+
+            answers = [analysis('running')];
+            component.retryPhotoAnalysis();
+
+            expect(component.photoStep).toBe('working');
+            expect(component.photoStatus).toBe('Claude is reading the photos…');
+        });
+
+        it('announces again words that did not change: the live region is emptied, then filled', async () => {
+            await open();
+            component.photoStatus = 'Claude is reading the photos…';
+
+            component.announcePhoto('Claude is reading the photos…');
+
+            expect(component.photoStatus).toBe('');
+
+            await settle();
+
+            expect(component.photoStatus).toBe('Claude is reading the photos…');
+
+            component.announcePhoto('Something else');
+
+            expect(component.photoStatus).toBe('Something else');
         });
 
         it('stops following an analysis that takes more than a few minutes', async () => {

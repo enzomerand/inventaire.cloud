@@ -28,7 +28,7 @@
  */
 import { PHOTO_TYPES, maxFilesOf } from '../fields/files.js';
 import { controlOf, toInput } from '../fields/index.js';
-import { HttpError, http, uploadTimeoutFor } from '../lib/http.js';
+import { HttpError, http, leaveStalePage, uploadTimeoutFor } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
 import { notify } from '../lib/notify.js';
@@ -37,6 +37,7 @@ import {
     MAX_POLL_FAILURES,
     MAX_WAIT_MS,
     POLL_INTERVAL_MS,
+    STALE_STATUSES,
     failureOf,
     isEnded,
     requestFailure,
@@ -58,9 +59,6 @@ import {
  * @property {{ fieldId: string, value: any }[]} entries The checked proposals.
  * @property {{ original: File, prepared: File | undefined }[]} photos The photos, as chosen and as sent.
  */
-
-/** The statuses of the HTTP failures after which following the analysis again is pointless (the session or the right is gone). */
-const FINAL_POLL_STATUSES = [401, 403, 419];
 
 /**
  * @returns {Record<string, any>} The state, getters and methods to merge into the component.
@@ -480,7 +478,9 @@ export default function photoEntryDialog() {
 
         /**
          * Says what came of the request that sends the photos: a photo that cannot be read sends the person back to their choice,
-         * an inventory that is gone sends them to the workspace, anything else is told in the dialog.
+         * an inventory that is gone sends them to the workspace, and a refusal is told in the dialog. A failure that the helper
+         * already told with a toast (the network, the server, an ended session) is not told twice, except the throttling, which
+         * it only toasts and the person, who is looking at the dialog, needs the wait of: the photos stay chosen, to be sent again.
          *
          * @param {unknown} error
          * @returns {void}
@@ -492,9 +492,18 @@ export default function photoEntryDialog() {
                 this.goToPhotoStep('choose');
             } else if (error instanceof HttpError) {
                 // A 404 on the address of the analyses is the inventory's own: it is gone, and so is everything on this page.
-                if (!this.leaveIfGone(error)) {
-                    this.failPhotoEntry(requestFailure(error));
+                if (this.leaveIfGone(error)) {
+                    return;
                 }
+
+                if (error.reported && error.status !== 429) {
+                    this.photoBusy = '';
+                    this.goToPhotoStep('choose');
+
+                    return;
+                }
+
+                this.failPhotoEntry(requestFailure(error));
             } else if (/** @type {any} */ (error)?.name !== 'AbortError') {
                 // Not a failure of the request (the helper lets a cancellation through as an AbortError): a bug, which must show.
                 throw error;
@@ -607,9 +616,18 @@ export default function photoEntryDialog() {
                     return;
                 }
 
+                // The session ended or the right is gone: a silent reading shows nothing by itself, so the dialog says it and the page
+                // does what it does for any other call (a reload, the login page), instead of staying up with a retry that cannot work.
+                if (STALE_STATUSES.includes(error.status)) {
+                    leaveStalePage(error);
+                    this.failPhotoEntry({ text: error.message, retry: false, resume: false });
+
+                    return;
+                }
+
                 failures += 1;
 
-                if (FINAL_POLL_STATUSES.includes(error.status) || failures >= MAX_POLL_FAILURES) {
+                if (failures >= MAX_POLL_FAILURES) {
                     this.failPhotoEntry({ text: t('photoEntry.error.lost'), retry: true, resume: true });
                 } else {
                     this.planPhotoPoll();
@@ -675,6 +693,7 @@ export default function photoEntryDialog() {
                 this.photoFailure = { text: '', retry: false, resume: false };
                 this.photoBusy = 'analysing';
                 this.goToPhotoStep('working');
+                this.announcePhoto(t('photoEntry.working.analysing'));
                 this.readPhotoAnalysis();
             } else {
                 this.analysePhotos();
@@ -826,7 +845,18 @@ export default function photoEntryDialog() {
          * @returns {void}
          */
         announcePhoto(text) {
-            this.photoStatus = text;
+            if (this.photoStatus !== text) {
+                this.photoStatus = text;
+
+                return;
+            }
+
+            // The same words again (a retry that fails the way it did): a live region only speaks when its text changes, so it is
+            // emptied first and the words come back once the page has drawn the empty region.
+            this.photoStatus = '';
+            this.$nextTick(() => {
+                this.photoStatus = text;
+            });
         },
     };
 }

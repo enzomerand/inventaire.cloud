@@ -29,6 +29,9 @@ export const NO_FIELDS_CODE = 'no_fields_to_fill';
 /** The code of the `429` that says the instance, not the person, is out of analyses for today. */
 export const INSTANCE_LIMIT_CODE = 'photo_analyses_instance_limit';
 
+/** The statuses of a failure after which doing the same again cannot work: the session ended, the CSRF token is stale or the right is gone. */
+export const STALE_STATUSES = [401, 403, 419];
+
 /** The classes of the badge of each level of confidence. */
 const LEVEL_CLASSES = {
     low: 'badge bg-orange-lt',
@@ -110,6 +113,13 @@ export function reviewRows(proposals, fields) {
             key: field.id,
             checkId: `photo-check-${field.id}`,
             nameId: `photo-name-${field.id}`,
+            valueId: `photo-value-${field.id}`,
+            levelId: `photo-level-${field.id}`,
+            evidenceId: `photo-evidence-${field.id}`,
+            // What the checkbox is called (the field and the value it would put there) and described by (how sure Claude is, and where
+            // it read it): without the value, "Weight" would be all a screen reader says, and the person would tick a number unheard.
+            labelledBy: `photo-name-${field.id} photo-value-${field.id}`,
+            describedBy: `photo-level-${field.id} photo-evidence-${field.id}`,
             name: field.name,
             value: proposal.value,
             evidence: typeof proposal.evidence === 'string' ? proposal.evidence : '',
@@ -175,6 +185,11 @@ export function requestFailure(error) {
         const messages = Object.values(error.errors ?? {}).flat();
 
         return { text: messages[0] ?? error.message, retry: false, resume: false };
+    }
+
+    // The session is gone, or the right to add items: the page is about to reload or leave, and sending the photos again would only fail.
+    if (STALE_STATUSES.includes(error.status)) {
+        return { text: error.message, retry: false, resume: false };
     }
 
     return { text: error.message, retry: true, resume: false };

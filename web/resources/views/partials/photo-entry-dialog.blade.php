@@ -78,16 +78,16 @@
                             <template x-for="cell in photoRows" :key="cell.key">
                                 <li class="list-group-item" data-photo-row>
                                     <div class="d-flex align-items-start gap-3">
-                                        <input type="checkbox" class="form-check-input flex-shrink-0 mt-1" :id="cell.checkId" :checked="isProposalChecked(cell)" :aria-labelledby="cell.nameId" @change="toggleProposal(cell, $event)">
+                                        <input type="checkbox" class="form-check-input flex-shrink-0 mt-1" :id="cell.checkId" :checked="isProposalChecked(cell)" :aria-labelledby="cell.labelledBy" :aria-describedby="cell.describedBy" @change="toggleProposal(cell, $event)">
                                         <label class="app-grow" :for="cell.checkId">
                                             <span class="d-flex flex-wrap align-items-center gap-2 mb-1">
                                                 <span class="fw-medium text-break" :id="cell.nameId" x-text="cell.name"></span>
-                                                <span :class="cell.levelClass" x-text="cell.levelText"></span>
+                                                <span :id="cell.levelId" :class="cell.levelClass" x-text="cell.levelText"></span>
                                             </span>
-                                            <span class="d-block">
+                                            <span class="d-block" :id="cell.valueId">
                                                 @include('partials.field-value')
                                             </span>
-                                            <span class="d-block text-secondary small text-break" x-text="cell.evidence"></span>
+                                            <span class="d-block text-secondary small text-break" :id="cell.evidenceId" x-text="cell.evidence"></span>
                                         </label>
                                     </div>
                                 </li>

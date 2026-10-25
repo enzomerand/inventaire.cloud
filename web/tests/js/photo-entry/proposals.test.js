@@ -61,6 +61,11 @@ describe('the rows of the review', () => {
             key: '01hzx0000000000000000000na',
             checkId: 'photo-check-01hzx0000000000000000000na',
             nameId: 'photo-name-01hzx0000000000000000000na',
+            valueId: 'photo-value-01hzx0000000000000000000na',
+            levelId: 'photo-level-01hzx0000000000000000000na',
+            evidenceId: 'photo-evidence-01hzx0000000000000000000na',
+            labelledBy: 'photo-name-01hzx0000000000000000000na photo-value-01hzx0000000000000000000na',
+            describedBy: 'photo-level-01hzx0000000000000000000na photo-evidence-01hzx0000000000000000000na',
             name: 'Name',
             value: 'Hammer',
             text: 'Hammer',
@@ -107,6 +112,17 @@ describe('the words of a failure', () => {
             resume: false,
         });
     });
+
+    it.each([401, 403, 419])(
+        'offers no retry when the session or the right is gone (%i): the page is about to reload',
+        (status) => {
+            expect(requestFailure({ status, message: 'Please sign in' })).toEqual({
+                text: 'Please sign in',
+                retry: false,
+                resume: false,
+            });
+        },
+    );
 
     it('tells how long to wait when the API says (429)', () => {
         expect(requestFailure({ status: 429, message: 'Slow', retryAfter: 600 }).text).toBe(
