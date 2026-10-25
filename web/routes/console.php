@@ -18,6 +18,10 @@ Schedule::command('inventaire:prune-exports')->hourly()->withoutOverlapping(30);
 // whose worker was lost are given up on.
 Schedule::command('inventaire:prune-imports')->hourly()->withoutOverlapping(30);
 
+// The photo analyses that expired (the proposals nobody read) are deleted with their folders, and the ones whose worker was lost are
+// given up on. The lock of a run that was killed is forgotten after 30 minutes.
+Schedule::command('inventaire:prune-photo-analyses')->hourly()->withoutOverlapping(30);
+
 // The invitations to join a workspace that lapsed are deleted. They are invisible and refused as soon as they lapse: this only clears the table.
 Schedule::command('inventaire:prune-invitations')->hourly()->withoutOverlapping(30);
 

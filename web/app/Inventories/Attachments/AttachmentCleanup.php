@@ -117,6 +117,7 @@ final class AttachmentCleanup
             ...$this->db->table('attachments')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('exports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('imports')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
+            ...$this->db->table('photo_analyses')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
             ...$this->db->table('inventory_versions')->where('inventory_id', $inventory->getKey())->distinct()->pluck('disk')->all(),
         ];
 
@@ -165,6 +166,12 @@ final class AttachmentCleanup
                 ->where('inventories.workspace_id', $workspace->getKey())
                 ->distinct()
                 ->pluck('imports.disk')
+                ->all(),
+            ...$this->db->table('photo_analyses')
+                ->join('inventories', 'inventories.id', '=', 'photo_analyses.inventory_id')
+                ->where('inventories.workspace_id', $workspace->getKey())
+                ->distinct()
+                ->pluck('photo_analyses.disk')
                 ->all(),
             ...$this->db->table('inventory_versions')
                 ->join('inventories', 'inventories.id', '=', 'inventory_versions.inventory_id')

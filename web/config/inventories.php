@@ -295,6 +295,32 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Photo entry
+    |--------------------------------------------------------------------------
+    |
+    | An editor of a workspace can add an item from one to five photos of an object: Claude reads them and proposes the values of the
+    | fields (see App\PhotoEntry), which the editor reviews before the item is created. The photos are re-encoded without any
+    | metadata, sent to Anthropic by a queued job, and deleted as soon as it ends. Every analysis is paid for by the instance, hence the
+    | limits.
+    |
+    | - `photo_analyses_per_day`: analyses one person may ask for in a day, in all their workspaces
+    |   (`INVENTORIES_PHOTO_ANALYSES_PER_DAY`, 20), `429` beyond. Counted for 24 hours from the first analysis of a window; only an
+    |   analysis that is accepted counts.
+    | - `photo_analysis_ttl_hours`: hours the proposals of an analysis are kept, then purged by `inventaire:prune-photo-analyses`
+    |   (`INVENTORIES_PHOTO_ANALYSIS_TTL_HOURS`, 24).
+    | - `max_photos_per_analysis`: photos one analysis may hold (`INVENTORIES_MAX_PHOTOS_PER_ANALYSIS`, 5), `422` beyond.
+    |
+    | The pace of requests (5 a minute) and the key, the model and the effort (`services.anthropic`) are not here.
+    |
+    */
+    'photo_analyses_per_day' => (int) env('INVENTORIES_PHOTO_ANALYSES_PER_DAY', 20),
+
+    'photo_analysis_ttl_hours' => (int) env('INVENTORIES_PHOTO_ANALYSIS_TTL_HOURS', 24),
+
+    'max_photos_per_analysis' => (int) env('INVENTORIES_MAX_PHOTOS_PER_ANALYSIS', 5),
+
+    /*
+    |--------------------------------------------------------------------------
     | API tokens
     |--------------------------------------------------------------------------
     |
