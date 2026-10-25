@@ -51,6 +51,15 @@ vi.mock('../../../resources/js/versions/versions.js', async (importOriginal) => 
     ...(await importOriginal()),
     POLL_INTERVAL_MS: 20,
 }));
+// The same for the analysis of photos, and jsdom redraws no photo: it goes up as it is, as a JPEG.
+vi.mock('../../../resources/js/photo-entry/proposals.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    POLL_INTERVAL_MS: 20,
+}));
+vi.mock('../../../resources/js/photo-entry/photos.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    prepareAnalysisPhoto: vi.fn(async (file) => new File([file], file.name, { type: 'image/jpeg' })),
+}));
 
 const VIEWS = join(import.meta.dirname, '../../../resources/views');
 
@@ -92,6 +101,7 @@ const ROUTE_PATTERNS = {
     'api.v1.inventories.show': '/api/v1/inventories/{inventory}',
     'api.v1.inventories.items.index': '/api/v1/inventories/{inventory}/items',
     'api.v1.inventories.items.show': '/api/v1/inventories/{inventory}/items/{item}',
+    'api.v1.inventories.photo-analyses.store': '/api/v1/inventories/{inventory}/photo-analyses',
     'api.v1.inventories.fields.store': '/api/v1/inventories/{inventory}/fields',
     'api.v1.inventories.fields.order': '/api/v1/inventories/{inventory}/fields/order',
     'api.v1.inventories.fields.update': '/api/v1/inventories/{inventory}/fields/{field}',
@@ -117,6 +127,7 @@ const PAGE = {
         { code: 'USD', name: 'US Dollar' },
     ],
     abilities: {},
+    inventoryPhotoEntry: false,
     sharing: { enabled: true, limit: 20 },
     signaturesAvailable: true,
     maxSigners: 3,
@@ -252,7 +263,7 @@ function render(path, { scannerSlot = '' } = {}) {
         // The way a value is shown is shared by the table and the details of an item; the toolbar, the filters panel and the
         // table of the items are parts of the page of an inventory, and so are the parts of the dialog of an item.
         .replace(
-            /@include\('partials\.(field-value|items-toolbar|items-filters|export-dialog|import-dialog|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row)'\)/g,
+            /@include\('partials\.(field-value|items-toolbar|items-filters|export-dialog|import-dialog|items-table|items-gallery|items-cell-editor|file-icon|item-attachments|item-file-field|item-history|item-upload-row|photo-entry-dialog)'\)/g,
             (_match, name) => render(`partials/${name}.blade.php`),
         )
         // The scanner panel sits twice in the page of an inventory, under the name of the part of the page it serves.
@@ -275,6 +286,12 @@ function render(path, { scannerSlot = '' } = {}) {
     // What only the owners are offered (the link to the sharing page) is in the markup, or not.
     html = html.replace(/@if \(\$abilities\['(\w+)'\]\)([\s\S]*?)@endif/g, (_match, ability, body) =>
         abilitiesOfPage()[ability] ? body : '',
+    );
+
+    // What is offered to the people who may add an item from photos (the button, the dialog, the address of the analyses) is in the
+    // markup, or not.
+    html = html.replace(/@if \(\$photoEntry\)([\s\S]*?)@endif/g, (_match, body) =>
+        PAGE.inventoryPhotoEntry ? body : '',
     );
 
     // The language select lists two languages.
@@ -347,6 +364,8 @@ function render(path, { scannerSlot = '' } = {}) {
             "config('auth.account_deletion.lifetime_minutes')": '10',
             "config('inventories.max_attachment_size', 20 * 1024 * 1024)": String(MAX_ATTACHMENT_SIZE),
             "config('inventories.import_max_size', 10 * 1048576)": String(IMPORT_MAX_SIZE),
+            "$photoEntry ? '1' : '0'": PAGE.inventoryPhotoEntry ? '1' : '0',
+            "config('inventories.max_photos_per_analysis', 5)": '5',
         };
 
         return values[expression] ?? fail(`unsupported echo {{ ${expression} }}`);
@@ -504,6 +523,7 @@ describe('the pages under the real Alpine CSP build', () => {
         useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
+        PAGE.inventoryPhotoEntry = false;
         PAGE.sharing = { enabled: true, limit: 20 };
         PAGE.signaturesAvailable = true;
         PAGE.maxSigners = 3;
@@ -3776,6 +3796,399 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(control('name').classList.contains('is-invalid')).toBe(false);
                 expect(visible(feedback('name'))).toBe(false);
+            });
+        });
+
+        describe('adding an item from photos', () => {
+            const PHOTO_FIELD = {
+                id: 'photos',
+                name: 'Photos',
+                type: 'photo',
+                options: { max_files: 3 },
+                required: false,
+                position: 11,
+                ...queryFacts('photo'),
+            };
+            const WITH_PHOTOS = [...FIELDS, PHOTO_FIELD];
+            const ANALYSES = '/api/v1/inventories/tools/photo-analyses';
+            const photoDialog = () => document.querySelector('#photo-modal-title').closest('.modal');
+            const step = (name) => photoDialog().querySelector(`[data-photo-step="${name}"]`);
+            const shownSteps = () => ['choose', 'working', 'review', 'error'].filter((name) => visible(step(name)));
+            const chooser = () => photoDialog().querySelector('#photo-entry-pick');
+            const reviewRows = () => [...photoDialog().querySelectorAll('[data-photo-row]')];
+            const later = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+            const jpeg = (name) => new File(['x'.repeat(8)], name, { type: 'image/jpeg' });
+
+            /** An analysis, as the API describes it. */
+            const analysis = (status, extra = {}) => ({
+                data: { id: 'a1', status, error: null, proposals: [], created_at: '2026-10-25T10:00:00Z', ...extra },
+            });
+
+            /** Opens the page; the readings of the analysis answer from `readings` (the last one stays the answer). */
+            async function openWith({ fields = WITH_PHOTOS, readings = [analysis('pending')] } = {}) {
+                http.get.mockImplementation(async (url) => {
+                    if (url === '/api/v1/inventories/tools') {
+                        return { data: { id: 'tools', name: 'Tools', items_count: 1, fields } };
+                    }
+
+                    if (url.startsWith(ANALYSES)) {
+                        return readings.length > 1 ? readings.shift() : readings[0];
+                    }
+
+                    return itemsPage([HAMMER]);
+                });
+                await mount('app/inventory.blade.php');
+            }
+
+            /** Picks photos in the file chooser of the dialog. */
+            async function pick(...files) {
+                Object.defineProperty(chooser(), 'files', { configurable: true, value: files });
+                chooser().dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+            }
+
+            /** Opens the dialog, picks a photo, presses "Analyse", and waits for the answers to come. */
+            async function analyse(...files) {
+                await press('Add from photos');
+                await pick(...(files.length > 0 ? files : [jpeg('front.jpg')]));
+                await press('Analyse');
+                await later(120);
+                await flush();
+            }
+
+            beforeEach(() => {
+                PAGE.inventoryPhotoEntry = true;
+                URL.createObjectURL = vi.fn((file) => `blob:${file.name}`);
+                URL.revokeObjectURL = vi.fn();
+            });
+
+            afterEach(() => {
+                delete URL.createObjectURL;
+                delete URL.revokeObjectURL;
+            });
+
+            describe('who is offered it', () => {
+                it('is not in the page when the instance, the workspace or the role does not allow it', async () => {
+                    PAGE.inventoryPhotoEntry = false;
+                    await openWith();
+
+                    expect(buttons('Add from photos')).toEqual([]);
+                    expect(document.querySelector('#photo-modal-title')).toBeNull();
+                    expect(document.querySelector('[x-data="inventoryItems"]').dataset.photoEntry).toBe('0');
+                    expect(document.querySelector('[x-data="inventoryItems"]').dataset.photoEntryUrl).toBeUndefined();
+                });
+
+                it('is a button next to "Add item", with the address of the analyses and how many photos they take', async () => {
+                    await openWith();
+
+                    const root = document.querySelector('[x-data="inventoryItems"]');
+
+                    expect(root.dataset.photoEntry).toBe('1');
+                    expect(root.dataset.photoEntryUrl).toBe(ANALYSES);
+                    expect(root.dataset.photoEntryMax).toBe('5');
+                    expect(buttons('Add from photos')).toHaveLength(1);
+                    expect(buttons('Add from photos')[0].parentElement).toBe(buttons('Add item')[0].parentElement);
+                });
+
+                it('is not offered to a person who may not add items, whatever the markup says', async () => {
+                    PAGE.abilities = { edit_items: false };
+                    await openWith();
+
+                    expect(buttons('Add from photos')).toEqual([]);
+                });
+
+                it('is not offered in an inventory that has no field to fill in', async () => {
+                    await openWith({ fields: [PHOTO_FIELD] });
+
+                    expect(buttons('Add from photos')).toEqual([]);
+                });
+
+                it('is also offered where an inventory with no item starts', async () => {
+                    http.get.mockImplementation(async (url) =>
+                        url === '/api/v1/inventories/tools'
+                            ? { data: { id: 'tools', name: 'Tools', items_count: 0, fields: WITH_PHOTOS } }
+                            : itemsPage([], { total: 0, from: 0, to: 0 }),
+                    );
+                    await mount('app/inventory.blade.php');
+
+                    expect(buttons('Add from photos')).toHaveLength(2);
+                });
+            });
+
+            describe('the dialog', () => {
+                beforeEach(async () => {
+                    await openWith();
+                });
+
+                it('opens on the choice of the photos, with the note on where they go and no step but that one', async () => {
+                    await press('Add from photos');
+
+                    expect(showModal).toHaveBeenCalledWith(photoDialog(), { focus: ['#photo-entry-pick'] });
+                    expect(shownSteps()).toEqual(['choose']);
+                    expect(step('choose').textContent).toContain(
+                        'The photos are sent to Anthropic (Claude) to be read, then deleted.',
+                    );
+                    expect(step('choose').textContent).toContain('Check every value before the item is created.');
+                });
+
+                it('lets the phone offer the camera and the gallery: images, several, and no capture', async () => {
+                    await press('Add from photos');
+
+                    expect(chooser().type).toBe('file');
+                    expect(chooser().accept).toBe('image/*');
+                    expect(chooser().multiple).toBe(true);
+                    expect(chooser().hasAttribute('capture')).toBe(false);
+                    expect(chooser().closest('form')).toBeNull();
+                });
+
+                it('shows the photos chosen as thumbnails with a button that takes each back', async () => {
+                    await press('Add from photos');
+                    await pick(jpeg('front.jpg'), jpeg('label.jpg'));
+
+                    const thumbnails = [...step('choose').querySelectorAll('img')];
+
+                    expect(thumbnails.map((image) => [image.getAttribute('src'), image.alt])).toEqual([
+                        ['blob:front.jpg', 'front.jpg'],
+                        ['blob:label.jpg', 'label.jpg'],
+                    ]);
+                    expect(step('choose').textContent).toContain('2 of 5 photos');
+                    expect(buttons('Analyse')).toHaveLength(1);
+
+                    await press('Remove the photo front.jpg');
+
+                    expect([...step('choose').querySelectorAll('img')].map((image) => image.alt)).toEqual([
+                        'label.jpg',
+                    ]);
+                    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:front.jpg');
+                });
+
+                it('takes five photos at most and says so', async () => {
+                    await press('Add from photos');
+                    await pick(...['1', '2', '3', '4', '5', '6'].map((name) => jpeg(`${name}.jpg`)));
+
+                    expect(step('choose').querySelectorAll('img')).toHaveLength(5);
+                    expect(step('choose').querySelector('#photo-entry-message').textContent).toBe(
+                        'An analysis takes 5 photos at most: the others were left out.',
+                    );
+                    expect(chooser().disabled).toBe(true);
+                });
+
+                it('cannot analyse before a photo is chosen', async () => {
+                    await press('Add from photos');
+
+                    expect(buttons('Analyse')[0].disabled).toBe(true);
+                });
+            });
+
+            describe('the analysis', () => {
+                it('shows a spinner and a way to cancel while it waits, then the review', async () => {
+                    http.post.mockResolvedValue(analysis('pending'));
+                    await openWith({
+                        readings: [
+                            analysis('running'),
+                            analysis('completed', {
+                                proposals: [
+                                    { field: 'name', value: 'Saw', confidence: 'high', evidence: 'on the blade' },
+                                    { field: 'state', value: 'bbbbbbbb', confidence: 'low', evidence: 'worn' },
+                                ],
+                            }),
+                        ],
+                    });
+                    await press('Add from photos');
+                    await pick(jpeg('front.jpg'));
+                    await press('Analyse');
+
+                    expect(http.post).toHaveBeenCalledTimes(1);
+                    expect(http.post.mock.calls[0][0]).toBe(ANALYSES);
+                    expect(http.post.mock.calls[0][1].getAll('photos[]').map((file) => file.name)).toEqual([
+                        'front.jpg',
+                    ]);
+                    expect(shownSteps()).toEqual(['working']);
+                    expect(step('working').querySelector('.spinner-border')).not.toBeNull();
+                    expect(step('working').textContent).toContain('Claude is reading the photos…');
+                    expect(buttons('Cancel', photoDialog())).toHaveLength(1);
+
+                    await later(120);
+                    await flush();
+
+                    expect(shownSteps()).toEqual(['review']);
+                    expect(reviewRows()).toHaveLength(2);
+                });
+
+                it('gives up and goes back to the photos when the person cancels', async () => {
+                    http.post.mockResolvedValue(analysis('pending'));
+                    await openWith();
+                    await press('Add from photos');
+                    await pick(jpeg('front.jpg'));
+                    await press('Analyse');
+                    await press('Cancel', photoDialog());
+
+                    expect(shownSteps()).toEqual(['choose']);
+                    expect(step('choose').querySelectorAll('img')).toHaveLength(1);
+                });
+
+                it('names what went wrong, and offers to try again only when that can help', async () => {
+                    http.post.mockResolvedValue(analysis('pending'));
+                    await openWith({ readings: [analysis('failed', { error: 'unavailable' })] });
+                    await analyse();
+
+                    expect(shownSteps()).toEqual(['error']);
+                    expect(step('error').querySelector('[role="alert"]').textContent.trim()).toBe(
+                        'The analysis service is unavailable at the moment. Please try again in a moment.',
+                    );
+                    expect(buttons('Try again')).toHaveLength(1);
+                    expect(buttons('Back to the photos')).toHaveLength(1);
+
+                    await press('Back to the photos');
+
+                    expect(shownSteps()).toEqual(['choose']);
+                });
+
+                it('does not offer to try again when it cannot help', async () => {
+                    http.post.mockResolvedValue(analysis('pending'));
+                    await openWith({ readings: [analysis('failed', { error: 'refused' })] });
+                    await analyse();
+
+                    expect(shownSteps()).toEqual(['error']);
+                    expect(buttons('Try again')).toEqual([]);
+                    expect(buttons('Back to the photos')).toHaveLength(1);
+                });
+
+                it('says so when the request is refused', async () => {
+                    http.post.mockRejectedValue(new HttpError(409, 'No.', { code: 'photo_entry_disabled' }));
+                    await openWith();
+                    await analyse();
+
+                    expect(shownSteps()).toEqual(['error']);
+                    expect(step('error').textContent).toContain('Adding items from photos is turned off.');
+                    expect(buttons('Try again')).toEqual([]);
+                });
+            });
+
+            describe('the review', () => {
+                const PROPOSALS = [
+                    { field: 'name', value: 'Saw', confidence: 'high', evidence: 'printed on the blade' },
+                    { field: 'state', value: 'bbbbbbbb', confidence: 'medium', evidence: 'worn handle' },
+                    { field: 'qty', value: '2.50', confidence: 'low', evidence: '<b>2.5 kg</b> on a sticker' },
+                ];
+
+                beforeEach(async () => {
+                    http.post.mockResolvedValue(analysis('pending'));
+                    await openWith({ readings: [analysis('completed', { proposals: PROPOSALS })] });
+                });
+
+                it('has a row for each proposal: the field, the value as the table shows it, the confidence and the evidence', async () => {
+                    await analyse();
+
+                    expect(shownSteps()).toEqual(['review']);
+                    expect(
+                        reviewRows().map((row) => [
+                            row.querySelector('label .fw-medium').textContent,
+                            row.querySelector('label .badge:not(.bg-secondary-lt)').textContent,
+                            row.querySelector('label .text-secondary').textContent,
+                        ]),
+                    ).toEqual([
+                        ['Name', 'High confidence', 'printed on the blade'],
+                        ['State', 'Medium confidence', 'worn handle'],
+                        ['Weight', 'Low confidence', '<b>2.5 kg</b> on a sticker'],
+                    ]);
+                    expect(reviewRows()[0].querySelector('label').textContent).toContain('Saw');
+                    expect(reviewRows()[1].querySelector('label').textContent).toContain('Used');
+                    expect(reviewRows()[2].querySelector('label').textContent).toContain('2.50 kg');
+                    // What Claude wrote is text, never markup.
+                    expect(photoDialog().querySelector('b')).toBeNull();
+                });
+
+                it('starts with every box unchecked: nothing is accepted for the person', async () => {
+                    await analyse();
+
+                    const boxes = reviewRows().map((row) => row.querySelector('input[type="checkbox"]'));
+
+                    expect(boxes).toHaveLength(3);
+                    expect(boxes.map((box) => box.checked)).toEqual([false, false, false]);
+                    expect(step('review').textContent).toContain('0 of 3 values checked');
+                });
+
+                it('ties each box to the name of its field', async () => {
+                    await analyse();
+
+                    for (const row of reviewRows()) {
+                        const box = row.querySelector('input[type="checkbox"]');
+
+                        expect(document.getElementById(box.getAttribute('aria-labelledby')).textContent).toBe(
+                            row.querySelector('label .fw-medium').textContent,
+                        );
+                        expect(row.querySelector('label').getAttribute('for')).toBe(box.id);
+                    }
+                });
+
+                it('counts the boxes the person checks', async () => {
+                    await analyse();
+                    await tick(reviewRows()[1].querySelector('input[type="checkbox"]'), true);
+
+                    expect(step('review').textContent).toContain('1 of 3 values checked');
+                    expect(reviewRows()[1].querySelector('input[type="checkbox"]').checked).toBe(true);
+                });
+
+                it('opens the form of the new item with the checked values and the photos, once the dialog is hidden', async () => {
+                    await analyse(jpeg('front.jpg'), jpeg('label.jpg'));
+                    await tick(reviewRows()[0].querySelector('input[type="checkbox"]'), true);
+                    await tick(reviewRows()[1].querySelector('input[type="checkbox"]'), true);
+                    await press('Continue');
+
+                    expect(hideModal).toHaveBeenCalledWith(photoDialog());
+                    expect(showModal).not.toHaveBeenCalledWith(itemDialog());
+
+                    // Bootstrap tells the component when the dialog has been closed, whichever way it was.
+                    onModalHidden.mock.calls.find(([element]) => element === photoDialog())[1]();
+                    await flush();
+
+                    expect(showModal).toHaveBeenCalledWith(itemDialog());
+                    expect(itemDialog().querySelector('#item-modal-title').textContent).toBe('New item');
+                    expect(control('name').value).toBe('Saw');
+                    expect(control('state').value).toBe('bbbbbbbb');
+                    // The row that was left unchecked is not in the form.
+                    expect(control('qty').value).toBe('');
+
+                    const files = itemDialog().querySelector('#item-field-photos').closest('div[role="group"]');
+
+                    expect(files.textContent).toContain('front.jpg');
+                    expect(files.textContent).toContain('label.jpg');
+                    expect(files.textContent).toContain('2 of 3');
+                });
+
+                it('opens the form with nothing filled in when nothing was checked', async () => {
+                    await analyse();
+                    await press('Continue');
+                    onModalHidden.mock.calls.find(([element]) => element === photoDialog())[1]();
+                    await flush();
+
+                    expect(showModal).toHaveBeenCalledWith(itemDialog());
+                    expect(control('name').value).toBe('');
+                    expect(control('state').value).toBe('');
+                });
+
+                it('goes back to the photos to try others', async () => {
+                    await analyse();
+                    await press('Other photos');
+
+                    expect(shownSteps()).toEqual(['choose']);
+                    expect(step('choose').querySelectorAll('img')).toHaveLength(1);
+                });
+            });
+
+            describe('when nothing was found', () => {
+                it('says so, and still offers to go on', async () => {
+                    http.post.mockResolvedValue(analysis('pending'));
+                    await openWith({ readings: [analysis('completed', { proposals: [] })] });
+                    await analyse();
+
+                    expect(shownSteps()).toEqual(['review']);
+                    expect(step('review').textContent).toContain('No value found on these photos');
+                    expect(reviewRows()).toEqual([]);
+                    expect(buttons('Continue')).toHaveLength(1);
+                    expect(buttons('Other photos')).toHaveLength(1);
+                });
             });
         });
 

@@ -23,6 +23,12 @@
     (partials/item-attachments) and its history (partials/item-history). The photo and file fields of the form are
     partials/item-file-field. data-max-attachment-size is the largest file the server takes, in bytes.
 
+    The "Add from photos" button of the items card (and of the empty state) opens partials/photo-entry-dialog
+    (resources/js/photo-entry/dialog.js): photos of an object are analysed, the person reviews the values the analysis proposes, and
+    the form of a new item opens with the ones they accepted. $photoEntry (the controller: the instance, the workspace and the role
+    allow it) decides whether the button, the dialog, data-photo-entry-url (the endpoint of the analyses) and data-photo-entry-max
+    (how many photos an analysis takes) are in the markup at all; data-photo-entry says it with 1 or 0.
+
     The barcode fields of the form have a scan button (resources/js/scanner/inventory-scan.js): the picture of the camera
     (partials/barcode-scanner, slot "field") takes the place of the form while it scans. The scan button of the toolbar opens
     a dialog of its own with another panel (slot "search"); a code that matches no item can be added from the empty state.
@@ -159,6 +165,11 @@
         data-can-manage-fields="{{ $abilities['manage_fields'] ? '1' : '0' }}"
         data-max-attachment-size="{{ config('inventories.max_attachment_size', 20 * 1024 * 1024) }}"
         data-import-max-size="{{ config('inventories.import_max_size', 10 * 1048576) }}"
+        data-photo-entry="{{ $photoEntry ? '1' : '0' }}"
+        @if ($photoEntry)
+        data-photo-entry-url="{{ route('api.v1.inventories.photo-analyses.store', ['inventory' => $inventory->ulid], absolute: false) }}"
+        data-photo-entry-max="{{ config('inventories.max_photos_per_analysis', 5) }}"
+        @endif
         @barcode-scanned="onBarcodeScanned"
         @barcode-scan-cancelled="onBarcodeCancelled"
     >
@@ -166,10 +177,18 @@
             <div class="card-header">
                 <h2 class="card-title" x-ref="itemsTitle" tabindex="-1">{{ __('Items') }}</h2>
                 <div class="card-actions">
-                    <button type="button" class="btn btn-primary" x-show="canAdd" @click="startCreate">
-                        <x-tabler-plus aria-hidden="true" />
-                        {{ __('Add item') }}
-                    </button>
+                    <div class="btn-list">
+                        @if ($photoEntry)
+                            <button type="button" class="btn" x-show="canPhotoEntry" @click="openPhotoEntry">
+                                <x-tabler-camera aria-hidden="true" />
+                                {{ __('Add from photos') }}
+                            </button>
+                        @endif
+                        <button type="button" class="btn btn-primary" x-show="canAdd" @click="startCreate">
+                            <x-tabler-plus aria-hidden="true" />
+                            {{ __('Add item') }}
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -232,6 +251,12 @@
                                 <x-tabler-plus aria-hidden="true" />
                                 {{ __('Add item') }}
                             </button>
+                            @if ($photoEntry)
+                                <button type="button" class="btn" x-show="canPhotoEntry" @click="openPhotoEntry">
+                                    <x-tabler-camera aria-hidden="true" />
+                                    {{ __('Add from photos') }}
+                                </button>
+                            @endif
                             <button type="button" class="btn" @click="openImport">
                                 <x-tabler-file-import aria-hidden="true" />
                                 {{ __('Import a file') }}
@@ -285,6 +310,10 @@
         @include('partials.export-dialog')
 
         @include('partials.import-dialog')
+
+        @if ($photoEntry)
+            @include('partials.photo-entry-dialog')
+        @endif
 
         {{-- The dialog of the scan button of the search box: the panel starts when it opens (resources/js/scanner/inventory-scan.js). --}}
         <div class="modal modal-blur fade" tabindex="-1" x-ref="scanModal" role="dialog" aria-labelledby="scan-modal-title" aria-hidden="true">
