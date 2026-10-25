@@ -29,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property string $ulid
  * @property string $name
  * @property int $storage_used
+ * @property bool $photo_entry_enabled Whether the owner let the editors add items from photos analysed by Claude (App\PhotoEntry).
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -60,7 +61,7 @@ final class Workspace extends Model
      *
      * @var array<string, mixed>
      */
-    protected $attributes = ['storage_used' => 0];
+    protected $attributes = ['storage_used' => 0, 'photo_entry_enabled' => false];
 
     /**
      * Get the attributes that should be cast.
@@ -71,6 +72,7 @@ final class Workspace extends Model
     {
         return [
             'storage_used' => 'integer',
+            'photo_entry_enabled' => 'boolean',
         ];
     }
 

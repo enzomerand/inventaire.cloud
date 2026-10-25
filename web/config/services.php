@@ -45,6 +45,17 @@ return [
         'webhook_secret' => env('DOCUMENSO_WEBHOOK_SECRET'),
     ],
 
+    // The photo entry (App\PhotoEntry): Claude reads the photos of an object and proposes the values of its fields. The key stays in
+    // the environment, never in the database nor in a log; without it the feature is unavailable whatever the admin switch says.
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_MODEL', 'claude-sonnet-5-5'),
+        'effort' => env('ANTHROPIC_EFFORT', 'low'),
+        'timeout' => (int) env('ANTHROPIC_TIMEOUT', 90),
+        // Development aid: answers with made-up proposals instead of calling Claude. Honoured only when APP_ENV is local.
+        'fake' => (bool) env('ANTHROPIC_FAKE', false),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
