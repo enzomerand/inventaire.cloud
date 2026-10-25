@@ -15,6 +15,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 
@@ -451,9 +452,36 @@ describe('a failure', function (): void {
     })->with([
         'a bad key' => [401, 'authentication_error'],
         'a key without the right' => [403, 'permission_error'],
-        'a bad request' => [400, 'invalid_request_error'],
         'an unknown model' => [404, 'not_found_error'],
     ]);
+
+    it('is "failed", and reported, when the API rejects the request (400): a rejected image is no sign of a bad setup', function (): void {
+        $reported = [];
+        $this->app->make(ExceptionHandler::class)->reportable(function (RuntimeException $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+        $history = [];
+
+        expect(claudeFailure([claudeError(400, 'invalid_request_error', 'messages.0.content.1.image: image exceeds 5 MB')], $history))->toBe(PhotoAnalysisError::Failed->value)
+            ->and($history)->toHaveCount(1)
+            ->and($reported)->toHaveCount(1)
+            ->and($reported[0])->toStartWith('The API rejected a photo analysis request (400): ')->toContain('image exceeds 5 MB');
+    });
+
+    it('does not report what is not a fault of the application: a key the API refuses', function (): void {
+        $reported = [];
+        $this->app->make(ExceptionHandler::class)->reportable(function (RuntimeException $exception) use (&$reported): bool {
+            $reported[] = $exception->getMessage();
+
+            return false;
+        });
+
+        claudeFailure([claudeError(401, 'authentication_error')]);
+
+        expect($reported)->toBe([]);
+    });
 
     it('is "failed" for anything else', function (): void {
         expect(claudeFailure([claudeError(422, 'invalid_request_error')]))->toBe(PhotoAnalysisError::Failed->value);

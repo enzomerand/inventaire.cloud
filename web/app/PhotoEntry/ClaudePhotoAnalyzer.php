@@ -26,6 +26,7 @@ use JsonException;
 use Locale;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -51,8 +52,10 @@ use Throwable;
  *
  * How a failure is told ({@see PhotoAnalysisError}): the model declined (`stop_reason: refusal`) is `refused`; the answer ran out of room
  * (`max_tokens`) is `truncated`; text that is not the JSON asked for is `invalid_answer`; the network, a timeout, a rate limit (429) or a
- * server error (5xx, overloaded included) is `unavailable`, worth trying again; a request the API refuses (400, 401, 403, 404: a bad key,
- * an unknown model, an account without credit) is `misconfigured`, for the administrator; anything else is `failed`.
+ * server error (5xx, overloaded included) is `unavailable`, worth trying again; a key, a model or an account the API refuses (401, 403,
+ * 404: a bad key, an unknown model, an account without credit) is `misconfigured`, for the administrator; anything else is `failed`,
+ * a 400 included: it is not a sign of a bad setup (the API may reject an image, or a request that is too large), so the person is told
+ * the general failure, and the administrator is told through the report of the application.
  */
 final class ClaudePhotoAnalyzer implements PhotoAnalyzer
 {
@@ -360,9 +363,14 @@ PROMPT;
 
         $error = match (true) {
             $exception instanceof RateLimitException, $exception instanceof InternalServerException, $exception instanceof APIConnectionException => PhotoAnalysisError::Unavailable,
-            $exception instanceof BadRequestException, $exception instanceof AuthenticationException, $exception instanceof PermissionDeniedException, $exception instanceof NotFoundException => PhotoAnalysisError::Misconfigured,
+            $exception instanceof AuthenticationException, $exception instanceof PermissionDeniedException, $exception instanceof NotFoundException => PhotoAnalysisError::Misconfigured,
             default => PhotoAnalysisError::Failed,
         };
+
+        if ($exception instanceof BadRequestException) {
+            // Reported with what the API said, not with the exception of the SDK, which carries the request (the photos, the key).
+            report(new RuntimeException('The API rejected a photo analysis request (400): '.mb_substr($exception->getMessage(), 0, 500)));
+        }
 
         Log::warning('The photo analysis request failed.', [
             'error' => $error->value,
