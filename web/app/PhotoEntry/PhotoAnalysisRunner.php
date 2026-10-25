@@ -31,7 +31,8 @@ final class PhotoAnalysisRunner
 {
     /**
      * Gets the analyzer, the code that judges what it read, the one that tells which fields to fill, the cleanup that deletes the photos,
-     * the storage they are read from and the code that tells whether the photo entry is still on.
+     * the storage they are read from, the code that tells whether the photo entry is still on and the daily count the analyses are
+     * counted in.
      */
     public function __construct(
         private readonly PhotoAnalyzer $analyzer,
@@ -40,13 +41,14 @@ final class PhotoAnalysisRunner
         private readonly PhotoAnalysisCleanup $cleanup,
         private readonly AttachmentStorage $storage,
         private readonly PhotoEntry $photoEntry,
+        private readonly PhotoAnalysisQuota $quota,
     ) {}
 
     /**
      * Does the analysis. One that is not waiting any more (it was given up on, deleted, or another worker took it) is left alone. One
      * whose workspace may not use the photo entry any more (the owner withdrew consent, the administrator turned it off or removed the key
      * while it waited in the queue) is failed `disabled` before anything is read or sent: consent is judged when the photos leave, not only
-     * when they came.
+     * when they came, and since nothing was sent to Anthropic the places counted for it go back to the person and the instance.
      */
     public function run(PhotoAnalysis $analysis): void
     {
@@ -102,17 +104,25 @@ final class PhotoAnalysisRunner
             'photos' => $analysis->photo_count,
             'proposals' => $count,
         ]);
+
+        // Consent withdrawn while the photos waited: nothing left the instance, so the analysis costs nothing. Only the worker that ended the
+        // analysis gives the places back, once.
+        if ($ended && $error === PhotoAnalysisError::Disabled) {
+            $this->quota->release($analysis->user_id);
+        }
     }
 
     /**
      * Marks an analysis that is not over `failed` with the reason, and deletes its photos. One that is over already (completed, or
      * failed before) is left as it is: the update wants the analysis to be waiting or running, so a failure reported late never undoes
      * the proposals of an analysis that did end.
+     *
+     * @return bool Whether it was ended here: false when it was over already.
      */
-    public function fail(PhotoAnalysis $analysis, PhotoAnalysisError $error): void
+    public function fail(PhotoAnalysis $analysis, PhotoAnalysisError $error): bool
     {
         try {
-            $this->markFailed($analysis, $error, [PhotoAnalysisStatus::Pending, PhotoAnalysisStatus::Running]);
+            return $this->markFailed($analysis, $error, [PhotoAnalysisStatus::Pending, PhotoAnalysisStatus::Running]);
         } finally {
             $this->deletePhotos($analysis);
         }

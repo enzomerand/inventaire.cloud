@@ -26,7 +26,7 @@ use Throwable;
  * metadata ({@see PhotoImages}, `422`), the analysis is counted ({@see PhotoAnalysisQuota}), the row is created `pending`, the photos are
  * written to the disk, under the folder of the inventory, and the job {@see AnalyzePhotos} queued. The row comes first so that no folder
  * is ever left that nothing refers to; if the photos cannot be written or the job queued, the row ends `failed`, the photos are deleted,
- * the cause is reported and the API answers `503` ({@see AnalysisNotStartedException}). The job reads the photos back, asks Claude,
+ * the cause is reported, the places counted for it go back and the API answers `503` ({@see AnalysisNotStartedException}). The job reads the photos back, asks Claude,
  * stores the proposals and deletes the photos; the row is kept `inventories.photo_analysis_ttl_hours`.
  *
  * The photos are not counted in the storage of the workspace: they are gone minutes after they came.
@@ -111,8 +111,13 @@ final class PhotoAnalyses
             AnalyzePhotos::dispatch($analysis)->afterCommit();
         } catch (Throwable $failure) {
             // Nothing will ever run this analysis: it ends failed, the photos that were written go now, and the administrator is told why.
+            // Nothing was sent to Anthropic, so the places reserved for the person and the instance go back, unless the analysis did run to
+            // its end meanwhile (a synchronous queue), in which case it was paid for.
             report($failure);
-            $this->runner->fail($analysis, PhotoAnalysisError::Failed);
+
+            if ($this->runner->fail($analysis, PhotoAnalysisError::Failed)) {
+                $this->quota->release($user->getKey());
+            }
 
             throw new AnalysisNotStartedException;
         }

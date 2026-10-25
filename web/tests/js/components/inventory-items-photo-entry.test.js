@@ -1083,6 +1083,34 @@ describe('adding an item from photos', () => {
             expect(component.photoStatus).toBe('Something else');
         });
 
+        it('lets the last thing said win over a repeat that was still waiting for the region to be drawn', async () => {
+            await open();
+            component.photoStatus = 'Claude is reading the photos…';
+
+            component.announcePhoto('Claude is reading the photos…');
+            component.announcePhoto('Something else');
+            await settle();
+
+            expect(component.photoStatus).toBe('Something else');
+
+            component.announcePhoto('Something else');
+            component.announcePhoto('Something else');
+            await settle();
+
+            expect(component.photoStatus).toBe('Something else');
+        });
+
+        it('does not say again after the dialog was reset what a repeat was waiting to say', async () => {
+            await open();
+            component.photoStatus = 'Claude is reading the photos…';
+
+            component.announcePhoto('Claude is reading the photos…');
+            component.resetPhotoEntry();
+            await settle();
+
+            expect(component.photoStatus).toBe('');
+        });
+
         it('stops following an analysis that takes more than a few minutes', async () => {
             await open();
             http.post.mockResolvedValue(analysis('pending'));

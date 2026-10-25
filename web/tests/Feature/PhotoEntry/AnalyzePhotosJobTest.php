@@ -9,6 +9,7 @@ use App\Models\PhotoAnalysis;
 use App\Models\Workspace;
 use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisException;
+use App\PhotoEntry\PhotoAnalysisQuota;
 use App\PhotoEntry\PhotoAnalysisRunner;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\PhotoAnalyzer;
@@ -19,6 +20,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 
 require_once __DIR__.'/../../Support/photo-entry.php';
@@ -200,6 +202,19 @@ describe('an analysis that fails', function (): void {
             ->and(storedFiles())->toBe([]);
     });
 
+    it('keeps the places it counted when it fails after Claude was asked: the request was paid for', function (): void {
+        config(['inventories.photo_analyses_per_day_instance' => 5]);
+        $case = analysisCase();
+        $editor = $case['team']['editor'];
+        app(PhotoAnalysisQuota::class)->reserve($editor);
+        photoAnalyzerSaying(new PhotoAnalysisException(PhotoAnalysisError::Failed));
+
+        analysisRun($case['analysis']);
+
+        expect(RateLimiter::attempts('photo-analyses-per-day:'.$editor->id))->toBe(1)
+            ->and(RateLimiter::attempts('photo-analyses-per-day:instance'))->toBe(1);
+    });
+
     it('is failed when a photo is not on the disk any more', function (): void {
         $case = analysisCase();
         $calls = [];
@@ -243,8 +258,11 @@ describe('an analysis that fails', function (): void {
 });
 
 describe('an analysis whose workspace may not use the photo entry any more', function (): void {
-    it('is failed "disabled" without any call, and the photos are deleted, whoever switched it off', function (Closure $switchOff): void {
+    it('is failed "disabled" without any call, the photos are deleted and the places it counted go back, whoever switched it off', function (Closure $switchOff): void {
+        config(['inventories.photo_analyses_per_day_instance' => 5]);
         $case = analysisCase();
+        $editor = $case['team']['editor'];
+        app(PhotoAnalysisQuota::class)->reserve($editor);
         $calls = [];
         photoAnalyzerSaying(analysisReading([]), $calls);
         $switchOff($case['team']['workspace']);
@@ -257,7 +275,9 @@ describe('an analysis whose workspace may not use the photo entry any more', fun
             ->and($analysis->proposals)->toBeNull()
             ->and($analysis->model)->toBeNull()
             ->and($calls)->toBe([])
-            ->and(storedFiles())->toBe([]);
+            ->and(storedFiles())->toBe([])
+            ->and(RateLimiter::attempts('photo-analyses-per-day:'.$editor->id))->toBe(0)
+            ->and(RateLimiter::attempts('photo-analyses-per-day:instance'))->toBe(0);
     })->with([
         'the owner withdrew consent' => [fn (Workspace $workspace) => $workspace->forceFill(['photo_entry_enabled' => false])->save()],
         'the administrator switched it off' => [fn () => app(InstanceSettings::class)->update([InstanceSettings::PHOTO_ENTRY_ENABLED => false])],

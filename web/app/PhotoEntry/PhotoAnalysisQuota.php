@@ -23,8 +23,10 @@ use Illuminate\Support\Facades\RateLimiter;
  * person who is out of analyses is told before their photos are worked on), then the photos are prepared, and only then is the place
  * reserved ({@see self::reserve()}): a photo that cannot be read, a workspace that has the feature off, an inventory with no field to
  * fill, cost nothing. The reservation is one atomic step of the limiter for each count, so requests made at the same moment cannot all
- * pass a check made before any of them was counted; one that is accepted and then fails (the disk, say) keeps its place. A person who
- * is refused because the instance is out of analyses gets their own place back: it was not used.
+ * pass a check made before any of them was counted. An analysis that is accepted and then fails after Claude was asked keeps its place
+ * (the request was paid for); one that never reached Anthropic (the photos could not be written, the job not queued, the consent
+ * withdrawn while it waited) gives its places back ({@see self::release()}), and so does a person who is refused because the instance
+ * is out of analyses: it was not used.
  *
  * Beyond the limit of the person the API answers `429` with `Retry-After`, as it does for every pace it holds: this throws the exception
  * the limiter of the routes throws, which the application renders the same way (`code`: `too_many_requests`). Beyond the cap of the
@@ -48,7 +50,7 @@ final class PhotoAnalysisQuota
      */
     public function ensureAvailable(User $user): void
     {
-        $key = $this->key($user);
+        $key = $this->key($user->getKey());
 
         if (RateLimiter::tooManyAttempts($key, $this->limit())) {
             throw $this->refusal($key);
@@ -68,7 +70,7 @@ final class PhotoAnalysisQuota
      */
     public function reserve(User $user): void
     {
-        $key = $this->key($user);
+        $key = $this->key($user->getKey());
 
         if (RateLimiter::hit($key, self::WINDOW) > $this->limit()) {
             throw $this->refusal($key);
@@ -79,6 +81,31 @@ final class PhotoAnalysisQuota
             RateLimiter::decrement($key, self::WINDOW);
 
             throw new InstanceQuotaReachedException($this->instanceLimit(), RateLimiter::availableIn(self::INSTANCE_KEY));
+        }
+    }
+
+    /**
+     * Gives back the places an analysis reserved for the person and for the instance, because it never reached Anthropic. Nothing goes
+     * below zero: a window that ended since the reservation has nothing left to give back.
+     *
+     * @param  int  $userId  The person the analysis was reserved for.
+     */
+    public function release(int $userId): void
+    {
+        $this->giveBack($this->key($userId));
+
+        if ($this->instanceLimit() > 0) {
+            $this->giveBack(self::INSTANCE_KEY);
+        }
+    }
+
+    /**
+     * Takes one off a count, if it has one.
+     */
+    private function giveBack(string $key): void
+    {
+        if (RateLimiter::attempts($key) > 0) {
+            RateLimiter::decrement($key, self::WINDOW);
         }
     }
 
@@ -109,8 +136,8 @@ final class PhotoAnalysisQuota
     /**
      * The key of the count of a person.
      */
-    private function key(User $user): string
+    private function key(int|string $userId): string
     {
-        return 'photo-analyses-per-day:'.$user->getKey();
+        return 'photo-analyses-per-day:'.$userId;
     }
 }

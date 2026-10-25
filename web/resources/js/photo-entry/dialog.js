@@ -72,6 +72,9 @@ export default function photoEntryDialog() {
     let working = null;
     // Ticket of the work the dialog does: what was started under an older one (a cancelled analysis, a closed dialog) is dropped.
     let run = 0;
+    // Ticket of the last thing said to the live region: a repeat that waits for the page to draw the empty region gives way to whatever
+    // was said, or cleared, after it.
+    let announced = 0;
     let hiddenBound = false;
     let counter = 0;
     // The analysis being followed, since when, and how many readings in a row failed.
@@ -310,6 +313,7 @@ export default function photoEntryDialog() {
             this.photoStep = 'choose';
             this.photoBusy = '';
             this.photoMessage = '';
+            announced += 1;
             this.photoStatus = '';
         },
 
@@ -845,6 +849,8 @@ export default function photoEntryDialog() {
          * @returns {void}
          */
         announcePhoto(text) {
+            const ticket = (announced += 1);
+
             if (this.photoStatus !== text) {
                 this.photoStatus = text;
 
@@ -855,7 +861,9 @@ export default function photoEntryDialog() {
             // emptied first and the words come back once the page has drawn the empty region.
             this.photoStatus = '';
             this.$nextTick(() => {
-                this.photoStatus = text;
+                if (ticket === announced) {
+                    this.photoStatus = text;
+                }
             });
         },
     };

@@ -418,7 +418,8 @@ describe('an analysis that cannot be started', function (): void {
         });
     }
 
-    it('answers 503 when a photo cannot be written, leaves no folder without a row, and reports the cause', function (): void {
+    it('answers 503 when a photo cannot be written, leaves no folder without a row, reports the cause and gives the places back', function (): void {
+        config(['inventories.photo_analyses_per_day_instance' => 5]);
         $case = photoReady();
         $disk = Storage::disk(ATTACHMENT_TEST_DISK);
         $calls = 0;
@@ -436,10 +437,13 @@ describe('an analysis that cannot be started', function (): void {
             ->and($analysis->status)->toBe(PhotoAnalysisStatus::Failed)
             ->and($analysis->error)->toBe('failed')
             ->and(storedFiles())->toBe([])
-            ->and($reported)->toContain('A file could not be written to the disk ['.ATTACHMENT_TEST_DISK.'].');
+            ->and($reported)->toContain('A file could not be written to the disk ['.ATTACHMENT_TEST_DISK.'].')
+            ->and(RateLimiter::attempts('photo-analyses-per-day:'.$case['team']['editor']->id))->toBe(0)
+            ->and(RateLimiter::attempts('photo-analyses-per-day:instance'))->toBe(0);
     });
 
-    it('answers 503 when the job cannot be queued, and the photos go with the analysis that ends failed', function (): void {
+    it('answers 503 when the job cannot be queued, and the photos go with the analysis that ends failed, the places back', function (): void {
+        config(['inventories.photo_analyses_per_day_instance' => 5]);
         $case = photoReady();
         Bus::shouldReceive('dispatch')->once()->andThrow(new RuntimeException('The queue is down'));
         $reported = [];
@@ -451,7 +455,9 @@ describe('an analysis that cannot be started', function (): void {
 
         expect(PhotoAnalysis::query()->sole()->status)->toBe(PhotoAnalysisStatus::Failed)
             ->and(storedFiles())->toBe([])
-            ->and($reported)->toContain('The queue is down');
+            ->and($reported)->toContain('The queue is down')
+            ->and(RateLimiter::attempts('photo-analyses-per-day:'.$case['team']['editor']->id))->toBe(0)
+            ->and(RateLimiter::attempts('photo-analyses-per-day:instance'))->toBe(0);
     });
 
     it('creates the row before it writes anything: a folder is never on the disk without one', function (): void {

@@ -99,6 +99,45 @@ function claudeSent(array $history, int $number = 0): array
 }
 
 /**
+ * The `fallbacks` setting config/services.php computes when `ANTHROPIC_FALLBACKS` is given (null removes the variable).
+ *
+ * The configuration file is evaluated again with the variable swapped for the duration of the call, since the application read its own
+ * when it booted.
+ */
+function anthropicFallbacksSetting(?string $value): bool
+{
+    $name = 'ANTHROPIC_FALLBACKS';
+    $previous = [$_ENV[$name] ?? null, $_SERVER[$name] ?? null, getenv($name)];
+
+    unset($_ENV[$name], $_SERVER[$name]);
+    putenv($name);
+
+    if ($value !== null) {
+        $_ENV[$name] = $_SERVER[$name] = $value;
+        putenv("{$name}={$value}");
+    }
+
+    try {
+        return (require config_path('services.php'))['anthropic']['fallbacks'];
+    } finally {
+        unset($_ENV[$name], $_SERVER[$name]);
+        putenv($name);
+
+        if ($previous[0] !== null) {
+            $_ENV[$name] = $previous[0];
+        }
+
+        if ($previous[1] !== null) {
+            $_SERVER[$name] = $previous[1];
+        }
+
+        if ($previous[2] !== false) {
+            putenv("{$name}={$previous[2]}");
+        }
+    }
+}
+
+/**
  * Two fields in an inventory, and the eligible ones.
  *
  * @return array{fields: list<InventoryField>, name: InventoryField, weight: InventoryField, condition: InventoryField}
@@ -325,6 +364,18 @@ describe('the fallback', function (): void {
     it('is on unless the configuration says otherwise', function (): void {
         expect(config('services.anthropic.fallbacks'))->toBeTrue();
     });
+
+    it('is what the environment says, and the default when the variable is unset or empty', function (?string $value, bool $expected): void {
+        expect(anthropicFallbacksSetting($value))->toBe($expected);
+    })->with([
+        'unset' => [null, true],
+        'empty' => ['', true],
+        'true' => ['true', true],
+        '1' => ['1', true],
+        'false' => ['false', false],
+        '0' => ['0', false],
+        'off' => ['off', false],
+    ]);
 
     it('is not asked for by the others, which would answer with a 400', function (string $model): void {
         config(['services.anthropic.model' => $model]);
