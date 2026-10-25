@@ -83,7 +83,8 @@ describe('an analysis that works', function (): void {
 
         expect($analysis->status)->toBe(PhotoAnalysisStatus::Completed)
             ->and($analysis->error)->toBeNull()
-            ->and($analysis->proposals)->toBe([
+            // MySQL reorders the keys of a JSON object: compared as equal, not identical.
+            ->and($analysis->proposals)->toEqual([
                 ['field' => $case['name']->ulid, 'value' => 'Drill', 'confidence' => 'high', 'evidence' => 'On the case'],
                 ['field' => $case['weight']->ulid, 'value' => '2.5', 'confidence' => 'low', 'evidence' => ''],
                 ['field' => $case['condition']->ulid, 'value' => $ids['Used'], 'confidence' => 'medium', 'evidence' => 'Sticker'],
@@ -132,7 +133,8 @@ describe('an analysis that works', function (): void {
 
         $analysis = analysisRun($case['analysis']);
 
-        expect($analysis->proposals)->toBe([
+        // MySQL reorders the keys of a JSON object: compared as equal, not identical.
+        expect($analysis->proposals)->toEqual([
             ['field' => $working->ulid, 'value' => false, 'confidence' => 'high', 'evidence' => 'Étiquette « HS »'],
             ['field' => $tags->ulid, 'value' => ['rouge', 'métal'], 'confidence' => 'medium', 'evidence' => ''],
         ]);

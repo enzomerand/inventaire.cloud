@@ -39,7 +39,7 @@ describe('the model', function (): void {
         expect($analysis->getRouteKeyName())->toBe('ulid')
             ->and(strlen($analysis->ulid))->toBe(26)
             ->and($found->status)->toBe(PhotoAnalysisStatus::Completed)
-            ->and($found->proposals)->toBe([['field' => '01abc', 'value' => '12.50', 'confidence' => 'high', 'evidence' => 'Label']])
+            ->and($found->proposals)->toEqual([['field' => '01abc', 'value' => '12.50', 'confidence' => 'high', 'evidence' => 'Label']])
             ->and($found->input_tokens)->toBe(1200)
             ->and($found->inventory->is($case['inventory']))->toBeTrue()
             ->and($case['inventory']->photoAnalyses()->count())->toBe(1);
