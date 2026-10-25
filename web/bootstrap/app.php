@@ -8,6 +8,7 @@ use App\Http\Middleware\RefuseApiTokens;
 use App\Http\Middleware\RequireStatefulRequest;
 use App\Http\Middleware\RequireTokenAbility;
 use App\Http\Middleware\SetLocale;
+use App\Http\Middleware\SetPermissionsPolicy;
 use App\Http\Middleware\SetReferrerPolicy;
 use App\Http\Middleware\SetRobotsTag;
 use App\Http\Responses\MembershipError;
@@ -36,10 +37,12 @@ $app = Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // The Referrer-Policy and X-Robots-Tag headers go out with every answer, so they come first (outermost). Then the
-        // language (so every answer is localized), then the install gate: it must precede everything that could need a
-        // database, a session or an application key.
-        $middleware->prepend([SetReferrerPolicy::class, SetRobotsTag::class, SetLocale::class, RedirectIfNotInstalled::class]);
+        // The Referrer-Policy, Permissions-Policy and X-Robots-Tag headers go out with every answer, so they come first
+        // (outermost). Then the language (so every answer is localized), then the install gate: it must precede everything
+        // that could need a database, a session or an application key.
+        $middleware->prepend([
+            SetReferrerPolicy::class, SetPermissionsPolicy::class, SetRobotsTag::class, SetLocale::class, RedirectIfNotInstalled::class,
+        ]);
         $middleware->encryptCookies(except: [LocaleResolver::COOKIE_NAME]);
 
         // The web front calls the API with its session cookie: Sanctum makes the requests that come from the
