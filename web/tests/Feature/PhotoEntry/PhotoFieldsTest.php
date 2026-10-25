@@ -98,3 +98,97 @@ describe('the catalogue', function (): void {
             ->and($hints[$fields['barcode']->ulid])->toBe(['format' => 'ean13']);
     });
 });
+
+describe('the budget of the catalogue', function (): void {
+    /**
+     * The characters the catalogue takes in the request.
+     *
+     * @param  list<array{id: string, name: string, type: string, hints: array<string, mixed>}>  $catalogue
+     */
+    function catalogueSize(array $catalogue): int
+    {
+        return array_sum(array_map(PhotoFields::size(...), $catalogue));
+    }
+
+    it('lists the labels of the choices while there is room', function (): void {
+        $case = photoCase();
+        $condition = fieldIn($case['inventory'], 'select', 'Condition', photoManyChoices(10));
+        $photoFields = app(PhotoFields::class);
+
+        $catalogue = $photoFields->catalogue($photoFields->eligible($case['inventory']->fields()->get()));
+
+        expect($catalogue)->toHaveCount(1)
+            ->and($catalogue[0]['hints']['choices'])->toBeArray()->toHaveCount(10)
+            ->and(catalogueSize($catalogue))->toBeLessThanOrEqual(PhotoFields::CATALOGUE_BUDGET);
+    });
+
+    it('stays within the budget for a huge inventory: the choices that do not fit are summarised, in the order of the fields', function (): void {
+        $case = photoCase();
+        $fields = [];
+
+        // 40 fields of 200 choices of 100 characters: about 800 000 characters if everything were written out.
+        for ($number = 1; $number <= 40; $number++) {
+            $fields[] = fieldIn($case['inventory'], 'select', "Field {$number}", photoManyChoices(200));
+        }
+
+        $photoFields = app(PhotoFields::class);
+        $catalogue = $photoFields->catalogue($photoFields->eligible($case['inventory']->fields()->get()));
+        $listed = array_values(array_filter($catalogue, fn (array $entry): bool => is_array($entry['hints']['choices'])));
+
+        expect(catalogueSize($catalogue))->toBeLessThanOrEqual(PhotoFields::CATALOGUE_BUDGET)
+            // Every field is still offered, with a sentence in place of the labels it had no room for.
+            ->and(array_column($catalogue, 'id'))->toBe(array_map(fn ($field): string => $field->ulid, $fields))
+            ->and(count($listed))->toBeLessThan(2)
+            ->and($catalogue[39]['hints']['choices'])->toBe('one of 200 predefined values: write the label as read');
+    });
+
+    it('summarises a multiple choice as any of its values', function (): void {
+        $case = photoCase();
+        $first = fieldIn($case['inventory'], 'multiselect', 'First', photoManyChoices(200));
+        $second = fieldIn($case['inventory'], 'multiselect', 'Second', photoManyChoices(200));
+        $photoFields = app(PhotoFields::class);
+
+        $hints = collect($photoFields->catalogue($photoFields->eligible($case['inventory']->fields()->get())))->keyBy('id')->map(fn (array $entry): array => $entry['hints']);
+
+        expect($hints[$first->ulid]['choices'])->toBeArray()->toHaveCount(200)
+            ->and($hints[$second->ulid]['choices'])->toBe('any of 200 predefined values: write each label as read');
+    });
+
+    it('writes out a small field further down when a big one before it had no room', function (): void {
+        $case = photoCase();
+        $bigs = [];
+
+        for ($number = 1; $number <= 3; $number++) {
+            $bigs[] = fieldIn($case['inventory'], 'select', "Big {$number}", photoManyChoices(200));
+        }
+
+        $small = fieldIn($case['inventory'], 'select', 'Small', ['choices' => [['label' => 'New'], ['label' => 'Used']]]);
+        $photoFields = app(PhotoFields::class);
+
+        $hints = collect($photoFields->catalogue($photoFields->eligible($case['inventory']->fields()->get())))->keyBy('id')->map(fn (array $entry): array => $entry['hints']);
+
+        expect($hints[$bigs[0]->ulid]['choices'])->toBeArray()
+            ->and($hints[$bigs[1]->ulid]['choices'])->toBeString()
+            ->and($hints[$bigs[2]->ulid]['choices'])->toBeString()
+            ->and($hints[$small->ulid]['choices'])->toBe(['New', 'Used']);
+    });
+
+    it('leaves out the fields that do not fit even summarised, so that Claude is not offered them', function (): void {
+        $case = photoCase();
+
+        for ($number = 1; $number <= 100; $number++) {
+            // A long name and a long unit: about 250 characters a line, 25 000 for the hundred.
+            fieldIn($case['inventory'], 'number', str_pad("Field {$number} ", 120, 'n'), ['unit' => str_repeat('u', 30)]);
+        }
+
+        $photoFields = app(PhotoFields::class);
+        $eligible = $photoFields->eligible($case['inventory']->fields()->get());
+        $catalogue = $photoFields->catalogue($eligible);
+
+        expect(count($eligible))->toBe(100)
+            ->and(count($catalogue))->toBeLessThan(100)->toBeGreaterThan(50)
+            ->and(catalogueSize($catalogue))->toBeLessThanOrEqual(PhotoFields::CATALOGUE_BUDGET)
+            // The ones that were kept are the first, in order.
+            ->and(array_column($catalogue, 'id'))->toBe(array_map(fn ($field): string => $field->ulid, array_slice($eligible, 0, count($catalogue))));
+    });
+});

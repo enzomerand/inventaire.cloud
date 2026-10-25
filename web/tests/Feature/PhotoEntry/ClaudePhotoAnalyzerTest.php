@@ -167,7 +167,28 @@ describe('the request', function (): void {
         }
 
         // The hints are in the prompt: the unit and decimals of the number, the labels of the choices; the photo field is not.
-        expect($instruction)->toContain('"unit": "kg"')->toContain('"decimals": 1')->toContain('"New"')->toContain('"Used"')->not->toContain('Pictures');
+        expect($instruction)->toContain('"unit":"kg"')->toContain('"decimals":1')->toContain('"New"')->toContain('"Used"')->not->toContain('Pictures');
+    });
+
+    it('keeps the request small for a huge inventory: the catalogue stays within its budget and the schema only names the fields it offers', function (): void {
+        $case = photoCase();
+
+        for ($number = 1; $number <= 40; $number++) {
+            fieldIn($case['inventory'], 'select', "Field {$number}", photoManyChoices(200));
+        }
+
+        $fields = app(PhotoFields::class)->eligible($case['inventory']->fields()->get());
+        $history = [];
+
+        claudeAnalyzer([claudeResponse(claudeBody(claudeAnswerText([])))], $history)->analyze(['jpeg'], $fields, 'en');
+
+        $sent = claudeSent($history);
+        $instruction = $sent['messages'][0]['content'][2]['text'];
+
+        // 40 x 200 x 100 characters of labels would be 800 000: the whole body stays a few tens of thousands.
+        expect(mb_strlen($instruction))->toBeLessThan(PhotoFields::CATALOGUE_BUDGET + 1000)
+            ->and(strlen((string) $history[0]['request']->getBody()))->toBeLessThan(PhotoFields::CATALOGUE_BUDGET + 12000)
+            ->and($sent['output_config']['format']['schema']['properties']['proposals']['items']['properties']['field']['enum'])->toHaveCount(40);
     });
 
     it('constrains the answer to a list of proposals whose field is one of the ULIDs of the fields to fill', function (): void {

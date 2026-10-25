@@ -289,6 +289,18 @@ describe('choices', function (): void {
             ->and(proposedValue($case['inventory'], $condition, ['Cassé', 'Bac']))->toBeNull();
     });
 
+    it('are matched against all the choices of the field, including the ones the prompt only summarised', function (): void {
+        $case = photoCase();
+        // The first field takes the room of the catalogue, so the choices of the second are only counted in the prompt.
+        fieldIn($case['inventory'], 'select', 'First', photoManyChoices(200));
+        $second = fieldIn($case['inventory'], 'select', 'Second', photoManyChoices(200, 'Option'));
+        $choices = $second->options['choices'];
+        $last = $choices[199];
+
+        expect(proposedValue($case['inventory'], $second, mb_strtoupper($last['label'])))->toBe(['value' => $last['id']])
+            ->and(proposedValue($case['inventory'], $second, 'Option 201'))->toBeNull();
+    });
+
     it('take every value for a multiple choice, once each, and leave out the ones that match nothing', function (): void {
         $case = photoCase();
         $extras = fieldIn($case['inventory'], 'multiselect', 'Extras', ['choices' => [['label' => 'Case'], ['label' => 'Charger'], ['label' => 'Étui']]]);

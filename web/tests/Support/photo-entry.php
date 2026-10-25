@@ -179,3 +179,20 @@ function photoAnalyzerSaying(PhotoReading|Throwable $outcome, array &$calls = []
 
     return $analyzer;
 }
+
+/**
+ * The options of a select field with this many choices whose labels are long (100 characters), the way a catalogue imported from a
+ * spreadsheet might have them.
+ *
+ * @return array{choices: list<array{label: string}>}
+ */
+function photoManyChoices(int $count, string $prefix = 'Choice'): array
+{
+    $choices = [];
+
+    for ($number = 1; $number <= $count; $number++) {
+        $choices[] = ['label' => str_pad("{$prefix} ".sprintf('%03d', $number).' ', 100, 'x')];
+    }
+
+    return ['choices' => $choices];
+}
