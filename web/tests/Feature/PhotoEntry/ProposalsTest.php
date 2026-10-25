@@ -167,33 +167,108 @@ describe('texts', function (): void {
 describe('numbers, amounts and percentages', function (): void {
     it('are read from the ways they are written, and kept with the decimals of the field', function (string $written, ?string $expected): void {
         $case = photoCase();
-        $weight = fieldIn($case['inventory'], 'number', 'Weight', ['decimals' => 2]);
+        $weight = fieldIn($case['inventory'], 'number', 'Weight', ['decimals' => 2, 'unit' => 'kg']);
 
         expect(proposedValue($case['inventory'], $weight, $written))->toBe($expected === null ? null : ['value' => $expected]);
     })->with([
         'a plain number' => ['12.5', '12.50'],
         'a decimal comma' => ['12,5', '12.50'],
         'a whole number' => ['12', '12.00'],
-        'a unit after' => ['2.5 kg', '2.50'],
-        'a unit before' => ['kg 2.5', '2.50'],
-        'a currency' => ['12,50 €', '12.50'],
-        'a percent sign' => ['45 %', '45.00'],
+        'a decimal below one' => ['0.12', '0.12'],
+        'a decimal below one with too many decimals' => ['0.125', null],
+        'the unit of the field after' => ['2.5 kg', '2.50'],
+        'the unit of the field glued to it' => ['2.5kg', '2.50'],
+        'the unit of the field before' => ['kg 2.5', '2.50'],
+        'the unit in capitals' => ['2.5 KG', '2.50'],
         'a negative' => ['-3.25', '-3.25'],
+        'a negative with the true minus sign' => ["\u{2212}3.25", '-3.25'],
         'a plus sign' => ['+3', '3.00'],
+        'a negative with the unit' => ['-3 kg', '-3.00'],
         'spaces for thousands' => ['1 234,5', '1234.50'],
-        'non-breaking spaces' => ["1\u{202F}234,5", '1234.50'],
+        'non-breaking spaces' => ["1\u{00A0}234,5", '1234.50'],
+        'narrow non-breaking spaces' => ["1\u{202F}234,5", '1234.50'],
+        'thin spaces' => ["1\u{2009}234,5", '1234.50'],
+        'spaces for thousands and a dot for decimals' => ['1 234.5', '1234.50'],
+        'spaces for thousands, three decimals' => ['1 234.567', null],
         'a dot for thousands, a comma for decimals' => ['1.234,56', '1234.56'],
         'a comma for thousands, a dot for decimals' => ['1,234.56', '1234.56'],
-        'thousands only' => ['1.234.567', '1234567.00'],
-        'zeros after the last decimal' => ['2.500', '2.50'],
-        'more decimals than the field keeps' => ['2.505', null],
+        'the last of a dot and a comma is the decimal sign' => ['1.234.567,8', '1234567.80'],
+        'thousands only, with dots' => ['1.234.567', '1234567.00'],
+        'thousands only, with commas' => ['1,234,567', '1234567.00'],
+        'thousands only, with spaces' => ['12 345 678', '12345678.00'],
+        'more decimals than the field keeps' => ['2.5051', null],
+        'a number with a different unit' => ['250 g', null],
+        'a number with a unit the field does not have' => ['2.5 m', null],
         'a range' => ['10-12', null],
         'a word' => ['about five', null],
+        'a word in front of a number' => ['about 5', null],
+        'a model number' => ['Model 200 128GB', null],
+        'a standard' => ['ISO 9001', null],
         'an exponent' => ['1e3', null],
         'two numbers' => ['3 and 4', null],
+        'two numbers apart by a space' => ['12 5', null],
         'a version number' => ['12.5.3', null],
+        'groups that are not of three digits' => ['1.23.456', null],
+        'groups with a zero in front' => ['0.123.456', null],
+        'groups of two kinds of space' => ['1 234.567 890', null],
+        'thousands of two kinds, no decimal sign' => ['1.234,567,890', null],
+        'a decimal sign that is not last' => ['1,5 234', null],
+        'two separators in a row' => ['1,,5', null],
+        'a separator at the end' => ['12,', null],
+        'a separator at the start' => ['.5', null],
+        'two signs' => ['--5', null],
+        'a currency that is not the field\'s' => ['€ 5', null],
         'a number too large' => ['1000000000000000', null],
+        'an apostrophe for thousands' => ["1'234.5", null],
     ]);
+
+    it('refuse a thousands separator or a decimal sign that could be the other: one separator and three digits', function (string $written, string $decimals, ?string $expected): void {
+        $case = photoCase();
+        $field = fieldIn($case['inventory'], 'number', 'Quantity', ['decimals' => (int) $decimals]);
+
+        expect(proposedValue($case['inventory'], $field, $written))->toBe($expected === null ? null : ['value' => $expected]);
+    })->with([
+        // With decimals, 1.234 is a thousand two hundred and thirty-four, or one and 234 thousandths: not guessed.
+        'a dot, two decimals' => ['1.234', '2', null],
+        'a comma, two decimals' => ['2,500', '2', null],
+        'a dot, three decimals' => ['2.500', '3', null],
+        'a longer whole part' => ['12.345', '1', null],
+        // A field that keeps no decimals can only mean thousands.
+        'a dot, no decimals' => ['1.234', '0', '1234'],
+        'a comma, no decimals' => ['12,345', '0', '12345'],
+        'a comma, no decimals, a hundred' => ['123,456', '0', '123456'],
+        // Not ambiguous: a whole part that cannot be a first group of thousands, or one separator and another number of digits.
+        'a whole part of four digits' => ['1234.567', '3', '1234.567'],
+        'a whole part with a zero in front' => ['0.125', '3', '0.125'],
+        'two digits after the dot' => ['1.23', '2', '1.23'],
+        'four digits after the dot' => ['1.2345', '4', '1.2345'],
+        'one digit after the comma, no decimals' => ['1,5', '0', null],
+    ]);
+
+    it('read the decoration a percentage and an amount carry, and refuse the others', function (): void {
+        $case = photoCase();
+        $share = fieldIn($case['inventory'], 'percentage', 'Share', ['decimals' => 2]);
+        $price = fieldIn($case['inventory'], 'money', 'Price', ['currency' => 'EUR']);
+        $plain = fieldIn($case['inventory'], 'number', 'Count', ['decimals' => 0]);
+
+        expect(proposedValue($case['inventory'], $share, '45 %'))->toBe(['value' => '45.00'])
+            ->and(proposedValue($case['inventory'], $share, '45%'))->toBe(['value' => '45.00'])
+            ->and(proposedValue($case['inventory'], $share, '45 kg'))->toBeNull()
+            ->and(proposedValue($case['inventory'], $price, '12,50 €'))->toBe(['value' => '12.50'])
+            ->and(proposedValue($case['inventory'], $price, '€12.50'))->toBe(['value' => '12.50'])
+            ->and(proposedValue($case['inventory'], $price, '$ 12.50'))->toBe(['value' => '12.50'])
+            ->and(proposedValue($case['inventory'], $price, '12.50 EUR'))->toBe(['value' => '12.50'])
+            ->and(proposedValue($case['inventory'], $price, 'eur 12.50'))->toBe(['value' => '12.50'])
+            ->and(proposedValue($case['inventory'], $price, '-12,50 €'))->toBe(['value' => '-12.50'])
+            ->and(proposedValue($case['inventory'], $price, '12.50 USD'))->toBeNull()
+            ->and(proposedValue($case['inventory'], $price, '€ 12.50 EUR'))->toBeNull()
+            ->and(proposedValue($case['inventory'], $price, '12.50 kg'))->toBeNull()
+            // A number field without a unit takes the number, not a unit or a currency.
+            ->and(proposedValue($case['inventory'], $plain, '3'))->toBe(['value' => '3'])
+            ->and(proposedValue($case['inventory'], $plain, '3 kg'))->toBeNull()
+            ->and(proposedValue($case['inventory'], $plain, '12 €'))->toBeNull()
+            ->and(proposedValue($case['inventory'], $plain, '45 %'))->toBeNull();
+    });
 
     it('keep the bounds of the field', function (): void {
         $case = photoCase();

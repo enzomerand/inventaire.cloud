@@ -41,7 +41,7 @@ function analysisCase(array $attributes = []): array
     $case = photoCase();
     photoTurnedOn($case['team']['workspace']);
     $name = fieldIn($case['inventory'], 'text', 'Name');
-    $weight = fieldIn($case['inventory'], 'number', 'Weight', ['decimals' => 1]);
+    $weight = fieldIn($case['inventory'], 'number', 'Weight', ['decimals' => 1, 'unit' => 'kg']);
     $condition = fieldIn($case['inventory'], 'select', 'Condition', ['choices' => [['label' => 'New'], ['label' => 'Used']]]);
     fieldIn($case['inventory'], 'photo', 'Pictures');
 

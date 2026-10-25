@@ -139,7 +139,7 @@ final class Proposals
             'text' => preg_replace('/\s+/u', ' ', $first),
             'textarea' => $first,
             'email' => preg_replace('/^mailto:/i', '', $first),
-            'number', 'money', 'percentage' => $this->decimal($first),
+            'number', 'money', 'percentage' => $this->decimal($field, $first),
             'boolean' => $this->boolean($first),
             'date' => $this->date($first),
             'datetime' => $this->moment($first),
@@ -186,43 +186,135 @@ final class Proposals
     }
 
     /**
-     * A number as a canonical decimal string, from the ways it is written around the world: `12.50`, `12,50 €`, `1 234,5`, `1.234,56`,
-     * `1,234.56`, `2.5 kg`, `-3`, `45 %`. The last separator is the decimal sign when there are two kinds; one that appears several
-     * times is a thousands separator; a single one is the decimal sign. Null for what is not one number (`10-12`, `about 5`, `1e3`).
+     * A number as a canonical decimal string, or null when the text is not one number and nothing else. Nothing is guessed: what could be
+     * read two ways is refused, and Claude is asked for a plain number anyway (a dot as the decimal sign, no unit).
+     *
+     * What is accepted, and nothing else:
+     *
+     * - an optional sign (`+`, `-` or `−`) and the digits of one number, with at most one decoration, before or after it: **the unit of
+     *   the field** for a `number` (`2.5 kg` in a field whose unit is `kg`: another unit, or none declared, is refused, for `250 g` is no
+     *   `250` of a field in kilograms), `%` for a `percentage`, a **currency symbol** (`€`, `$`...) or **the code of the currency of the
+     *   field** (`EUR`; another code is refused) for a `money`. `about 5`, `Model 200 128GB`, `ISO 9001`, `10-12`, `1e3`, `3 and 4` are no
+     *   number: refused;
+     * - thousands groups of **exactly three digits** after a first group of one to three, separated by one kind of separator: a space
+     *   (also a non-breaking, a narrow non-breaking and a thin one), a dot or a comma (`1 234 567`, `1.234.567`, `1,234,567`);
+     * - when **both a dot and a comma** appear, the last of them is the decimal sign and the other kind is the thousands separator
+     *   (`1.234,56` and `1,234.56` are 1234.56); `1.234,567.89` is not a number;
+     * - when only **one** dot or comma appears, it is the decimal sign (`12.5`, `12,50`, `1 234,5`, `0.125`) — except for one followed by
+     *   **exactly three digits** after a whole part of one to three digits that does not start with a zero and no other separator
+     *   (`1.234`, `2,500`): is it a thousand two hundred and thirty-four, or one and 234 thousandths? That is refused, unless the field
+     *   keeps no decimals, where only the thousands reading can hold. After a space-grouped whole part (`1 234.567`) it is a decimal sign.
+     *
      * Nothing is rounded: the field refuses a number with more decimals than it keeps.
      */
-    private function decimal(string $text): ?string
+    private function decimal(InventoryField $field, string $text): ?string
     {
-        $compact = preg_replace('/[\s\x{00A0}\x{202F}\x{2009}\']+/u', '', $text) ?? '';
+        $hints = $this->photoFields->hints($field);
+        $decimals = is_int($hints['decimals'] ?? null) ? $hints['decimals'] : 2;
+        $unit = is_string($hints['unit'] ?? null) && $hints['unit'] !== '' ? $hints['unit'] : null;
+        $money = $field->type === 'money';
+        $decoration = $money ? '\p{Sc}|[A-Za-z]{3}' : ($unit === null ? '(?!)' : preg_quote($unit, '/'));
+        $sign = '[+\-\x{2212}]';
 
-        if (preg_match('/^[^0-9+\-.,]*([+\-]?[0-9][0-9.,]*)[^0-9.,]*$/u', $compact, $parts) !== 1) {
+        $pattern = "/^(?<s1>{$sign})?\\s*(?:(?<pre>{$decoration})\\s*)?(?<s2>{$sign})?\\s*(?<core>[0-9](?:[0-9 .,\\x{00A0}\\x{202F}\\x{2009}]*[0-9])?)(?:\\s*(?<post>{$decoration}))?$/Diu";
+
+        if (preg_match($pattern, trim($text), $parts) !== 1) {
             return null;
         }
 
-        $negative = str_starts_with($parts[1], '-');
-        $number = ltrim($parts[1], '+-');
-        $dot = strrpos($number, '.');
-        $comma = strrpos($number, ',');
-        // Where the decimal sign is, if there is one.
-        $at = match (true) {
-            $dot !== false && $comma !== false => max($dot, $comma),
-            $dot !== false => substr_count($number, '.') === 1 ? $dot : null,
-            $comma !== false => substr_count($number, ',') === 1 ? $comma : null,
-            default => null,
-        };
+        $decorations = array_values(array_filter([$parts['pre'] ?? '', $parts['post'] ?? ''], fn (string $word): bool => $word !== ''));
+        $signs = array_values(array_filter([$parts['s1'] ?? '', $parts['s2'] ?? ''], fn (string $mark): bool => $mark !== ''));
 
-        // What comes before the decimal sign is the whole part: digits, grouped by thousands if the number is long. A number that is only
-        // groups (`1.234.567`) has no decimal sign. `12.5.3` is no number.
-        $whole = $at === null ? $number : substr($number, 0, $at);
-        $fraction = $at === null ? '' : substr($number, $at + 1);
-
-        if (preg_match('/^(?:[0-9]+|[0-9]{1,3}(?:[.,][0-9]{3})+)$/D', $whole) !== 1 || ($at !== null && preg_match('/^[0-9]+$/D', $fraction) !== 1)) {
+        // One sign, one decoration: `€ 5 EUR` and `--5` are not a number.
+        if (count($decorations) > 1 || count($signs) > 1) {
             return null;
         }
 
-        $number = str_replace(['.', ','], '', $whole).($at === null ? '' : '.'.$fraction);
+        // A code of currency must be the one of the field: `12 USD` in a field in euros is not 12 euros. A symbol is not checked.
+        if ($money && $decorations !== [] && preg_match('/^[A-Za-z]{3}$/D', $decorations[0]) === 1) {
+            $currency = $hints['currency'] ?? null;
+
+            if (is_string($currency) && $currency !== '' && strtoupper($decorations[0]) !== strtoupper($currency)) {
+                return null;
+            }
+        }
+
+        $number = $this->plainNumber($parts['core'], $decimals);
+
+        if ($number === null) {
+            return null;
+        }
+
+        $negative = $signs !== [] && $signs[0] !== '+';
 
         return Decimal::tryFrom(($negative ? '-' : '').$number)?->format();
+    }
+
+    /**
+     * The digits of a number written with its separators as `whole` or `whole.fraction`, or null when they cannot be read with certainty.
+     * The rules are the ones of {@see self::decimal()}.
+     *
+     * @param  string  $core  Digits, spaces, dots and commas, starting and ending with a digit.
+     * @param  int  $decimals  How many decimals the field keeps.
+     */
+    private function plainNumber(string $core, int $decimals): ?string
+    {
+        $pieces = preg_split('/([ .,\x{00A0}\x{202F}\x{2009}])/u', $core, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
+        $runs = [];
+        $separators = [];
+
+        foreach ($pieces as $index => $piece) {
+            if ($index % 2 === 0) {
+                $runs[] = $piece;
+            } else {
+                // Every kind of space is one.
+                $separators[] = $piece === '.' || $piece === ',' ? $piece : ' ';
+            }
+        }
+
+        // Two separators in a row leave a run with no digit.
+        if (in_array('', $runs, true)) {
+            return null;
+        }
+
+        if ($separators === []) {
+            return $runs[0];
+        }
+
+        $marks = array_keys(array_filter($separators, fn (string $separator): bool => $separator !== ' '));
+        $dots = count(array_keys($separators, '.', true));
+        $commas = count(array_keys($separators, ',', true));
+
+        // Where the decimal sign is, if there is one: the last dot or comma when there are both kinds, the only one when there is one,
+        // none when the same kind is repeated (those are thousands separators) or when there are only spaces.
+        $at = $marks !== [] && ($dots + $commas === 1 || ($dots > 0 && $commas > 0)) ? max($marks) : null;
+
+        // The fraction is the last run: nothing may follow the decimal sign but its digits.
+        if ($at !== null && $at !== count($separators) - 1) {
+            return null;
+        }
+
+        $grouping = $at === null ? $separators : array_values(array_diff_key($separators, [$at => true]));
+        $whole = $at === null ? $runs : array_slice($runs, 0, $at + 1);
+        $fraction = $at === null ? null : $runs[$at + 1];
+
+        if ($grouping !== []) {
+            // One kind of separator, a first group of one to three digits (no zero in front) and every other group of exactly three.
+            if (count(array_unique($grouping)) !== 1 || preg_match('/^[1-9][0-9]{0,2}$/D', $whole[0]) !== 1) {
+                return null;
+            }
+
+            foreach (array_slice($whole, 1) as $group) {
+                if (strlen($group) !== 3) {
+                    return null;
+                }
+            }
+        } elseif ($fraction !== null && strlen($fraction) === 3 && preg_match('/^[1-9][0-9]{0,2}$/D', $whole[0]) === 1) {
+            // `1.234`: a thousand and more, or one and a bit? Only a field that keeps no decimals settles it.
+            return $decimals === 0 ? $whole[0].$fraction : null;
+        }
+
+        return implode('', $whole).($fraction === null ? '' : '.'.$fraction);
     }
 
     /**
