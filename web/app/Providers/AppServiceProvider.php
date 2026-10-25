@@ -14,10 +14,15 @@ use App\Inventories\Sharing\ShareLinks;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Jobs\GenerateExport;
 use App\Models\User;
+use App\PhotoEntry\ClaudePhotoAnalyzer;
+use App\PhotoEntry\FakePhotoAnalyzer;
+use App\PhotoEntry\PhotoAnalyzer;
+use App\PhotoEntry\PhotoFields;
 use App\Services\ClientNetwork;
 use App\Settings\InstanceSettings;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
@@ -45,6 +50,12 @@ class AppServiceProvider extends ServiceProvider
 
         // The catalogue of inventory templates is read from its files once per process (see the class).
         $this->app->singleton(TemplateCatalogue::class);
+
+        // What reads the photos of the photo entry: Claude, or on a development machine that asks for it (ANTHROPIC_FAKE, and only when
+        // APP_ENV is local: never in production) an analyzer that makes the proposals up, so the whole flow can be tried without a key.
+        $this->app->bind(PhotoAnalyzer::class, fn (Application $app): PhotoAnalyzer => $app->isLocal() && config()->boolean('services.anthropic.fake')
+            ? new FakePhotoAnalyzer(delay: 1.5)
+            : new ClaudePhotoAnalyzer($app->make(PhotoFields::class)));
     }
 
     /**
