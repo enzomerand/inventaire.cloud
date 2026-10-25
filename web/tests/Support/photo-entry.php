@@ -9,7 +9,13 @@ use App\Inventories\Attachments\AttachmentStorage;
 use App\Models\Inventory;
 use App\Models\PhotoAnalysis;
 use App\Models\User;
+use App\Models\Workspace;
+use App\PhotoEntry\PhotoAnalyzer;
+use App\PhotoEntry\PhotoReading;
+use App\Settings\InstanceSettings;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
 
 require_once __DIR__.'/attachments.php';
 require_once __DIR__.'/inventories.php';
@@ -100,4 +106,76 @@ function photoApp1Segments(string $jpeg): int
     }
 
     return $count;
+}
+
+/**
+ * Makes the photo entry usable in a workspace: the administrator turned it on, the instance has a key, the owner consented.
+ */
+function photoTurnedOn(Workspace $workspace): void
+{
+    app(InstanceSettings::class)->update([InstanceSettings::PHOTO_ENTRY_ENABLED => true]);
+    config(['services.anthropic.key' => 'sk-ant-test-secret']);
+    $workspace->forceFill(['photo_entry_enabled' => true])->save();
+}
+
+/**
+ * The address of the photo analyses of an inventory, or of one of them.
+ */
+function photoUri(Inventory $inventory, ?PhotoAnalysis $analysis = null): string
+{
+    return "/api/v1/inventories/{$inventory->ulid}/photo-analyses".($analysis === null ? '' : "/{$analysis->ulid}");
+}
+
+/**
+ * A photo to upload: a JPEG, a PNG or a WebP that GD draws, of this size.
+ */
+function photoUpload(string $name = 'photo.jpg', string $format = 'jpeg', int $width = 40, int $height = 20): UploadedFile
+{
+    return attachmentUploadedAs($name, attachmentImageBytes($format, $width, $height), 'image/'.$format);
+}
+
+/**
+ * Sends photos the way the web front does (multipart, signed in as the given person).
+ *
+ * @param  list<UploadedFile>  $photos
+ * @param  array<string, string>  $headers
+ */
+function photoPost(object $test, ?User $as, Inventory $inventory, array $photos, array $headers = []): TestResponse
+{
+    if ($as !== null) {
+        $test->flushSession();
+        app('auth')->forgetGuards();
+        $test->actingAs($as);
+    }
+
+    return $test->post(photoUri($inventory), ['photos' => $photos], frontend($headers + ['Accept' => 'application/json']));
+}
+
+/**
+ * An analyzer that says what the test wants it to say, and remembers what it was asked. It is what the application is given
+ * while the test lasts.
+ *
+ * @param  PhotoReading|Throwable  $outcome  What it gives back, or throws.
+ * @param  array<int, array{photos: list<string>, fields: list<string>, locale: string}>  $calls  Filled with one entry per call.
+ */
+function photoAnalyzerSaying(PhotoReading|Throwable $outcome, array &$calls = []): PhotoAnalyzer
+{
+    $analyzer = new class($outcome, $calls) implements PhotoAnalyzer
+    {
+        /**
+         * @param  array<int, array{photos: list<string>, fields: list<string>, locale: string}>  $calls
+         */
+        public function __construct(private readonly PhotoReading|Throwable $outcome, private array &$calls) {}
+
+        public function analyze(array $photos, array $fields, string $locale): PhotoReading
+        {
+            $this->calls[] = ['photos' => $photos, 'fields' => array_map(fn ($field): string => $field->ulid, $fields), 'locale' => $locale];
+
+            return $this->outcome instanceof Throwable ? throw $this->outcome : $this->outcome;
+        }
+    };
+
+    app()->instance(PhotoAnalyzer::class, $analyzer);
+
+    return $analyzer;
 }

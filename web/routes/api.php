@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\ItemRevisionController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\MyInvitationController;
 use App\Http\Controllers\Api\V1\OpenApiController;
+use App\Http\Controllers\Api\V1\PhotoAnalysisController;
 use App\Http\Controllers\Api\V1\ShareLinkController;
 use App\Http\Controllers\Api\V1\SignOutEverywhereController;
 use App\Http\Controllers\Api\V1\TemplateController;
@@ -96,6 +97,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 // The consent of a workspace to the photo entry (its photos go to a third party, Anthropic, and every analysis is paid for by the
                 // instance): its owner chooses at their browser, a token cannot.
                 Route::put('/workspaces/{workspace}/photo-entry', WorkspacePhotoEntryController::class)->name('workspaces.photo-entry.update');
+
+                // The photo entry: the photos of an object are sent to Claude (Anthropic) and the proposals read back until they are ready. The
+                // photos leave the instance and every analysis is paid for by it, so this is a person at their browser, never a script. The
+                // analysis is bound through the inventory (`{photoAnalysis}`: the relation `photoAnalyses`), and is its author's alone.
+                Route::scopeBindings()->group(function (): void {
+                    Route::post('/inventories/{inventory}/photo-analyses', [PhotoAnalysisController::class, 'store'])->middleware('throttle:photo-analyses')->name('inventories.photo-analyses.store');
+                    Route::get('/inventories/{inventory}/photo-analyses/{photoAnalysis}', [PhotoAnalysisController::class, 'show'])->name('inventories.photo-analyses.show');
+                });
             });
         });
 

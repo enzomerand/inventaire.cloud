@@ -128,7 +128,7 @@ final class Inventory extends Model
 
     /**
      * The photo analyses started from the inventory, whoever sent the photos. The route key of an analysis is its ULID, and an analysis is
-     * bound through this relation (`/inventories/{inventory}/photo-analyses/{analysis}`), so an analysis of another inventory is a 404.
+     * bound through this relation (`/inventories/{inventory}/photo-analyses/{photoAnalysis}`), so an analysis of another inventory is a 404.
      *
      * @return HasMany<PhotoAnalysis, $this>
      */

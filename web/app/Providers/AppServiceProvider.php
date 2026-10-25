@@ -121,6 +121,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('imports', fn (Request $request): Limit => Limit::perMinute(config()->integer('inventories.imports_per_minute'))
             ->by('imports:'.$this->signedInKey($request)));
 
+        // Sending photos to be read by Claude (Anthropic) is a paid request: five a minute per person (the day's count is the quota of
+        // App\PhotoEntry\PhotoAnalysisQuota, `photo_analyses_per_day`).
+        RateLimiter::for('photo-analyses', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by('photo-analyses:'.$this->signedInKey($request)));
+
         // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
         RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))
             ->by('official-versions:'.$this->signedInKey($request)));
