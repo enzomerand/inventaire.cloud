@@ -19,10 +19,13 @@ use Anthropic\Core\Exceptions\RateLimitException;
 use Anthropic\RequestOptions;
 use App\Models\InventoryField;
 use GuzzleHttp\Client as Guzzle;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use Illuminate\Support\Facades\Log;
 use JsonException;
 use Locale;
 use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
 /**
@@ -36,10 +39,15 @@ use Throwable;
  * the format of a date) are in the prompt, not the schema; the server converts and checks every value it gets back ({@see Proposals}).
  * The catalogue has a budget ({@see PhotoFields::CATALOGUE_BUDGET}), so a huge inventory cannot make a huge request.
  *
- * The key, the model, the effort and the timeout come from `config('services.anthropic')`, read at each call. The key is never logged.
- * Neither is anything of the request: the photos stay out of every message this class writes. The SDK's own `timeout` option is not
- * enforced by the SDK, the transport is: the Guzzle client built here carries it, and one retry is allowed after a failure the SDK
- * judges temporary.
+ * The key, the model, the effort, the timeout and the fallback come from `config('services.anthropic')`, read at each call. The key is
+ * never logged. Neither is anything of the request: the photos stay out of every message this class writes. The SDK's own `timeout`
+ * option is not enforced by the SDK, the transport is: the Guzzle client built here carries it, and one retry is allowed after a failure
+ * the SDK judges temporary.
+ *
+ * **The time of an analysis is bounded**, because the job that runs it is killed after 300 seconds: the timeout of a request is held
+ * between {@see self::MIN_TIMEOUT} and {@see self::MAX_TIMEOUT} whatever `ANTHROPIC_TIMEOUT` says, and the wait the API asks for before
+ * the retry (`Retry-After`) is cut to {@see self::MAX_RETRY_WAIT} seconds ({@see self::boundedRetryWait()}), so that two requests and
+ * the wait between them always end before the job does.
  *
  * How a failure is told ({@see PhotoAnalysisError}): the model declined (`stop_reason: refusal`) is `refused`; the answer ran out of room
  * (`max_tokens`) is `truncated`; text that is not the JSON asked for is `invalid_answer`; the network, a timeout, a rate limit (429) or a
@@ -64,7 +72,16 @@ final class ClaudePhotoAnalyzer implements PhotoAnalyzer
     public const DEFAULT_EFFORT = 'low';
 
     /** Seconds a request may take when the configuration gives none. */
-    private const DEFAULT_TIMEOUT = 90;
+    public const DEFAULT_TIMEOUT = 90;
+
+    /** The least a request is given, in seconds: a photo analysis does not come back faster than that, whatever the configuration says. */
+    public const MIN_TIMEOUT = 10;
+
+    /** The most a request is given, in seconds: two of them (one retry) and the wait between them stay under the 300 seconds of the job. */
+    public const MAX_TIMEOUT = 120;
+
+    /** The longest the SDK waits before its retry, in seconds, whatever the API asks (`Retry-After`). */
+    public const MAX_RETRY_WAIT = 30;
 
     /** Seconds the connection may take to open. */
     private const CONNECT_TIMEOUT = 10;
@@ -122,8 +139,9 @@ PROMPT;
             throw new PhotoAnalysisException(PhotoAnalysisError::Misconfigured, 'The effort is not one the API knows.');
         }
 
-        // Only the models that accept it get the fallback: the others answer a 400 to it. The parameters that are null are not sent.
-        $fallback = in_array($model, self::FALLBACK_MODELS, true);
+        // Only the models that accept it get the fallback, and only if the operator did not turn it off: the others answer a 400 to it.
+        // The parameters that are null are not sent.
+        $fallback = config()->boolean('services.anthropic.fallbacks', true) && in_array($model, self::FALLBACK_MODELS, true);
 
         try {
             $message = $this->client(trim($key))->beta->messages->create(
@@ -151,21 +169,58 @@ PROMPT;
      */
     private function client(string $key): Client
     {
-        $timeout = config('services.anthropic.timeout');
+        $stack = HandlerStack::create($this->handler);
+        $stack->push(Middleware::mapResponse(self::boundedRetryWait(...)), 'bounded-retry-wait');
+
         $options = [
-            'timeout' => is_numeric($timeout) && $timeout > 0 ? (int) $timeout : self::DEFAULT_TIMEOUT,
+            'timeout' => $this->timeout(),
             'connect_timeout' => self::CONNECT_TIMEOUT,
             'http_errors' => false,
+            'handler' => $stack,
         ];
-
-        if ($this->handler !== null) {
-            $options['handler'] = $this->handler;
-        }
 
         return new Client(
             apiKey: $key,
             requestOptions: RequestOptions::with(maxRetries: 1, transporter: new Guzzle($options)),
         );
+    }
+
+    /**
+     * The seconds a request may take: `ANTHROPIC_TIMEOUT`, held between {@see self::MIN_TIMEOUT} and {@see self::MAX_TIMEOUT}; the default
+     * when it is empty, zero or not a number.
+     */
+    private function timeout(): int
+    {
+        $timeout = config('services.anthropic.timeout');
+        $seconds = is_numeric($timeout) && $timeout > 0 ? (int) $timeout : self::DEFAULT_TIMEOUT;
+
+        return max(self::MIN_TIMEOUT, min(self::MAX_TIMEOUT, $seconds));
+    }
+
+    /**
+     * The answer of the API with the wait it asks for before a retry (`Retry-After`, `retry-after-ms`) cut to {@see self::MAX_RETRY_WAIT}
+     * seconds: the SDK does what the API says to the letter, which could keep the job asleep until the queue kills it.
+     */
+    public static function boundedRetryWait(ResponseInterface $response): ResponseInterface
+    {
+        $milliseconds = $response->getHeaderLine('retry-after-ms');
+
+        if (is_numeric($milliseconds) && (float) $milliseconds > self::MAX_RETRY_WAIT * 1000) {
+            $response = $response->withHeader('retry-after-ms', (string) (self::MAX_RETRY_WAIT * 1000));
+        }
+
+        $after = $response->getHeaderLine('retry-after');
+
+        if ($after !== '') {
+            // Seconds, or a date.
+            $seconds = is_numeric($after) ? (float) $after : (($date = strtotime($after)) !== false ? (float) ($date - time()) : 0.0);
+
+            if ($seconds > self::MAX_RETRY_WAIT) {
+                $response = $response->withHeader('retry-after', (string) self::MAX_RETRY_WAIT);
+            }
+        }
+
+        return $response;
     }
 
     /**

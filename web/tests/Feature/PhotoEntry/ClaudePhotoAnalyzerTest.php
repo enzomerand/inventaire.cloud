@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Jobs\AnalyzePhotos;
 use App\Models\InventoryField;
+use App\Models\PhotoAnalysis;
 use App\PhotoEntry\ClaudePhotoAnalyzer;
 use App\PhotoEntry\PhotoAnalysisError;
 use App\PhotoEntry\PhotoAnalysisException;
@@ -260,6 +262,29 @@ describe('the request', function (): void {
         expect($history[0]['options']['timeout'])->toBe(45)->and($history[0]['options']['connect_timeout'])->toBe(10)->and($history[0]['options']['http_errors'])->toBeFalse();
     });
 
+    it('holds the timeout between 10 and 120 seconds, so that two requests stay under the 300 seconds of the job', function (int $configured, int $expected): void {
+        config(['services.anthropic.timeout' => $configured]);
+        $case = claudeFields();
+        $history = [];
+
+        claudeAnalyzer([claudeResponse(claudeBody(claudeAnswerText([])))], $history)->analyze(['jpeg'], $case['fields'], 'en');
+
+        expect($history[0]['options']['timeout'])->toBe($expected)
+            ->and(2 * ClaudePhotoAnalyzer::MAX_TIMEOUT + ClaudePhotoAnalyzer::MAX_RETRY_WAIT)->toBeLessThan((new AnalyzePhotos(PhotoAnalysis::factory()->make()))->timeout);
+    })->with([[1, 10], [9, 10], [10, 10], [90, 90], [120, 120], [121, 120], [3600, 120], [-5, 90]]);
+
+    it('cuts the wait the API asks for before the retry', function (): void {
+        $answer = fn (array $headers): Response => new Response(429, $headers);
+
+        expect(ClaudePhotoAnalyzer::boundedRetryWait($answer(['retry-after' => '3600']))->getHeaderLine('retry-after'))->toBe('30')
+            ->and(ClaudePhotoAnalyzer::boundedRetryWait($answer(['retry-after-ms' => '3600000']))->getHeaderLine('retry-after-ms'))->toBe('30000')
+            ->and(ClaudePhotoAnalyzer::boundedRetryWait($answer(['retry-after' => gmdate('D, d M Y H:i:s', time() + 7200).' GMT']))->getHeaderLine('retry-after'))->toBe('30')
+            // A short wait, or none, is left as it is.
+            ->and(ClaudePhotoAnalyzer::boundedRetryWait($answer(['retry-after' => '2']))->getHeaderLine('retry-after'))->toBe('2')
+            ->and(ClaudePhotoAnalyzer::boundedRetryWait($answer(['retry-after-ms' => '1500']))->getHeaderLine('retry-after-ms'))->toBe('1500')
+            ->and(ClaudePhotoAnalyzer::boundedRetryWait($answer([]))->getHeaders())->toBe([]);
+    });
+
     it('falls back to the default timeout when the configuration has none', function (): void {
         config(['services.anthropic.timeout' => 0]);
         $case = claudeFields();
@@ -283,6 +308,22 @@ describe('the fallback', function (): void {
             ->and(claudeSent($history)['fallbacks'])->toBe('default')
             ->and($history[0]['request']->getHeaderLine('anthropic-beta'))->toContain('server-side-fallback-2026-07-01');
     })->with(['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5', 'claude-fable-5-1']);
+
+    it('is not asked for by any model when the operator turned it off, and the model stays', function (): void {
+        config(['services.anthropic.model' => 'claude-sonnet-5-5', 'services.anthropic.fallbacks' => false]);
+        $case = claudeFields();
+        $history = [];
+
+        claudeAnalyzer([claudeResponse(claudeBody(claudeAnswerText([])))], $history)->analyze(['jpeg'], $case['fields'], 'en');
+
+        expect(claudeSent($history)['model'])->toBe('claude-sonnet-5-5')
+            ->and(claudeSent($history))->not->toHaveKey('fallbacks')
+            ->and($history[0]['request']->getHeaderLine('anthropic-beta'))->not->toContain('fallback');
+    });
+
+    it('is on unless the configuration says otherwise', function (): void {
+        expect(config('services.anthropic.fallbacks'))->toBeTrue();
+    });
 
     it('is not asked for by the others, which would answer with a 400', function (string $model): void {
         config(['services.anthropic.model' => $model]);
