@@ -32,7 +32,7 @@ import {
     summarizeOptions,
 } from '../fields/options.js';
 import { COLORS, swatchClass } from '../fields/palette.js';
-import { firstMessages, fillUrl } from '../lib/forms.js';
+import { firstMessages, fillUrl, revealFirstRefusal } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -633,11 +633,26 @@ export default function inventoryFields() {
                 this.errors = messages;
                 this.formError =
                     other !== undefined ? messages[other] : Object.keys(messages).length === 0 ? error.message : '';
+                this.revealRefusal();
             } else if (error.status === 409 && error.code === 'field_limit_reached') {
                 this.formError = t('fields.error.limit', { count: error.body?.limit ?? '' });
+                this.revealRefusal();
             } else {
                 notify('danger', error.message);
             }
+        },
+
+        /**
+         * Brings the first refusal of the dialog into view and puts the cursor on its control, once it has been rendered: the
+         * options of a type (the choices of a select, say) can push it outside what the scrolling part of the dialog shows, and
+         * "Save" would look as if it did nothing.
+         *
+         * @returns {void}
+         */
+        revealRefusal() {
+            const dialog = this.$refs.fieldModal;
+
+            this.$nextTick(() => revealFirstRefusal(dialog));
         },
 
         /**

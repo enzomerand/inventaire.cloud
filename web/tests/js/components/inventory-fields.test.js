@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import inventoryFields from '../../../resources/js/components/inventory-fields.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
@@ -455,6 +455,129 @@ describe('the fields of an inventory', () => {
             await component.save();
 
             expect(component.formError).toBe('Field limit reached (100 per inventory).');
+        });
+
+        describe('when the refusal lies outside what the dialog shows', () => {
+            let scroll;
+
+            /** Puts in the page what the dialog renders for the refusals the component holds (the markup is Alpine's job). */
+            function render(html) {
+                fieldModal.innerHTML = html;
+                document.body.append(fieldModal);
+            }
+
+            /** A choice of a select in the dialog: its box, and the message under it when it was refused. */
+            const choice = (index, message = '') => `
+                <div class="mb-2">
+                    <div class="input-group"><input id="choice-${index}" class="form-control" aria-label="Choice"></div>
+                    <div class="text-danger small mt-1">${message}</div>
+                </div>
+            `;
+
+            beforeEach(() => {
+                // jsdom has no layout, hence no scrollIntoView.
+                scroll = vi.fn();
+                Element.prototype.scrollIntoView = scroll;
+                component.startCreate();
+                component.form.name = 'Name';
+            });
+
+            afterEach(() => {
+                delete Element.prototype.scrollIntoView;
+                fieldModal.remove();
+            });
+
+            it('scrolls to the first input that was refused and puts the cursor in it', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: {
+                            name: ['This inventory already has a field with this name.'],
+                            'options.choices': ['At least one choice is required.'],
+                        },
+                    }),
+                );
+                render(`
+                    <div class="mb-3">
+                        <input id="field-name" class="form-control is-invalid">
+                        <div class="text-danger small mt-1">This inventory already has a field with this name.</div>
+                    </div>
+                    <div class="mb-3">${choice(0)}</div>
+                `);
+
+                await component.save();
+
+                expect(scroll).toHaveBeenCalledTimes(1);
+                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('#field-name'));
+                expect(document.activeElement).toBe(fieldModal.querySelector('#field-name'));
+            });
+
+            it('scrolls to the message of a choice, and to the one under the choices, with the cursor in their box', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: { 'options.choices.1.label': ['The choice label is required.'] },
+                    }),
+                );
+                render(`
+                    <div class="mb-3"><input id="field-name" class="form-control"></div>
+                    <div class="mb-3">${choice(0)}${choice(1, 'The choice label is required.')}</div>
+                `);
+
+                await component.save();
+
+                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('.text-danger:not(:empty)'));
+                expect(document.activeElement).toBe(fieldModal.querySelector('#choice-1'));
+
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: { 'options.choices': ['Two choices have the same name.'] },
+                    }),
+                );
+                render(`
+                    <div class="mb-3">
+                        ${choice(0)}${choice(1)}
+                        <div class="form-hint mt-2">Renaming or recoloring a choice keeps it on the items that have it.</div>
+                        <div class="text-danger small mt-1">Two choices have the same name.</div>
+                    </div>
+                `);
+                scroll.mockClear();
+
+                await component.save();
+
+                expect(scroll.mock.contexts[0].textContent).toBe('Two choices have the same name.');
+                expect(document.activeElement).toBe(fieldModal.querySelector('#choice-0'));
+            });
+
+            it('scrolls to the message at the top for a refusal that is about no input, and to the one that says the quota is reached', async () => {
+                http.post.mockRejectedValueOnce(new HttpError(422, 'Invalid.', { errors: { odd: ['Odd.'] } }));
+                render(
+                    '<div class="alert alert-danger" role="alert">Odd.</div><input id="field-name" class="form-control">',
+                );
+                const before = document.activeElement;
+
+                await component.save();
+
+                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('.alert-danger'));
+                expect(document.activeElement).toBe(before);
+
+                scroll.mockClear();
+                http.post.mockRejectedValueOnce(
+                    new HttpError(409, 'Conflict', { code: 'field_limit_reached', body: { limit: 100 } }),
+                );
+                fieldModal.querySelector('.alert-danger').textContent = 'Field limit reached (100 per inventory).';
+
+                await component.save();
+
+                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('.alert-danger'));
+            });
+
+            it('does not look for a refusal when the failure is shown as a toast', async () => {
+                http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'odd' }));
+                render('<input id="field-name" class="form-control is-invalid">');
+
+                await component.save();
+
+                expect(scroll).not.toHaveBeenCalled();
+            });
         });
 
         it('shows other failures as a toast, but not the ones the HTTP helper already told', async () => {

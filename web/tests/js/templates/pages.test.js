@@ -3737,6 +3737,8 @@ describe('the pages under the real Alpine CSP build', () => {
                 const feedback = (id) => control(id).closest('.mb-3').querySelector('.text-danger');
 
                 expect(control('name').classList.contains('is-invalid')).toBe(true);
+                // The first refusal is brought into view with the cursor in its control, wherever it lies in a long form.
+                expect(document.activeElement).toBe(control('name'));
                 expect(visible(feedback('name'))).toBe(true);
                 expect(feedback('name').textContent).toBe('The Name is required.');
                 expect(feedback('qty').textContent).toBe('The Weight must be a number, written with a dot.');
@@ -7577,6 +7579,8 @@ describe('the pages under the real Alpine CSP build', () => {
             await submit(fieldDialog().querySelector('form'));
 
             expect(input('field-name').classList.contains('is-invalid')).toBe(true);
+            // The first refusal is brought into view with the cursor in its input, wherever it lies in a long dialog.
+            expect(document.activeElement).toBe(input('field-name'));
             expect(input('field-name').parentElement.querySelector('.text-danger').textContent).toBe(
                 'This inventory already has a field with this name.',
             );
@@ -8168,6 +8172,19 @@ describe('the pages under the real Alpine CSP build', () => {
                 await submit(form());
 
                 expect(error().textContent).toBe('Wait 30 seconds');
+            });
+
+            it('puts the cursor in the first input that was refused', async () => {
+                await open([]);
+                http.post.mockRejectedValueOnce(
+                    new HttpError(422, 'Invalid.', { errors: { label: ['Too long.'], signers: ['Add a signer.'] } }),
+                );
+                await press('New version', document.querySelector('.btn-list'));
+                document.body.focus();
+
+                await submit(form());
+
+                expect(document.activeElement).toBe(field('version-label'));
             });
 
             it('forgets the refusals on a new attempt', async () => {

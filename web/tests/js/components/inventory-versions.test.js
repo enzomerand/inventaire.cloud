@@ -580,6 +580,95 @@ describe('the page of the official versions', () => {
             expect(component.errors).toEqual({});
         });
 
+        describe('when the refusal lies outside what the dialog shows', () => {
+            let scroll;
+
+            /** Puts in the page what the dialog renders (the markup is Alpine's job): the inputs, and the alert under the buttons. */
+            function render({ label = '', email = '', formError = '' } = {}) {
+                const dialog = component.$refs.createModal;
+
+                dialog.innerHTML = `
+                    <div class="modal-body">
+                        <input id="version-label" class="form-control${label ? ' is-invalid' : ''}">
+                        <div class="invalid-feedback">${label}</div>
+                        <fieldset>
+                            <input id="signer-name-0" class="form-control">
+                            <input id="signer-email-0" class="form-control${email ? ' is-invalid' : ''}">
+                            <div class="invalid-feedback">${email}</div>
+                        </fieldset>
+                    </div>
+                    <div class="modal-footer">
+                        <div class="alert alert-danger" role="alert"${formError ? '' : ' hidden'}>${formError}</div>
+                    </div>
+                `;
+                document.body.append(dialog);
+
+                return dialog;
+            }
+
+            beforeEach(() => {
+                // jsdom has no layout, hence no scrollIntoView.
+                scroll = vi.fn();
+                Element.prototype.scrollIntoView = scroll;
+            });
+
+            afterEach(() => {
+                delete Element.prototype.scrollIntoView;
+                component.$refs.createModal.remove();
+            });
+
+            it('scrolls to the first input that was refused and puts the cursor in it', async () => {
+                await mount();
+                http.post.mockRejectedValue(
+                    failure(422, { errors: { label: ['Too long.'], 'signers.0.email': ['Not valid.'] } }),
+                );
+                const dialog = render({ label: 'Too long.', email: 'Not valid.' });
+                component.startCreate();
+
+                await component.submit();
+
+                expect(scroll).toHaveBeenCalledTimes(1);
+                expect(scroll.mock.contexts[0]).toBe(dialog.querySelector('#version-label'));
+                expect(document.activeElement).toBe(dialog.querySelector('#version-label'));
+            });
+
+            it('goes to the input of a signer when it is the only one refused', async () => {
+                await mount();
+                http.post.mockRejectedValue(failure(422, { errors: { 'signers.0.email': ['Not valid.'] } }));
+                const dialog = render({ email: 'Not valid.' });
+                component.startCreate();
+
+                await component.submit();
+
+                expect(scroll.mock.contexts[0]).toBe(dialog.querySelector('#signer-email-0'));
+                expect(document.activeElement).toBe(dialog.querySelector('#signer-email-0'));
+            });
+
+            it('goes to the message under the buttons for a refusal that is about no input', async () => {
+                await mount();
+                http.post.mockRejectedValue(failure(409, { code: 'storage_limit_reached' }));
+                const dialog = render({ formError: 'The storage of this workspace is full.' });
+                const before = document.activeElement;
+                component.startCreate();
+
+                await component.submit();
+
+                expect(scroll.mock.contexts[0]).toBe(dialog.querySelector('.alert-danger'));
+                expect(document.activeElement).toBe(before);
+            });
+
+            it('does not look for a refusal when the request was cancelled', async () => {
+                await mount();
+                http.post.mockRejectedValue(new Error('cancelled'));
+                render({ label: 'Too long.' });
+                component.startCreate();
+
+                await component.submit();
+
+                expect(scroll).not.toHaveBeenCalled();
+            });
+        });
+
         it('forgets a refusal when the dialog is closed, however it was', async () => {
             await mount();
             http.post.mockRejectedValue(failure(422, { errors: { label: ['Too long.'] } }));

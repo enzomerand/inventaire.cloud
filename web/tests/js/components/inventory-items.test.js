@@ -921,6 +921,91 @@ describe('the items of an inventory', () => {
             expect(component.formError).toBe('Item limit reached (10000 per inventory).');
         });
 
+        describe('when the refusal lies outside what the dialog shows', () => {
+            let scroll;
+
+            /** Puts in the page what the dialog renders for the refusals the component holds (the markup is Alpine's job). */
+            function render(html) {
+                modal.innerHTML = html;
+                document.body.append(modal);
+            }
+
+            beforeEach(() => {
+                // jsdom has no layout, hence no scrollIntoView.
+                scroll = vi.fn();
+                Element.prototype.scrollIntoView = scroll;
+            });
+
+            afterEach(() => {
+                delete Element.prototype.scrollIntoView;
+                modal.remove();
+            });
+
+            it('scrolls to the first field that was refused and puts the cursor in it', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: {
+                            'values.price': ['The Price must have at most 2 decimals.'],
+                            'values.qty': ['The Weight must be at least 0.'],
+                        },
+                    }),
+                );
+                render(`
+                    <div class="mb-3"><input id="name" class="form-control"></div>
+                    <div class="mb-3">
+                        <input id="qty" class="form-control is-invalid">
+                        <div class="text-danger small">The Weight must be at least 0.</div>
+                    </div>
+                    <div class="mb-3">
+                        <input id="price" class="form-control is-invalid">
+                        <div class="text-danger small">The Price must have at most 2 decimals.</div>
+                    </div>
+                `);
+
+                await component.save();
+
+                expect(scroll).toHaveBeenCalledTimes(1);
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('#qty'));
+                expect(document.activeElement).toBe(modal.querySelector('#qty'));
+            });
+
+            it('scrolls to the message at the top for a refusal that is about no field, and leaves the cursor alone', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', { errors: { 'values.vanished': ['This field no longer exists.'] } }),
+                );
+                render(`
+                    <div class="alert alert-danger" role="alert">This field no longer exists.</div>
+                    <div class="mb-3"><input id="name" class="form-control"></div>
+                `);
+                const before = document.activeElement;
+
+                await component.save();
+
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('.alert-danger'));
+                expect(document.activeElement).toBe(before);
+            });
+
+            it('scrolls to the message that says the quota is reached', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(409, 'Conflict', { code: 'item_limit_reached', body: { limit: 10000 } }),
+                );
+                render('<div class="alert alert-danger" role="alert">Item limit reached (10000 per inventory).</div>');
+
+                await component.save();
+
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('.alert-danger'));
+            });
+
+            it('does nothing for a failure that is not shown in the dialog', async () => {
+                http.post.mockRejectedValue(new HttpError(500, 'Server down', { reported: true }));
+                render('<input id="name" class="form-control">');
+
+                await component.save();
+
+                expect(scroll).not.toHaveBeenCalled();
+            });
+        });
+
         it('takes the person back to the workspace when the inventory was deleted while the form was open', async () => {
             const gone = new HttpError(404, 'This item no longer exists.');
             gone.reported = true;

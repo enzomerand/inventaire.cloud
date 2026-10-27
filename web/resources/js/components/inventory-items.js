@@ -60,7 +60,7 @@ import {
     selectOptionsOf,
     toInput,
 } from '../fields/index.js';
-import { firstMessages, fillUrl } from '../lib/forms.js';
+import { firstMessages, fillUrl, revealFirstRefusal } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -1332,6 +1332,7 @@ export default function inventoryItems() {
                 this.refuse(error);
             } else if (error.status === 409 && error.code === 'item_limit_reached') {
                 this.formError = t('inventories.error.item_limit', { count: error.body?.limit ?? '' });
+                this.revealRefusal();
             } else {
                 notify('danger', error.message);
             }
@@ -1393,6 +1394,21 @@ export default function inventoryItems() {
             if (unknown.length > 0) {
                 this.loadInventory();
             }
+
+            this.revealRefusal();
+        },
+
+        /**
+         * Brings the first refusal of the dialog into view and puts the cursor on its control, once it has been rendered: in a
+         * long form it can lie outside what the scrolling part of the dialog shows, and "Save" would look as if it did nothing.
+         * The dialog is taken before the wait, for the same reason as the root (see `rootElement`).
+         *
+         * @returns {void}
+         */
+        revealRefusal() {
+            const dialog = this.$refs.modal;
+
+            this.$nextTick(() => revealFirstRefusal(dialog));
         },
     });
 }
