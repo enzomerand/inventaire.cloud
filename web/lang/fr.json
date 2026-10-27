@@ -278,6 +278,8 @@
     "choice identifier": "identifiant du choix",
     "choice label": "libellé du choix",
     "choices": "choix",
+    "name of signer :position": "nom du signataire :position",
+    "email address of signer :position": "adresse e-mail du signataire :position",
     "Choose": "Choisir",
     "Choose :name": "Choisir :name",
     "Choose File": "Choisir le fichier",

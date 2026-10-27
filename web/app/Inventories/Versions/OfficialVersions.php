@@ -201,6 +201,10 @@ final class OfficialVersions
             'signers.*.email' => [...EmailAddress::rules(), 'distinct'],
         ], [
             'signers.*.email.distinct' => __('Each signer needs a different email address.'),
+        ], [
+            // `:position` is filled in by Laravel for the wildcard: the message says which signer, never "signers.0.name".
+            'signers.*.name' => __('name of signer :position'),
+            'signers.*.email' => __('email address of signer :position'),
         ]);
 
         $validator->validate();
