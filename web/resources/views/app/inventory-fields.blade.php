@@ -96,10 +96,10 @@
                             </div>
                             <div class="col-12 col-md-auto">
                                 <div class="d-flex flex-wrap gap-2">
-                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="named('fields.move_up_named', field)" :title="named('fields.move_up_named', field)" @click="moveUp(field)" :disabled="busy || isFirst(field)">
+                                    <button type="button" class="btn btn-sm btn-icon" data-field-action="up" :data-field-id="field.id" :aria-label="named('fields.move_up_named', field)" :title="named('fields.move_up_named', field)" @click="moveUp(field)" :disabled="busy || isFirst(field)">
                                         <x-tabler-arrow-up aria-hidden="true" />
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-icon" :aria-label="named('fields.move_down_named', field)" :title="named('fields.move_down_named', field)" @click="moveDown(field)" :disabled="busy || isLast(field)">
+                                    <button type="button" class="btn btn-sm btn-icon" data-field-action="down" :data-field-id="field.id" :aria-label="named('fields.move_down_named', field)" :title="named('fields.move_down_named', field)" @click="moveDown(field)" :disabled="busy || isLast(field)">
                                         <x-tabler-arrow-down aria-hidden="true" />
                                     </button>
                                     <button type="button" class="btn btn-sm btn-icon" :aria-label="named('fields.edit_named', field)" :title="named('fields.edit_named', field)" @click="startEdit(field)" :disabled="busy">

@@ -7448,6 +7448,27 @@ describe('the pages under the real Alpine CSP build', () => {
             ]);
         });
 
+        it('keeps the cursor on the button that moved a field, or on the other one at the end of the list', async () => {
+            await open();
+            http.put.mockResolvedValueOnce({ data: [FIELDS[1], FIELDS[0], FIELDS[2]] });
+
+            await press('Move Name down');
+
+            // The pressed button was disabled while the order was on its way: the cursor is put back on it.
+            expect(document.activeElement).toBe(buttons('Move Name down')[0]);
+            expect(document.activeElement.disabled).toBe(false);
+
+            http.put.mockResolvedValueOnce({ data: [FIELDS[1], FIELDS[2], FIELDS[0]] });
+
+            await press('Move Name down');
+
+            // Name is the last field now: it can no longer go down, so the cursor goes to the button that moves it back up.
+            expect(buttons('Move Name down')).toHaveLength(1);
+            expect(buttons('Move Name down')[0].disabled).toBe(true);
+            expect(document.activeElement).toBe(buttons('Move Name up')[0]);
+            expect(document.activeElement.disabled).toBe(false);
+        });
+
         it('shows the options of the type that is picked, and sends them with the new field', async () => {
             await open();
             http.post.mockResolvedValue({ data: { id: 'new' } });

@@ -62,6 +62,7 @@ function inventoryAnswer(fields = FIELDS) {
 
 describe('the fields of an inventory', () => {
     let component;
+    let root;
     let fieldModal;
     let deleteModal;
 
@@ -69,17 +70,18 @@ describe('the fields of an inventory', () => {
         fieldModal = document.createElement('div');
         deleteModal = document.createElement('div');
         component = inventoryFields();
-        component.$root = {
-            dataset: {
-                url: INVENTORY,
-                fieldsUrl: INVENTORY + '/fields',
-                orderUrl: INVENTORY + '/fields/order',
-                fieldUrl: INVENTORY + '/fields/__id__',
-                workspacePage: '/app/w/shop',
-                types: JSON.stringify(TYPES),
-                currencies: JSON.stringify(CURRENCIES),
-            },
-        };
+        // An element, as Alpine hands it over: the move buttons of the rows are looked up in it.
+        root = document.createElement('div');
+        Object.assign(root.dataset, {
+            url: INVENTORY,
+            fieldsUrl: INVENTORY + '/fields',
+            orderUrl: INVENTORY + '/fields/order',
+            fieldUrl: INVENTORY + '/fields/__id__',
+            workspacePage: '/app/w/shop',
+            types: JSON.stringify(TYPES),
+            currencies: JSON.stringify(CURRENCIES),
+        });
+        component.$root = root;
         component.$refs = { fieldModal, deleteModal };
         component.$nextTick = (callback) => callback();
         http.get.mockResolvedValue(inventoryAnswer());
@@ -247,6 +249,105 @@ describe('the fields of an inventory', () => {
             expect(notify).toHaveBeenCalledWith('danger', 'The list must contain every field.');
             expect(component.fields.map((one) => one.id)).toEqual(['a', 'b', 'c', 'd']);
             expect(component.busy).toBe(false);
+        });
+
+        describe('where the cursor goes once the order has been sent', () => {
+            /** The move buttons of the rows, as the markup names them (`data-field-action`, `data-field-id`). */
+            function render(ids) {
+                root.innerHTML = ids
+                    .map(
+                        (id) =>
+                            `<div><button data-field-action="up" data-field-id="${id}"></button>` +
+                            `<button data-field-action="down" data-field-id="${id}"></button></div>`,
+                    )
+                    .join('');
+                document.body.append(root);
+            }
+
+            const button = (id, action) => root.querySelector(`[data-field-action="${action}"][data-field-id="${id}"]`);
+
+            afterEach(() => root.remove());
+
+            it('goes back to the button that was pressed, on the same field, whichever way it went', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockResolvedValue({ data: reordered(['b', 'a', 'c']) });
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(button('a', 'down'));
+
+                component.fields = FIELDS;
+                http.put.mockResolvedValue({ data: reordered(['a', 'c', 'b']) });
+
+                await component.moveUp(FIELDS[2]);
+
+                expect(document.activeElement).toBe(button('c', 'up'));
+            });
+
+            it('goes to the other button when the field has reached an end of the list, where the pressed one is disabled', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockResolvedValue({ data: reordered(['a', 'c', 'b']) });
+
+                await component.moveDown(FIELDS[1]);
+
+                // Last of the list: it cannot go down any more, it can go back up.
+                expect(document.activeElement).toBe(button('b', 'up'));
+
+                component.fields = FIELDS;
+                http.put.mockResolvedValue({ data: reordered(['b', 'a', 'c']) });
+
+                await component.moveUp(FIELDS[1]);
+
+                // First of the list: it can go back down.
+                expect(document.activeElement).toBe(button('b', 'down'));
+            });
+
+            it('waits for the rendering: the cursor is not put anywhere before the rows are drawn again', async () => {
+                render(['a', 'b', 'c']);
+                const waiting = [];
+                component.$nextTick = (callback) => waiting.push(callback);
+                http.put.mockResolvedValue({ data: reordered(['b', 'a', 'c']) });
+                const before = document.activeElement;
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(before);
+                expect(waiting).toHaveLength(1);
+
+                waiting[0]();
+
+                expect(document.activeElement).toBe(button('a', 'down'));
+            });
+
+            it('puts the cursor back too when the order was refused and the list is read again', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockRejectedValue(new HttpError(422, 'Invalid.', { errors: { fields: ['Nope.'] } }));
+                http.get.mockResolvedValue(inventoryAnswer(FIELDS));
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(button('a', 'down'));
+            });
+
+            it('leaves the cursor alone when the field is gone from the list the server holds', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockRejectedValue(new HttpError(422, 'Invalid.', { errors: { fields: ['Nope.'] } }));
+                http.get.mockResolvedValue(inventoryAnswer([FIELDS[1], FIELDS[2]]));
+                const before = document.activeElement;
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(before);
+            });
+
+            it('does nothing when no order was sent', async () => {
+                render(['a', 'b', 'c']);
+                const before = document.activeElement;
+
+                await component.moveUp(FIELDS[0]);
+
+                expect(document.activeElement).toBe(before);
+            });
         });
 
         it('names the buttons after the field', () => {

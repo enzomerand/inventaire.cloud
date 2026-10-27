@@ -321,6 +321,36 @@ export default function inventoryFields() {
             } finally {
                 this.busy = false;
             }
+
+            this.focusMove(field.id, places < 0 ? 'up' : 'down');
+        },
+
+        /**
+         * Puts the cursor back on a move button of a field once the list has been rendered again: the button that was pressed was
+         * disabled while the order was on its way, which sent the cursor to the page. The same button is kept as long as the field
+         * can still go that way; at the end of the list it is the other one.
+         *
+         * @param {string} id The field that was moved.
+         * @param {'up' | 'down'} action The button that was pressed (`data-field-action`).
+         * @returns {void}
+         */
+        focusMove(id, action) {
+            // Taken now, not in the wait: Alpine stops answering `$root` once the element that started the call has left the page.
+            const root = this.$root;
+
+            this.$nextTick(() => {
+                const field = this.fields.find((other) => other.id === id);
+
+                if (field === undefined) {
+                    return;
+                }
+
+                const stuck = action === 'up' ? this.isFirst(field) : this.isLast(field);
+                const wanted = stuck ? (action === 'up' ? 'down' : 'up') : action;
+                const buttons = root.querySelectorAll(`[data-field-action="${wanted}"]`);
+
+                [...buttons].find((button) => button.dataset.fieldId === id)?.focus();
+            });
         },
 
         /**
