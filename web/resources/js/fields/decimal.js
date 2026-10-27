@@ -11,6 +11,9 @@ import { numberFormat, pageLocale } from './locale.js';
 /** Characters people put between groups of digits: spaces (also the non-breaking ones) and the Swiss apostrophe. */
 const GROUPING = /[\s\u00a0\u202f'\u2019]/g;
 
+/** A number as the API takes it: digits, a fraction after a dot, a minus sign in front of a negative one. */
+const DECIMAL_TEXT = /^-?\d+(\.\d+)?$/;
+
 /**
  * Reads what was typed in a number box into the text the API accepts: a dot for the decimal separator, no grouping.
  *
@@ -18,8 +21,8 @@ const GROUPING = /[\s\u00a0\u202f'\u2019]/g;
  * other one groups thousands. A comma alone is a decimal separator too, except in a language whose own separator is the
  * dot, where commas that only ever separate groups of exactly three digits (`1,234`, `12,345,678`; not `0,500`) group
  * thousands: `1,234` is one thousand two hundred and thirty-four for an English reader, and a little over one for a French one.
- * Text that is not a number is returned as it is (cleaned of spaces): the server judges it and answers with a message
- * the person can read.
+ * Text that is not a number is returned as it is (cleaned of spaces), for whoever calls it to judge with
+ * {@link isDecimalText}: what the API says about it is worded for the people who call the API (a dot, never a comma).
  *
  * @param {unknown} input What was typed.
  * @param {string} [locale] The language of the person, which tells what a lone comma means; the one of the page by default.
@@ -50,6 +53,17 @@ export function parseDecimal(input, locale = pageLocale()) {
     }
 
     return text;
+}
+
+/**
+ * Whether a text, as {@link parseDecimal} returns it, is a number the API can read (it may still refuse it for its decimals,
+ * its size or the limits of the field: only the shape is judged here).
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isDecimalText(text) {
+    return DECIMAL_TEXT.test(text);
 }
 
 /**

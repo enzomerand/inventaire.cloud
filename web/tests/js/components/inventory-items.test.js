@@ -911,6 +911,50 @@ describe('the items of an inventory', () => {
             expect(component.formError).toBe('The given data was invalid.');
         });
 
+        describe('when the text typed in a number box is no number', () => {
+            const SAID = 'Enter a number with at most 6 decimals.';
+            const [name, qty, price] = FIELDS;
+
+            it('says so under the box without sending anything, whatever the kind of number', async () => {
+                component.onInput(name, { target: { value: 'Hammer' } });
+                component.onInput(qty, { target: { value: 'abc' } });
+                component.onInput(price, { target: { value: '12 euros' } });
+
+                await component.save();
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(component.errors).toEqual({ qty: SAID, price: SAID });
+                expect(component.errorOf(qty)).toBe(SAID);
+                expect(component.controlClass(qty)).toBe('form-control is-invalid');
+                expect(component.formError).toBe('');
+                expect(hideModal).not.toHaveBeenCalled();
+                expect(component.busy).toBe(false);
+            });
+
+            it('forgets the message of a box as soon as it is typed in again, and sends the form once every box is right', async () => {
+                component.onInput(qty, { target: { value: 'abc' } });
+                await component.save();
+
+                component.onInput(qty, { target: { value: '1,5' } });
+                expect(component.errorOf(qty)).toBe('');
+
+                await component.save();
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(http.post.mock.calls[0][1].values).toMatchObject({ qty: '1.5' });
+            });
+
+            it('leaves the judging of a number to the API: its decimals, its size, the limits of the field', async () => {
+                component.onInput(qty, { target: { value: '1,2345' } });
+                component.onInput(price, { target: { value: '-99999999999' } });
+
+                await component.save();
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(http.post.mock.calls[0][1].values).toMatchObject({ qty: '1.2345', price: '-99999999999' });
+            });
+        });
+
         it('says the quota is reached', async () => {
             http.post.mockRejectedValue(
                 new HttpError(409, 'Conflict', { code: 'item_limit_reached', body: { limit: 10000 } }),
@@ -985,6 +1029,23 @@ describe('the items of an inventory', () => {
                 expect(document.activeElement).toBe(before);
             });
 
+            it('scrolls to the first number box whose text is no number, before anything is sent', async () => {
+                component.onInput(FIELDS[1], { target: { value: 'abc' } });
+                render(`
+                    <div class="mb-3"><input id="name" class="form-control"></div>
+                    <div class="mb-3">
+                        <input id="qty" class="form-control is-invalid">
+                        <div class="text-danger small">Enter a number with at most 6 decimals.</div>
+                    </div>
+                `);
+
+                await component.save();
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('#qty'));
+                expect(document.activeElement).toBe(modal.querySelector('#qty'));
+            });
+
             it('scrolls to the message that says the quota is reached', async () => {
                 http.post.mockRejectedValue(
                     new HttpError(409, 'Conflict', { code: 'item_limit_reached', body: { limit: 10000 } }),
@@ -1048,6 +1109,22 @@ describe('the items of an inventory', () => {
             answer([item('i1', STORED)]);
             await component.init();
             http.patch.mockResolvedValue({ data: item('i1') });
+        });
+
+        it('does not send a number box that was changed to something that is no number, and says so under it', async () => {
+            component.open({ id: 'i1' });
+            component.onInput(FIELDS[1], { target: { value: '1,5x' } });
+
+            await component.save();
+
+            expect(http.patch).not.toHaveBeenCalled();
+            expect(component.errorOf(FIELDS[1])).toBe('Enter a number with at most 6 decimals.');
+            expect(hideModal).not.toHaveBeenCalled();
+
+            component.onInput(FIELDS[1], { target: { value: '1,75' } });
+            await component.save();
+
+            expect(http.patch).toHaveBeenCalledWith(ITEMS + '/i1', { values: { qty: '1.75' } });
         });
 
         it('sends only what was changed', async () => {

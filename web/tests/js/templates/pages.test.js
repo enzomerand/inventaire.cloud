@@ -3721,6 +3721,34 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(badges()).toEqual(['Two']);
             });
 
+            it('says under a number box that its text is no number, without sending the item', async () => {
+                await press('Add item');
+                await type(control('name'), 'Saw');
+                await type(control('qty'), 'abc');
+
+                await submit(itemDialog().querySelector('form'));
+
+                const feedback = (id) => control(id).closest('.mb-3').querySelector('.text-danger');
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(control('qty').classList.contains('is-invalid')).toBe(true);
+                expect(visible(feedback('qty'))).toBe(true);
+                expect(feedback('qty').textContent).toBe('Enter a number with at most 6 decimals.');
+                expect(document.activeElement).toBe(control('qty'));
+                expect(hideModal).not.toHaveBeenCalled();
+
+                http.post.mockResolvedValue({ data: { id: 'new', values: { name: 'Saw', qty: '1.5' } } });
+                await type(control('qty'), '1,5');
+
+                expect(control('qty').classList.contains('is-invalid')).toBe(false);
+                expect(visible(feedback('qty'))).toBe(false);
+
+                await submit(itemDialog().querySelector('form'));
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(http.post.mock.calls[0][1].values).toMatchObject({ name: 'Saw', qty: '1.5' });
+            });
+
             it('shows each refusal under the field it is about', async () => {
                 http.post.mockRejectedValue(
                     new HttpError(422, 'Invalid.', {
@@ -4843,22 +4871,26 @@ describe('the pages under the real Alpine CSP build', () => {
 
             it('shows what the server refuses under the box, which stays for the value to be fixed', async () => {
                 http.patch.mockRejectedValueOnce(
-                    new HttpError(422, 'Invalid', { errors: { 'values.price': ['The price must be a number.'] } }),
+                    new HttpError(422, 'Invalid', {
+                        errors: { 'values.price': ['The price must have at most 2 decimals.'] },
+                    }),
                 );
                 cellButton(0, PRICE).click();
                 await flush();
 
-                await type(editor(), 'abc');
+                await type(editor(), '12.345');
                 key(editor(), 'Enter');
                 await flush();
 
                 expect(editor().classList.contains('is-invalid')).toBe(true);
                 expect(editor().getAttribute('aria-invalid')).toBe('true');
                 expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
-                expect(document.getElementById('item-inline-error').textContent).toBe('The price must be a number.');
+                expect(document.getElementById('item-inline-error').textContent).toBe(
+                    'The price must have at most 2 decimals.',
+                );
                 expect(editor().disabled).toBe(false);
                 expect(editor().closest('td').querySelector('.text-danger').textContent).toBe(
-                    'The price must be a number.',
+                    'The price must have at most 2 decimals.',
                 );
                 expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
                 expect(document.activeElement).toBe(editor());
@@ -4874,6 +4906,37 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(editor()).toBeNull();
                 expect(cellButton(0, PRICE).textContent.trim()).toBe('€12.00');
+            });
+
+            it('says under the box that text is no number, without sending it, and sends the number that fixes it', async () => {
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), 'abc');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).not.toHaveBeenCalled();
+                expect(editor().classList.contains('is-invalid')).toBe(true);
+                expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
+                expect(document.getElementById('item-inline-error').textContent).toBe(
+                    'Enter a number with at most 6 decimals.',
+                );
+                expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
+                expect(document.activeElement).toBe(editor());
+
+                http.patch.mockResolvedValueOnce({ data: { ...HAMMER, values: { ...HAMMER.values, price: '12.50' } } });
+                await type(editor(), '12,5');
+
+                expect(editor().classList.contains('is-invalid')).toBe(false);
+
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { price: '12.5' },
+                });
+                expect(editor()).toBeNull();
             });
 
             it('says an item is gone with a toast, and reads the list again', async () => {

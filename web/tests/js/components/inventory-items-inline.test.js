@@ -318,24 +318,128 @@ describe('editing a cell in place', () => {
         });
     });
 
+    describe('when the text typed is no number', () => {
+        const SAID = 'Enter a number with at most 6 decimals.';
+
+        /** Types in the price box of the first row, then leaves it the way the person does. */
+        async function typePrice(value, source) {
+            await edit(0, 'price');
+            component.onInlineInput({ target: { value } });
+
+            await component.commitInline(source);
+        }
+
+        it('says so under the box without sending anything, and keeps the box open for the value to be fixed', async () => {
+            await typePrice('abc', 'blur');
+
+            expect(http.patch).not.toHaveBeenCalled();
+            expect(component.inlineError).toBe(SAID);
+            expect(component.inlineClass).toBe('form-control form-control-sm is-invalid');
+            expect(component.inlineInvalid).toBe('true');
+            expect(component.inlineDescribedBy).toBe('item-inline-error');
+            expect(component.inlineRow).toBe('i1');
+            expect(component.inlineInput).toBe('abc');
+            expect(component.inlineSaving).toBe(false);
+            expect(component.items[0].values.price).toBe('19.90');
+        });
+
+        it('puts the cursor back in the box after Enter, and leaves it where the person put it after a blur', async () => {
+            const box = document.createElement('input');
+            box.id = 'item-inline-editor';
+            component.$root.append(box);
+            document.body.append(component.$root);
+
+            await typePrice('abc', 'blur');
+            // The cursor went elsewhere (that is what a blur is): saving again after Enter brings it back.
+            box.blur();
+            expect(document.activeElement).not.toBe(box);
+
+            await component.commitInline('blur');
+            expect(document.activeElement).not.toBe(box);
+
+            await component.commitInline('enter');
+            expect(document.activeElement).toBe(box);
+
+            component.$root.remove();
+        });
+
+        it('judges every number box the same way: amounts and percentages too, and what looks like a number only to the eye', async () => {
+            for (const text of ['abc', '12abc', '1.2.3', '--1', '1e3', '12,5,5', '.5', '+5', '-']) {
+                component.closeInline(false);
+                await typePrice(text, 'blur');
+
+                expect(component.inlineError, text).toBe(SAID);
+            }
+
+            expect(http.patch).not.toHaveBeenCalled();
+        });
+
+        it('sends what a person may type for a number: a comma, groups of digits, a minus sign, a number the API will judge', async () => {
+            http.patch.mockResolvedValue(changed(HAMMER, { price: '12.50' }));
+
+            for (const text of ['12,5', '1 299,90', '-3', '7', '12.345', '0']) {
+                http.patch.mockClear();
+                await typePrice(text, 'blur');
+
+                expect(http.patch, text).toHaveBeenCalledTimes(1);
+                expect(component.inlineError, text).toBe('');
+            }
+        });
+
+        it('forgets the message as soon as the text is typed again, and sends the fixed value', async () => {
+            http.patch.mockResolvedValue(changed(HAMMER, { price: '12.00' }));
+            await typePrice('abc', 'enter');
+
+            component.onInlineInput({ target: { value: '12' } });
+            expect(component.inlineError).toBe('');
+            expect(component.inlineInvalid).toBeNull();
+
+            await component.commitInline('enter');
+
+            expect(http.patch).toHaveBeenCalledWith(ITEMS + '/i1', { values: { price: '12' } });
+            expect(component.inlineRow).toBeNull();
+        });
+
+        it('gives the value up without a word when another cell is edited, as it does for a value the server refused', async () => {
+            await typePrice('abc', 'blur');
+
+            await edit(1, 'name');
+
+            expect(component.inlineRow).toBe('i2');
+            expect(component.inlineError).toBe('');
+            expect(notify).not.toHaveBeenCalled();
+            expect(http.patch).not.toHaveBeenCalled();
+        });
+
+        it('does not touch the other kinds of box: a text goes to the server as it is', async () => {
+            http.patch.mockResolvedValue(changed(HAMMER, { name: 'abc' }));
+            await edit(0, 'name');
+            component.onInlineInput({ target: { value: 'abc' } });
+
+            await component.commitInline('blur');
+
+            expect(http.patch).toHaveBeenCalledWith(ITEMS + '/i1', { values: { name: 'abc' } });
+        });
+    });
+
     describe('when the server refuses the value', () => {
         const refusal = () =>
             new HttpError(422, 'The given data was invalid.', {
-                errors: { 'values.price': ['The Price must be a number.'] },
+                errors: { 'values.price': ['The Price must have at most 2 decimals.'] },
             });
 
         it('says why under the control, which stays so that the value can be fixed', async () => {
             http.patch.mockRejectedValue(refusal());
             await edit(0, 'price');
-            component.onInlineInput({ target: { value: 'abc' } });
+            component.onInlineInput({ target: { value: '12.345' } });
 
             await component.commitInline('blur');
 
-            expect(component.inlineError).toBe('The Price must be a number.');
+            expect(component.inlineError).toBe('The Price must have at most 2 decimals.');
             expect(component.inlineClass).toBe('form-control form-control-sm is-invalid');
             expect(component.inlineInvalid).toBe('true');
             expect(component.inlineRow).toBe('i1');
-            expect(component.inlineInput).toBe('abc');
+            expect(component.inlineInput).toBe('12.345');
             expect(component.inlineSaving).toBe(false);
             expect(component.items[0].values.price).toBe('19.90');
         });
@@ -343,7 +447,7 @@ describe('editing a cell in place', () => {
         it('forgets the refusal as soon as the value is typed again, and saves the fixed value', async () => {
             http.patch.mockRejectedValueOnce(refusal()).mockResolvedValueOnce(changed(HAMMER, { price: '12.00' }));
             await edit(0, 'price');
-            component.onInlineInput({ target: { value: 'abc' } });
+            component.onInlineInput({ target: { value: '12.345' } });
             await component.commitInline('enter');
 
             component.onInlineInput({ target: { value: '12' } });
@@ -359,7 +463,7 @@ describe('editing a cell in place', () => {
         it('gives up the value that was refused when another cell is edited, and opens that cell', async () => {
             http.patch.mockRejectedValue(refusal());
             await edit(0, 'price');
-            component.onInlineInput({ target: { value: 'abc' } });
+            component.onInlineInput({ target: { value: '12.345' } });
             await component.commitInline('blur');
 
             await edit(1, 'name');
@@ -378,7 +482,7 @@ describe('editing a cell in place', () => {
             const sent = deferred();
             http.patch.mockReturnValue(sent.promise);
             await edit(0, 'price');
-            component.onInlineInput({ target: { value: 'abc' } });
+            component.onInlineInput({ target: { value: '12.345' } });
             const saving = component.commitInline('blur');
 
             const next = edit(1, 'name');
@@ -388,7 +492,7 @@ describe('editing a cell in place', () => {
 
             expect(notify).toHaveBeenCalledWith(
                 'warning',
-                'The new value of Price was not saved: The Price must be a number.',
+                'The new value of Price was not saved: The Price must have at most 2 decimals.',
             );
             expect(component.inlineRow).toBe('i2');
             expect(component.inlineFieldId).toBe('name');
@@ -400,7 +504,7 @@ describe('editing a cell in place', () => {
             await edit(0, 'price');
             expect(component.inlineDescribedBy).toBeNull();
 
-            component.onInlineInput({ target: { value: 'abc' } });
+            component.onInlineInput({ target: { value: '12.345' } });
             await component.commitInline('blur');
 
             expect(component.inlineDescribedBy).toBe('item-inline-error');
@@ -424,7 +528,7 @@ describe('editing a cell in place', () => {
     describe('when the control is closed before the answer comes', () => {
         const refusal = () =>
             new HttpError(422, 'The given data was invalid.', {
-                errors: { 'values.price': ['The Price must be a number.'] },
+                errors: { 'values.price': ['The Price must have at most 2 decimals.'] },
             });
 
         /** Starts saving a price, and leaves the request pending. */
@@ -432,12 +536,12 @@ describe('editing a cell in place', () => {
             const sent = deferred();
             http.patch.mockReturnValue(sent.promise);
             await edit(0, 'price');
-            component.onInlineInput({ target: { value: 'abc' } });
+            component.onInlineInput({ target: { value: '12.345' } });
 
             return { sent, saving: component.commitInline('blur') };
         }
 
-        const NOT_SAVED = 'The new value of Price was not saved: The Price must be a number.';
+        const NOT_SAVED = 'The new value of Price was not saved: The Price must have at most 2 decimals.';
 
         it('says which field was refused, by a toast, when the view changed meanwhile', async () => {
             const { sent, saving } = await sendPrice();

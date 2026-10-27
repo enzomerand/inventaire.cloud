@@ -6,6 +6,7 @@ import {
     formatDecimal,
     formatMoney,
     formatPercentage,
+    isDecimalText,
     parseDecimal,
     shiftDecimalLeft,
     toDecimalInput,
@@ -41,6 +42,27 @@ describe('parseDecimal()', () => {
     it('lets text that is not a number through, for the server to refuse with a message', () => {
         expect(parseDecimal('12abc')).toBe('12abc');
         expect(parseDecimal('1e5')).toBe('1e5');
+    });
+});
+
+describe('isDecimalText()', () => {
+    it.each(['0', '12', '12.5', '-3', '-0.50', '007', '1234567890123456789.123456789'])(
+        'takes %j for a number',
+        (text) => {
+            expect(isDecimalText(text)).toBe(true);
+        },
+    );
+
+    it.each(['', '-', 'abc', '12abc', '1.2.3', '12.', '.5', '+5', '--1', '1e3', '12,5', ' 12', '١٢'])(
+        'takes %j for something else',
+        (text) => {
+            expect(isDecimalText(text)).toBe(false);
+        },
+    );
+
+    it('judges what parseDecimal() makes of a typed text', () => {
+        expect(isDecimalText(parseDecimal('1 299,90'))).toBe(true);
+        expect(isDecimalText(parseDecimal('12 euros'))).toBe(false);
     });
 });
 
