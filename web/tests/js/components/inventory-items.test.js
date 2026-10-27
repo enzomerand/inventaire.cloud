@@ -912,7 +912,7 @@ describe('the items of an inventory', () => {
         });
 
         describe('when the text typed in a number box is no number', () => {
-            const SAID = 'Enter a number with at most 6 decimals.';
+            const SAID = 'Enter a number, for example 12.5.';
             const [name, qty, price] = FIELDS;
 
             it('says so under the box without sending anything, whatever the kind of number', async () => {
@@ -1118,7 +1118,7 @@ describe('the items of an inventory', () => {
             await component.save();
 
             expect(http.patch).not.toHaveBeenCalled();
-            expect(component.errorOf(FIELDS[1])).toBe('Enter a number with at most 6 decimals.');
+            expect(component.errorOf(FIELDS[1])).toBe('Enter a number, for example 12.5.');
             expect(hideModal).not.toHaveBeenCalled();
 
             component.onInput(FIELDS[1], { target: { value: '1,75' } });

@@ -119,6 +119,7 @@
     "Empty": "Vide",
     "Enter a number with at most 15 digits before the decimal sign.": "Saisissez un nombre avec 15 chiffres au plus avant la virgule.",
     "Enter a number with at most 6 decimals.": "Saisissez un nombre avec 6 décimales au plus.",
+    "Enter a number, for example 12.5.": "Saisissez un nombre, par exemple 12,5.",
     "Field added.": "Champ ajouté.",
     "Field deleted.": "Champ supprimé.",
     "Field limit reached (:count per inventory).": "Limite de champs atteinte (:count par inventaire).",

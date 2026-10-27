@@ -319,7 +319,7 @@ describe('editing a cell in place', () => {
     });
 
     describe('when the text typed is no number', () => {
-        const SAID = 'Enter a number with at most 6 decimals.';
+        const SAID = 'Enter a number, for example 12.5.';
 
         /** Types in the price box of the first row, then leaves it the way the person does. */
         async function typePrice(value, source) {

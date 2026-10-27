@@ -23,6 +23,7 @@ const MESSAGES = {
     'fields.boolean.yes': 'Yes',
     'fields.boolean.no': 'No',
     'fields.rating': ':value out of :max',
+    'fields.error.invalid_number': 'Enter a number, for example 12.5.',
     'grid.filter.invalid_number': 'Enter a number with at most 6 decimals.',
 };
 
@@ -478,7 +479,7 @@ describe('typing a value', () => {
         });
 
         it('refuses text that is no number before it is sent, in the words of the interface', () => {
-            const said = 'Enter a number with at most 6 decimals.';
+            const said = 'Enter a number, for example 12.5.';
 
             for (const type of ['number', 'money', 'percentage']) {
                 const one = field(type, { decimals: 2, currency: 'EUR' });

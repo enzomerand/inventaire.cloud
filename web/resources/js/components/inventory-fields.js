@@ -31,6 +31,7 @@ import {
     optionsToForm,
     summarizeOptions,
 } from '../fields/options.js';
+import { isDecimalText, parseDecimal } from '../fields/decimal.js';
 import { COLORS, swatchClass } from '../fields/palette.js';
 import { firstMessages, fillUrl, revealFirstRefusal } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
@@ -556,8 +557,18 @@ export default function inventoryFields() {
                 this.form.options.choices.push(blankChoice());
             }
 
-            this.busy = true;
             this.resetDialog();
+
+            const refusals = this.boundRefusals();
+
+            if (Object.keys(refusals).length > 0) {
+                this.errors = refusals;
+                this.revealRefusal();
+
+                return;
+            }
+
+            this.busy = true;
 
             const body = {
                 name: this.form.name.trim(),
@@ -670,6 +681,28 @@ export default function inventoryFields() {
             } else {
                 notify('danger', error.message);
             }
+        },
+
+        /**
+         * The bounds of a number field typed as something that is no number, keyed like the refusals of the API. The API
+         * refuses them too, with a message about a dot, while the boxes take a comma.
+         *
+         * @returns {Record<string, string>}
+         */
+        boundRefusals() {
+            if (this.form.type !== 'number') {
+                return {};
+            }
+
+            return Object.fromEntries(
+                ['min', 'max']
+                    .filter((bound) => {
+                        const text = parseDecimal(this.form.options[bound]);
+
+                        return text !== null && !isDecimalText(text);
+                    })
+                    .map((bound) => [`options.${bound}`, t('fields.error.invalid_number')]),
+            );
         },
 
         /**

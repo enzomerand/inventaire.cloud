@@ -3733,7 +3733,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(http.post).not.toHaveBeenCalled();
                 expect(control('qty').classList.contains('is-invalid')).toBe(true);
                 expect(visible(feedback('qty'))).toBe(true);
-                expect(feedback('qty').textContent).toBe('Enter a number with at most 6 decimals.');
+                expect(feedback('qty').textContent).toBe('Enter a number, for example 12.5.');
                 expect(document.activeElement).toBe(control('qty'));
                 expect(hideModal).not.toHaveBeenCalled();
 
@@ -4920,7 +4920,7 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(editor().classList.contains('is-invalid')).toBe(true);
                 expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
                 expect(document.getElementById('item-inline-error').textContent).toBe(
-                    'Enter a number with at most 6 decimals.',
+                    'Enter a number, for example 12.5.',
                 );
                 expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
                 expect(document.activeElement).toBe(editor());

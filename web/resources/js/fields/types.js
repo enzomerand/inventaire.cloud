@@ -185,7 +185,7 @@ const DECIMAL_INPUT = {
     refusal: (input) => {
         const text = parseDecimal(input);
 
-        return text === null || isDecimalText(text) ? null : t('grid.filter.invalid_number');
+        return text === null || isDecimalText(text) ? null : t('fields.error.invalid_number');
     },
 };
 

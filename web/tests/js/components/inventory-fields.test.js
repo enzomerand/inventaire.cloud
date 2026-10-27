@@ -421,6 +421,19 @@ describe('the fields of an inventory', () => {
             expect(component.busy).toBe(false);
         });
 
+        it('refuses bounds that are no number before asking the API', async () => {
+            component.startCreate();
+            component.selectType({ target: { value: 'number' } });
+            component.form.name = 'Weight';
+            Object.assign(component.form.options, { min: '1,5', max: 'abc' });
+
+            await component.save();
+
+            expect(http.post).not.toHaveBeenCalled();
+            expect(component.errors).toEqual({ 'options.max': 'Enter a number, for example 12.5.' });
+            expect(component.busy).toBe(false);
+        });
+
         it('sends the currency of an amount, the grade of a rating and the format of a barcode', async () => {
             http.post.mockResolvedValue({ data: field('n', 'money') });
 
