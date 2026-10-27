@@ -18,10 +18,10 @@ use App\Models\Attachment;
 use App\Models\Inventory;
 use App\Models\Item;
 use App\Policies\InventoryPolicy;
+use App\Support\FileSize;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Number;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -67,7 +67,7 @@ final class AttachmentController extends Controller
             );
         } catch (StorageLimitReachedException $limit) {
             return ApiError::conflict(
-                __('The storage of this workspace is full: its files cannot weigh more than :size in all.', ['size' => Number::fileSize($limit->limit, maxPrecision: 1)]),
+                __('The storage of this workspace is full: its files cannot weigh more than :size in all.', ['size' => FileSize::format($limit->limit)]),
                 StorageLimitReachedException::CODE,
                 ['limit' => $limit->limit],
             );

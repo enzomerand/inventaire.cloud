@@ -137,6 +137,18 @@ describe('the content of the page', function (): void {
             ->and(shareAttributes($page, '//html', 'lang'))->toBe(['fr']);
     });
 
+    it('writes the size of a file in the unit of the language of the visitor', function (): void {
+        $case = shareFixture();
+        attachmentTo($case['inventory'], $case['items']['drill'], attachmentUploadedAs('notes.bin', str_repeat('a', 1536)), null, $case['fields']['docs']);
+
+        $english = sharePageGet($this, $case['token'])->assertOk()->getContent();
+        $french = sharePageGet($this, $case['token'], headers: ['Accept-Language' => 'fr'])->assertOk()->getContent();
+
+        expect($english)->toContain('1.5 KB')
+            ->and($french)->toContain('1,5 ko')
+            ->and($french)->not->toContain('KB');
+    });
+
     it('draws a choice or a tag as a badge, a rating as stars with their grade in words and a color as a swatch', function (): void {
         $case = shareFixture();
 

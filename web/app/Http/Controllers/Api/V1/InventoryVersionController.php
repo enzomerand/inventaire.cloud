@@ -26,6 +26,7 @@ use App\Models\Inventory;
 use App\Models\InventoryVersion;
 use App\Policies\InventoryVersionPolicy;
 use App\Signatures\SignatureRequests;
+use App\Support\FileSize;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Http\JsonResponse;
@@ -33,7 +34,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Number;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -96,7 +96,7 @@ final class InventoryVersionController extends Controller
             );
         } catch (StorageLimitReachedException $limit) {
             return ApiError::conflict(
-                __('The storage of this workspace is full: its files cannot weigh more than :size in all.', ['size' => Number::fileSize($limit->limit, maxPrecision: 1)]),
+                __('The storage of this workspace is full: its files cannot weigh more than :size in all.', ['size' => FileSize::format($limit->limit)]),
                 StorageLimitReachedException::CODE,
                 ['limit' => $limit->limit],
             );
@@ -114,7 +114,7 @@ final class InventoryVersionController extends Controller
             );
         } catch (SnapshotTooLargeException $large) {
             return ApiError::invalid(
-                __('The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.', ['size' => Number::fileSize($large->limit, maxPrecision: 1)]),
+                __('The data of this inventory is too large to be frozen as an official version: it cannot weigh more than :size.', ['size' => FileSize::format($large->limit)]),
                 'inventory',
                 ExportRefusedException::PDF_TOO_LARGE,
             );

@@ -22,9 +22,9 @@ use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\ShareLink;
 use App\Support\DisplayTime;
+use App\Support\FileSize;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use Illuminate\Support\Number;
 
 /**
  * The inventory a share link shows, as the public page draws it: a page of its items, newest first, matching the words of a search, with
@@ -268,7 +268,7 @@ final class SharedInventory
             href: route('share.attachment', $displayable ? $path + ['inline' => 1] : $path, absolute: false),
             thumbnail: $attachment->hasThumbnail() ? route('share.thumbnail', $path, absolute: false) : null,
             icon: $attachment->mime === 'application/pdf' ? 'pdf' : ($displayable ? 'image' : 'file'),
-            size: Number::fileSize($attachment->size, maxPrecision: 1),
+            size: FileSize::format($attachment->size),
             displayable: $displayable,
         );
     }

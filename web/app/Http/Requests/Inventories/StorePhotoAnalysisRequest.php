@@ -6,11 +6,11 @@ namespace App\Http\Requests\Inventories;
 
 use App\PhotoEntry\PhotoAnalyses;
 use App\Policies\InventoryPolicy;
+use App\Support\FileSize;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Number;
 
 /**
  * The photos of one object to analyse: a multipart `photos[]`, from one to `inventories.max_photos_per_analysis` (5) images, JPEG, PNG or
@@ -56,7 +56,7 @@ final class StorePhotoAnalysisRequest extends FormRequest
     {
         return [
             'photos.max' => trans_choice('You can send :count photo at a time.|You can send :count photos at a time.', config()->integer('inventories.max_photos_per_analysis')),
-            'photos.*.max' => __('Each photo must not be larger than :size.', ['size' => Number::fileSize(config()->integer('inventories.max_attachment_size'), maxPrecision: 1)]),
+            'photos.*.max' => __('Each photo must not be larger than :size.', ['size' => FileSize::format(config()->integer('inventories.max_attachment_size'))]),
         ];
     }
 
