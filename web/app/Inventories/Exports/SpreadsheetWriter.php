@@ -41,8 +41,8 @@ use Throwable;
  * - A number with more than 15 significant digits is written as text (a spreadsheet keeps 15 exactly: the rest would be lost).
  * - A date before 1900 is written as text (a spreadsheet has no such date).
  * - A moment is the wall-clock time in the timezone of the instance, as the people of the instance read it (a spreadsheet has no
- *   timezone). The date formats are the built-in ones (numbers 14, 20 and 22), which the spreadsheet shows in the language of
- *   the person who opens it.
+ *   timezone, so the header of the column names the zone: {@see ExportTable::headers()}). The date formats are the built-in ones
+ *   (numbers 14, 20 and 22), which the spreadsheet shows in the language of the person who opens it.
  * - The header is bold and frozen, with an automatic filter on the whole table, and the sheet is named after the inventory.
  *
  * The library writes the rows to a scratch file as they come: memory does not grow with the number of items.
@@ -242,8 +242,7 @@ final class SpreadsheetWriter implements ExportWriter
     {
         return match (true) {
             $index === 0 => 28.0,
-            $index >= $last - 1 => 18.0,
-            default => (float) min(40, max(12, mb_strlen($header) + 4)),
+            default => (float) min(40, max($index >= $last - 1 ? 18 : 12, mb_strlen($header) + 4)),
         };
     }
 }

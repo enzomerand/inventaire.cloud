@@ -243,6 +243,20 @@ describe('the mistakes of the request', function (): void {
         'twice the same address, whatever the case' => [['signers' => [['name' => 'Ada', 'email' => 'ada@example.test'], ['name' => 'Ada again', 'email' => 'ADA@example.test']]], 'signers.1.email'],
     ]);
 
+    it('names the signer in the messages, in the language of the request, never by its key', function (): void {
+        $case = versionTableCase();
+        $data = ['signers' => [['name' => 'Ada', 'email' => 'ada@example.test'], ['name' => ' ', 'email' => 'not an address']]];
+
+        $english = versionApiPost($this, $case['team']['owner'], $case['inventory'], $data)->assertStatus(422)->json('errors');
+        $french = versionApiPost($this, $case['team']['owner'], $case['inventory'], $data, ['Accept-Language' => 'fr'])->assertStatus(422)->json('errors');
+
+        expect($english['signers.1.name'][0])->toContain('name of signer 2')
+            ->and($english['signers.1.email'][0])->toContain('email address of signer 2')
+            ->and($french['signers.1.name'][0])->toBe('Le champ nom du signataire 2 est obligatoire.')
+            ->and($french['signers.1.email'][0])->toContain('adresse e-mail du signataire 2')
+            ->and(implode(' ', array_merge(...array_values($french))))->not->toContain('signers.');
+    });
+
     it('refuse more signers than the instance allows, and never more than ten', function (): void {
         $case = versionTableCase();
 

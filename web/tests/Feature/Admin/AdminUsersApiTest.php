@@ -239,6 +239,9 @@ describe('listing the accounts', function (): void {
         User::factory()->create(['name' => 'Grace Hopper', 'email' => 'grace.hopper@navy.test']);
         User::factory()->create(['name' => 'élodie Martin', 'email' => 'elodie@example.com']);
         User::factory()->create(['name' => '100% Real_Name', 'email' => 'real@example.com']);
+        User::factory()->create(['name' => 'Élise Martin', 'email' => 'emartin@mail.test']);
+        User::factory()->create(['name' => 'Elise Bernard', 'email' => 'ebernard@mail.test']);
+        User::factory()->create(['name' => 'Zoé Muñoz', 'email' => 'zmunoz@mail.test']);
 
         $names = collect(adminCall($this, $admin, 'GET', '/api/v1/admin/users', ['q' => $term])->assertOk()->json('data'))->pluck('name')->sort()->values()->all();
 
@@ -251,12 +254,20 @@ describe('listing the accounts', function (): void {
         'name or address' => ['example.com', ['100% Real_Name', 'Ada Lovelace', 'élodie Martin']],
         'surrounded by spaces' => ['  lovelace ', ['Ada Lovelace']],
         'an accented letter' => ['ÉLODIE', ['élodie Martin']],
+        'a name without the accent it has' => ['elise', ['Elise Bernard', 'Élise Martin']],
+        'the same in capitals' => ['ELISE', ['Elise Bernard', 'Élise Martin']],
+        'an accent the name does not have' => ['élise', ['Elise Bernard', 'Élise Martin']],
+        'a capital accented letter' => ['ÉLISE', ['Elise Bernard', 'Élise Martin']],
+        'a term whose accent is a character of its own' => ["e\u{0301}lise", ['Elise Bernard', 'Élise Martin']],
+        'a tilde' => ['munoz', ['Zoé Muñoz']],
+        'accents and capitals in a whole name' => ['ZOE MUÑOZ', ['Zoé Muñoz']],
+        'an address, by a word with an accent' => ['ÉBERNARD@mail', ['Elise Bernard']],
         'a percent sign is a character' => ['100%', ['100% Real_Name']],
         'an underscore is a character' => ['e_l', []],
         'an underscore that is there' => ['l_na', ['100% Real_Name']],
         'a lone percent sign' => ['%', ['100% Real_Name']],
         'nothing' => ['zzz', []],
-        'everything when empty' => ['', ['100% Real_Name', 'Ada Lovelace', 'Grace Hopper', 'The Boss', 'élodie Martin']],
+        'everything when empty' => ['', ['100% Real_Name', 'Ada Lovelace', 'Elise Bernard', 'Grace Hopper', 'The Boss', 'Zoé Muñoz', 'Élise Martin', 'élodie Martin']],
     ]);
 
     it('refuses a search or a page that makes no sense', function (array $query): void {

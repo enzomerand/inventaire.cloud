@@ -18,7 +18,16 @@
  * It is a piece of the `inventoryItems` component (see `lib/compose.js`): one cell is edited at a time, and what is edited is
  * the text a control holds (see `fromInput` / `toInput` of the field types) until it is saved.
  */
-import { controlOf, fromInput, inputModeOf, inputTypeOf, isSummable, maxLengthOf, toInput } from '../fields/index.js';
+import {
+    controlOf,
+    fromInput,
+    inputModeOf,
+    inputRefusal,
+    inputTypeOf,
+    isSummable,
+    maxLengthOf,
+    toInput,
+} from '../fields/index.js';
 import { firstMessages, fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
@@ -272,6 +281,22 @@ export default function gridInline() {
 
             if (JSON.stringify(this.inlineInput) === JSON.stringify(this.inlineOriginal)) {
                 this.closeInline(source === 'enter');
+
+                return;
+            }
+
+            // A value that is no value of the field is not sent: it is said under the control, which stays so that it can be
+            // fixed (the API would refuse it with a message written for the people who call it).
+            const refusal = inputRefusal(field, this.inlineInput);
+
+            if (refusal !== null) {
+                this.inlineError = refusal;
+
+                if (source === 'enter') {
+                    const root = this.rootElement;
+
+                    this.$nextTick(() => focusEditor(root));
+                }
 
                 return;
             }

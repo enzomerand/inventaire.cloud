@@ -9,6 +9,7 @@ use App\Settings\InstanceSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -108,8 +109,8 @@ describe('the content of the page', function (): void {
             'Discount (%)' => '12.5%',
             'In stock' => 'Yes',
             'Bought' => 'Mar 1, 2026',
-            // 10:30 UTC is 12:30 in Paris in July.
-            'Seen' => 'Jul 1, 2026, 12:30 PM',
+            // 10:30 UTC is 12:30 in Paris in July, and the page says in which zone.
+            'Seen' => 'Jul 1, 2026, 12:30 PM UTC+2',
             'Opening' => '07:05',
             'Condition' => 'Used',
             'Labels' => 'Heavy Fragile',
@@ -135,6 +136,18 @@ describe('the content of the page', function (): void {
         expect(shareTexts($page, '//html/body//footer'))->toBe(['Partage en lecture seule réalisé avec '.config('app.name')])
             ->and(shareTexts($page, '//h1/../p[last()]')[0])->toStartWith('3 articles')->toContain('Ce lien expire le')
             ->and(shareAttributes($page, '//html', 'lang'))->toBe(['fr']);
+    });
+
+    it('writes the size of a file in the unit of the language of the visitor', function (): void {
+        $case = shareFixture();
+        attachmentTo($case['inventory'], $case['items']['drill'], attachmentUploadedAs('notes.bin', str_repeat('a', 1536)), null, $case['fields']['docs']);
+
+        $english = sharePageGet($this, $case['token'])->assertOk()->getContent();
+        $french = sharePageGet($this, $case['token'], headers: ['Accept-Language' => 'fr'])->assertOk()->getContent();
+
+        expect($english)->toContain('1.5 KB')
+            ->and($french)->toContain('1,5 ko')
+            ->and($french)->not->toContain('KB');
     });
 
     it('draws a choice or a tag as a badge, a rating as stars with their grade in words and a color as a swatch', function (): void {
@@ -190,6 +203,41 @@ describe('the content of the page', function (): void {
         $again = shareDom(sharePageGet($this, $token)->assertOk());
 
         expect($again->query('//tbody/tr')->length)->toBe(1);
+    });
+});
+
+describe('the zone of the times', function (): void {
+    it('is named after every moment the page writes: the date and time fields and the expiry of the link', function (string $zone, string $locale, string $today, string $seen, string $seenText, string $expiresText): void {
+        $this->travelTo(Carbon::parse($today, 'UTC'));
+        $case = shareFixture();
+        sharePageForce($case, ['seen' => $seen]);
+        // After the fixture, which sets the zone of the other tests.
+        config(['app.display_timezone' => $zone]);
+
+        $page = shareDom(sharePageGet($this, $case['token'], headers: ['Accept-Language' => $locale])->assertOk());
+        $row = sharePageRow($page, 3);
+
+        expect($row['Seen'])->toBe($seenText)
+            ->and(shareTexts($page, '//h1/../p[last()]')[0])->toEndWith($expiresText)
+            // A day and a time of the day are what was typed, in no zone: nothing is added to them.
+            ->and($row['Bought'])->toBe($locale === 'fr' ? '1 mars 2026' : 'Mar 1, 2026')
+            ->and($row['Opening'])->toBe('07:05');
+    })->with([
+        'UTC, in English' => ['UTC', 'en', '2026-01-10 08:30:00', '2026-01-15T10:30:00Z', 'Jan 15, 2026, 10:30 AM UTC', 'This link expires on Feb 9, 2026, 8:30 AM UTC.'],
+        'Paris in winter, in French' => ['Europe/Paris', 'fr', '2026-01-10 08:30:00', '2026-01-15T10:30:00Z', '15 janv. 2026, 11:30 UTC+1', 'Ce lien expire le 9 févr. 2026, 09:30 UTC+1.'],
+        'Paris in summer, in English' => ['Europe/Paris', 'en', '2026-06-10 08:30:00', '2026-07-01T10:30:00Z', 'Jul 1, 2026, 12:30 PM UTC+2', 'This link expires on Jul 10, 2026, 10:30 AM UTC+2.'],
+    ]);
+
+    it('names the offset the zone has at each moment, not one for the whole column', function (): void {
+        $case = shareFixture();
+        sharePageForce($case, ['seen' => '2026-01-15T10:30:00Z']);
+        $other = $case['items']['formulas'];
+        $other->forceFill(['values' => [...$other->values, $case['fields']['seen']->ulid => '2026-07-01T10:30:00Z']])->save();
+
+        $page = shareDom(sharePageGet($this, $case['token'])->assertOk());
+
+        // The newest item comes first: the second row holds the summer moment, the third (the drill) the winter one.
+        expect([sharePageRow($page, 2)['Seen'], sharePageRow($page, 3)['Seen']])->toBe(['Jul 1, 2026, 12:30 PM UTC+2', 'Jan 15, 2026, 11:30 AM UTC+1']);
     });
 });
 

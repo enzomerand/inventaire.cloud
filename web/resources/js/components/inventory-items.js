@@ -54,13 +54,14 @@ import {
     emptyInput,
     fromInput,
     inputModeOf,
+    inputRefusal,
     inputTypeOf,
     isSummable,
     maxLengthOf,
     selectOptionsOf,
     toInput,
 } from '../fields/index.js';
-import { firstMessages, fillUrl } from '../lib/forms.js';
+import { firstMessages, fillUrl, revealFirstRefusalOnceShown } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -1150,6 +1151,23 @@ export default function inventoryItems() {
         },
 
         /**
+         * The fields the next save takes into account: adding an item, every field but the files; changing one, only the fields
+         * whose control holds something else than when the dialog opened. The files of a field go up on their own request,
+         * never with the values.
+         *
+         * @returns {Field[]}
+         */
+        fieldsToSend() {
+            const editing = this.mode === 'edit';
+
+            return this.fields.filter(
+                (field) =>
+                    controlOf(field) !== 'files' &&
+                    !(editing && JSON.stringify(this.values[field.id]) === JSON.stringify(this.original[field.id])),
+            );
+        },
+
+        /**
          * Converts what the controls hold into what the API takes. Adding an item: every field that holds something, the
          * others are left out. Changing one: only the fields whose control holds something else than when the dialog
          * opened, and null clears a field.
@@ -1160,16 +1178,7 @@ export default function inventoryItems() {
             const editing = this.mode === 'edit';
             const values = {};
 
-            for (const field of this.fields) {
-                // The files of a field go up on their own request, never with the values.
-                if (controlOf(field) === 'files') {
-                    continue;
-                }
-
-                if (editing && JSON.stringify(this.values[field.id]) === JSON.stringify(this.original[field.id])) {
-                    continue;
-                }
-
+            for (const field of this.fieldsToSend()) {
                 const value = fromInput(field, this.values[field.id]);
 
                 if (value !== null || editing) {
@@ -1178,6 +1187,27 @@ export default function inventoryItems() {
             }
 
             return values;
+        },
+
+        /**
+         * The messages for the controls whose content would be sent but cannot be a value of its field: text typed in a number
+         * box that is no number. The API refuses those too, in words written for the people who call it ("written with a dot"
+         * for a box that takes a comma): they are told here, under the control, before anything is sent.
+         *
+         * @returns {Record<string, string>} The message of each such field, by field id.
+         */
+        refusedInputs() {
+            const refused = {};
+
+            for (const field of this.fieldsToSend()) {
+                const message = inputRefusal(field, this.values[field.id]);
+
+                if (message !== null) {
+                    refused[field.id] = message;
+                }
+            }
+
+            return refused;
         },
 
         /**
@@ -1196,6 +1226,17 @@ export default function inventoryItems() {
             // Nothing was changed: there is nothing to send.
             if (!creating && Object.keys(values).length === 0) {
                 this.closeDialog();
+
+                return;
+            }
+
+            // A value that is no value of its field is not sent: it is said under the control, which is brought into view.
+            const refused = this.refusedInputs();
+
+            if (Object.keys(refused).length > 0) {
+                this.errors = refused;
+                this.formError = '';
+                this.revealRefusal();
 
                 return;
             }
@@ -1332,6 +1373,7 @@ export default function inventoryItems() {
                 this.refuse(error);
             } else if (error.status === 409 && error.code === 'item_limit_reached') {
                 this.formError = t('inventories.error.item_limit', { count: error.body?.limit ?? '' });
+                this.revealRefusal();
             } else {
                 notify('danger', error.message);
             }
@@ -1393,6 +1435,20 @@ export default function inventoryItems() {
             if (unknown.length > 0) {
                 this.loadInventory();
             }
+
+            this.revealRefusal();
+        },
+
+        /**
+         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusalOnceShown`). The dialog is
+         * taken before the wait, for the same reason as the root (see `rootElement`).
+         *
+         * @returns {void}
+         */
+        revealRefusal() {
+            const dialog = this.$refs.modal;
+
+            this.$nextTick(() => revealFirstRefusalOnceShown(dialog));
         },
     });
 }

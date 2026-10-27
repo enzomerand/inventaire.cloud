@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Exports;
 
+use App\Inventories\Fields\DateTimeType;
 use App\Inventories\Fields\ExportValue;
 use App\Inventories\Fields\FieldType;
 use App\Inventories\Fields\FieldTypes;
@@ -11,6 +12,7 @@ use App\Inventories\Fields\UploadedFilesType;
 use App\Inventories\ItemValues;
 use App\Models\InventoryField;
 use App\Models\Item;
+use App\Support\DisplayTime;
 use Illuminate\Support\Collection;
 
 /**
@@ -92,17 +94,23 @@ final class ExportTable
     /**
      * The names of all the columns of a sheet or of a CSV: the identifier of the item, the fields, the dates.
      *
+     * The cells of a moment (a field of date and time, the dates the item was created and changed) are exact values in the timezone
+     * of the instance, and a spreadsheet has no timezone to carry: the zone is named in the header instead, between brackets
+     * (`Delivered (Europe/Paris)`, `Created on (UTC)`). It is the identifier of the zone, not its offset, since the offset of a
+     * zone changes with the summer time and a column holds moments of both. A day or a time of the day has no zone and gets none.
+     *
      * @return list<string>
      */
     public function headers(): array
     {
+        $zone = ' ('.DisplayTime::zone().')';
         $headers = [__('Identifier')];
 
-        foreach (array_keys($this->types) as $position) {
-            $headers[] = $this->header($position);
+        foreach ($this->types as $position => $type) {
+            $headers[] = $this->header($position).($type instanceof DateTimeType ? $zone : '');
         }
 
-        return [...$headers, __('Created on'), __('Modified on')];
+        return [...$headers, __('Created on').$zone, __('Modified on').$zone];
     }
 
     /**

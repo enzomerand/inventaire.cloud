@@ -18,13 +18,13 @@ use App\Inventories\Exports\ExportStatus;
 use App\Models\Export;
 use App\Models\Inventory;
 use App\Policies\InventoryPolicy;
+use App\Support\FileSize;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Number;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -86,7 +86,7 @@ final class ExportController extends Controller
             );
         } catch (ExportStorageFullException $full) {
             return ApiError::conflict(
-                __('Your exports take too much room: together, they cannot weigh more than :size. Delete some, or wait for them to expire.', ['size' => Number::fileSize($full->limit, maxPrecision: 1)]),
+                __('Your exports take too much room: together, they cannot weigh more than :size. Delete some, or wait for them to expire.', ['size' => FileSize::format($full->limit)]),
                 ExportStorageFullException::CODE,
                 ['limit' => $full->limit],
             );

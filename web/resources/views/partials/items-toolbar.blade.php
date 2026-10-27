@@ -80,8 +80,9 @@
                     </template>
                 </select>
                 <button type="button" class="btn btn-icon" :disabled="!isSorted" :aria-label="directionLabel" :title="directionLabel" @click="flipDirection">
-                    <span :hidden="isDescending"><x-tabler-sort-ascending aria-hidden="true" /></span>
-                    <span :hidden="!isDescending"><x-tabler-sort-descending aria-hidden="true" /></span>
+                    {{-- The toggle is on the icons themselves: Tabler gives a .btn-icon .icon a negative margin that a wrapping span would collapse to nothing, dropping the icon. --}}
+                    <x-tabler-sort-ascending aria-hidden="true" x-show="!isDescending" />
+                    <x-tabler-sort-descending aria-hidden="true" x-show="isDescending" />
                 </button>
             </div>
         </div>

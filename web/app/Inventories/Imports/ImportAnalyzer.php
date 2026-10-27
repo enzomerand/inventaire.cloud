@@ -12,7 +12,9 @@ use App\Inventories\Fields\FieldTypes;
 use App\Inventories\SearchText;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
+use App\Support\DisplayTime;
 use DateTimeImmutable;
+use DateTimeZone;
 use Illuminate\Support\Collection;
 
 /**
@@ -34,7 +36,8 @@ use Illuminate\Support\Collection;
  * The proposal is, for each column in this order: the field that has the same name (without the case, the accents and a unit in
  * brackets: `Price (EUR)` is `price`), and not already taken by an earlier column; ignored, when it is one of the columns an export adds
  * (the identifier and the dates of creation and change); else a new field of the type guessed, named as the header, when the person may
- * create fields, and ignored when not.
+ * create fields, and ignored when not. The header of a column of moments an export wrote names the zone of the moments between
+ * brackets (`Seen (Europe/Paris)`): it is the file's, and not part of the name of the field a column of moments makes.
  */
 final class ImportAnalyzer
 {
@@ -443,7 +446,7 @@ final class ImportAnalyzer
         $entries = [];
 
         foreach ($columns as $column) {
-            $key = self::nameKey($column['header']);
+            $key = self::nameKey(self::withoutZone($column['header']));
             $field = $byName[$key] ?? null;
 
             if ($field !== null && ! isset($used[$field->ulid])) {
@@ -459,12 +462,53 @@ final class ImportAnalyzer
                 continue;
             }
 
-            $name = $this->freeName($column['header'], $taken);
+            $name = $this->freeName(in_array($column['guess'], ['date', 'datetime'], true) ? self::withoutZone($column['header']) : $column['header'], $taken);
             $taken[SingleLineText::fold($name)] = true;
             $entries[] = ['column' => $column['index'], 'target' => ImportMapping::NEW, 'type' => $column['guess'], 'name' => $name];
         }
 
         return ImportMapping::from($entries);
+    }
+
+    /**
+     * A header without the timezone it ends with between brackets (`Seen (Europe/Paris)` is `Seen`, `Seen (visit) (UTC)` is `Seen
+     * (visit)`): what an export writes in the header of a column of moments. Any other brackets stay (a unit, a remark, the ones of the
+     * name of a field, `Delivery (Poland)`, `Price (EUR/kg)`). The zone may be an alias of the database (`Asia/Calcutta`) as well as
+     * its identifier, or the zone of this instance whatever the database knows of it.
+     */
+    private static function withoutZone(string $header): string
+    {
+        if (preg_match('/^(.*\S)\s*\(([^()]+)\)\s*$/u', $header, $found) !== 1 || ! self::isZoneName($found[2])) {
+            return $header;
+        }
+
+        return $found[1];
+    }
+
+    /**
+     * Whether a text between brackets names a timezone: `UTC`, one of the identifiers of the database that have a region
+     * (`Europe/Paris`, and its aliases such as `Asia/Calcutta` or `US/Eastern`), or the zone of this instance (an export of it writes
+     * that one, even when the database of this server is older than the one that named it).
+     *
+     * The aliases without a region (`Poland`, `Japan`, `GB`, `NZ`, `CET`...) are not zones here: in a header they are as likely a
+     * country or a remark, and an export never writes them. Nor is any `a/b` text a zone (`EUR/kg` is a unit).
+     */
+    private static function isZoneName(string $text): bool
+    {
+        /** @var array<string, true>|null $names */
+        static $names = null;
+
+        if ($names === null) {
+            $names = ['UTC' => true];
+
+            foreach (DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC) as $identifier) {
+                if (str_contains($identifier, '/')) {
+                    $names[$identifier] = true;
+                }
+            }
+        }
+
+        return isset($names[$text]) || $text === DisplayTime::zone();
     }
 
     /**

@@ -309,7 +309,11 @@ describe('the proposal', function (): void {
         $csv = importFile(importCsv([[$header, 'Other'], ['a', 'b']]));
 
         expect(importAnalyze($csv, locale: 'fr')->mapping->toArray()[0]['target'])->toBe('ignore');
-    })->with(['Identifier', 'identifiant', 'Created on', 'Créé le', 'CREE LE', 'Modified on', 'Modifié le']);
+    })->with([
+        'Identifier', 'identifiant', 'Created on', 'Créé le', 'CREE LE', 'Modified on', 'Modifié le',
+        // An export names the zone of its moments in the header of the column.
+        'Created on (Europe/Paris)',
+    ]);
 
     it('prefers a field to the columns of an export', function (): void {
         $fields = importProposalFields();
@@ -325,6 +329,50 @@ describe('the proposal', function (): void {
 
         expect(array_column($mapping, 'type'))->toBe(['date', 'money', 'boolean'])
             ->and(array_column($mapping, 'name'))->toBe(['Bought', 'Price (EUR)', 'In stock']);
+    });
+
+    it('names the new field of a column of moments without the zone its header gives, and keeps any other brackets', function (): void {
+        $csv = importFile(importCsv([
+            ['Seen (Europe/Paris)', 'Delivered (UTC)', 'Planned (estimate)', 'Remark (UTC)'],
+            ['2026-07-01 12:30', '2026-07-02 08:00', '2026-07-03 09:00', 'a (b)'],
+        ]));
+
+        $mapping = importAnalyze($csv)->mapping->toArray();
+
+        // The last column holds texts, not moments: its brackets are part of its name, whatever they say.
+        expect(array_column($mapping, 'type'))->toBe(['datetime', 'datetime', 'datetime', 'text'])
+            ->and(array_column($mapping, 'name'))->toBe(['Seen', 'Delivered', 'Planned (estimate)', 'Remark (UTC)']);
+    });
+
+    it('leaves the zone out of the name of the new field of a moment column, an alias of the database being a zone too', function (string $zone): void {
+        $csv = importFile(importCsv([["Seen ({$zone})"], ['2026-07-01 12:30']]));
+
+        expect(importAnalyze($csv)->mapping->toArray()[0])->toMatchArray(['type' => 'datetime', 'name' => 'Seen']);
+    })->with(['Asia/Calcutta', 'US/Eastern']);
+
+    it('keeps the brackets of a header that only looks like a zone, whatever the database calls it', function (string $remark): void {
+        $csv = importFile(importCsv([["Delivery ({$remark})"], ['2026-07-01 12:30']]));
+
+        expect(importAnalyze($csv)->mapping->toArray()[0])->toMatchArray(['type' => 'datetime', 'name' => "Delivery ({$remark})"]);
+    })->with([
+        // Aliases of the database without a region are countries or remarks in a header, not what an export writes.
+        'Poland', 'Japan', 'GB', 'NZ', 'CET',
+        // Any text with a slash is not a zone: a unit, a ratio.
+        'EUR/kg', 'Europe/Nowhere',
+    ]);
+
+    it('leaves the zone of the instance out of the name of the new field of a moment column, however the database names it', function (string $zone): void {
+        config(['app.display_timezone' => $zone]);
+        $csv = importFile(importCsv([["Seen ({$zone})"], ['2026-07-01 12:30']]));
+
+        expect(importAnalyze($csv)->mapping->toArray()[0])->toMatchArray(['type' => 'datetime', 'name' => 'Seen']);
+    })->with(['Poland', 'Europe/Paris', 'UTC', 'Mars/Olympus']);
+
+    it('leaves the zone out of the name of the new field of a column that reads as days', function (): void {
+        // The moments of a spreadsheet that all fall at midnight read as days.
+        $path = importSpreadsheet('xlsx', [['Seen (Europe/Paris)'], [new DateTimeImmutable('2026-07-01')], [new DateTimeImmutable('2026-07-02')]]);
+
+        expect(importAnalyze($path, ImportFormat::Xlsx)->mapping->toArray()[0])->toMatchArray(['type' => 'date', 'name' => 'Seen']);
     });
 
     it('ignores the others when the person may not create fields', function (): void {

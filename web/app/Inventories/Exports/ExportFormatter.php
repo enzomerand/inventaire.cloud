@@ -6,6 +6,7 @@ namespace App\Inventories\Exports;
 
 use App\Inventories\Fields\ExportKind;
 use App\Inventories\Fields\ExportValue;
+use App\Support\DisplayTime;
 use DateTimeImmutable;
 use DateTimeZone;
 use IntlDateFormatter;
@@ -17,7 +18,9 @@ use NumberFormatter;
  *
  * Numbers get the separators of the language and the decimals of their field (`1 234,50` in French, `1,234.50` in English), an
  * amount its currency (`1 234,50 €`), a percentage its sign, a number its unit, a rating its maximum (`3/5`); dates and moments are
- * written the way the language writes them, a moment in the timezone of the instance; yes and no are in the language. A number a
+ * written the way the language writes them, a moment in the timezone of the instance, **followed by that zone** (`15 oct. 2026,
+ * 14:30 UTC+2`, see {@see DisplayTime::offset()}: the reader of a printed page or of a shared one cannot ask which zone it is, and a
+ * browser shows the same moment in its own); yes and no are in the language. A number a
  * float could not keep whole (more than 15 significant digits) is written digit by digit with the decimal separator of the
  * language and no grouping, rather than rounded; an amount of that size keeps its currency, where the language puts it.
  */
@@ -29,6 +32,8 @@ final class ExportFormatter
     private IntlDateFormatter $dayFormat;
 
     private IntlDateFormatter $momentFormat;
+
+    private DateTimeZone $zone;
 
     /** @var array<int, NumberFormatter> The number formatters, by number of decimals. */
     private array $numbers = [];
@@ -42,8 +47,9 @@ final class ExportFormatter
      */
     public function __construct(private readonly string $locale, string $timezone)
     {
+        $this->zone = new DateTimeZone($timezone);
         $this->dayFormat = new IntlDateFormatter($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE, 'UTC');
-        $this->momentFormat = new IntlDateFormatter($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT, new DateTimeZone($timezone));
+        $this->momentFormat = new IntlDateFormatter($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT, $this->zone);
     }
 
     /**
@@ -56,17 +62,18 @@ final class ExportFormatter
             ExportKind::Text, ExportKind::Time => $value->string(),
             ExportKind::Number => $this->number($value),
             ExportKind::Date => $this->day($value->string()),
-            ExportKind::DateTime => $value->moment() === null ? '' : (string) $this->momentFormat->format($value->moment()),
+            ExportKind::DateTime => $value->moment() === null ? '' : $this->moment($value->moment()),
             ExportKind::Boolean => $value->answer() === true ? __('Yes') : __('No'),
         };
     }
 
     /**
-     * A moment as text, in the timezone of the formatter.
+     * A moment as text, in the timezone of the formatter and followed by the name of that zone at that moment, after a no-break space
+     * so that the time and its zone are never split over two lines.
      */
     public function moment(DateTimeImmutable $moment): string
     {
-        return (string) $this->momentFormat->format($moment);
+        return (string) $this->momentFormat->format($moment)."\u{00A0}".DisplayTime::offset($moment->setTimezone($this->zone));
     }
 
     /**

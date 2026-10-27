@@ -224,6 +224,7 @@ class ClientMessages extends Component
             'fields.notice.saved' => __('Field saved.'),
             'fields.notice.deleted' => __('Field deleted.'),
             'fields.error.limit' => __('Field limit reached (:count per inventory).'),
+            'fields.error.invalid_number' => __('Enter a number, for example 12.5.'),
             'fields.choice.remove' => __('Remove the choice'),
             'fields.choice.remove_named' => __('Remove the choice :name'),
             'fields.barcode.any' => __('Any code'),

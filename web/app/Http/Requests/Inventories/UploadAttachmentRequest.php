@@ -6,11 +6,11 @@ namespace App\Http\Requests\Inventories;
 
 use App\Inventories\Attachments\Attachments;
 use App\Policies\InventoryPolicy;
+use App\Support\FileSize;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Number;
 
 /**
  * A file to attach to an item: one multipart `file` part, at most `inventories.max_attachment_size` bytes, and optionally the
@@ -55,7 +55,7 @@ final class UploadAttachmentRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'file.max' => __('The file must not be larger than :size.', ['size' => Number::fileSize(config()->integer('inventories.max_attachment_size'), maxPrecision: 1)]),
+            'file.max' => __('The file must not be larger than :size.', ['size' => FileSize::format(config()->integer('inventories.max_attachment_size'))]),
         ];
     }
 

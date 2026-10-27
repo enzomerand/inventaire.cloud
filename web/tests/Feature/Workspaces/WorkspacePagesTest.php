@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 
 uses(RefreshDatabase::class);
@@ -13,7 +14,7 @@ uses(RefreshDatabase::class);
 /**
  * The workspaces the switcher hands to the scripts, read from the page.
  *
- * @return list<array{id: string, name: string, role: string, current: bool}>
+ * @return list<array{id: string, name: string, role: string, current: bool, owner: string|null}>
  */
 function switcherItems(TestResponse $page): array
 {
@@ -58,11 +59,81 @@ describe('the workspace switcher of the header', function (): void {
         $page = $this->actingAs($user->fresh())->get(route('app.workspaces'), ['Accept-Language' => 'en'])->assertOk();
 
         expect(switcherItems($page))->toBe([
-            ['id' => $personal->ulid, 'name' => 'Espace personnel', 'role' => 'owner', 'current' => false],
-            ['id' => $shop->ulid, 'name' => 'Shop', 'role' => 'owner', 'current' => true],
-            ['id' => $shared->ulid, 'name' => 'Shared', 'role' => 'viewer', 'current' => false],
+            ['id' => $personal->ulid, 'name' => 'Espace personnel', 'role' => 'owner', 'current' => false, 'owner' => null],
+            ['id' => $shop->ulid, 'name' => 'Shop', 'role' => 'owner', 'current' => true, 'owner' => null],
+            ['id' => $shared->ulid, 'name' => 'Shared', 'role' => 'viewer', 'current' => false, 'owner' => $other->name],
         ]);
         $page->assertSee('x-text="currentName">Shop</span>', false);
+    });
+
+    it('names the owner of a workspace that is somebody else\'s, so that two "Personal space" can be told apart', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);
+        $camille = User::factory()->withPersonalWorkspace()->create(['name' => 'Camille Martin']);
+        $hers = $camille->workspaces()->firstOrFail();
+        $hers->members()->attach($user->id, ['role' => WorkspaceRole::Editor->value]);
+
+        $page = $this->actingAs($user->fresh())->get(route('app.workspaces'), ['Accept-Language' => 'en'])->assertOk();
+
+        expect(collect(switcherItems($page))->map(fn (array $item): array => [$item['name'], $item['role'], $item['owner']])->all())->toBe([
+            ['Espace personnel', 'owner', null],
+            ['Espace personnel', 'editor', 'Camille Martin'],
+        ]);
+        // Under the name of the workspace, with the word that says what the name is for a screen reader.
+        $page->assertSee('x-if="ownerOf(workspace)"', false)
+            ->assertSee('<span class="visually-hidden">Owner: </span>', false);
+        // The button of the header names the owner of the current workspace too, in its content (an aria-label would hide it from a
+        // screen reader) and in its tooltip, with the word the server translated.
+        $page->assertSee('x-if="currentOwner"', false)
+            ->assertSee(':title="currentTitle"', false)
+            ->assertSee('data-owner-label="Owner:"', false)
+            ->assertSee('<span class="visually-hidden">Change workspace </span>', false)
+            ->assertDontSee('aria-label="Change workspace"', false);
+        $this->flushSession();
+        $this->actingAs($user->fresh())->get(route('app.workspaces'), ['Accept-Language' => 'fr'])->assertOk()
+            ->assertSee('<span class="visually-hidden">Propriétaire : </span>', false)
+            ->assertSee('data-owner-label="Propriétaire :"', false);
+    });
+
+    it('gives the owner of a workspace the name of the owner and never somebody else\'s', function (): void {
+        $owner = User::factory()->withPersonalWorkspace()->create(['name' => 'Camille Martin']);
+        $editor = User::factory()->withPersonalWorkspace()->create(['name' => 'Ada Lovelace']);
+        $viewer = User::factory()->withPersonalWorkspace()->create(['name' => 'Grace Hopper']);
+        $shop = app(Workspaces::class)->create($owner, 'Shop');
+        $shop->members()->attach($editor->id, ['role' => WorkspaceRole::Editor->value]);
+        $shop->members()->attach($viewer->id, ['role' => WorkspaceRole::Viewer->value]);
+        $named = function (User $who): array {
+            $this->flushSession();
+
+            return array_column(switcherItems($this->actingAs($who->fresh())->get(route('app.workspaces'))->assertOk()), 'owner', 'name');
+        };
+
+        expect($named($owner)['Shop'])->toBeNull()
+            ->and($named($editor)['Shop'])->toBe('Camille Martin')
+            ->and($named($viewer)['Shop'])->toBe('Camille Martin');
+    });
+
+    it('reads the owners of all the workspaces of somebody else in a single query, and none when there are no such workspaces', function (): void {
+        $user = User::factory()->withPersonalWorkspace()->create();
+        $ownerQueries = function () use ($user): int {
+            $this->flushSession();
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->actingAs($user->fresh())->get(route('app.workspaces'))->assertOk();
+            $queries = DB::getQueryLog();
+            DB::disableQueryLog();
+
+            return collect($queries)->filter(fn (array $query): bool => str_contains((string) $query['query'], 'users') && str_contains((string) $query['query'], 'workspace_user'))->count();
+        };
+
+        $none = $ownerQueries();
+
+        foreach (['Camille Martin', 'Alice Roy', 'Bob Roy', 'Carl Roy'] as $name) {
+            $other = User::factory()->withPersonalWorkspace()->create(['name' => $name]);
+            $other->workspaces()->firstOrFail()->members()->attach($user->id, ['role' => WorkspaceRole::Viewer->value]);
+        }
+
+        expect($none)->toBe(0)
+            ->and($ownerQueries())->toBe(1);
     });
 
     it('escapes the names of the workspaces', function (): void {

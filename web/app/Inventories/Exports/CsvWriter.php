@@ -22,8 +22,9 @@ use Throwable;
  * other languages. **The separator also decides the decimal sign**, on purpose: a spreadsheet in French reads a semicolon file and
  * expects a comma for its decimals (`12,5`), and a comma-separated file could not hold one at all without quoting every number,
  * so the semicolon writes the decimals with a comma and the comma and the tab write them with a point (`12.5`). The dialog says
- * so next to each separator, and an API client that wants a point with a semicolon must choose the comma or the tab. Dates are ISO (`2026-10-15`, `2026-10-15 14:30`), a yes or no is "Yes" or "No" in the language of the
- * export, a number has the decimals of its field and no thousands separator.
+ * so next to each separator, and an API client that wants a point with a semicolon must choose the comma or the tab. Dates are ISO
+ * (`2026-10-15`, `2026-10-15 14:30`), a yes or no is "Yes" or "No" in the language of the export, a number has the decimals of its
+ * field and no thousands separator. The zone of a moment is named in the header of its column ({@see ExportTable::headers()}).
  *
  * A text that starts with one of `= + - @` or a tab or a carriage return is read as a formula by the spreadsheet that opens it,
  * and a formula can read other files or call out: such a text, and such a header, is written with a quote in front (`'=SUM(A1)`),

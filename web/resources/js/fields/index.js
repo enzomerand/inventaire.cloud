@@ -167,6 +167,18 @@ export function fromInput(field, input) {
 }
 
 /**
+ * Why what a control holds cannot be sent, when it is something the interface can tell before asking the API (text typed in a
+ * number box that is no number, say). The API refuses it too; this is the message worded for the person who typed it.
+ *
+ * @param {Field} field
+ * @param {any} input What the control holds.
+ * @returns {string | null} The message, null when the value can be sent (the API may still refuse it).
+ */
+export function inputRefusal(field, input) {
+    return typeOf(field).refusal?.(input, field) ?? null;
+}
+
+/**
  * How a value is shown, as a {@link Cell}.
  *
  * @param {Field} field

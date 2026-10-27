@@ -49,7 +49,7 @@ describe('the cells', function (): void {
             ->and($drill['Bought'])->toBeInstanceOf(DateTimeInterface::class)
             ->and($drill['Bought']->format('Y-m-d H:i'))->toBe('2026-03-01 00:00')
             // 10:30 UTC, in the timezone of the instance (Paris, in summer).
-            ->and($drill['Seen']->format('Y-m-d H:i'))->toBe('2026-07-01 12:30')
+            ->and($drill['Seen (Europe/Paris)']->format('Y-m-d H:i'))->toBe('2026-07-01 12:30')
             ->and($drill['Name'])->toBe('Drill 18V')
             ->and($drill['Notes'])->toBe("Two lines\nof notes")
             ->and($drill['Condition'])->toBe('Used')
@@ -86,23 +86,23 @@ describe('the cells', function (): void {
         [$export, $case] = spreadsheetOf($format);
         $row = collect(exportRecords($export))->firstWhere('Identifier', $case['items']['empty']->ulid);
 
-        expect(array_filter($row, fn (mixed $value, string $header): bool => ! in_array($header, ['Identifier', 'Created on', 'Modified on'], true) && $value !== '' && $value !== null, ARRAY_FILTER_USE_BOTH))->toBe([]);
+        expect(array_filter($row, fn (mixed $value, string $header): bool => ! in_array($header, ['Identifier', 'Created on (Europe/Paris)', 'Modified on (Europe/Paris)'], true) && $value !== '' && $value !== null, ARRAY_FILTER_USE_BOTH))->toBe([]);
     })->with([ExportFormat::Xlsx, ExportFormat::Ods]);
 
     it('give the dates the item was created and changed, in the timezone of the instance', function (): void {
         [$export, $case] = spreadsheetOf(ExportFormat::Xlsx);
-        $created = collect(exportRecords($export))->firstWhere('Identifier', $case['items']['drill']->ulid)['Created on'];
+        $created = collect(exportRecords($export))->firstWhere('Identifier', $case['items']['drill']->ulid)['Created on (Europe/Paris)'];
 
         expect($created)->toBeInstanceOf(DateTimeInterface::class)
             ->and($created->format('Y-m-d H:i'))->toBe($case['items']['drill']->created_at->copy()->setTimezone('Europe/Paris')->format('Y-m-d H:i'));
     });
 
-    it('put the unit or the currency in the header, after the name of the field', function (): void {
+    it('put the unit or the currency in the header, after the name of the field, and the zone of the moments', function (): void {
         [$export] = spreadsheetOf(ExportFormat::Xlsx);
 
         expect(exportSheet($export)['rows'][0])->toBe([
-            'Identifier', 'Name', 'Notes', 'Quantity (kg)', 'Price (EUR)', 'Discount (%)', 'In stock', 'Bought', 'Seen', 'Opening', 'Condition',
-            'Labels', 'Keywords', 'Website', 'Contact', 'Phone', 'Grade', 'Color', 'Barcode', 'Photos', 'Docs', 'Created on', 'Modified on',
+            'Identifier', 'Name', 'Notes', 'Quantity (kg)', 'Price (EUR)', 'Discount (%)', 'In stock', 'Bought', 'Seen (Europe/Paris)', 'Opening', 'Condition',
+            'Labels', 'Keywords', 'Website', 'Contact', 'Phone', 'Grade', 'Color', 'Barcode', 'Photos', 'Docs', 'Created on (Europe/Paris)', 'Modified on (Europe/Paris)',
         ]);
     });
 
@@ -207,8 +207,48 @@ describe('the sheet', function (): void {
         expect($export->status)->toBe(ExportStatus::Completed, (string) $export->error)
             ->and(exportSheet($export)['rows'])->toHaveCount(1)
             ->and($export->items_count)->toBe(0)
-            ->and(exportSheet($export)['rows'][0])->toBe(['Identifier', 'Name', 'Created on', 'Modified on']);
+            ->and(exportSheet($export)['rows'][0])->toBe(['Identifier', 'Name', 'Created on (Europe/Paris)', 'Modified on (Europe/Paris)']);
     })->with([ExportFormat::Xlsx, ExportFormat::Ods]);
+});
+
+describe('the zone of the moments in a workbook', function (): void {
+    it('is named in the header of every column of moments and of no other, with the cells left exact', function (ExportFormat $format, string $zone, string $locale, string $summer, string $winter): void {
+        $case = exportFixture();
+        // A winter moment on one item and a summer one on the other: the header must be right for both, so it names the zone, not an offset.
+        $other = $case['items']['formulas'];
+        $other->forceFill(['values' => [...$other->values, $case['fields']['seen']->ulid => '2026-01-15T10:30:00Z']])->save();
+        config(['app.display_timezone' => $zone]);
+
+        $export = exportRun(exportAsked($case['inventory'], $case['team']['owner'], $format, ['locale' => $locale]));
+
+        expect($export->status)->toBe(ExportStatus::Completed, (string) $export->error);
+
+        $french = $locale === 'fr';
+        $header = exportSheet($export)['rows'][0];
+        $records = collect(exportRecords($export))->keyBy($french ? 'Identifiant' : 'Identifier');
+        $drill = $records[$case['items']['drill']->ulid];
+
+        expect($header)->toContain("Seen ({$zone})", ($french ? 'Créé le' : 'Created on')." ({$zone})", ($french ? 'Modifié le' : 'Modified on')." ({$zone})")
+            ->and($header)->toContain('Bought', 'Opening')
+            ->and($drill["Seen ({$zone})"]->format('Y-m-d H:i'))->toBe($summer)
+            ->and($records[$other->ulid]["Seen ({$zone})"]->format('Y-m-d H:i'))->toBe($winter)
+            ->and($drill[($french ? 'Créé le' : 'Created on')." ({$zone})"]->format('Y-m-d H:i'))->toBe($case['items']['drill']->created_at->copy()->setTimezone($zone)->format('Y-m-d H:i'))
+            // A day and a time of the day have no zone: nothing is added to their header.
+            ->and($drill['Bought']->format('Y-m-d'))->toBe('2026-03-01');
+    })->with(fn (): array => [
+        'a workbook, UTC, in English' => [ExportFormat::Xlsx, 'UTC', 'en', '2026-07-01 10:30', '2026-01-15 10:30'],
+        'a workbook, Paris, in French' => [ExportFormat::Xlsx, 'Europe/Paris', 'fr', '2026-07-01 12:30', '2026-01-15 11:30'],
+        'an OpenDocument spreadsheet, UTC, in French' => [ExportFormat::Ods, 'UTC', 'fr', '2026-07-01 10:30', '2026-01-15 10:30'],
+        'an OpenDocument spreadsheet, Paris, in English' => [ExportFormat::Ods, 'Europe/Paris', 'en', '2026-07-01 12:30', '2026-01-15 11:30'],
+    ]);
+
+    it('makes the last two columns wide enough for a header with a zone', function (): void {
+        [$export] = spreadsheetOf(ExportFormat::Xlsx);
+        $sheet = exportZipEntry(exportLocalPath($export), 'xl/worksheets/sheet1.xml');
+
+        // "Created on (Europe/Paris)" is 25 characters and "Modified on (Europe/Paris)" 26: the header and four more, where 18 would cut them.
+        expect($sheet)->toContain('<col min="22" max="22" width="29"')->toContain('<col min="23" max="23" width="30"');
+    });
 });
 
 describe('the numbers and the dates a spreadsheet cannot keep', function (): void {
@@ -228,7 +268,7 @@ describe('the numbers and the dates a spreadsheet cannot keep', function (): voi
         // 16 significant digits: a spreadsheet keeps 15, so the number is written whole as text.
         expect($large['Big'])->toBe('1234567890.123456')
             ->and($large['Day'])->toBe('1850-05-17')
-            ->and($large['Moment'])->toBe((new DateTimeImmutable('1850-05-17T10:00:00Z'))->setTimezone(new DateTimeZone('Europe/Paris'))->format('Y-m-d H:i'))
+            ->and($large['Moment (Europe/Paris)'])->toBe((new DateTimeImmutable('1850-05-17T10:00:00Z'))->setTimezone(new DateTimeZone('Europe/Paris'))->format('Y-m-d H:i'))
             // 15 digits: exact as a number.
             ->and($small['Big'])->toBe(999999999.999999)
             ->and($small['Day'])->toBeInstanceOf(DateTimeInterface::class);

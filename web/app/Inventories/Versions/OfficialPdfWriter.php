@@ -225,14 +225,17 @@ final class OfficialPdfWriter
 
     /**
      * The three lines under the title, each of which fits the width of the page: when the version was frozen (in the timezone of the
-     * instance, then in UTC) and of what inventory; who froze it and how many items it holds; the SHA-256 of the data, whole.
+     * instance, named, then in UTC; once when the instance is on UTC) and of what inventory; who froze it and how many items it
+     * holds; the SHA-256 of the data, whole.
      *
      * @return list<string>
      */
     private function lines(InventoryVersion $version, VersionContent $content, int $items, ExportFormatter $local, FontMetrics $metrics, string $font): array
     {
         $moment = $version->frozen_at->toDateTimeImmutable();
-        $frozen = __('Frozen on :date', ['date' => $local->moment($moment).' ('.DisplayTime::zone().')']).' · '.(new ExportFormatter($version->locale, 'UTC'))->moment($moment).' UTC';
+        $utc = (new ExportFormatter($version->locale, 'UTC'))->moment($moment);
+        $zoned = $local->moment($moment);
+        $frozen = __('Frozen on :date', ['date' => $zoned === $utc ? $utc : "{$zoned} (".DisplayTime::zone().') · '.$utc]);
         $width = PdfBody::TABLE_WIDTH_PT;
 
         return [

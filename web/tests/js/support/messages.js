@@ -49,6 +49,7 @@ export const MESSAGES = {
     'grid.notice.dropped': 'Some of the search options no longer apply: they were removed.',
     'grid.notice.fields_changed': 'The fields of this inventory have changed: the list was loaded again.',
     'grid.notice.not_saved': 'The new value of :field was not saved: :reason',
+    'fields.error.invalid_number': 'Enter a number, for example 12.5.',
     'grid.filter.invalid_number': 'Enter a number with at most 6 decimals.',
     'grid.filter.too_large': 'Enter a number with at most 15 digits before the decimal sign.',
     'grid.filter.invalid_value': 'This value is not valid.',

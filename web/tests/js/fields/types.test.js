@@ -8,6 +8,7 @@ import {
     emptyInput,
     fromInput,
     inputModeOf,
+    inputRefusal,
     inputTypeOf,
     maxLengthOf,
     selectOptionsOf,
@@ -22,6 +23,8 @@ const MESSAGES = {
     'fields.boolean.yes': 'Yes',
     'fields.boolean.no': 'No',
     'fields.rating': ':value out of :max',
+    'fields.error.invalid_number': 'Enter a number, for example 12.5.',
+    'grid.filter.invalid_number': 'Enter a number with at most 6 decimals.',
 };
 
 /** The spaces the formatters use (no-break, narrow no-break) written as plain ones, to compare text. */
@@ -473,6 +476,52 @@ describe('typing a value', () => {
         it('sends nothing for an empty box', () => {
             expect(fromInput(number, '')).toBeNull();
             expect(fromInput(number, '  ')).toBeNull();
+        });
+
+        it('refuses text that is no number before it is sent, in the words of the interface', () => {
+            const said = 'Enter a number, for example 12.5.';
+
+            for (const type of ['number', 'money', 'percentage']) {
+                const one = field(type, { decimals: 2, currency: 'EUR' });
+
+                for (const text of ['abc', '12abc', '1.2.3', '--1', '1e3', '.5', '+5', '-', '12 euros']) {
+                    expect(inputRefusal(one, text), `${type}: ${text}`).toBe(said);
+                }
+            }
+        });
+
+        it('accepts what a person may type for a number, and an empty box', () => {
+            for (const type of ['number', 'money', 'percentage']) {
+                const one = field(type, { decimals: 2, currency: 'EUR' });
+
+                for (const text of [
+                    '12',
+                    '12,5',
+                    '12.5',
+                    '1 299,90',
+                    '1,234.50',
+                    '1.234,50',
+                    '-3',
+                    '0',
+                    '12.345678',
+                    '',
+                    '  ',
+                ]) {
+                    expect(inputRefusal(one, text), `${type}: ${text}`).toBeNull();
+                }
+
+                expect(inputRefusal(one, null)).toBeNull();
+            }
+        });
+
+        it('leaves the limits of the field to the API: decimals, size, minimum and maximum', () => {
+            expect(inputRefusal(field('number', { decimals: 0, min: '5' }), '1234567890123456789.123')).toBeNull();
+        });
+
+        it('has nothing to say about the types that take any text, or no text', () => {
+            for (const type of ['text', 'textarea', 'date', 'select', 'tags', 'file']) {
+                expect(inputRefusal(field(type), 'abc'), type).toBeNull();
+            }
         });
 
         it('puts a stored number in the box with the decimal separator of the language', () => {

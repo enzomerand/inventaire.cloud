@@ -19,7 +19,14 @@
  */
 import { cell, emptyCell } from './cell.js';
 import { filesCell } from './files.js';
-import { formatDecimal, formatMoney, formatPercentage, parseDecimal, toDecimalInput } from './decimal.js';
+import {
+    formatDecimal,
+    formatMoney,
+    formatPercentage,
+    isDecimalText,
+    parseDecimal,
+    toDecimalInput,
+} from './decimal.js';
 import { dateFormat, pageLocale } from './locale.js';
 import { badgeClass } from './palette.js';
 import { t } from '../lib/i18n.js';
@@ -61,6 +68,9 @@ import { t } from '../lib/i18n.js';
  * @property {boolean} [scannable] Whether the form offers to read the value from a barcode with the camera.
  * @property {(value: any, field: Field) => any} toInput
  * @property {(input: any, field: Field) => any} fromInput
+ * @property {(input: any, field: Field) => string | null} [refusal] Why what the control holds cannot be sent, in the words of the
+ *   interface (null when it can; absent for the types that take any text). It lets a form say so before the API does, in
+ *   the language and the way the person typed.
  * @property {(value: any, field: Field, options?: DescribeOptions) => import('./cell.js').Cell} describe
  */
 
@@ -171,6 +181,12 @@ const DECIMAL_INPUT = {
     inputMode: 'decimal',
     toInput: (value) => toDecimalInput(value, pageLocale()),
     fromInput: (input) => parseDecimal(input),
+    // Text that is no number goes no further: the API refuses it with a message about a dot, while the box takes a comma too.
+    refusal: (input) => {
+        const text = parseDecimal(input);
+
+        return text === null || isDecimalText(text) ? null : t('fields.error.invalid_number');
+    },
 };
 
 /** What the photo and file fields share: files are added and removed one by one, never typed in a box or sent with the values. */

@@ -6,6 +6,7 @@ import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/m
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
 import { useMemoryStorage } from '../support/storage.js';
+import { nextFrame } from '../support/frame.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -911,6 +912,50 @@ describe('the items of an inventory', () => {
             expect(component.formError).toBe('The given data was invalid.');
         });
 
+        describe('when the text typed in a number box is no number', () => {
+            const SAID = 'Enter a number, for example 12.5.';
+            const [name, qty, price] = FIELDS;
+
+            it('says so under the box without sending anything, whatever the kind of number', async () => {
+                component.onInput(name, { target: { value: 'Hammer' } });
+                component.onInput(qty, { target: { value: 'abc' } });
+                component.onInput(price, { target: { value: '12 euros' } });
+
+                await component.save();
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(component.errors).toEqual({ qty: SAID, price: SAID });
+                expect(component.errorOf(qty)).toBe(SAID);
+                expect(component.controlClass(qty)).toBe('form-control is-invalid');
+                expect(component.formError).toBe('');
+                expect(hideModal).not.toHaveBeenCalled();
+                expect(component.busy).toBe(false);
+            });
+
+            it('forgets the message of a box as soon as it is typed in again, and sends the form once every box is right', async () => {
+                component.onInput(qty, { target: { value: 'abc' } });
+                await component.save();
+
+                component.onInput(qty, { target: { value: '1,5' } });
+                expect(component.errorOf(qty)).toBe('');
+
+                await component.save();
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(http.post.mock.calls[0][1].values).toMatchObject({ qty: '1.5' });
+            });
+
+            it('leaves the judging of a number to the API: its decimals, its size, the limits of the field', async () => {
+                component.onInput(qty, { target: { value: '1,2345' } });
+                component.onInput(price, { target: { value: '-99999999999' } });
+
+                await component.save();
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(http.post.mock.calls[0][1].values).toMatchObject({ qty: '1.2345', price: '-99999999999' });
+            });
+        });
+
         it('says the quota is reached', async () => {
             http.post.mockRejectedValue(
                 new HttpError(409, 'Conflict', { code: 'item_limit_reached', body: { limit: 10000 } }),
@@ -919,6 +964,96 @@ describe('the items of an inventory', () => {
             await component.save();
 
             expect(component.formError).toBe('Item limit reached (10000 per inventory).');
+        });
+
+        describe('when the refusal lies outside what the dialog shows', () => {
+            let scroll;
+
+            /** Puts in the page what the dialog renders for the refusals the component holds (the markup is Alpine's job). */
+            function render(html) {
+                modal.innerHTML = html;
+                document.body.append(modal);
+            }
+
+            beforeEach(() => {
+                // jsdom has no layout, hence no scrollIntoView.
+                scroll = vi.fn();
+                Element.prototype.scrollIntoView = scroll;
+            });
+
+            afterEach(() => {
+                delete Element.prototype.scrollIntoView;
+                modal.remove();
+            });
+
+            it('scrolls to the first field that was refused and puts the cursor in it', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: {
+                            'values.price': ['The Price must have at most 2 decimals.'],
+                            'values.qty': ['The Weight must be at least 0.'],
+                        },
+                    }),
+                );
+                render(`
+                    <div class="mb-3"><input id="name" class="form-control"></div>
+                    <div class="mb-3">
+                        <input id="qty" class="form-control is-invalid">
+                        <div class="text-danger small">The Weight must be at least 0.</div>
+                    </div>
+                    <div class="mb-3">
+                        <input id="price" class="form-control is-invalid">
+                        <div class="text-danger small">The Price must have at most 2 decimals.</div>
+                    </div>
+                `);
+
+                await component.save();
+                await nextFrame();
+
+                expect(scroll).toHaveBeenCalledTimes(1);
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('#qty'));
+                expect(document.activeElement).toBe(modal.querySelector('#qty'));
+            });
+
+            it('scrolls to the first number box whose text is no number, before anything is sent', async () => {
+                component.onInput(FIELDS[1], { target: { value: 'abc' } });
+                render(`
+                    <div class="mb-3"><input id="name" class="form-control"></div>
+                    <div class="mb-3">
+                        <input id="qty" class="form-control is-invalid">
+                        <div class="text-danger small">Enter a number with at most 6 decimals.</div>
+                    </div>
+                `);
+
+                await component.save();
+                await nextFrame();
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('#qty'));
+                expect(document.activeElement).toBe(modal.querySelector('#qty'));
+            });
+
+            it('scrolls to the message that says the quota is reached', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(409, 'Conflict', { code: 'item_limit_reached', body: { limit: 10000 } }),
+                );
+                render('<div class="alert alert-danger" role="alert">Item limit reached (10000 per inventory).</div>');
+
+                await component.save();
+                await nextFrame();
+
+                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('.alert-danger'));
+            });
+
+            it('does nothing for a failure that is not shown in the dialog', async () => {
+                http.post.mockRejectedValue(new HttpError(500, 'Server down', { reported: true }));
+                render('<input id="name" class="form-control">');
+
+                await component.save();
+                await nextFrame();
+
+                expect(scroll).not.toHaveBeenCalled();
+            });
         });
 
         it('takes the person back to the workspace when the inventory was deleted while the form was open', async () => {
@@ -963,6 +1098,22 @@ describe('the items of an inventory', () => {
             answer([item('i1', STORED)]);
             await component.init();
             http.patch.mockResolvedValue({ data: item('i1') });
+        });
+
+        it('does not send a number box that was changed to something that is no number, and says so under it', async () => {
+            component.open({ id: 'i1' });
+            component.onInput(FIELDS[1], { target: { value: '1,5x' } });
+
+            await component.save();
+
+            expect(http.patch).not.toHaveBeenCalled();
+            expect(component.errorOf(FIELDS[1])).toBe('Enter a number, for example 12.5.');
+            expect(hideModal).not.toHaveBeenCalled();
+
+            component.onInput(FIELDS[1], { target: { value: '1,75' } });
+            await component.save();
+
+            expect(http.patch).toHaveBeenCalledWith(ITEMS + '/i1', { values: { qty: '1.75' } });
         });
 
         it('sends only what was changed', async () => {

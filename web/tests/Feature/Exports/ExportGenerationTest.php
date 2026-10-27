@@ -137,13 +137,13 @@ describe('a completed export', function (): void {
         app()->setLocale('en');
         $french = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Xlsx, ['locale' => 'fr']));
 
-        expect(exportSheet($french)['rows'][0])->toContain('Identifiant', 'Créé le', 'Modifié le')
+        expect(exportSheet($french)['rows'][0])->toContain('Identifiant', 'Créé le (Europe/Paris)', 'Modifié le (Europe/Paris)')
             // The worker is where it was.
             ->and(app()->getLocale())->toBe('en');
 
         $english = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Xlsx, ['locale' => 'en']));
 
-        expect(exportSheet($english)['rows'][0])->toContain('Identifier', 'Created on', 'Modified on');
+        expect(exportSheet($english)['rows'][0])->toContain('Identifier', 'Created on (Europe/Paris)', 'Modified on (Europe/Paris)');
     });
 
     it('is written once: a worker that finds it taken, or finished, does nothing', function (ExportStatus $status): void {

@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import inventoryFields from '../../../resources/js/components/inventory-fields.js';
 import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
+import { nextFrame } from '../support/frame.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -62,6 +63,7 @@ function inventoryAnswer(fields = FIELDS) {
 
 describe('the fields of an inventory', () => {
     let component;
+    let root;
     let fieldModal;
     let deleteModal;
 
@@ -69,17 +71,18 @@ describe('the fields of an inventory', () => {
         fieldModal = document.createElement('div');
         deleteModal = document.createElement('div');
         component = inventoryFields();
-        component.$root = {
-            dataset: {
-                url: INVENTORY,
-                fieldsUrl: INVENTORY + '/fields',
-                orderUrl: INVENTORY + '/fields/order',
-                fieldUrl: INVENTORY + '/fields/__id__',
-                workspacePage: '/app/w/shop',
-                types: JSON.stringify(TYPES),
-                currencies: JSON.stringify(CURRENCIES),
-            },
-        };
+        // An element, as Alpine hands it over: the move buttons of the rows are looked up in it.
+        root = document.createElement('div');
+        Object.assign(root.dataset, {
+            url: INVENTORY,
+            fieldsUrl: INVENTORY + '/fields',
+            orderUrl: INVENTORY + '/fields/order',
+            fieldUrl: INVENTORY + '/fields/__id__',
+            workspacePage: '/app/w/shop',
+            types: JSON.stringify(TYPES),
+            currencies: JSON.stringify(CURRENCIES),
+        });
+        component.$root = root;
         component.$refs = { fieldModal, deleteModal };
         component.$nextTick = (callback) => callback();
         http.get.mockResolvedValue(inventoryAnswer());
@@ -249,6 +252,131 @@ describe('the fields of an inventory', () => {
             expect(component.busy).toBe(false);
         });
 
+        describe('where the cursor goes once the order has been sent', () => {
+            /** The move buttons of the rows, as the markup names them (`data-field-action`, `data-field-id`). */
+            function render(ids) {
+                root.innerHTML = ids
+                    .map(
+                        (id) =>
+                            `<div><button data-field-action="up" data-field-id="${id}"></button>` +
+                            `<button data-field-action="down" data-field-id="${id}"></button></div>`,
+                    )
+                    .join('');
+                document.body.append(root);
+            }
+
+            const button = (id, action) => root.querySelector(`[data-field-action="${action}"][data-field-id="${id}"]`);
+
+            afterEach(() => root.remove());
+
+            it('goes back to the button that was pressed, on the same field, whichever way it went', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockResolvedValue({ data: reordered(['b', 'a', 'c']) });
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(button('a', 'down'));
+
+                component.fields = FIELDS;
+                http.put.mockResolvedValue({ data: reordered(['a', 'c', 'b']) });
+
+                await component.moveUp(FIELDS[2]);
+
+                expect(document.activeElement).toBe(button('c', 'up'));
+            });
+
+            it('goes to the other button when the field has reached an end of the list, where the pressed one is disabled', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockResolvedValue({ data: reordered(['a', 'c', 'b']) });
+
+                await component.moveDown(FIELDS[1]);
+
+                // Last of the list: it cannot go down any more, it can go back up.
+                expect(document.activeElement).toBe(button('b', 'up'));
+
+                component.fields = FIELDS;
+                http.put.mockResolvedValue({ data: reordered(['b', 'a', 'c']) });
+
+                await component.moveUp(FIELDS[1]);
+
+                // First of the list: it can go back down.
+                expect(document.activeElement).toBe(button('b', 'down'));
+            });
+
+            it('waits for the rendering: the cursor is not put anywhere before the rows are drawn again', async () => {
+                render(['a', 'b', 'c']);
+                const waiting = [];
+                component.$nextTick = (callback) => waiting.push(callback);
+                http.put.mockResolvedValue({ data: reordered(['b', 'a', 'c']) });
+                const before = document.activeElement;
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(before);
+                expect(waiting).toHaveLength(1);
+
+                waiting[0]();
+
+                expect(document.activeElement).toBe(button('a', 'down'));
+            });
+
+            it('puts the cursor back too when the order was refused and the list is read again', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockRejectedValue(new HttpError(422, 'Invalid.', { errors: { fields: ['Nope.'] } }));
+                http.get.mockResolvedValue(inventoryAnswer(FIELDS));
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(button('a', 'down'));
+            });
+
+            it('leaves the cursor alone when the field is gone from the list the server holds', async () => {
+                render(['a', 'b', 'c']);
+                http.put.mockRejectedValue(new HttpError(422, 'Invalid.', { errors: { fields: ['Nope.'] } }));
+                http.get.mockResolvedValue(inventoryAnswer([FIELDS[1], FIELDS[2]]));
+                const before = document.activeElement;
+
+                await component.moveDown(FIELDS[0]);
+
+                expect(document.activeElement).toBe(before);
+            });
+
+            it('takes the root before any wait, since Alpine stops answering it once the pressed button has left the page', async () => {
+                render(['a', 'b', 'c']);
+                let listRead = false;
+                Object.defineProperty(component, '$root', {
+                    configurable: true,
+                    get() {
+                        if (listRead) {
+                            throw new Error('The element that started the call has left the page.');
+                        }
+
+                        return root;
+                    },
+                });
+                http.put.mockRejectedValue(new HttpError(422, 'Invalid.', { errors: { fields: ['Nope.'] } }));
+                http.get.mockImplementation(async () => {
+                    listRead = true;
+
+                    return inventoryAnswer([FIELDS[1], FIELDS[2]]);
+                });
+
+                await expect(component.moveDown(FIELDS[0])).resolves.toBeUndefined();
+
+                expect(component.fields.map((one) => one.id)).toEqual(['b', 'c']);
+                expect(component.busy).toBe(false);
+            });
+
+            it('does nothing when no order was sent', async () => {
+                render(['a', 'b', 'c']);
+                const before = document.activeElement;
+
+                await component.moveUp(FIELDS[0]);
+
+                expect(document.activeElement).toBe(before);
+            });
+        });
+
         it('names the buttons after the field', () => {
             expect(component.named('fields.move_up_named', FIELDS[0])).toBe('Move Name up');
             expect(component.named('fields.move_down_named', FIELDS[0])).toBe('Move Name down');
@@ -317,6 +445,19 @@ describe('the fields of an inventory', () => {
             });
             expect(hideModal).toHaveBeenCalledWith(fieldModal);
             expect(notify).toHaveBeenCalledWith('success', 'Field added.');
+            expect(component.busy).toBe(false);
+        });
+
+        it('refuses bounds that are no number before asking the API', async () => {
+            component.startCreate();
+            component.selectType({ target: { value: 'number' } });
+            component.form.name = 'Weight';
+            Object.assign(component.form.options, { min: '1,5', max: 'abc' });
+
+            await component.save();
+
+            expect(http.post).not.toHaveBeenCalled();
+            expect(component.errors).toEqual({ 'options.max': 'Enter a number, for example 12.5.' });
             expect(component.busy).toBe(false);
         });
 
@@ -455,6 +596,72 @@ describe('the fields of an inventory', () => {
             await component.save();
 
             expect(component.formError).toBe('Field limit reached (100 per inventory).');
+        });
+
+        describe('when the refusal lies outside what the dialog shows', () => {
+            let scroll;
+
+            /** Puts in the page what the dialog renders for the refusals the component holds (the markup is Alpine's job). */
+            function render(html) {
+                fieldModal.innerHTML = html;
+                document.body.append(fieldModal);
+            }
+
+            /** A choice of a select in the dialog: its box, and the message under it when it was refused. */
+            const choice = (index, message = '') => `
+                <div class="mb-2">
+                    <div class="input-group"><input id="choice-${index}" class="form-control" aria-label="Choice"></div>
+                    <div class="text-danger small mt-1">${message}</div>
+                </div>
+            `;
+
+            beforeEach(() => {
+                // jsdom has no layout, hence no scrollIntoView.
+                scroll = vi.fn();
+                Element.prototype.scrollIntoView = scroll;
+                component.startCreate();
+                component.form.name = 'Name';
+            });
+
+            afterEach(() => {
+                delete Element.prototype.scrollIntoView;
+                fieldModal.remove();
+            });
+
+            it('scrolls to the first input that was refused and puts the cursor in it', async () => {
+                http.post.mockRejectedValue(
+                    new HttpError(422, 'Invalid.', {
+                        errors: {
+                            name: ['This inventory already has a field with this name.'],
+                            'options.choices': ['At least one choice is required.'],
+                        },
+                    }),
+                );
+                render(`
+                    <div class="mb-3">
+                        <input id="field-name" class="form-control is-invalid">
+                        <div class="text-danger small mt-1">This inventory already has a field with this name.</div>
+                    </div>
+                    <div class="mb-3">${choice(0)}</div>
+                `);
+
+                await component.save();
+                await nextFrame();
+
+                expect(scroll).toHaveBeenCalledTimes(1);
+                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('#field-name'));
+                expect(document.activeElement).toBe(fieldModal.querySelector('#field-name'));
+            });
+
+            it('does not look for a refusal when the failure is shown as a toast', async () => {
+                http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'odd' }));
+                render('<input id="field-name" class="form-control is-invalid">');
+
+                await component.save();
+                await nextFrame();
+
+                expect(scroll).not.toHaveBeenCalled();
+            });
         });
 
         it('shows other failures as a toast, but not the ones the HTTP helper already told', async () => {

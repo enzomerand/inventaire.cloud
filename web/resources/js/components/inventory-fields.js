@@ -21,6 +21,7 @@
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the input they are about, in the dialog, or as a toast.
  */
+import { inputRefusal } from '../fields/index.js';
 import {
     BARCODE_FORMATS,
     barcodeFormatName,
@@ -32,7 +33,7 @@ import {
     summarizeOptions,
 } from '../fields/options.js';
 import { COLORS, swatchClass } from '../fields/palette.js';
-import { firstMessages, fillUrl } from '../lib/forms.js';
+import { firstMessages, fillUrl, revealFirstRefusalOnceShown } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -308,6 +309,9 @@ export default function inventoryFields() {
                 return;
             }
 
+            // `$root` is taken now, before any wait: Alpine stops answering it once the element that started the call has left the
+            // page (the field may be deleted by another editor while the order is on its way).
+            const root = this.$root;
             const order = this.fields.map((other) => other.id);
             order.splice(to, 0, ...order.splice(from, 1));
             this.busy = true;
@@ -321,6 +325,24 @@ export default function inventoryFields() {
             } finally {
                 this.busy = false;
             }
+
+            // The pressed button was disabled while the order was on its way, which sent the cursor to the page: put it back on
+            // a move button once the list has been rendered again. The same button is kept as long as the field can still go
+            // that way; at the end of the list it is the other one.
+            const action = places < 0 ? 'up' : 'down';
+
+            this.$nextTick(() => {
+                const moved = this.fields.find((other) => other.id === field.id);
+
+                if (moved === undefined) {
+                    return;
+                }
+
+                const stuck = action === 'up' ? this.isFirst(moved) : this.isLast(moved);
+                const wanted = stuck ? (action === 'up' ? 'down' : 'up') : action;
+
+                root.querySelector(`[data-field-action="${wanted}"][data-field-id="${field.id}"]`)?.focus();
+            });
         },
 
         /**
@@ -526,8 +548,18 @@ export default function inventoryFields() {
                 this.form.options.choices.push(blankChoice());
             }
 
-            this.busy = true;
             this.resetDialog();
+
+            const refusals = this.boundRefusals();
+
+            if (Object.keys(refusals).length > 0) {
+                this.errors = refusals;
+                this.revealRefusal();
+
+                return;
+            }
+
+            this.busy = true;
 
             const body = {
                 name: this.form.name.trim(),
@@ -633,11 +665,44 @@ export default function inventoryFields() {
                 this.errors = messages;
                 this.formError =
                     other !== undefined ? messages[other] : Object.keys(messages).length === 0 ? error.message : '';
+                this.revealRefusal();
             } else if (error.status === 409 && error.code === 'field_limit_reached') {
                 this.formError = t('fields.error.limit', { count: error.body?.limit ?? '' });
+                this.revealRefusal();
             } else {
                 notify('danger', error.message);
             }
+        },
+
+        /**
+         * The bounds of a number field typed as something that is no number, keyed like the refusals of the API. The API
+         * refuses them too, with a message about a dot, while the boxes take a comma.
+         *
+         * @returns {Record<string, string>}
+         */
+        boundRefusals() {
+            if (this.form.type !== 'number') {
+                return {};
+            }
+
+            const number = /** @type {Field} */ ({ type: 'number' });
+
+            return Object.fromEntries(
+                ['min', 'max']
+                    .map((bound) => [`options.${bound}`, inputRefusal(number, this.form.options[bound])])
+                    .filter(([, message]) => message !== null),
+            );
+        },
+
+        /**
+         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusalOnceShown`).
+         *
+         * @returns {void}
+         */
+        revealRefusal() {
+            const dialog = this.$refs.fieldModal;
+
+            this.$nextTick(() => revealFirstRefusalOnceShown(dialog));
         },
 
         /**

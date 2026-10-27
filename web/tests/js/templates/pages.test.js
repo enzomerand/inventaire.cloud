@@ -127,6 +127,8 @@ const PAGE = {
         { code: 'USD', name: 'US Dollar' },
     ],
     abilities: {},
+    /** The owner of the workspaces that belong to somebody else, by id of workspace (the switcher of the header names them). */
+    workspaceOwners: {},
     inventoryPhotoEntry: false,
     sharing: { enabled: true, limit: 20 },
     signaturesAvailable: true,
@@ -339,7 +341,9 @@ function render(path, { scannerSlot = '' } = {}) {
         }
 
         if (expression.startsWith('json_encode($list')) {
-            return escape(JSON.stringify(WORKSPACES));
+            return escape(
+                JSON.stringify(WORKSPACES.map((item) => ({ ...item, owner: PAGE.workspaceOwners[item.id] ?? null }))),
+            );
         }
 
         const values = {
@@ -523,6 +527,7 @@ describe('the pages under the real Alpine CSP build', () => {
         useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
+        PAGE.workspaceOwners = {};
         PAGE.inventoryPhotoEntry = false;
         PAGE.sharing = { enabled: true, limit: 20 };
         PAGE.signaturesAvailable = true;
@@ -548,6 +553,32 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(items.map((item) => item.textContent.trim())).toEqual(['Espace personnel', 'Shop', 'Shared']);
             expect(items.map((item) => item.classList.contains('active'))).toEqual([false, true, false]);
             expect(items.map((item) => item.getAttribute('aria-current'))).toEqual([null, 'true', null]);
+            expect(document.querySelector('.dropdown-toggle .app-workspace-name').textContent).toBe('Shop');
+        });
+
+        /** What a person who reads the button of the header is told: its text content, as the accessible name is built from it. */
+        const buttonName = () => document.querySelector('.dropdown-toggle').textContent.replace(/\s+/g, ' ').trim();
+
+        it("names the action and the workspace in the button, and no owner while the workspace is the person's", () => {
+            const button = document.querySelector('.dropdown-toggle');
+
+            expect(buttonName()).toBe('Change workspace Shop');
+            expect(button.hasAttribute('aria-label')).toBe(false);
+            expect(button.hasAttribute('title')).toBe(false);
+        });
+
+        it("names the owner in the button, for a screen reader and in its tooltip, when the current workspace is somebody else's", async () => {
+            PAGE.workspaceOwners = { shop: 'Camille Martin' };
+            await mount('components/workspace-switcher.blade.php');
+            const button = document.querySelector('.dropdown-toggle');
+
+            // The owner is part of the content, not of an aria-label (which would replace the content as the accessible name).
+            expect(buttonName()).toBe('Change workspace Shop Owner: Camille Martin');
+            expect(button.hasAttribute('aria-label')).toBe(false);
+            expect(button.querySelector('.visually-hidden:not(:first-of-type)')?.textContent.trim()).toBe(
+                'Owner: Camille Martin',
+            );
+            expect(button.getAttribute('title')).toBe('Shop (Owner: Camille Martin)');
             expect(document.querySelector('.dropdown-toggle .app-workspace-name').textContent).toBe('Shop');
         });
 
@@ -3285,9 +3316,17 @@ describe('the pages under the real Alpine CSP build', () => {
                 await choose(select, 'price');
                 expect(lastParams()).toEqual({ page: 1, sort: 'price' });
 
+                // The icons carry the toggle themselves (a wrapping span would collapse inside the icon button and drop the icon).
+                const icons = () => [...buttons('Ascending order').concat(buttons('Descending order'))[0].children];
+                const shown = () => icons().map((icon) => visible(icon));
+
+                expect(icons().map((icon) => icon.localName)).toEqual(['svg', 'svg']);
+                expect(shown()).toEqual([true, false]);
+
                 await press('Ascending order');
                 expect(lastParams()).toEqual({ page: 1, sort: 'price', direction: 'desc' });
                 expect(buttons('Descending order')).toHaveLength(1);
+                expect(shown()).toEqual([false, true]);
             });
 
             it('shows the dates an item was added and last changed', async () => {
@@ -3713,6 +3752,34 @@ describe('the pages under the real Alpine CSP build', () => {
                 expect(badges()).toEqual(['Two']);
             });
 
+            it('says under a number box that its text is no number, without sending the item', async () => {
+                await press('Add item');
+                await type(control('name'), 'Saw');
+                await type(control('qty'), 'abc');
+
+                await submit(itemDialog().querySelector('form'));
+
+                const feedback = (id) => control(id).closest('.mb-3').querySelector('.text-danger');
+
+                expect(http.post).not.toHaveBeenCalled();
+                expect(control('qty').classList.contains('is-invalid')).toBe(true);
+                expect(visible(feedback('qty'))).toBe(true);
+                expect(feedback('qty').textContent).toBe('Enter a number, for example 12.5.');
+                expect(document.activeElement).toBe(control('qty'));
+                expect(hideModal).not.toHaveBeenCalled();
+
+                http.post.mockResolvedValue({ data: { id: 'new', values: { name: 'Saw', qty: '1.5' } } });
+                await type(control('qty'), '1,5');
+
+                expect(control('qty').classList.contains('is-invalid')).toBe(false);
+                expect(visible(feedback('qty'))).toBe(false);
+
+                await submit(itemDialog().querySelector('form'));
+
+                expect(http.post).toHaveBeenCalledTimes(1);
+                expect(http.post.mock.calls[0][1].values).toMatchObject({ name: 'Saw', qty: '1.5' });
+            });
+
             it('shows each refusal under the field it is about', async () => {
                 http.post.mockRejectedValue(
                     new HttpError(422, 'Invalid.', {
@@ -3729,6 +3796,8 @@ describe('the pages under the real Alpine CSP build', () => {
                 const feedback = (id) => control(id).closest('.mb-3').querySelector('.text-danger');
 
                 expect(control('name').classList.contains('is-invalid')).toBe(true);
+                // The first refusal is brought into view with the cursor in its control, wherever it lies in a long form.
+                expect(document.activeElement).toBe(control('name'));
                 expect(visible(feedback('name'))).toBe(true);
                 expect(feedback('name').textContent).toBe('The Name is required.');
                 expect(feedback('qty').textContent).toBe('The Weight must be a number, written with a dot.');
@@ -4833,22 +4902,26 @@ describe('the pages under the real Alpine CSP build', () => {
 
             it('shows what the server refuses under the box, which stays for the value to be fixed', async () => {
                 http.patch.mockRejectedValueOnce(
-                    new HttpError(422, 'Invalid', { errors: { 'values.price': ['The price must be a number.'] } }),
+                    new HttpError(422, 'Invalid', {
+                        errors: { 'values.price': ['The price must have at most 2 decimals.'] },
+                    }),
                 );
                 cellButton(0, PRICE).click();
                 await flush();
 
-                await type(editor(), 'abc');
+                await type(editor(), '12.345');
                 key(editor(), 'Enter');
                 await flush();
 
                 expect(editor().classList.contains('is-invalid')).toBe(true);
                 expect(editor().getAttribute('aria-invalid')).toBe('true');
                 expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
-                expect(document.getElementById('item-inline-error').textContent).toBe('The price must be a number.');
+                expect(document.getElementById('item-inline-error').textContent).toBe(
+                    'The price must have at most 2 decimals.',
+                );
                 expect(editor().disabled).toBe(false);
                 expect(editor().closest('td').querySelector('.text-danger').textContent).toBe(
-                    'The price must be a number.',
+                    'The price must have at most 2 decimals.',
                 );
                 expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
                 expect(document.activeElement).toBe(editor());
@@ -4864,6 +4937,37 @@ describe('the pages under the real Alpine CSP build', () => {
 
                 expect(editor()).toBeNull();
                 expect(cellButton(0, PRICE).textContent.trim()).toBe('€12.00');
+            });
+
+            it('says under the box that text is no number, without sending it, and sends the number that fixes it', async () => {
+                cellButton(0, PRICE).click();
+                await flush();
+
+                await type(editor(), 'abc');
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).not.toHaveBeenCalled();
+                expect(editor().classList.contains('is-invalid')).toBe(true);
+                expect(editor().getAttribute('aria-describedby')).toBe('item-inline-error');
+                expect(document.getElementById('item-inline-error').textContent).toBe(
+                    'Enter a number, for example 12.5.',
+                );
+                expect(visible(editor().closest('td').querySelector('.text-danger'))).toBe(true);
+                expect(document.activeElement).toBe(editor());
+
+                http.patch.mockResolvedValueOnce({ data: { ...HAMMER, values: { ...HAMMER.values, price: '12.50' } } });
+                await type(editor(), '12,5');
+
+                expect(editor().classList.contains('is-invalid')).toBe(false);
+
+                key(editor(), 'Enter');
+                await flush();
+
+                expect(http.patch).toHaveBeenCalledWith('/api/v1/inventories/tools/items/i1', {
+                    values: { price: '12.5' },
+                });
+                expect(editor()).toBeNull();
             });
 
             it('says an item is gone with a toast, and reads the list again', async () => {
@@ -7375,6 +7479,27 @@ describe('the pages under the real Alpine CSP build', () => {
             ]);
         });
 
+        it('keeps the cursor on the button that moved a field, or on the other one at the end of the list', async () => {
+            await open();
+            http.put.mockResolvedValueOnce({ data: [FIELDS[1], FIELDS[0], FIELDS[2]] });
+
+            await press('Move Name down');
+
+            // The pressed button was disabled while the order was on its way: the cursor is put back on it.
+            expect(document.activeElement).toBe(buttons('Move Name down')[0]);
+            expect(document.activeElement.disabled).toBe(false);
+
+            http.put.mockResolvedValueOnce({ data: [FIELDS[1], FIELDS[2], FIELDS[0]] });
+
+            await press('Move Name down');
+
+            // Name is the last field now: it can no longer go down, so the cursor goes to the button that moves it back up.
+            expect(buttons('Move Name down')).toHaveLength(1);
+            expect(buttons('Move Name down')[0].disabled).toBe(true);
+            expect(document.activeElement).toBe(buttons('Move Name up')[0]);
+            expect(document.activeElement.disabled).toBe(false);
+        });
+
         it('shows the options of the type that is picked, and sends them with the new field', async () => {
             await open();
             http.post.mockResolvedValue({ data: { id: 'new' } });
@@ -7569,6 +7694,8 @@ describe('the pages under the real Alpine CSP build', () => {
             await submit(fieldDialog().querySelector('form'));
 
             expect(input('field-name').classList.contains('is-invalid')).toBe(true);
+            // The first refusal is brought into view with the cursor in its input, wherever it lies in a long dialog.
+            expect(document.activeElement).toBe(input('field-name'));
             expect(input('field-name').parentElement.querySelector('.text-danger').textContent).toBe(
                 'This inventory already has a field with this name.',
             );
@@ -8160,6 +8287,19 @@ describe('the pages under the real Alpine CSP build', () => {
                 await submit(form());
 
                 expect(error().textContent).toBe('Wait 30 seconds');
+            });
+
+            it('puts the cursor in the first input that was refused', async () => {
+                await open([]);
+                http.post.mockRejectedValueOnce(
+                    new HttpError(422, 'Invalid.', { errors: { label: ['Too long.'], signers: ['Add a signer.'] } }),
+                );
+                await press('New version', document.querySelector('.btn-list'));
+                document.body.focus();
+
+                await submit(form());
+
+                expect(document.activeElement).toBe(field('version-label'));
             });
 
             it('forgets the refusals on a new attempt', async () => {
