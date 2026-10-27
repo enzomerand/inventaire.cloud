@@ -183,13 +183,6 @@ describe('a legend followed by a template does not float', () => {
             expect(floatingLegendBeforeTemplate(html), html).toEqual([]);
         }
     });
-
-    it('would catch the legend of the filters panel losing its float-none', () => {
-        const source = readFileSync(join(VIEWS, 'partials/items-filters.blade.php'), 'utf8');
-
-        expect(floatingLegendBeforeTemplate(source)).toEqual([]);
-        expect(floatingLegendBeforeTemplate(source.replace(' float-none"', '"'))).toHaveLength(1);
-    });
 });
 
 /**

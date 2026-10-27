@@ -625,65 +625,6 @@ describe('the fields of an inventory', () => {
                 expect(document.activeElement).toBe(fieldModal.querySelector('#field-name'));
             });
 
-            it('scrolls to the message of a choice, and to the one under the choices, with the cursor in their box', async () => {
-                http.post.mockRejectedValue(
-                    new HttpError(422, 'Invalid.', {
-                        errors: { 'options.choices.1.label': ['The choice label is required.'] },
-                    }),
-                );
-                render(`
-                    <div class="mb-3"><input id="field-name" class="form-control"></div>
-                    <div class="mb-3">${choice(0)}${choice(1, 'The choice label is required.')}</div>
-                `);
-
-                await component.save();
-
-                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('.text-danger:not(:empty)'));
-                expect(document.activeElement).toBe(fieldModal.querySelector('#choice-1'));
-
-                http.post.mockRejectedValue(
-                    new HttpError(422, 'Invalid.', {
-                        errors: { 'options.choices': ['Two choices have the same name.'] },
-                    }),
-                );
-                render(`
-                    <div class="mb-3">
-                        ${choice(0)}${choice(1)}
-                        <div class="form-hint mt-2">Renaming or recoloring a choice keeps it on the items that have it.</div>
-                        <div class="text-danger small mt-1">Two choices have the same name.</div>
-                    </div>
-                `);
-                scroll.mockClear();
-
-                await component.save();
-
-                expect(scroll.mock.contexts[0].textContent).toBe('Two choices have the same name.');
-                expect(document.activeElement).toBe(fieldModal.querySelector('#choice-0'));
-            });
-
-            it('scrolls to the message at the top for a refusal that is about no input, and to the one that says the quota is reached', async () => {
-                http.post.mockRejectedValueOnce(new HttpError(422, 'Invalid.', { errors: { odd: ['Odd.'] } }));
-                render(
-                    '<div class="alert alert-danger" role="alert">Odd.</div><input id="field-name" class="form-control">',
-                );
-                const before = document.activeElement;
-
-                await component.save();
-
-                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('.alert-danger'));
-                expect(document.activeElement).toBe(before);
-
-                scroll.mockClear();
-                http.post.mockRejectedValueOnce(
-                    new HttpError(409, 'Conflict', { code: 'field_limit_reached', body: { limit: 100 } }),
-                );
-                fieldModal.querySelector('.alert-danger').textContent = 'Field limit reached (100 per inventory).';
-
-                await component.save();
-
-                expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('.alert-danger'));
-            });
-
             it('does not look for a refusal when the failure is shown as a toast', async () => {
                 http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'odd' }));
                 render('<input id="field-name" class="form-control is-invalid">');

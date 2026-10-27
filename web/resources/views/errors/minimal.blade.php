@@ -39,7 +39,7 @@
     </style>
 </head>
 <body>
-    <main role="main">
+    <main>
         <div class="error-head">
             <h1>@yield('code')</h1>
             <div class="error-message">@yield('message')</div>

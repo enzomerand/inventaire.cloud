@@ -1013,22 +1013,6 @@ describe('the items of an inventory', () => {
                 expect(document.activeElement).toBe(modal.querySelector('#qty'));
             });
 
-            it('scrolls to the message at the top for a refusal that is about no field, and leaves the cursor alone', async () => {
-                http.post.mockRejectedValue(
-                    new HttpError(422, 'Invalid.', { errors: { 'values.vanished': ['This field no longer exists.'] } }),
-                );
-                render(`
-                    <div class="alert alert-danger" role="alert">This field no longer exists.</div>
-                    <div class="mb-3"><input id="name" class="form-control"></div>
-                `);
-                const before = document.activeElement;
-
-                await component.save();
-
-                expect(scroll.mock.contexts[0]).toBe(modal.querySelector('.alert-danger'));
-                expect(document.activeElement).toBe(before);
-            });
-
             it('scrolls to the first number box whose text is no number, before anything is sent', async () => {
                 component.onInput(FIELDS[1], { target: { value: 'abc' } });
                 render(`

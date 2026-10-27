@@ -51,9 +51,9 @@ function isShown(element, root) {
 }
 
 /**
- * The control to put the cursor in for a refusal: the refused control itself, the first control that shares the message's
- * block (a message is written under the control it is about), or the refusal itself when it asked for the cursor with a
- * `tabindex`. The message that opens a form (`.alert-danger`) is about no control.
+ * The control to put the cursor in for a refusal: the refused control itself, or the first control that shares the message's
+ * block (a message is written under the control it is about). The message that opens a form (`.alert-danger`) is about no
+ * control.
  *
  * @param {HTMLElement} refusal
  * @param {Element} root
@@ -62,10 +62,6 @@ function isShown(element, root) {
 function controlOf(refusal, root) {
     if (refusal.matches(CONTROL)) {
         return /** @type {HTMLInputElement} */ (refusal).disabled ? null : refusal;
-    }
-
-    if (refusal.hasAttribute('tabindex')) {
-        return refusal;
     }
 
     if (refusal.classList.contains('alert-danger')) {

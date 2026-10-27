@@ -21,6 +21,7 @@
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are shown
  * under the input they are about, in the dialog, or as a toast.
  */
+import { inputRefusal } from '../fields/index.js';
 import {
     BARCODE_FORMATS,
     barcodeFormatName,
@@ -31,7 +32,6 @@ import {
     optionsToForm,
     summarizeOptions,
 } from '../fields/options.js';
-import { isDecimalText, parseDecimal } from '../fields/decimal.js';
 import { COLORS, swatchClass } from '../fields/palette.js';
 import { firstMessages, fillUrl, revealFirstRefusal } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
@@ -323,34 +323,24 @@ export default function inventoryFields() {
                 this.busy = false;
             }
 
-            this.focusMove(field.id, places < 0 ? 'up' : 'down');
-        },
-
-        /**
-         * Puts the cursor back on a move button of a field once the list has been rendered again: the button that was pressed was
-         * disabled while the order was on its way, which sent the cursor to the page. The same button is kept as long as the field
-         * can still go that way; at the end of the list it is the other one.
-         *
-         * @param {string} id The field that was moved.
-         * @param {'up' | 'down'} action The button that was pressed (`data-field-action`).
-         * @returns {void}
-         */
-        focusMove(id, action) {
-            // Taken now, not in the wait: Alpine stops answering `$root` once the element that started the call has left the page.
+            // The pressed button was disabled while the order was on its way, which sent the cursor to the page: put it back on
+            // a move button once the list has been rendered again. The same button is kept as long as the field can still go
+            // that way; at the end of the list it is the other one.
+            // `$root` is taken now, not in the wait: Alpine stops answering it once the element that started the call has left the page.
             const root = this.$root;
+            const action = places < 0 ? 'up' : 'down';
 
             this.$nextTick(() => {
-                const field = this.fields.find((other) => other.id === id);
+                const moved = this.fields.find((other) => other.id === field.id);
 
-                if (field === undefined) {
+                if (moved === undefined) {
                     return;
                 }
 
-                const stuck = action === 'up' ? this.isFirst(field) : this.isLast(field);
+                const stuck = action === 'up' ? this.isFirst(moved) : this.isLast(moved);
                 const wanted = stuck ? (action === 'up' ? 'down' : 'up') : action;
-                const buttons = root.querySelectorAll(`[data-field-action="${wanted}"]`);
 
-                [...buttons].find((button) => button.dataset.fieldId === id)?.focus();
+                root.querySelector(`[data-field-action="${wanted}"][data-field-id="${field.id}"]`)?.focus();
             });
         },
 
@@ -694,21 +684,17 @@ export default function inventoryFields() {
                 return {};
             }
 
+            const number = /** @type {Field} */ ({ type: 'number' });
+
             return Object.fromEntries(
                 ['min', 'max']
-                    .filter((bound) => {
-                        const text = parseDecimal(this.form.options[bound]);
-
-                        return text !== null && !isDecimalText(text);
-                    })
-                    .map((bound) => [`options.${bound}`, t('fields.error.invalid_number')]),
+                    .map((bound) => [`options.${bound}`, inputRefusal(number, this.form.options[bound])])
+                    .filter(([, message]) => message !== null),
             );
         },
 
         /**
-         * Brings the first refusal of the dialog into view and puts the cursor on its control, once it has been rendered: the
-         * options of a type (the choices of a select, say) can push it outside what the scrolling part of the dialog shows, and
-         * "Save" would look as if it did nothing.
+         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusal`).
          *
          * @returns {void}
          */

@@ -117,14 +117,6 @@ describe('revealFirstRefusal()', () => {
         expect(document.activeElement).toBe(before);
     });
 
-    it('puts the cursor on an alert that asked for it with a tabindex', () => {
-        const root = dialog('<div class="alert alert-danger" tabindex="-1">Nope.</div>');
-
-        revealFirstRefusal(root);
-
-        expect(document.activeElement).toBe(root.querySelector('.alert-danger'));
-    });
-
     it('shows a message written under a control that is not marked, and puts the cursor in that control', () => {
         const root = dialog(`
             <div class="mb-3"><input id="plain" class="form-control"><span class="text-danger small"></span></div>

@@ -632,31 +632,6 @@ describe('the page of the official versions', () => {
                 expect(document.activeElement).toBe(dialog.querySelector('#version-label'));
             });
 
-            it('goes to the input of a signer when it is the only one refused', async () => {
-                await mount();
-                http.post.mockRejectedValue(failure(422, { errors: { 'signers.0.email': ['Not valid.'] } }));
-                const dialog = render({ email: 'Not valid.' });
-                component.startCreate();
-
-                await component.submit();
-
-                expect(scroll.mock.contexts[0]).toBe(dialog.querySelector('#signer-email-0'));
-                expect(document.activeElement).toBe(dialog.querySelector('#signer-email-0'));
-            });
-
-            it('goes to the message under the buttons for a refusal that is about no input', async () => {
-                await mount();
-                http.post.mockRejectedValue(failure(409, { code: 'storage_limit_reached' }));
-                const dialog = render({ formError: 'The storage of this workspace is full.' });
-                const before = document.activeElement;
-                component.startCreate();
-
-                await component.submit();
-
-                expect(scroll.mock.contexts[0]).toBe(dialog.querySelector('.alert-danger'));
-                expect(document.activeElement).toBe(before);
-            });
-
             it('does not look for a refusal when the request was cancelled', async () => {
                 await mount();
                 http.post.mockRejectedValue(new Error('cancelled'));

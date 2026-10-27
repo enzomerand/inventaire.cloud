@@ -1440,9 +1440,8 @@ export default function inventoryItems() {
         },
 
         /**
-         * Brings the first refusal of the dialog into view and puts the cursor on its control, once it has been rendered: in a
-         * long form it can lie outside what the scrolling part of the dialog shows, and "Save" would look as if it did nothing.
-         * The dialog is taken before the wait, for the same reason as the root (see `rootElement`).
+         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusal`). The dialog is
+         * taken before the wait, for the same reason as the root (see `rootElement`).
          *
          * @returns {void}
          */
