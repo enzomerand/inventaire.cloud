@@ -236,15 +236,13 @@ final class SpreadsheetWriter implements ExportWriter
     }
 
     /**
-     * How wide a column is, in characters: wide enough for its header, between 12 and 40, more for the identifier and the dates
-     * (18 at least: a date and a time, and the header with its zone).
+     * How wide a column is, in characters: wide enough for its header, between 12 and 40, more for the identifier and the dates.
      */
     private function width(int $index, int $last, string $header): float
     {
         return match (true) {
             $index === 0 => 28.0,
-            $index >= $last - 1 => (float) min(40, max(18, mb_strlen($header) + 4)),
-            default => (float) min(40, max(12, mb_strlen($header) + 4)),
+            default => (float) min(40, max($index >= $last - 1 ? 18 : 12, mb_strlen($header) + 4)),
         };
     }
 }

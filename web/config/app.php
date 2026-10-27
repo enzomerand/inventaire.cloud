@@ -102,8 +102,7 @@ return [
     | exchanged in UTC (see `timezone`, above) and are converted to this zone
     | when the server writes one for people, such as the date in the name of
     | a download (see App\Support\DisplayTime). Pages show dates in the
-    | timezone of the browser, so every time of day the server writes states
-    | its zone (after the time in a text, in the column header of a sheet).
+    | timezone of the browser.
     |
     */
 

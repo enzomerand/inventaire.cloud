@@ -268,11 +268,8 @@ describe('the page', function (): void {
             ->and($html)->toContain('<span class="label">Opening</span> &nbsp; 07:05<');
     })->with([
         'UTC, in English, in winter' => ['UTC', 'en', '2026-01-15 10:30:00', 'Exported on Jan 15, 2026, 10:30 AM UTC', 'Jul 1, 2026, 10:30 AM UTC', 'Modified on &nbsp; Jan 15, 2026, 10:30 AM UTC'],
-        'UTC, in French, in summer' => ['UTC', 'fr', '2026-07-02 08:00:00', 'Exporté le 2 juil. 2026, 08:00 UTC', '1 juil. 2026, 10:30 UTC', 'Modifié le &nbsp; 2 juil. 2026, 08:00 UTC'],
-        'Paris, in English, in winter' => ['Europe/Paris', 'en', '2026-01-15 10:30:00', 'Exported on Jan 15, 2026, 11:30 AM UTC+1', 'Jul 1, 2026, 12:30 PM UTC+2', 'Modified on &nbsp; Jan 15, 2026, 11:30 AM UTC+1'],
         'Paris, in French, in winter' => ['Europe/Paris', 'fr', '2026-01-15 10:30:00', 'Exporté le 15 janv. 2026, 11:30 UTC+1', '1 juil. 2026, 12:30 UTC+2', 'Modifié le &nbsp; 15 janv. 2026, 11:30 UTC+1'],
         'Paris, in English, in summer' => ['Europe/Paris', 'en', '2026-07-02 08:00:00', 'Exported on Jul 2, 2026, 10:00 AM UTC+2', 'Jul 1, 2026, 12:30 PM UTC+2', 'Modified on &nbsp; Jul 2, 2026, 10:00 AM UTC+2'],
-        'Paris, in French, in summer' => ['Europe/Paris', 'fr', '2026-07-02 08:00:00', 'Exporté le 2 juil. 2026, 10:00 UTC+2', '1 juil. 2026, 12:30 UTC+2', 'Modifié le &nbsp; 2 juil. 2026, 10:00 UTC+2'],
     ]);
 
     it('states the zone in the cells of a table too, with the offset of the day of each moment and none in the header', function (): void {

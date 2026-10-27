@@ -68,8 +68,8 @@ final class ExportFormatter
     }
 
     /**
-     * A moment as text, in the timezone of the formatter and followed by the name of that zone at that moment ("15 oct. 2026, 14:30
-     * UTC+2"), after a no-break space so that the time and its zone are never split over two lines.
+     * A moment as text, in the timezone of the formatter and followed by the name of that zone at that moment, after a no-break space
+     * so that the time and its zone are never split over two lines.
      */
     public function moment(DateTimeImmutable $moment): string
     {

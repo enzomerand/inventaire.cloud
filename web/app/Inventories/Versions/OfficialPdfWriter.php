@@ -235,8 +235,6 @@ final class OfficialPdfWriter
         $moment = $version->frozen_at->toDateTimeImmutable();
         $utc = (new ExportFormatter($version->locale, 'UTC'))->moment($moment);
         $zoned = $local->moment($moment);
-        // Both writings state their zone ("UTC+2", "UTC"); the name of the zone of the instance is added, and the moment is written
-        // once when the instance is on UTC.
         $frozen = __('Frozen on :date', ['date' => $zoned === $utc ? $utc : "{$zoned} (".DisplayTime::zone().') · '.$utc]);
         $width = PdfBody::TABLE_WIDTH_PT;
 

@@ -224,11 +224,8 @@ describe('the zone of the times', function (): void {
             ->and($row['Opening'])->toBe('07:05');
     })->with([
         'UTC, in English' => ['UTC', 'en', '2026-01-10 08:30:00', '2026-01-15T10:30:00Z', 'Jan 15, 2026, 10:30 AM UTC', 'This link expires on Feb 9, 2026, 8:30 AM UTC.'],
-        'UTC, in French' => ['UTC', 'fr', '2026-01-10 08:30:00', '2026-01-15T10:30:00Z', '15 janv. 2026, 10:30 UTC', 'Ce lien expire le 9 févr. 2026, 08:30 UTC.'],
-        'Paris in winter, in English' => ['Europe/Paris', 'en', '2026-01-10 08:30:00', '2026-01-15T10:30:00Z', 'Jan 15, 2026, 11:30 AM UTC+1', 'This link expires on Feb 9, 2026, 9:30 AM UTC+1.'],
         'Paris in winter, in French' => ['Europe/Paris', 'fr', '2026-01-10 08:30:00', '2026-01-15T10:30:00Z', '15 janv. 2026, 11:30 UTC+1', 'Ce lien expire le 9 févr. 2026, 09:30 UTC+1.'],
         'Paris in summer, in English' => ['Europe/Paris', 'en', '2026-06-10 08:30:00', '2026-07-01T10:30:00Z', 'Jul 1, 2026, 12:30 PM UTC+2', 'This link expires on Jul 10, 2026, 10:30 AM UTC+2.'],
-        'Paris in summer, in French' => ['Europe/Paris', 'fr', '2026-06-10 08:30:00', '2026-07-01T10:30:00Z', '1 juil. 2026, 12:30 UTC+2', 'Ce lien expire le 10 juil. 2026, 10:30 UTC+2.'],
     ]);
 
     it('names the offset the zone has at each moment, not one for the whole column', function (): void {

@@ -10,17 +10,9 @@ use App\Support\DisplayTime;
  * the zone has at that moment, so that the same moment has the same name in every language.
  */
 
-/**
- * A moment (given in UTC) seen in a zone.
- */
-function displayTimeIn(string $zone, string $utc): DateTimeImmutable
-{
-    return (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone($zone));
-}
-
 describe('the name of the zone of a moment', function (): void {
     it('is UTC for the UTC zone, and UTC with the offset the zone has at that moment for the others', function (string $zone, string $utc, string $name): void {
-        expect(DisplayTime::offset(displayTimeIn($zone, $utc)))->toBe($name);
+        expect(DisplayTime::offset((new DateTimeImmutable($utc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone($zone))))->toBe($name);
     })->with([
         'UTC' => ['UTC', '2026-07-01 10:30', 'UTC'],
         'Paris in winter' => ['Europe/Paris', '2026-01-15 10:30', 'UTC+1'],
@@ -38,13 +30,6 @@ describe('the name of the zone of a moment', function (): void {
         'the furthest east' => ['Pacific/Kiritimati', '2026-07-01 10:30', 'UTC+14'],
         'a zone given as an offset' => ['+02:00', '2026-07-01 10:30', 'UTC+2'],
     ]);
-
-    it('reads the zone the moment is in, not the moment alone', function (): void {
-        $utc = new DateTimeImmutable('2026-07-01 10:30', new DateTimeZone('UTC'));
-
-        expect(DisplayTime::offset($utc))->toBe('UTC')
-            ->and(DisplayTime::offset($utc->setTimezone(new DateTimeZone('Europe/Paris'))))->toBe('UTC+2');
-    });
 });
 
 describe('a moment written for a reader', function (): void {

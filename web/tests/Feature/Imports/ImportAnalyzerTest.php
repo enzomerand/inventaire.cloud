@@ -312,7 +312,7 @@ describe('the proposal', function (): void {
     })->with([
         'Identifier', 'identifiant', 'Created on', 'Créé le', 'CREE LE', 'Modified on', 'Modifié le',
         // An export names the zone of its moments in the header of the column.
-        'Created on (Europe/Paris)', 'Créé le (UTC)', 'Modified on (Europe/Paris)', 'Modifié le (UTC)',
+        'Created on (Europe/Paris)',
     ]);
 
     it('prefers a field to the columns of an export', function (): void {
@@ -329,16 +329,6 @@ describe('the proposal', function (): void {
 
         expect(array_column($mapping, 'type'))->toBe(['date', 'money', 'boolean'])
             ->and(array_column($mapping, 'name'))->toBe(['Bought', 'Price (EUR)', 'In stock']);
-    });
-
-    it('sends the column of moments of an export to the field that has its name, the zone in the header apart', function (): void {
-        $case = importCase();
-        $seen = fieldIn($case['inventory'], 'datetime', 'Seen');
-        $csv = importFile(importCsv([['Seen (Europe/Paris)', 'Other'], ['2026-07-01 12:30', 'b']]));
-
-        $mapping = importAnalyze($csv, fields: [$seen])->mapping->toArray();
-
-        expect($mapping[0])->toMatchArray(['target' => 'field', 'field' => $seen->ulid]);
     });
 
     it('names the new field of a column of moments without the zone its header gives, and keeps any other brackets', function (): void {

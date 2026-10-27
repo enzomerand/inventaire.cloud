@@ -14,9 +14,8 @@ use DateTimeInterface;
  * (`app.display_timezone`, chosen at installation) is only for what the server itself puts in front of a reader, such
  * as the date in the name of a download. Dates shown in a page are formatted by the browser, in the zone of the reader.
  *
- * Since the browser and the server may show the same moment in two zones, **every time of day the server writes states its
- * zone**: after the time in a text made to be read ({@see self::offset()}), in the header of the column in a spreadsheet
- * (where the cells stay exact values, {@see self::zone()}).
+ * A browser shows a moment in its own zone, so every time of day the server writes states its zone ({@see self::offset()} in a text,
+ * {@see self::zone()} in the header of a spreadsheet column).
  */
 final class DisplayTime
 {
