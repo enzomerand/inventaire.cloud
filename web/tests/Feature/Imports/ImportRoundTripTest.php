@@ -117,6 +117,23 @@ describe('an export, imported again into an inventory with the same fields', fun
 
         expect($import->status->value)->toBe('completed')->and(roundTripSorted(importItemsOf($target)))->toEqual(roundTripSorted(importItemsOf($case['inventory'])));
     });
+
+    it('sends the column of moments back to its field, whatever brackets the name of the field ends with', function (): void {
+        $case = importCase();
+        $name = fieldIn($case['inventory'], 'text', 'Name');
+        $seen = fieldIn($case['inventory'], 'datetime', 'Seen (visit)');
+        itemIn($case['inventory'], [$name->ulid => 'Drill', $seen->ulid => '2026-07-01T10:30:00Z'], $case['team']['owner']);
+        $export = exportRun(exportAsked($case['inventory'], $case['team']['owner'], ExportFormat::Csv, ['options' => ['delimiter' => 'comma']]));
+        $target = roundTripCopy($case['inventory']);
+
+        $import = roundTripImport($this, $case, $target, exportLocalPath($export), [], 'export.csv');
+
+        // The header of the column is "Seen (visit) (Europe/Paris)": no new field "Seen (visit) 2".
+        expect($import->status->value)->toBe('completed')
+            ->and($import->fields_created)->toBe(0)
+            ->and($target->fields()->count())->toBe(2)
+            ->and(importItemsOf($target))->toEqual(importItemsOf($case['inventory']));
+    });
 });
 
 describe('an export, imported into an inventory with no field', function (): void {

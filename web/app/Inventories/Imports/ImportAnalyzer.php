@@ -445,7 +445,7 @@ final class ImportAnalyzer
         $entries = [];
 
         foreach ($columns as $column) {
-            $key = self::nameKey($column['header']);
+            $key = self::nameKey(self::withoutZone($column['header']));
             $field = $byName[$key] ?? null;
 
             if ($field !== null && ! isset($used[$field->ulid])) {
@@ -461,7 +461,7 @@ final class ImportAnalyzer
                 continue;
             }
 
-            $name = $this->freeName($column['guess'] === 'datetime' ? self::withoutZone($column['header']) : $column['header'], $taken);
+            $name = $this->freeName(in_array($column['guess'], ['date', 'datetime'], true) ? self::withoutZone($column['header']) : $column['header'], $taken);
             $taken[SingleLineText::fold($name)] = true;
             $entries[] = ['column' => $column['index'], 'target' => ImportMapping::NEW, 'type' => $column['guess'], 'name' => $name];
         }
@@ -470,13 +470,13 @@ final class ImportAnalyzer
     }
 
     /**
-     * A header without the timezone it ends with between brackets (`Seen (Europe/Paris)` is `Seen`, `Seen (UTC)` too): what the header of
-     * a column of moments says in an export, so that the field the column makes is not named after the zone of the file. Any other
-     * brackets (a unit, a remark) stay.
+     * A header without the timezone it ends with between brackets (`Seen (Europe/Paris)` is `Seen`, `Seen (visit) (UTC)` is `Seen
+     * (visit)`): what an export writes in the header of a column of moments. Any other brackets stay (a unit, a remark, the ones of the
+     * name of a field). The zone may be an alias of the database (`Asia/Calcutta`) as well as its identifier.
      */
     private static function withoutZone(string $header): string
     {
-        if (preg_match('/^(.*\S)\s*\(([^()]+)\)\s*$/u', $header, $found) !== 1 || ! in_array($found[2], DateTimeZone::listIdentifiers(), true)) {
+        if (preg_match('/^(.*\S)\s*\(([^()]+)\)\s*$/u', $header, $found) !== 1 || ! in_array($found[2], DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true)) {
             return $header;
         }
 

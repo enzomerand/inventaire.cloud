@@ -354,6 +354,19 @@ describe('the proposal', function (): void {
             ->and(array_column($mapping, 'name'))->toBe(['Seen', 'Delivered', 'Planned (estimate)', 'Remark (UTC)']);
     });
 
+    it('leaves the zone out of the name of the new field of a moment column, an alias of the database being a zone too', function (string $zone): void {
+        $csv = importFile(importCsv([["Seen ({$zone})"], ['2026-07-01 12:30']]));
+
+        expect(importAnalyze($csv)->mapping->toArray()[0])->toMatchArray(['type' => 'datetime', 'name' => 'Seen']);
+    })->with(['Asia/Calcutta', 'US/Eastern']);
+
+    it('leaves the zone out of the name of the new field of a column that reads as days', function (): void {
+        // The moments of a spreadsheet that all fall at midnight read as days.
+        $path = importSpreadsheet('xlsx', [['Seen (Europe/Paris)'], [new DateTimeImmutable('2026-07-01')], [new DateTimeImmutable('2026-07-02')]]);
+
+        expect(importAnalyze($path, ImportFormat::Xlsx)->mapping->toArray()[0])->toMatchArray(['type' => 'date', 'name' => 'Seen']);
+    });
+
     it('ignores the others when the person may not create fields', function (): void {
         $fields = importProposalFields();
         $csv = importFile(importCsv([['Name', 'Bought'], ['a', '2026-03-01']]));
