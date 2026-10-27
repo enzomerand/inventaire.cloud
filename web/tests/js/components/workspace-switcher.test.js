@@ -34,6 +34,7 @@ describe('workspace switcher', () => {
                 url: '/api/v1/me/current-workspace',
                 workspaceUrl: '/app/w/__id__',
                 workspaces: JSON.stringify(LIST),
+                ownerLabel: 'Owner:',
             },
         };
         component.$store = { workspaces: store };
@@ -96,6 +97,35 @@ describe('workspace switcher', () => {
 
             expect(component.ownerOf(store.items[1])).toBe('Camille Martin');
             expect(component.ownerOf(store.items[0])).toBe('');
+        });
+
+        it("gives the owner of the current workspace for the button of the header, when it is somebody else's", () => {
+            component.init();
+
+            expect(component.currentOwner).toBe('');
+
+            store.replace(LIST.map((item) => ({ ...item, current: item.id === 'hers' })));
+
+            expect(component.currentOwner).toBe('Camille Martin');
+        });
+
+        it('gives no owner for the button while there is no current workspace', () => {
+            expect(component.currentOwner).toBe('');
+
+            component.init();
+            store.replace(LIST.map((item) => ({ ...item, current: false })));
+
+            expect(component.currentOwner).toBe('');
+        });
+
+        it("puts the name and the owner of the current workspace in the tooltip of the button, only when it is somebody else's", () => {
+            component.init();
+
+            expect(component.currentTitle).toBeNull();
+
+            store.replace(LIST.map((item) => ({ ...item, current: item.id === 'hers' })));
+
+            expect(component.currentTitle).toBe('Espace personnel (Owner: Camille Martin)');
         });
 
         it('mutes the line of the owner, except in the highlighted entry where it would not read on its background', () => {

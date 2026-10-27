@@ -340,6 +340,32 @@ describe('the fields of an inventory', () => {
                 expect(document.activeElement).toBe(before);
             });
 
+            it('takes the root before any wait, since Alpine stops answering it once the pressed button has left the page', async () => {
+                render(['a', 'b', 'c']);
+                let listRead = false;
+                Object.defineProperty(component, '$root', {
+                    configurable: true,
+                    get() {
+                        if (listRead) {
+                            throw new Error('The element that started the call has left the page.');
+                        }
+
+                        return root;
+                    },
+                });
+                http.put.mockRejectedValue(new HttpError(422, 'Invalid.', { errors: { fields: ['Nope.'] } }));
+                http.get.mockImplementation(async () => {
+                    listRead = true;
+
+                    return inventoryAnswer([FIELDS[1], FIELDS[2]]);
+                });
+
+                await expect(component.moveDown(FIELDS[0])).resolves.toBeUndefined();
+
+                expect(component.fields.map((one) => one.id)).toEqual(['b', 'c']);
+                expect(component.busy).toBe(false);
+            });
+
             it('does nothing when no order was sent', async () => {
                 render(['a', 'b', 'c']);
                 const before = document.activeElement;

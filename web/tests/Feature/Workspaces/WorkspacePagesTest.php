@@ -81,9 +81,17 @@ describe('the workspace switcher of the header', function (): void {
         // Under the name of the workspace, with the word that says what the name is for a screen reader.
         $page->assertSee('x-if="ownerOf(workspace)"', false)
             ->assertSee('<span class="visually-hidden">Owner: </span>', false);
+        // The button of the header names the owner of the current workspace too, in its content (an aria-label would hide it from a
+        // screen reader) and in its tooltip, with the word the server translated.
+        $page->assertSee('x-if="currentOwner"', false)
+            ->assertSee(':title="currentTitle"', false)
+            ->assertSee('data-owner-label="Owner:"', false)
+            ->assertSee('<span class="visually-hidden">Change workspace </span>', false)
+            ->assertDontSee('aria-label="Change workspace"', false);
         $this->flushSession();
         $this->actingAs($user->fresh())->get(route('app.workspaces'), ['Accept-Language' => 'fr'])->assertOk()
-            ->assertSee('<span class="visually-hidden">Propriétaire : </span>', false);
+            ->assertSee('<span class="visually-hidden">Propriétaire : </span>', false)
+            ->assertSee('data-owner-label="Propriétaire :"', false);
     });
 
     it('gives the owner of a workspace the name of the owner and never somebody else\'s', function (): void {

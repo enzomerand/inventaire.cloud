@@ -4063,10 +4063,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ValidationError'
               example:
-                message: The signers.0.email field must be a valid email address.
+                message: The email address of signer 1 field must be a valid email address.
                 errors:
                   signers.0.email:
-                    - The signers.0.email field must be a valid email address.
+                    - The email address of signer 1 field must be a valid email address.
           x-codes:
             - code: pdf_too_large
               description: >-

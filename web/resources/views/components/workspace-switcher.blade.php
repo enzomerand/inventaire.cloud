@@ -7,7 +7,8 @@
     shares it through the "workspaces" store with the workspaces page). The name of the current workspace is also
     written here as plain text, for the time before the scripts run. Choosing a workspace takes the person to its
     page (data-workspace-url, where __id__ stands for the ULID). A workspace of somebody else shows the name of its
-    owner under its own name.
+    owner under its own name, and so does the button of the header (for a screen reader and in its tooltip) when it is
+    the current one: two workspaces may have the same name.
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
@@ -22,16 +23,23 @@
     data-url="{{ route('api.v1.me.current-workspace', absolute: false) }}"
     data-workspace-url="{{ route('app.workspace', ['workspace' => '__id__'], absolute: false) }}"
     data-workspaces="{{ json_encode($list, JSON_THROW_ON_ERROR) }}"
+    data-owner-label="{{ __('Owner:') }}"
 >
+    {{-- The name of the button is its content, not an aria-label (which would hide the owner from a screen reader): the action, the
+         name of the workspace (hidden on a narrow screen, where the icon stands alone) and, when it is somebody else's, its owner. --}}
     <button
         type="button"
         class="nav-link dropdown-toggle d-flex align-items-center gap-1 bg-transparent border-0"
         data-bs-toggle="dropdown"
         aria-expanded="false"
-        aria-label="{{ __('Change workspace') }}"
+        :title="currentTitle"
     >
         <x-tabler-stack-2 aria-hidden="true" />
+        <span class="visually-hidden">{{ __('Change workspace') }} </span>
         <span class="d-none d-md-inline text-truncate app-workspace-name" x-text="currentName">{{ $current }}</span>
+        <template x-if="currentOwner">
+            <span class="visually-hidden"><span>{{ __('Owner:') }} </span><span x-text="currentOwner"></span></span>
+        </template>
     </button>
 
     <div class="dropdown-menu dropdown-menu-end">

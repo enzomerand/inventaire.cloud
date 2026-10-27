@@ -309,6 +309,9 @@ export default function inventoryFields() {
                 return;
             }
 
+            // `$root` is taken now, before any wait: Alpine stops answering it once the element that started the call has left the
+            // page (the field may be deleted by another editor while the order is on its way).
+            const root = this.$root;
             const order = this.fields.map((other) => other.id);
             order.splice(to, 0, ...order.splice(from, 1));
             this.busy = true;
@@ -326,8 +329,6 @@ export default function inventoryFields() {
             // The pressed button was disabled while the order was on its way, which sent the cursor to the page: put it back on
             // a move button once the list has been rendered again. The same button is kept as long as the field can still go
             // that way; at the end of the list it is the other one.
-            // `$root` is taken now, not in the wait: Alpine stops answering it once the element that started the call has left the page.
-            const root = this.$root;
             const action = places < 0 ? 'up' : 'down';
 
             this.$nextTick(() => {

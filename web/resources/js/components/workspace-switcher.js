@@ -2,10 +2,12 @@
  * Alpine component behind the workspace switcher in the header.
  *
  * It seeds the shared `workspaces` store (see stores/workspaces.js) with the list the server rendered, shows it (a
- * workspace of somebody else with the name of its owner under its own), and changes the current workspace through the
- * API. The person is taken to the page of that workspace afterwards, since what a page shows depends on the workspace.
- * The endpoints and the list come from the markup (`data-url`, `data-workspace-url`, `data-workspaces` on the root),
- * because the CSP build of Alpine does not allow Blade to inject values into expressions.
+ * workspace of somebody else with the name of its owner under its own, and the button of the header names the owner
+ * of the current one too), and changes the current workspace through the API. The person is taken to the page of that
+ * workspace afterwards, since what a page shows depends on the workspace.
+ * The endpoints, the list and the word that introduces an owner come from the markup (`data-url`, `data-workspace-url`,
+ * `data-workspaces`, `data-owner-label` on the root), because the CSP build of Alpine does not allow Blade to inject
+ * values into expressions.
  */
 import { fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
@@ -46,6 +48,29 @@ export default function workspaceSwitcher() {
         /** Name of the current workspace, for the button of the dropdown. */
         get currentName() {
             return this.$store.workspaces.current?.name ?? '';
+        },
+
+        /**
+         * The name of the owner of the current workspace when it is somebody else's, for the button of the dropdown: it
+         * is the line that tells two workspaces of the same name apart, as in the entries of the list. Empty otherwise.
+         */
+        get currentOwner() {
+            const current = this.$store.workspaces.current;
+
+            return current === null ? '' : (this.owners[current.id] ?? '');
+        },
+
+        /**
+         * The tooltip of the button of the dropdown: the name of the current workspace followed by its owner, when it is
+         * somebody else's (the name alone is ambiguous then, and the name is hidden on a narrow screen). Nothing otherwise.
+         * The word that introduces the owner comes from the markup (`data-owner-label`), translated by the server.
+         *
+         * @returns {string|null}
+         */
+        get currentTitle() {
+            const owner = this.currentOwner;
+
+            return owner === '' ? null : `${this.currentName} (${this.$root.dataset.ownerLabel} ${owner})`;
         },
 
         /**

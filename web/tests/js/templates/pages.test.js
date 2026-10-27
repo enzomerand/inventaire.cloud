@@ -127,6 +127,8 @@ const PAGE = {
         { code: 'USD', name: 'US Dollar' },
     ],
     abilities: {},
+    /** The owner of the workspaces that belong to somebody else, by id of workspace (the switcher of the header names them). */
+    workspaceOwners: {},
     inventoryPhotoEntry: false,
     sharing: { enabled: true, limit: 20 },
     signaturesAvailable: true,
@@ -339,7 +341,9 @@ function render(path, { scannerSlot = '' } = {}) {
         }
 
         if (expression.startsWith('json_encode($list')) {
-            return escape(JSON.stringify(WORKSPACES));
+            return escape(
+                JSON.stringify(WORKSPACES.map((item) => ({ ...item, owner: PAGE.workspaceOwners[item.id] ?? null }))),
+            );
         }
 
         const values = {
@@ -523,6 +527,7 @@ describe('the pages under the real Alpine CSP build', () => {
         useMemoryStorage();
         window.location.hash = '';
         PAGE.abilities = {};
+        PAGE.workspaceOwners = {};
         PAGE.inventoryPhotoEntry = false;
         PAGE.sharing = { enabled: true, limit: 20 };
         PAGE.signaturesAvailable = true;
@@ -548,6 +553,32 @@ describe('the pages under the real Alpine CSP build', () => {
             expect(items.map((item) => item.textContent.trim())).toEqual(['Espace personnel', 'Shop', 'Shared']);
             expect(items.map((item) => item.classList.contains('active'))).toEqual([false, true, false]);
             expect(items.map((item) => item.getAttribute('aria-current'))).toEqual([null, 'true', null]);
+            expect(document.querySelector('.dropdown-toggle .app-workspace-name').textContent).toBe('Shop');
+        });
+
+        /** What a person who reads the button of the header is told: its text content, as the accessible name is built from it. */
+        const buttonName = () => document.querySelector('.dropdown-toggle').textContent.replace(/\s+/g, ' ').trim();
+
+        it("names the action and the workspace in the button, and no owner while the workspace is the person's", () => {
+            const button = document.querySelector('.dropdown-toggle');
+
+            expect(buttonName()).toBe('Change workspace Shop');
+            expect(button.hasAttribute('aria-label')).toBe(false);
+            expect(button.hasAttribute('title')).toBe(false);
+        });
+
+        it("names the owner in the button, for a screen reader and in its tooltip, when the current workspace is somebody else's", async () => {
+            PAGE.workspaceOwners = { shop: 'Camille Martin' };
+            await mount('components/workspace-switcher.blade.php');
+            const button = document.querySelector('.dropdown-toggle');
+
+            // The owner is part of the content, not of an aria-label (which would replace the content as the accessible name).
+            expect(buttonName()).toBe('Change workspace Shop Owner: Camille Martin');
+            expect(button.hasAttribute('aria-label')).toBe(false);
+            expect(button.querySelector('.visually-hidden:not(:first-of-type)')?.textContent.trim()).toBe(
+                'Owner: Camille Martin',
+            );
+            expect(button.getAttribute('title')).toBe('Shop (Owner: Camille Martin)');
             expect(document.querySelector('.dropdown-toggle .app-workspace-name').textContent).toBe('Shop');
         });
 

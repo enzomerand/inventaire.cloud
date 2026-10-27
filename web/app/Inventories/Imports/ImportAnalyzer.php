@@ -12,6 +12,7 @@ use App\Inventories\Fields\FieldTypes;
 use App\Inventories\SearchText;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
+use App\Support\DisplayTime;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Support\Collection;
@@ -472,15 +473,42 @@ final class ImportAnalyzer
     /**
      * A header without the timezone it ends with between brackets (`Seen (Europe/Paris)` is `Seen`, `Seen (visit) (UTC)` is `Seen
      * (visit)`): what an export writes in the header of a column of moments. Any other brackets stay (a unit, a remark, the ones of the
-     * name of a field). The zone may be an alias of the database (`Asia/Calcutta`) as well as its identifier.
+     * name of a field, `Delivery (Poland)`, `Price (EUR/kg)`). The zone may be an alias of the database (`Asia/Calcutta`) as well as
+     * its identifier, or the zone of this instance whatever the database knows of it.
      */
     private static function withoutZone(string $header): string
     {
-        if (preg_match('/^(.*\S)\s*\(([^()]+)\)\s*$/u', $header, $found) !== 1 || ! in_array($found[2], DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true)) {
+        if (preg_match('/^(.*\S)\s*\(([^()]+)\)\s*$/u', $header, $found) !== 1 || ! self::isZoneName($found[2])) {
             return $header;
         }
 
         return $found[1];
+    }
+
+    /**
+     * Whether a text between brackets names a timezone: `UTC`, one of the identifiers of the database that have a region
+     * (`Europe/Paris`, and its aliases such as `Asia/Calcutta` or `US/Eastern`), or the zone of this instance (an export of it writes
+     * that one, even when the database of this server is older than the one that named it).
+     *
+     * The aliases without a region (`Poland`, `Japan`, `GB`, `NZ`, `CET`...) are not zones here: in a header they are as likely a
+     * country or a remark, and an export never writes them. Nor is any `a/b` text a zone (`EUR/kg` is a unit).
+     */
+    private static function isZoneName(string $text): bool
+    {
+        /** @var array<string, true>|null $names */
+        static $names = null;
+
+        if ($names === null) {
+            $names = ['UTC' => true];
+
+            foreach (DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC) as $identifier) {
+                if (str_contains($identifier, '/')) {
+                    $names[$identifier] = true;
+                }
+            }
+        }
+
+        return isset($names[$text]) || $text === DisplayTime::zone();
     }
 
     /**
