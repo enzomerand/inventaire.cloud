@@ -3285,9 +3285,17 @@ describe('the pages under the real Alpine CSP build', () => {
                 await choose(select, 'price');
                 expect(lastParams()).toEqual({ page: 1, sort: 'price' });
 
+                // The icons carry the toggle themselves (a wrapping span would collapse inside the icon button and drop the icon).
+                const icons = () => [...buttons('Ascending order').concat(buttons('Descending order'))[0].children];
+                const shown = () => icons().map((icon) => visible(icon));
+
+                expect(icons().map((icon) => icon.localName)).toEqual(['svg', 'svg']);
+                expect(shown()).toEqual([true, false]);
+
                 await press('Ascending order');
                 expect(lastParams()).toEqual({ page: 1, sort: 'price', direction: 'desc' });
                 expect(buttons('Descending order')).toHaveLength(1);
+                expect(shown()).toEqual([false, true]);
             });
 
             it('shows the dates an item was added and last changed', async () => {
