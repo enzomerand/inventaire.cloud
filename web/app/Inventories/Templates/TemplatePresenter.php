@@ -38,6 +38,9 @@ final class TemplatePresenter
         'pink' => 'badge bg-pink-lt',
     ];
 
+    /** @var array<string, ExportFormatter> The writers of moments, by language: each holds two ICU formatters, built once. */
+    private array $moments = [];
+
     /**
      * Gets the registry that names the types.
      */
@@ -235,6 +238,6 @@ final class TemplatePresenter
      */
     private function dateTime(string $moment, string $locale): string
     {
-        return (new ExportFormatter($locale, DisplayTime::zone()))->moment(CarbonImmutable::parse($moment));
+        return ($this->moments[$locale] ??= new ExportFormatter($locale, DisplayTime::zone()))->moment(CarbonImmutable::parse($moment));
     }
 }
