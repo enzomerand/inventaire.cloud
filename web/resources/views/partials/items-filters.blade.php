@@ -18,7 +18,8 @@
         <div class="offcanvas-body">
             <template x-for="field in filterableFields" :key="field.id">
                 <fieldset class="mb-4">
-                    <legend class="form-label fs-4 text-break" x-text="field.name"></legend>
+                    {{-- float-none: a legend floats (width 100%) and clears only the element that follows it, which here is a <template>, so the first choice would float beside it. --}}
+                    <legend class="form-label fs-4 text-break float-none" x-text="field.name"></legend>
 
                     <template x-if="hasRange(field)">
                         <div class="row g-2 mb-2">

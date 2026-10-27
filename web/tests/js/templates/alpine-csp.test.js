@@ -132,6 +132,67 @@ describe('x-show is not defeated by a display utility', () => {
 });
 
 /**
+ * Lists the `<legend>`s of a template that float (Bootstrap and Tabler declare `legend { float: left; width: 100% }`) and are
+ * followed by a `<template>`.
+ *
+ * Their reboot only clears the element right after the legend (`legend + * { clear: left }`). A `<template>` is that element, and
+ * what Alpine renders from it comes after: the first rendered element then floats beside the legend instead of under it.
+ * `float-none` takes the legend out of that.
+ *
+ * @param {string} source Blade source of a template.
+ * @returns {string[]} The offending legends, as written.
+ */
+function floatingLegendBeforeTemplate(source) {
+    const legend = /<legend\b((?:"[^"]*"|'[^']*'|[^>"'])*)>(?:(?!<\/legend>)[\s\S])*<\/legend>\s*<template\b/g;
+    const offenders = [];
+
+    for (const [found, attributes] of withoutBladeComments(source).matchAll(legend)) {
+        const classes = attributes.match(/\sclass\s*=\s*"([^"]*)"/)?.[1].split(/\s+/) ?? [];
+
+        if (!classes.includes('float-none')) {
+            offenders.push(found.replace(/\s+/g, ' ').slice(0, 120));
+        }
+    }
+
+    return offenders;
+}
+
+describe('a legend followed by a template does not float', () => {
+    const templates = bladeFiles(VIEWS).map((file) => [relative(ROOT, file), readFileSync(file, 'utf8')]);
+
+    it.each(templates)(
+        '%s never puts a floating <legend> right before a <template> (add float-none to the legend)',
+        (_file, source) => {
+            expect(floatingLegendBeforeTemplate(source)).toEqual([]);
+        },
+    );
+
+    it('spots a legend without float-none before a template, whatever lies between them, and leaves the rest alone', () => {
+        const bad = `<legend class="form-label" x-text="field.name"></legend>\n<template x-if="open"><div></div></template>`;
+        const comment = `<legend class="form-label"></legend>\n{{-- the choices --}}\n<template x-for="one in all"></template>`;
+        const fine = [
+            `<legend class="form-label float-none" x-text="field.name"></legend>\n<template x-if="open"></template>`,
+            `<legend class="form-label">Format</legend>\n<div class="form-check"></div>`,
+            `<legend class="form-label">Format</legend><div><template x-if="open"></template></div>`,
+        ];
+
+        expect(floatingLegendBeforeTemplate(bad)).toHaveLength(1);
+        expect(floatingLegendBeforeTemplate(comment)).toHaveLength(1);
+
+        for (const html of fine) {
+            expect(floatingLegendBeforeTemplate(html), html).toEqual([]);
+        }
+    });
+
+    it('would catch the legend of the filters panel losing its float-none', () => {
+        const source = readFileSync(join(VIEWS, 'partials/items-filters.blade.php'), 'utf8');
+
+        expect(floatingLegendBeforeTemplate(source)).toEqual([]);
+        expect(floatingLegendBeforeTemplate(source.replace(' float-none"', '"'))).toHaveLength(1);
+    });
+});
+
+/**
  * Turns the Blade source of the toast stack into plain HTML. Only the few
  * constructs it uses are supported; anything else fails loudly so this helper
  * is extended on purpose rather than silently mis-rendering.
