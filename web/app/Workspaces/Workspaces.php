@@ -287,6 +287,35 @@ final class Workspaces
     }
 
     /**
+     * The names of the owners of some workspaces, read in one query.
+     *
+     * What tells two workspaces of the same name apart in a list: the first workspace of every account is called "Personal
+     * space", and the people who belong to one of another account see the two side by side. Members can read the name of
+     * the owner on the members page already.
+     *
+     * @param  list<int>  $workspaceIds  The keys of the workspaces.
+     * @return array<int, string> The name of the owner by key of workspace; a workspace that has none (which only a row changed by hand can be) is missing.
+     */
+    public function ownerNames(array $workspaceIds): array
+    {
+        if ($workspaceIds === []) {
+            return [];
+        }
+
+        $names = [];
+
+        foreach (WorkspaceMember::query()
+            ->join('users', 'users.id', '=', 'workspace_user.user_id')
+            ->whereIn('workspace_user.workspace_id', $workspaceIds)
+            ->where('workspace_user.role', WorkspaceRole::Owner->value)
+            ->pluck('users.name', 'workspace_user.workspace_id') as $workspaceId => $name) {
+            $names[(int) $workspaceId] = (string) $name;
+        }
+
+        return $names;
+    }
+
+    /**
      * The workspace the user is working in: the one they chose if they still belong to it, else the first one
      * they joined.
      *

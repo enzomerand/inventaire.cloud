@@ -1,11 +1,11 @@
 /**
  * Alpine component behind the workspace switcher in the header.
  *
- * It seeds the shared `workspaces` store (see stores/workspaces.js) with the list the server rendered, shows it,
- * and changes the current workspace through the API. The person is taken to the page of that workspace afterwards, since
- * what a page shows depends on the workspace. The endpoints and the list come from the markup (`data-url`,
- * `data-workspace-url`, `data-workspaces` on the root), because the CSP build of Alpine does not allow Blade to inject
- * values into expressions.
+ * It seeds the shared `workspaces` store (see stores/workspaces.js) with the list the server rendered, shows it (a
+ * workspace of somebody else with the name of its owner under its own), and changes the current workspace through the
+ * API. The person is taken to the page of that workspace afterwards, since what a page shows depends on the workspace.
+ * The endpoints and the list come from the markup (`data-url`, `data-workspace-url`, `data-workspaces` on the root),
+ * because the CSP build of Alpine does not allow Blade to inject values into expressions.
  */
 import { fillUrl } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
@@ -19,6 +19,14 @@ export default function workspaceSwitcher() {
     return {
         /** True while a change is in flight; blocks double clicks. */
         busy: false,
+
+        /**
+         * The name of the owner of each workspace that belongs to somebody else, by id of workspace. Kept here rather than in
+         * the shared store: the workspaces page fills the store again from the API, which does not carry them.
+         *
+         * @type {Record<string, string>}
+         */
+        owners: {},
 
         /** Endpoint that chooses the current workspace (PUT), from `data-url` on the component root. */
         get url() {
@@ -46,7 +54,32 @@ export default function workspaceSwitcher() {
          * @returns {void}
          */
         init() {
-            this.$store.workspaces.replace(JSON.parse(this.$root.dataset.workspaces));
+            const items = JSON.parse(this.$root.dataset.workspaces);
+
+            this.owners = Object.fromEntries(items.filter((item) => item.owner).map((item) => [item.id, item.owner]));
+            this.$store.workspaces.replace(items);
+        },
+
+        /**
+         * The name of the owner of a workspace that is somebody else's, to tell it from another of the same name (every
+         * account starts with a "Personal space"); empty for the workspaces of the person.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        ownerOf(item) {
+            return this.owners[item.id] ?? '';
+        },
+
+        /**
+         * CSS classes of the line that names the owner under the name of a workspace: muted, except in the highlighted
+         * entry, where the muted colour would not read on its background.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        ownerClass(item) {
+            return item.current ? 'd-block small' : 'd-block small text-secondary';
         },
 
         /**

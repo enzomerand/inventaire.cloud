@@ -15,9 +15,10 @@ vi.mock('../../../resources/js/lib/notify.js', () => ({ notify: vi.fn() }));
 vi.mock('../../../resources/js/lib/page.js', () => ({ redirectTo: vi.fn(), reloadPage: vi.fn() }));
 
 const LIST = [
-    { id: 'personal', name: 'Espace personnel', role: 'owner', current: false },
-    { id: 'shop', name: 'Shop', role: 'owner', current: true },
-    { id: 'shared', name: 'Shared', role: 'viewer', current: false },
+    { id: 'personal', name: 'Espace personnel', role: 'owner', current: false, owner: null },
+    { id: 'shop', name: 'Shop', role: 'owner', current: true, owner: null },
+    { id: 'shared', name: 'Shared', role: 'viewer', current: false, owner: 'Grace Hopper' },
+    { id: 'hers', name: 'Espace personnel', role: 'editor', current: false, owner: 'Camille Martin' },
 ];
 
 describe('workspace switcher', () => {
@@ -66,6 +67,40 @@ describe('workspace switcher', () => {
         it('highlights the current workspace in the dropdown', () => {
             expect(component.itemClass(LIST[1])).toBe('dropdown-item active');
             expect(component.itemClass(LIST[0])).toBe('dropdown-item');
+        });
+    });
+
+    describe('telling workspaces of the same name apart', () => {
+        it('gives the owner of a workspace that is somebody else, and nothing for the ones of the person', () => {
+            component.init();
+
+            expect(component.ownerOf(LIST[3])).toBe('Camille Martin');
+            expect(component.ownerOf(LIST[2])).toBe('Grace Hopper');
+            expect(component.ownerOf(LIST[0])).toBe('');
+            expect(component.ownerOf(LIST[1])).toBe('');
+        });
+
+        it('gives nothing for a workspace the server did not name an owner for', () => {
+            component.init();
+
+            expect(component.ownerOf({ id: 'unknown', name: 'Elsewhere', role: 'viewer', current: false })).toBe('');
+        });
+
+        it('still names the owners once the workspaces page has filled the store again from the API, which does not carry them', () => {
+            component.init();
+
+            store.replace([
+                { id: 'personal', name: 'Espace personnel', role: 'owner', current: false },
+                { id: 'hers', name: 'Espace personnel', role: 'editor', current: true },
+            ]);
+
+            expect(component.ownerOf(store.items[1])).toBe('Camille Martin');
+            expect(component.ownerOf(store.items[0])).toBe('');
+        });
+
+        it('mutes the line of the owner, except in the highlighted entry where it would not read on its background', () => {
+            expect(component.ownerClass(LIST[3])).toBe('d-block small text-secondary');
+            expect(component.ownerClass({ ...LIST[3], current: true })).toBe('d-block small');
         });
     });
 

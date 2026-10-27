@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\View\Components;
 
 use App\Models\User;
+use App\Workspaces\WorkspaceRole;
 use App\Workspaces\Workspaces;
 use Illuminate\Contracts\View\View;
 use Illuminate\View\Component;
@@ -18,7 +19,8 @@ use Illuminate\View\Component;
  *
  * The list is handed to the browser as JSON in the markup, where the Alpine component seeds the shared store with
  * it (see resources/js/components/workspace-switcher.js); the name of the current workspace is also in the markup
- * as it is, so that the button reads right before any script ran.
+ * as it is, so that the button reads right before any script ran. A workspace that belongs to somebody else comes with
+ * the name of its owner, which the list shows under its name: every account starts with a workspace of the same name.
  */
 class WorkspaceSwitcher extends Component
 {
@@ -31,7 +33,7 @@ class WorkspaceSwitcher extends Component
     /**
      * The workspaces of the signed-in user, in the shape the scripts use (see stores/workspaces.js).
      *
-     * @return list<array{id: string, name: string, role: string, current: bool}>
+     * @return list<array{id: string, name: string, role: string, current: bool, owner: string|null}>
      */
     public function items(): array
     {
@@ -46,11 +48,18 @@ class WorkspaceSwitcher extends Component
             ? $this->active
             : null;
 
+        // Who owns the workspaces of other people, so that two with the same name ("Personal space") can be told apart.
+        $owners = $this->workspaces->ownerNames(array_values(array_map(
+            fn ($membership): int => $membership->workspace->getKey(),
+            array_filter($memberships, fn ($membership): bool => $membership->role !== WorkspaceRole::Owner),
+        )));
+
         return array_map(fn ($membership): array => [
             'id' => $membership->workspace->ulid,
             'name' => $membership->workspace->name,
             'role' => $membership->role->value,
             'current' => $active === null ? $membership->current : $membership->workspace->ulid === $active,
+            'owner' => $owners[$membership->workspace->getKey()] ?? null,
         ], $memberships);
     }
 

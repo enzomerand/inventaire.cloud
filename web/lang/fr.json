@@ -506,6 +506,7 @@
     "Optional. Official exports can be signed electronically through Documenso. You can skip this step and configure it later.": "Facultatif. Les exports officiels peuvent être signés électroniquement via Documenso. Vous pouvez passer cette étape et la configurer plus tard.",
     "Origin Is Unreachable": "L'origine est inaccessible",
     "Owner": "Propriétaire",
+    "Owner:": "Propriétaire :",
     "Page Expired": "Page expirée",
     "Pagination Navigation": "Pagination",
     "Partial Content": "Contenu partiel",

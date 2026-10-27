@@ -6,7 +6,8 @@
     attributes below (the list of workspaces as JSON, read by resources/js/components/workspace-switcher.js, which
     shares it through the "workspaces" store with the workspaces page). The name of the current workspace is also
     written here as plain text, for the time before the scripts run. Choosing a workspace takes the person to its
-    page (data-workspace-url, where __id__ stands for the ULID).
+    page (data-workspace-url, where __id__ stands for the ULID). A workspace of somebody else shows the name of its
+    owner under its own name.
 
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
@@ -43,7 +44,11 @@
                 :disabled="busy"
                 @click="select(workspace)"
             >
-                <span x-text="workspace.name"></span>
+                <span class="d-block" x-text="workspace.name"></span>
+                {{-- Whose workspace it is, when it is somebody else's: two of them may have the same name. The hidden word is for screen readers, which would read "Personal space Camille Martin". --}}
+                <template x-if="ownerOf(workspace)">
+                    <span :class="ownerClass(workspace)"><span class="visually-hidden">{{ __('Owner:') }} </span><span x-text="ownerOf(workspace)"></span></span>
+                </template>
             </button>
         </template>
         <div class="dropdown-divider"></div>
