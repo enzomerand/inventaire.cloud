@@ -21,7 +21,7 @@
  * expressions. In the address of one version, `__id__` stands for its ULID.
  */
 import { announce } from '../lib/feedback.js';
-import { fillUrl, revealFirstRefusal } from '../lib/forms.js';
+import { fillUrl, revealFirstRefusalOnceShown } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -590,7 +590,7 @@ export default function inventoryVersions() {
                     this.errors = failure.fieldErrors;
                     this.formError = failure.message;
                     // A refused input can lie outside what the scrolling part of the dialog shows: bring it into view.
-                    this.$nextTick(() => revealFirstRefusal(dialog));
+                    this.$nextTick(() => revealFirstRefusalOnceShown(dialog));
                 }
             } finally {
                 this.busy = false;

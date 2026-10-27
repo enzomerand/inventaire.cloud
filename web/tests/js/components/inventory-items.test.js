@@ -6,6 +6,7 @@ import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/m
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
 import { useMemoryStorage } from '../support/storage.js';
+import { nextFrame } from '../support/frame.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -1007,6 +1008,7 @@ describe('the items of an inventory', () => {
                 `);
 
                 await component.save();
+                await nextFrame();
 
                 expect(scroll).toHaveBeenCalledTimes(1);
                 expect(scroll.mock.contexts[0]).toBe(modal.querySelector('#qty'));
@@ -1024,6 +1026,7 @@ describe('the items of an inventory', () => {
                 `);
 
                 await component.save();
+                await nextFrame();
 
                 expect(http.post).not.toHaveBeenCalled();
                 expect(scroll.mock.contexts[0]).toBe(modal.querySelector('#qty'));
@@ -1037,6 +1040,7 @@ describe('the items of an inventory', () => {
                 render('<div class="alert alert-danger" role="alert">Item limit reached (10000 per inventory).</div>');
 
                 await component.save();
+                await nextFrame();
 
                 expect(scroll.mock.contexts[0]).toBe(modal.querySelector('.alert-danger'));
             });
@@ -1046,6 +1050,7 @@ describe('the items of an inventory', () => {
                 render('<input id="name" class="form-control">');
 
                 await component.save();
+                await nextFrame();
 
                 expect(scroll).not.toHaveBeenCalled();
             });

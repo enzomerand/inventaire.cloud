@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fillUrl, firstMessages, revealFirstRefusal, throttledMessage } from '../../../resources/js/lib/forms.js';
+import {
+    fillUrl,
+    firstMessages,
+    revealFirstRefusal,
+    revealFirstRefusalOnceShown,
+    throttledMessage,
+} from '../../../resources/js/lib/forms.js';
+import { nextFrame } from '../support/frame.js';
 
 vi.mock('../../../resources/js/lib/i18n.js', () => ({
     t: (key, replacements = {}) =>
@@ -193,5 +200,41 @@ describe('revealFirstRefusal()', () => {
         revealFirstRefusal(root);
 
         expect(document.activeElement).toBe(root.querySelector('#name'));
+    });
+});
+
+describe('revealFirstRefusalOnceShown()', () => {
+    let scroll;
+
+    beforeEach(() => {
+        scroll = vi.fn();
+        Element.prototype.scrollIntoView = scroll;
+    });
+
+    afterEach(() => {
+        delete Element.prototype.scrollIntoView;
+        document.body.innerHTML = '';
+    });
+
+    it('waits for the frame on which Alpine displays a message that is the only refusal', async () => {
+        document.body.innerHTML = `
+            <div class="modal" id="dialog">
+                <div class="modal-body"><div class="text-danger small" style="display: none;">Two choices are the same.</div></div>
+            </div>
+        `;
+        const root = document.getElementById('dialog');
+        const message = root.querySelector('.text-danger');
+        // What `x-show` does: the element is displayed on the next frame, asked for before the dialog looks for its refusal.
+        const later = document.visibilityState === 'visible' ? requestAnimationFrame : (run) => setTimeout(run);
+        later(() => message.style.removeProperty('display'));
+
+        revealFirstRefusalOnceShown(root);
+
+        expect(scroll).not.toHaveBeenCalled();
+
+        await nextFrame();
+
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(scroll.mock.contexts[0]).toBe(message);
     });
 });

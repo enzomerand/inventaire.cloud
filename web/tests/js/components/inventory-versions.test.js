@@ -11,6 +11,7 @@ import { notify } from '../../../resources/js/lib/notify.js';
 import { deferred } from '../support/inventory.js';
 import { dismiss, forgetDialogs } from '../support/modal.js';
 import { VERSIONS_URL, onItsWay, signature, signer, version } from '../support/versions.js';
+import { nextFrame } from '../support/frame.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -626,6 +627,7 @@ describe('the page of the official versions', () => {
                 component.startCreate();
 
                 await component.submit();
+                await nextFrame();
 
                 expect(scroll).toHaveBeenCalledTimes(1);
                 expect(scroll.mock.contexts[0]).toBe(dialog.querySelector('#version-label'));
@@ -639,6 +641,7 @@ describe('the page of the official versions', () => {
                 component.startCreate();
 
                 await component.submit();
+                await nextFrame();
 
                 expect(scroll).not.toHaveBeenCalled();
             });

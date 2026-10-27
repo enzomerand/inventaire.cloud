@@ -61,7 +61,7 @@ import {
     selectOptionsOf,
     toInput,
 } from '../fields/index.js';
-import { firstMessages, fillUrl, revealFirstRefusal } from '../lib/forms.js';
+import { firstMessages, fillUrl, revealFirstRefusalOnceShown } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t, tn } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -1440,7 +1440,7 @@ export default function inventoryItems() {
         },
 
         /**
-         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusal`). The dialog is
+         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusalOnceShown`). The dialog is
          * taken before the wait, for the same reason as the root (see `rootElement`).
          *
          * @returns {void}
@@ -1448,7 +1448,7 @@ export default function inventoryItems() {
         revealRefusal() {
             const dialog = this.$refs.modal;
 
-            this.$nextTick(() => revealFirstRefusal(dialog));
+            this.$nextTick(() => revealFirstRefusalOnceShown(dialog));
         },
     });
 }

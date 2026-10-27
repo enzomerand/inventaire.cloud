@@ -83,8 +83,8 @@ function controlOf(refusal, root) {
  * `.is-invalid`, or a message that holds some text (`.invalid-feedback`, `.text-danger`, `.alert-danger`).
  *
  * The cursor goes to the control the refusal is about when there is one; a message that opens the form (an alert) is only
- * scrolled to, so that the cursor is not taken to something that cannot be typed in. Call it after the DOM has been updated
- * (`$nextTick`).
+ * scrolled to, so that the cursor is not taken to something that cannot be typed in. Call it once the refusals are displayed
+ * ({@link revealFirstRefusalOnceShown}).
  *
  * @param {Element | null | undefined} root The dialog (or any element that holds the form).
  * @returns {HTMLElement | null} The refusal that was brought into view, null when there is none.
@@ -110,6 +110,23 @@ export function revealFirstRefusal(root) {
     controlOf(refusal, root)?.focus({ preventScroll: true });
 
     return refusal;
+}
+
+/**
+ * {@link revealFirstRefusal} once Alpine has displayed the refusals. `x-show` displays an element on the next animation frame
+ * (on a timer when the page is hidden), after `$nextTick` has run: a refusal that is only a message would still be hidden,
+ * and skipped. Call it from `$nextTick`, so that it comes after the frame Alpine asked for.
+ *
+ * @param {Element | null | undefined} root The dialog (or any element that holds the form).
+ * @returns {void}
+ */
+export function revealFirstRefusalOnceShown(root) {
+    const later =
+        document.visibilityState === 'visible'
+            ? requestAnimationFrame
+            : (/** @type {() => void} */ run) => setTimeout(run);
+
+    later(() => revealFirstRefusal(root));
 }
 
 /**

@@ -5,6 +5,7 @@ import { HttpError, http } from '../../../resources/js/lib/http.js';
 import { hideModal, onModalHidden, showModal } from '../../../resources/js/lib/modal.js';
 import { notify } from '../../../resources/js/lib/notify.js';
 import { redirectTo } from '../../../resources/js/lib/page.js';
+import { nextFrame } from '../support/frame.js';
 
 vi.mock('../../../resources/js/lib/http.js', async (importOriginal) => {
     const original = await importOriginal();
@@ -645,6 +646,7 @@ describe('the fields of an inventory', () => {
                 `);
 
                 await component.save();
+                await nextFrame();
 
                 expect(scroll).toHaveBeenCalledTimes(1);
                 expect(scroll.mock.contexts[0]).toBe(fieldModal.querySelector('#field-name'));
@@ -656,6 +658,7 @@ describe('the fields of an inventory', () => {
                 render('<input id="field-name" class="form-control is-invalid">');
 
                 await component.save();
+                await nextFrame();
 
                 expect(scroll).not.toHaveBeenCalled();
             });

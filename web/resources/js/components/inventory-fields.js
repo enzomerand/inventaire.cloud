@@ -33,7 +33,7 @@ import {
     summarizeOptions,
 } from '../fields/options.js';
 import { COLORS, swatchClass } from '../fields/palette.js';
-import { firstMessages, fillUrl, revealFirstRefusal } from '../lib/forms.js';
+import { firstMessages, fillUrl, revealFirstRefusalOnceShown } from '../lib/forms.js';
 import { HttpError, http } from '../lib/http.js';
 import { t } from '../lib/i18n.js';
 import { hideModal, onModalHidden, showModal } from '../lib/modal.js';
@@ -695,14 +695,14 @@ export default function inventoryFields() {
         },
 
         /**
-         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusal`).
+         * Brings the first refusal of the dialog into view once it has been rendered (see `revealFirstRefusalOnceShown`).
          *
          * @returns {void}
          */
         revealRefusal() {
             const dialog = this.$refs.fieldModal;
 
-            this.$nextTick(() => revealFirstRefusal(dialog));
+            this.$nextTick(() => revealFirstRefusalOnceShown(dialog));
         },
 
         /**
