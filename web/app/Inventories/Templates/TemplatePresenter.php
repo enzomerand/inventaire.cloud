@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Templates;
 
+use App\Inventories\Exports\ExportFormatter;
 use App\Inventories\Fields\FieldTypes;
 use App\Inventories\Fields\RatingType;
 use App\Support\DisplayTime;
@@ -228,15 +229,12 @@ final class TemplatePresenter
     }
 
     /**
-     * A moment (written with its offset from UTC) in the medium form of the language, in the timezone of the instance.
-     * The validator refuses anything else, so the value is always one.
+     * A moment (written with its offset from UTC) in the medium form of the language, in the timezone of the instance and followed
+     * by that zone ("May 18, 2024, 10:30 AM UTC+2"), as the exports and the shared pages write it. The validator refuses anything
+     * else, so the value is always one.
      */
     private function dateTime(string $moment, string $locale): string
     {
-        $zone = DisplayTime::zone();
-        $formatted = IntlDateFormatter::create($locale, IntlDateFormatter::MEDIUM, IntlDateFormatter::SHORT, $zone)
-            ?->format(CarbonImmutable::parse($moment)->setTimezone($zone));
-
-        return is_string($formatted) ? $formatted : $moment;
+        return (new ExportFormatter($locale, DisplayTime::zone()))->moment(CarbonImmutable::parse($moment));
     }
 }

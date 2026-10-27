@@ -91,6 +91,21 @@ describe('the notice of a new token', function (): void {
             ->not->toMatch('/<(img|link|script)\b|\burl\(|\bsrc=/i');
     });
 
+    it('names the zone of its dates when the instance is on UTC too, in the text and in the HTML', function (): void {
+        config(['app.display_timezone' => 'UTC']);
+        $deferred = holdDeferred();
+
+        tokenCreationRequest($this, inventoryPerson('Ada'), ['expires_in_days' => 30])->assertCreated();
+        $deferred->release();
+
+        $mail = sentMails()[0];
+
+        expect($mail->getTextBody())
+            ->toContain('Created: March 2, 2026 12:30 PM (UTC)')
+            ->toContain('Expires: April 1, 2026 12:30 PM (UTC)')
+            ->and($mail->getHtmlBody())->toContain('Expires: April 1, 2026 12:30 PM (UTC)');
+    });
+
     it('says "never" for a token that does not expire', function (): void {
         $deferred = holdDeferred();
 

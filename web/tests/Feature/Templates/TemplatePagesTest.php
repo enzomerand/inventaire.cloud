@@ -264,15 +264,15 @@ describe('the page of a template', function (): void {
             ->and(templateAttributes($shop, '(//table)[2]/tbody/tr[1]/td[1]/span', 'class'))->toBe(['font-monospace text-break'])
             ->and(templateTexts($records, '(//table)[2]/tbody/tr[1]/td'))->toBe(['Kind of Blue', 'Miles Davis', '1959', '—', '#000000'])
             ->and(templateAttributes($records, '(//table)[2]/tbody/tr[1]/td[5]//span[contains(@class, "app-swatch")]', 'style'))->toBe(['background-color: #000000'])
-            ->and(templateTexts($records, '(//table)[2]/tbody/tr[2]/td[4]'))->toBe(['May 18, 2024, 8:30 AM']);
+            ->and(templateTexts($records, '(//table)[2]/tbody/tr[2]/td[4]'))->toBe(['May 18, 2024, 8:30 AM UTC']);
     });
 
-    it('writes a moment in the timezone of the instance', function (): void {
+    it('writes a moment in the timezone of the instance, and names the zone', function (): void {
         config(['app.display_timezone' => 'Europe/Paris']);
 
         $page = templateDom($this->get('/en/templates/sample-records')->assertOk());
 
-        expect(templateTexts($page, '(//table)[2]/tbody/tr[2]/td[4]'))->toBe(['May 18, 2024, 10:30 AM']);
+        expect(templateTexts($page, '(//table)[2]/tbody/tr[2]/td[4]'))->toBe(['May 18, 2024, 10:30 AM UTC+2']);
     });
 
     it('has a button that uses the template, at the top and at the end', function (): void {

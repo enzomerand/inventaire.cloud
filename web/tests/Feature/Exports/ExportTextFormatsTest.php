@@ -96,9 +96,9 @@ describe('the CSV', function (): void {
         $drill = collect(exportRecords($export))->firstWhere('Name', 'Drill 18V');
 
         expect($drill['Bought'])->toBe('2026-03-01')
-            ->and($drill['Seen'])->toBe('2026-07-01 12:30')
+            ->and($drill['Seen (Europe/Paris)'])->toBe('2026-07-01 12:30')
             ->and($drill['Opening'])->toBe('07:05')
-            ->and($drill['Created on'])->toBe($case['items']['drill']->created_at->copy()->setTimezone('Europe/Paris')->format('Y-m-d H:i'));
+            ->and($drill['Created on (Europe/Paris)'])->toBe($case['items']['drill']->created_at->copy()->setTimezone('Europe/Paris')->format('Y-m-d H:i'));
     });
 
     it('writes the choices by label, the lists joined, the files by name and the colors in lowercase', function (): void {
@@ -166,9 +166,41 @@ describe('the CSV', function (): void {
         fieldIn($empty, 'money', 'Price', ['currency' => 'USD']);
         [$export] = csvOf([], ['inventory' => $empty] + $case);
 
-        expect(exportSheet($export)['rows'])->toBe([['Identifier', 'Price (USD)', 'Created on', 'Modified on']])
+        expect(exportSheet($export)['rows'])->toBe([['Identifier', 'Price (USD)', 'Created on (Europe/Paris)', 'Modified on (Europe/Paris)']])
             ->and($export->items_count)->toBe(0);
     });
+});
+
+describe('the zone of the moments in a CSV', function (): void {
+    it('is named in the header of every column of moments and of no other, with the cells left exact', function (string $zone, string $locale, string $summer, string $winter): void {
+        $case = exportFixture();
+        // A winter moment on one item and a summer one on the other: the header must be right for both, so it names the zone, not an offset.
+        $other = $case['items']['formulas'];
+        $other->forceFill(['values' => [...$other->values, $case['fields']['seen']->ulid => '2026-01-15T10:30:00Z']])->save();
+        config(['app.display_timezone' => $zone]);
+
+        [$export] = csvOf(['locale' => $locale], $case);
+        $french = $locale === 'fr';
+        $records = collect(exportRecords($export))->keyBy($french ? 'Identifiant' : 'Identifier');
+        $created = $case['items']['drill']->created_at->copy()->setTimezone($zone)->format('Y-m-d H:i');
+
+        expect(exportSheet($export)['rows'][0])->toBe([
+            $french ? 'Identifiant' : 'Identifier', 'Name', 'Notes', 'Quantity (kg)', 'Price (EUR)', 'Discount (%)', 'In stock', 'Bought', "Seen ({$zone})", 'Opening', 'Condition',
+            'Labels', 'Keywords', 'Website', 'Contact', 'Phone', 'Grade', 'Color', 'Barcode', 'Photos', 'Docs',
+            ($french ? 'Créé le' : 'Created on')." ({$zone})", ($french ? 'Modifié le' : 'Modified on')." ({$zone})",
+        ])
+            ->and($records[$case['items']['drill']->ulid]["Seen ({$zone})"])->toBe($summer)
+            ->and($records[$other->ulid]["Seen ({$zone})"])->toBe($winter)
+            ->and($records[$case['items']['drill']->ulid][($french ? 'Créé le' : 'Created on')." ({$zone})"])->toBe($created)
+            // A day and a time of the day have no zone: what is in the cell is what was typed.
+            ->and($records[$case['items']['drill']->ulid]['Bought'])->toBe('2026-03-01')
+            ->and($records[$case['items']['drill']->ulid]['Opening'])->toBe('07:05');
+    })->with([
+        'UTC, in English' => ['UTC', 'en', '2026-07-01 10:30', '2026-01-15 10:30'],
+        'UTC, in French' => ['UTC', 'fr', '2026-07-01 10:30', '2026-01-15 10:30'],
+        'Paris, in English' => ['Europe/Paris', 'en', '2026-07-01 12:30', '2026-01-15 11:30'],
+        'Paris, in French' => ['Europe/Paris', 'fr', '2026-07-01 12:30', '2026-01-15 11:30'],
+    ]);
 });
 
 describe('the JSON', function (): void {

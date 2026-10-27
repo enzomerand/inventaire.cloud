@@ -309,7 +309,11 @@ describe('the proposal', function (): void {
         $csv = importFile(importCsv([[$header, 'Other'], ['a', 'b']]));
 
         expect(importAnalyze($csv, locale: 'fr')->mapping->toArray()[0]['target'])->toBe('ignore');
-    })->with(['Identifier', 'identifiant', 'Created on', 'Créé le', 'CREE LE', 'Modified on', 'Modifié le']);
+    })->with([
+        'Identifier', 'identifiant', 'Created on', 'Créé le', 'CREE LE', 'Modified on', 'Modifié le',
+        // An export names the zone of its moments in the header of the column.
+        'Created on (Europe/Paris)', 'Créé le (UTC)', 'Modified on (Europe/Paris)', 'Modifié le (UTC)',
+    ]);
 
     it('prefers a field to the columns of an export', function (): void {
         $fields = importProposalFields();
@@ -325,6 +329,29 @@ describe('the proposal', function (): void {
 
         expect(array_column($mapping, 'type'))->toBe(['date', 'money', 'boolean'])
             ->and(array_column($mapping, 'name'))->toBe(['Bought', 'Price (EUR)', 'In stock']);
+    });
+
+    it('sends the column of moments of an export to the field that has its name, the zone in the header apart', function (): void {
+        $case = importCase();
+        $seen = fieldIn($case['inventory'], 'datetime', 'Seen');
+        $csv = importFile(importCsv([['Seen (Europe/Paris)', 'Other'], ['2026-07-01 12:30', 'b']]));
+
+        $mapping = importAnalyze($csv, fields: [$seen])->mapping->toArray();
+
+        expect($mapping[0])->toMatchArray(['target' => 'field', 'field' => $seen->ulid]);
+    });
+
+    it('names the new field of a column of moments without the zone its header gives, and keeps any other brackets', function (): void {
+        $csv = importFile(importCsv([
+            ['Seen (Europe/Paris)', 'Delivered (UTC)', 'Planned (estimate)', 'Remark (UTC)'],
+            ['2026-07-01 12:30', '2026-07-02 08:00', '2026-07-03 09:00', 'a (b)'],
+        ]));
+
+        $mapping = importAnalyze($csv)->mapping->toArray();
+
+        // The last column holds texts, not moments: its brackets are part of its name, whatever they say.
+        expect(array_column($mapping, 'type'))->toBe(['datetime', 'datetime', 'datetime', 'text'])
+            ->and(array_column($mapping, 'name'))->toBe(['Seen', 'Delivered', 'Planned (estimate)', 'Remark (UTC)']);
     });
 
     it('ignores the others when the person may not create fields', function (): void {

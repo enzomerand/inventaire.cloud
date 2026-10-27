@@ -14,6 +14,7 @@ use App\Jobs\PurgeStoredFiles;
 use App\Jobs\RequestSignatures;
 use App\Models\InventoryVersion;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -171,11 +172,23 @@ describe('the document', function (): void {
         $html = versionHtml($version);
 
         expect($html)->toContain('Official version no. 1 · Year end')
-            ->and($html)->toContain('Frozen on Jul 14, 2026, 11:30 PM (Europe/Paris) · Jul 14, 2026, 9:30 PM UTC · Tools')
+            ->and($html)->toContain('Frozen on Jul 14, 2026, 11:30 PM UTC+2 (Europe/Paris) · Jul 14, 2026, 9:30 PM UTC · Tools')
             ->and($html)->toContain('Author: Owner · 3 items')
             ->and($html)->toContain('SHA-256 of the data: '.$version->snapshot_sha256)
             ->and(strlen($version->snapshot_sha256))->toBe(64);
     });
+
+    it('names the zone of the moment it was frozen: its offset and its name, then UTC, or UTC alone when the instance is on UTC', function (string $zone, string $today, string $line): void {
+        $case = versionTableCase();
+        config(['app.display_timezone' => $zone]);
+        $this->travelTo(Carbon::parse($today, 'UTC'));
+        $version = versionFreeze($case['inventory'], $case['team']['owner']);
+
+        expect(versionHtml($version))->toContain($line);
+    })->with([
+        'UTC' => ['UTC', '2026-07-14 21:30:00', 'Frozen on Jul 14, 2026, 9:30 PM UTC · Tools'],
+        'Paris in winter' => ['Europe/Paris', '2026-01-14 21:30:00', 'Frozen on Jan 14, 2026, 10:30 PM UTC+1 (Europe/Paris) · Jan 14, 2026, 9:30 PM UTC · Tools'],
+    ]);
 
     it('is written from the snapshot, not from what the inventory holds now', function (): void {
         $case = versionTableCase();

@@ -15,6 +15,7 @@ use App\Models\InventoryField;
 use App\Models\Item;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../../Support/exports.php';
@@ -248,6 +249,45 @@ describe('the page', function (): void {
             ->and($html)->toContain('Mar 1, 2026')
             ->and($html)->toContain('2 photos')
             ->and($html)->toContain('3 items');
+    });
+
+    it('states the zone after the time of the export, of the moments and of the last change, in the language and the zone of the instance', function (string $zone, string $locale, string $today, string $exported, string $seen, string $changed): void {
+        $this->travelTo(Carbon::parse($today, 'UTC'));
+        $case = exportFixture();
+        // After the fixture, which sets the zone of the other tests.
+        config(['app.display_timezone' => $zone]);
+
+        $html = pdfHtml($case['inventory'], $case['team']['owner'], ['locale' => $locale]);
+
+        expect($html)->toContain($exported)
+            // The moment of the item is in summer time in Paris, whatever the season of the export: each has its own offset.
+            ->and($html)->toContain('<span class="label">Seen</span> &nbsp; '.$seen)
+            ->and($html)->toContain($changed)
+            // A day and a time of the day have no zone.
+            ->and($html)->toContain($locale === 'fr' ? '<span class="label">Bought</span> &nbsp; 1 mars 2026<' : '<span class="label">Bought</span> &nbsp; Mar 1, 2026<')
+            ->and($html)->toContain('<span class="label">Opening</span> &nbsp; 07:05<');
+    })->with([
+        'UTC, in English, in winter' => ['UTC', 'en', '2026-01-15 10:30:00', 'Exported on Jan 15, 2026, 10:30 AM UTC', 'Jul 1, 2026, 10:30 AM UTC', 'Modified on &nbsp; Jan 15, 2026, 10:30 AM UTC'],
+        'UTC, in French, in summer' => ['UTC', 'fr', '2026-07-02 08:00:00', 'Exporté le 2 juil. 2026, 08:00 UTC', '1 juil. 2026, 10:30 UTC', 'Modifié le &nbsp; 2 juil. 2026, 08:00 UTC'],
+        'Paris, in English, in winter' => ['Europe/Paris', 'en', '2026-01-15 10:30:00', 'Exported on Jan 15, 2026, 11:30 AM UTC+1', 'Jul 1, 2026, 12:30 PM UTC+2', 'Modified on &nbsp; Jan 15, 2026, 11:30 AM UTC+1'],
+        'Paris, in French, in winter' => ['Europe/Paris', 'fr', '2026-01-15 10:30:00', 'Exporté le 15 janv. 2026, 11:30 UTC+1', '1 juil. 2026, 12:30 UTC+2', 'Modifié le &nbsp; 15 janv. 2026, 11:30 UTC+1'],
+        'Paris, in English, in summer' => ['Europe/Paris', 'en', '2026-07-02 08:00:00', 'Exported on Jul 2, 2026, 10:00 AM UTC+2', 'Jul 1, 2026, 12:30 PM UTC+2', 'Modified on &nbsp; Jul 2, 2026, 10:00 AM UTC+2'],
+        'Paris, in French, in summer' => ['Europe/Paris', 'fr', '2026-07-02 08:00:00', 'Exporté le 2 juil. 2026, 10:00 UTC+2', '1 juil. 2026, 12:30 UTC+2', 'Modifié le &nbsp; 2 juil. 2026, 10:00 UTC+2'],
+    ]);
+
+    it('states the zone in the cells of a table too, with the offset of the day of each moment and none in the header', function (): void {
+        $case = exportFixture();
+        $inventory = inventoryIn($case['team']['workspace'], 'Deliveries');
+        $name = fieldIn($inventory, 'text', 'Name');
+        $delivered = fieldIn($inventory, 'datetime', 'Delivered');
+        itemIn($inventory, [$name->ulid => 'Crate', $delivered->ulid => '2026-01-15T10:30:00Z']);
+        itemIn($inventory, [$name->ulid => 'Box', $delivered->ulid => '2026-07-01T10:30:00Z']);
+
+        $html = pdfHtml($inventory, $case['team']['owner']);
+
+        expect($html)->toContain('>Jan 15, 2026, 11:30 AM UTC+1</td>')
+            ->and($html)->toContain('>Jul 1, 2026, 12:30 PM UTC+2</td>')
+            ->and($html)->toMatch('#<th class="" style="width: [\d.]+%">Delivered</th>#');
     });
 
     it('has a card for each item beyond 8 fields, with a label and a value for each field that has one', function (): void {

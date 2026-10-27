@@ -13,6 +13,7 @@ use App\Inventories\SearchText;
 use App\Models\InventoryField;
 use App\Rules\SingleLineText;
 use DateTimeImmutable;
+use DateTimeZone;
 use Illuminate\Support\Collection;
 
 /**
@@ -34,7 +35,8 @@ use Illuminate\Support\Collection;
  * The proposal is, for each column in this order: the field that has the same name (without the case, the accents and a unit in
  * brackets: `Price (EUR)` is `price`), and not already taken by an earlier column; ignored, when it is one of the columns an export adds
  * (the identifier and the dates of creation and change); else a new field of the type guessed, named as the header, when the person may
- * create fields, and ignored when not.
+ * create fields, and ignored when not. The header of a column of moments an export wrote names the zone of the moments between
+ * brackets (`Seen (Europe/Paris)`): it is the file's, and not part of the name of the field a column of moments makes.
  */
 final class ImportAnalyzer
 {
@@ -459,12 +461,26 @@ final class ImportAnalyzer
                 continue;
             }
 
-            $name = $this->freeName($column['header'], $taken);
+            $name = $this->freeName($column['guess'] === 'datetime' ? self::withoutZone($column['header']) : $column['header'], $taken);
             $taken[SingleLineText::fold($name)] = true;
             $entries[] = ['column' => $column['index'], 'target' => ImportMapping::NEW, 'type' => $column['guess'], 'name' => $name];
         }
 
         return ImportMapping::from($entries);
+    }
+
+    /**
+     * A header without the timezone it ends with between brackets (`Seen (Europe/Paris)` is `Seen`, `Seen (UTC)` too): what the header of
+     * a column of moments says in an export, so that the field the column makes is not named after the zone of the file. Any other
+     * brackets (a unit, a remark) stay.
+     */
+    private static function withoutZone(string $header): string
+    {
+        if (preg_match('/^(.*\S)\s*\(([^()]+)\)\s*$/u', $header, $found) !== 1 || ! in_array($found[2], DateTimeZone::listIdentifiers(), true)) {
+            return $header;
+        }
+
+        return $found[1];
     }
 
     /**
