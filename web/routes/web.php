@@ -16,6 +16,7 @@ use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UpdateLocaleController;
 use App\Http\Controllers\Web\AdminSettingsPageController;
 use App\Http\Controllers\Web\ApiDocsController;
+use App\Http\Controllers\Web\CurrentWorkspaceBillingRedirectController;
 use App\Http\Controllers\Web\CurrentWorkspaceRedirectController;
 use App\Http\Controllers\Web\HomePageController;
 use App\Http\Controllers\Web\InventoryFieldsPageController;
@@ -25,6 +26,7 @@ use App\Http\Controllers\Web\InventoryVersionsPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
+use App\Http\Controllers\Web\WorkspaceBillingPageController;
 use App\Http\Controllers\Web\WorkspaceListPageController;
 use App\Http\Controllers\Web\WorkspaceMembersPageController;
 use App\Http\Controllers\Web\WorkspacePageController;
@@ -122,6 +124,10 @@ Route::view('/login', 'auth.login')->middleware('guest')->name('login');
 Route::middleware(['auth', AuthenticateSession::class])->group(function (): void {
     Route::get('/app', CurrentWorkspaceRedirectController::class)->name('app');
     Route::get('/app/workspaces', WorkspaceListPageController::class)->name('app.workspaces');
+
+    // The subscription page of the workspace the person works in (a link that does not know the workspace, such as the one in a mail). A
+    // visitor who is not signed in goes through the login page and comes back here.
+    Route::get('/app/billing', CurrentWorkspaceBillingRedirectController::class)->name('app.billing');
     Route::view('/app/account', 'app.account')->name('app.account');
 
     // The invitations addressed to the address of the account. The invitation mail links to this path (WorkspaceInvitationMail::PAGE, kept
@@ -138,6 +144,7 @@ Route::middleware(['auth', AuthenticateSession::class])->group(function (): void
     Route::prefix('app/w/{workspace}')->name('app.')->group(function (): void {
         Route::get('/', WorkspacePageController::class)->name('workspace');
         Route::get('/members', WorkspaceMembersPageController::class)->name('workspace.members');
+        Route::get('/billing', WorkspaceBillingPageController::class)->name('workspace.billing');
 
         Route::scopeBindings()->group(function (): void {
             Route::get('/inventories/{inventory}', InventoryPageController::class)->name('inventory');

@@ -242,9 +242,12 @@ describe('the codes of the document', function (): void {
         // Sent by the sign-in, the account, the installer and the guards of the web front: not operations of this document.
         // `token_with_session` is the guard of every operation that asks for an ability: the description of the document says it once, under "Authentication".
         // `invalid_body` and `invalid_signature` are the refusals of the webhook of Stripe (`/webhooks/stripe`), which Stripe calls and no client of the API does.
+        // `already_subscribed`, `billing_disabled`, `billing_unavailable`, `interval_not_offered` and `no_billing_account` are the refusals of the subscription of a
+        // workspace (`/workspaces/{workspace}/billing/*`), which a person answers at their browser: a token cannot reach those routes, so the document has none of them.
         $outside = [
-            'account_not_found', 'deletion_code_exhausted', 'deletion_code_expired', 'deletion_code_wrong', 'invalid_body', 'invalid_signature',
-            'login_code_locked', 'not_installed', 'not_stateful', 'session_required', 'setup_token_required', 'token_with_session',
+            'account_not_found', 'already_subscribed', 'billing_disabled', 'billing_unavailable', 'deletion_code_exhausted', 'deletion_code_expired',
+            'deletion_code_wrong', 'interval_not_offered', 'invalid_body', 'invalid_signature', 'login_code_locked', 'no_billing_account', 'not_installed',
+            'not_stateful', 'session_required', 'setup_token_required', 'token_with_session',
         ];
         $emitted = contractEmittedCodes();
         $undocumented = array_diff(array_keys($emitted['literal']), array_keys(contractDocumentedCodes()), $outside);

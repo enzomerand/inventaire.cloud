@@ -11,7 +11,9 @@
  * The photo entry (editors add an item from photos that Claude, at Anthropic, reads) is the owner's choice for each workspace, a
  * switch in its row. The list endpoint does not carry it (it is a token route), so the page renders it: `data-photo-entry` is the
  * consent of each workspace the person owns, as `{ulid: bool}`, or `null` when the instance does not offer the feature (no switch is
- * shown then). `data-photo-entry-url` is the endpoint with `__id__` where the ULID goes.
+ * shown then). `data-photo-entry-url` is the endpoint with `__id__` where the ULID goes. On an instance that sells plans, the workspaces
+ * whose plan does not include the photo entry (Free) are listed in `data-photo-entry-locked` (a JSON list of ULIDs): their switch is
+ * off and disabled, with a hint that leads to the subscription page (`data-billing-url`, `__id__` where the ULID goes).
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; the others are
  * shown as a toast, with the server's translated validation message when there is one, and a message of our own for
@@ -47,6 +49,9 @@ export default function workspaces() {
         /** The consent of the workspaces the person owns to the photo entry, by ULID; null when the instance does not offer it. */
         photoEntry: null,
 
+        /** The ULIDs of the workspaces whose plan does not include the photo entry (the switch is disabled for them). */
+        photoEntryLocked: [],
+
         /** Endpoint of the workspaces (GET, POST, PATCH, DELETE), from `data-url` on the component root. */
         get url() {
             return this.$root.dataset.url;
@@ -72,6 +77,11 @@ export default function workspaces() {
             return this.$root.dataset.photoEntryUrl;
         },
 
+        /** Page of the subscription of a workspace, with `__id__` where its ULID goes, from `data-billing-url` on the component root. */
+        get billingPage() {
+            return this.$root.dataset.billingUrl;
+        },
+
         /** The workspaces of the person, from the shared store. */
         get items() {
             return this.$store.workspaces.items;
@@ -92,6 +102,7 @@ export default function workspaces() {
             // `data-photo-entry` is rendered by the server: an object of booleans by ULID, or `null` when the instance does not offer the
             // feature (an attribute that is missing means the same).
             this.photoEntry = JSON.parse(this.$root.dataset.photoEntry ?? 'null');
+            this.photoEntryLocked = JSON.parse(this.$root.dataset.photoEntryLocked ?? '[]');
 
             if (window.location.hash === '#create') {
                 this.$nextTick(() => this.$refs.name?.focus());
@@ -120,14 +131,62 @@ export default function workspaces() {
         },
 
         /**
-         * Whether the owner turned the photo entry on for a workspace. A workspace the page does not know (one created since it was
-         * rendered) has it off, as a new workspace does.
+         * Whether the switch of the photo entry of a workspace shows it on: the owner turned it on and the plan includes it (a choice made
+         * before the workspace went back to Free is kept, but the feature is off meanwhile). A workspace the page does not know (one
+         * created since it was rendered) has it off, as a new workspace does.
          *
          * @param {import('../stores/workspaces.js').WorkspaceItem} item
          * @returns {boolean}
          */
         photoEntryOn(item) {
-            return this.photoEntry?.[item.id] === true;
+            return this.photoEntry?.[item.id] === true && !this.photoEntryLockedByPlan(item);
+        },
+
+        /**
+         * Whether the plan of a workspace leaves the photo entry out (an instance that sells plans, a workspace on Free): its switch can
+         * not be turned on, whatever the owner chose before.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {boolean}
+         */
+        photoEntryLockedByPlan(item) {
+            return this.photoEntryLocked.includes(item.id);
+        },
+
+        /**
+         * Whether the switch of the photo entry of a workspace is disabled: a request is in flight, or the plan leaves it out.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {boolean}
+         */
+        photoEntryDisabled(item) {
+            return this.busy || this.photoEntryLockedByPlan(item);
+        },
+
+        /**
+         * The ids of the hints that describe the switch of a workspace: the one about Claude, and the one about the plan when it applies.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        photoEntryHintIds(item) {
+            const ids = ['workspace-photo-entry-hint-' + item.id];
+
+            if (this.photoEntryLockedByPlan(item)) {
+                ids.push('workspace-photo-entry-plan-' + item.id);
+            }
+
+            return ids.join(' ');
+        },
+
+        /**
+         * Where the subscription page of a workspace is: the way to the plan that includes the photo entry.
+         *
+         * @param {import('../stores/workspaces.js').WorkspaceItem} item
+         * @returns {string}
+         */
+        billingUrl(item) {
+            return fillUrl(this.billingPage, item.id);
         },
 
         /**
@@ -363,7 +422,7 @@ export default function workspaces() {
         async togglePhotoEntry(item, event) {
             const box = event.target;
 
-            if (this.busy) {
+            if (this.busy || this.photoEntryLockedByPlan(item)) {
                 box.checked = this.photoEntryOn(item);
 
                 return;

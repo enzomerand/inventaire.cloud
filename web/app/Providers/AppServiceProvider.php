@@ -130,6 +130,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('photo-analyses', fn (Request $request): Limit => Limit::perMinute(5)
             ->by('photo-analyses:'.$this->signedInKey($request)));
 
+        // Reading the subscription of a workspace at Stripe, asked by the page when somebody comes back from Checkout: six a minute per person
+        // (each one is a call to Stripe that waits for its answer).
+        RateLimiter::for('billing-refresh', fn (Request $request): Limit => Limit::perMinute(6)
+            ->by('billing-refresh:'.$this->signedInKey($request)));
+
         // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
         RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))
             ->by('official-versions:'.$this->signedInKey($request)));

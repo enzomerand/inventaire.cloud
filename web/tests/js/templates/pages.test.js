@@ -85,6 +85,7 @@ const ROUTES = {
 const ROUTE_PATTERNS = {
     'app.workspace': '/app/w/{workspace}',
     'app.workspace.members': '/app/w/{workspace}/members',
+    'app.workspace.billing': '/app/w/{workspace}/billing',
     'app.inventory': '/app/w/{workspace}/inventories/{inventory}',
     'app.inventory.fields': '/app/w/{workspace}/inventories/{inventory}/fields',
     'app.inventory.versions': '/app/w/{workspace}/inventories/{inventory}/versions',
@@ -142,6 +143,10 @@ const PAGE = {
     photoEntryKey: true,
     // The consent of the workspaces the person owns, by ULID, as the page of the workspaces is rendered; null when the instance does not offer it.
     photoEntry: null,
+    // The ULIDs of the owned workspaces whose plan leaves the photo entry out, as the page of the workspaces is rendered.
+    photoEntryLocked: [],
+    // Whether the instance sells plans: the page of a workspace then links to its subscription.
+    billingOffered: false,
 };
 
 /** The largest file the server takes, in bytes, as the page of an inventory says (`data-max-attachment-size`). */
@@ -285,6 +290,11 @@ function render(path, { scannerSlot = '' } = {}) {
         PAGE.photoEntryKey ? configured : missing,
     );
 
+    // The link to the subscription is in the markup when the instance sells plans.
+    html = html.replace(/@if \(\$billingOffered\)([\s\S]*?)@endif/g, (_match, body) =>
+        PAGE.billingOffered ? body : '',
+    );
+
     // What only the owners are offered (the link to the sharing page) is in the markup, or not.
     html = html.replace(/@if \(\$abilities\['(\w+)'\]\)([\s\S]*?)@endif/g, (_match, ability, body) =>
         abilitiesOfPage()[ability] ? body : '',
@@ -338,6 +348,10 @@ function render(path, { scannerSlot = '' } = {}) {
 
         if (expression === 'json_encode($photoEntry, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR)') {
             return escape(JSON.stringify(PAGE.photoEntry));
+        }
+
+        if (expression === 'json_encode($photoEntryLocked, JSON_THROW_ON_ERROR)') {
+            return escape(JSON.stringify(PAGE.photoEntryLocked));
         }
 
         if (expression.startsWith('json_encode($list')) {
@@ -540,6 +554,8 @@ describe('the pages under the real Alpine CSP build', () => {
         PAGE.photoEntryEnabled = false;
         PAGE.photoEntryKey = true;
         PAGE.photoEntry = null;
+        PAGE.photoEntryLocked = [];
+        PAGE.billingOffered = false;
     });
 
     describe('the switcher of the header', () => {
@@ -818,6 +834,40 @@ describe('the pages under the real Alpine CSP build', () => {
                         .map((one) => one !== null && one.checked),
                 ).toEqual([false, true, false]);
                 expect(input.disabled).toBe(false);
+            });
+
+            it('shows the switch of a workspace on a plan without the photo entry off and disabled, with the way to its subscription', async () => {
+                PAGE.photoEntryLocked = ['shop'];
+                await offered({ personal: false, shop: true });
+
+                const input = photoSwitch(rows()[1]);
+                const hint = document.getElementById('workspace-photo-entry-plan-shop');
+
+                expect(input.checked).toBe(false);
+                expect(input.disabled).toBe(true);
+                expect(input.getAttribute('aria-describedby')).toBe(
+                    'workspace-photo-entry-hint-shop workspace-photo-entry-plan-shop',
+                );
+                expect(visible(hint)).toBe(true);
+                expect(hint.textContent).toContain('The photo entry is part of the Pro plan.');
+                expect(hint.querySelector('a').getAttribute('href')).toBe('/app/w/shop/billing');
+                // The workspaces whose plan includes it keep their switch, and have no such hint.
+                expect(photoSwitch(rows()[0]).disabled).toBe(false);
+                expect(visible(document.getElementById('workspace-photo-entry-plan-personal'))).toBe(false);
+            });
+
+            it('does not ask the server when the switch of a workspace on a plan without the photo entry is clicked all the same', async () => {
+                PAGE.photoEntryLocked = ['shop'];
+                await offered({ personal: false, shop: false });
+                const input = photoSwitch(rows()[1]);
+
+                input.disabled = false;
+                input.checked = true;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                await flush();
+
+                expect(http.put).not.toHaveBeenCalled();
+                expect(input.checked).toBe(false);
             });
 
             it('takes the switches off the page when the administrator turned the feature off in the meantime', async () => {
@@ -1947,6 +1997,18 @@ describe('the pages under the real Alpine CSP build', () => {
             );
 
             expect(link.getAttribute('href')).toBe('/app/w/shop/members');
+        });
+
+        it('links to the subscription of the workspace when the instance sells plans, and not otherwise', async () => {
+            const link = () =>
+                [...document.querySelectorAll('a.btn')].find((anchor) => anchor.textContent.trim() === 'Subscription');
+
+            await open();
+            expect(link()).toBeUndefined();
+
+            PAGE.billingOffered = true;
+            await open();
+            expect(link().getAttribute('href')).toBe('/app/w/shop/billing');
         });
 
         it('lists the inventories as cards, each linking to its page, with what it holds', async () => {

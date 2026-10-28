@@ -11,6 +11,10 @@
     (it is a token route), so the page reads it from data-photo-entry. Never put a display utility (d-flex...) on an element that carries
     x-show: the utility wins and it never hides.
 
+    On an instance that sells plans, the switch of a workspace on a plan without the photo entry (Free) is shown off and disabled
+    ($photoEntryLocked is the list of their ULIDs, from data-photo-entry-locked), with a hint that leads to the subscription page
+    (data-billing-url, __id__ for the ULID).
+
     Icons: never pass a class attribute to <x-tabler-*> (see components/locale-switcher.blade.php).
 --}}
 @extends('layouts.app')
@@ -29,6 +33,8 @@
         data-members-url="{{ route('app.workspace.members', ['workspace' => '__id__'], absolute: false) }}"
         data-photo-entry-url="{{ route('api.v1.workspaces.photo-entry.update', ['workspace' => '__id__'], absolute: false) }}"
         data-photo-entry="{{ json_encode($photoEntry, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR) }}"
+        data-photo-entry-locked="{{ json_encode($photoEntryLocked, JSON_THROW_ON_ERROR) }}"
+        data-billing-url="{{ route('app.workspace.billing', ['workspace' => '__id__'], absolute: false) }}"
     >
         <div class="col-12 col-lg-8">
             <div class="card">
@@ -69,15 +75,19 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     :checked="photoEntryOn(item)"
-                                                    :disabled="busy"
+                                                    :disabled="photoEntryDisabled(item)"
                                                     :aria-label="photoEntryLabel(item)"
-                                                    :aria-describedby="'workspace-photo-entry-hint-' + item.id"
+                                                    :aria-describedby="photoEntryHintIds(item)"
                                                     @change="togglePhotoEntry(item, $event)"
                                                 >
                                                 <span class="form-check-label">{{ __('Photo entry (AI)') }}</span>
                                             </label>
                                             <div class="form-hint" :id="'workspace-photo-entry-hint-' + item.id">
                                                 {{ __('Photos sent by the editors are read by Claude (Anthropic), then deleted.') }}
+                                            </div>
+                                            <div class="form-hint" :id="'workspace-photo-entry-plan-' + item.id" x-show="photoEntryLockedByPlan(item)">
+                                                {{ __('The photo entry is part of the Pro plan.') }}
+                                                <a :href="billingUrl(item)">{{ __('See the subscription') }}</a>
                                             </div>
                                         </div>
                                     </div>
