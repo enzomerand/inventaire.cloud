@@ -17,6 +17,14 @@ require_once __DIR__.'/../../Support/billing.php';
  * expected is refused.
  */
 
+/**
+ * Opens a Checkout session for a customer, the way the application does.
+ */
+function clientOpenSession(StripeClient $client, string $customer): string
+{
+    return $client->createCheckoutSession(['mode' => 'subscription', 'customer' => $customer])['id'];
+}
+
 beforeEach(function (): void {
     $this->stripe = billingOn();
     $this->client = new StripeClient;
@@ -174,7 +182,7 @@ describe('updating a customer', function (): void {
 
     it('says when the customer is gone', function (): void {
         expect(fn () => $this->client->updateCustomer('cus_gone', 'new@example.test'))
-            ->toThrow(fn (StripeException $e) => expect($e->notFound())->toBeTrue()->and($e->code())->toBe('resource_missing')->and($e->retryable())->toBeFalse());
+            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(404)->and($e->code())->toBe('resource_missing')->and($e->retryable())->toBeFalse());
     });
 });
 
@@ -300,7 +308,7 @@ describe('creating a Checkout session', function (): void {
 
     it('says when the customer is not at Stripe', function (): void {
         expect(fn () => $this->client->createCheckoutSession(['mode' => 'subscription', 'customer' => 'cus_gone']))
-            ->toThrow(fn (StripeException $e) => expect($e->notFound())->toBeTrue());
+            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(404)->and($e->code())->toBe('resource_missing'));
     });
 });
 
@@ -332,7 +340,7 @@ describe('creating a portal session', function (): void {
 });
 
 describe('reading the subscriptions of a customer', function (): void {
-    it('asks for all of them, the canceled included, ten at most', function (): void {
+    it('asks for all of them, the canceled included, a hundred a page', function (): void {
         $this->stripe->addCustomer('cus_1');
 
         $this->client->subscriptionsOf('cus_1');
@@ -342,7 +350,80 @@ describe('reading the subscriptions of a customer', function (): void {
         parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
         expect($request->method())->toBe('GET')
             ->and((string) parse_url($request->url(), PHP_URL_PATH))->toBe('/v1/subscriptions')
-            ->and($query)->toBe(['customer' => 'cus_1', 'status' => 'all', 'limit' => '10']);
+            ->and($query)->toBe(['customer' => 'cus_1', 'status' => 'all', 'limit' => '100']);
+    });
+
+    it('follows the pages until Stripe says there is no more, so that none is missed', function (): void {
+        $ids = [];
+
+        foreach (range(1, 205) as $number) {
+            $ids[] = $this->stripe->subscribe('cus_1', $number === 1 ? 'active' : 'canceled');
+        }
+
+        $subscriptions = $this->client->subscriptionsOf('cus_1');
+        $queries = array_map(function ($request): array {
+            $query = [];
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return $query;
+        }, $this->stripe->requests);
+
+        // The most recent first: the list of the fake is the list of Stripe, page after page.
+        expect(array_column($subscriptions, 'id'))->toBe(array_reverse($ids))
+            ->and($this->stripe->requests)->toHaveCount(3)
+            ->and($queries[0])->not->toHaveKey('starting_after')
+            ->and($queries[1]['starting_after'])->toBe($subscriptions[99]['id'])
+            ->and($queries[2]['starting_after'])->toBe($subscriptions[199]['id'])
+            ->and(array_unique(array_column($queries, 'limit')))->toBe(['100'])
+            ->and(array_unique(array_column($queries, 'customer')))->toBe(['cus_1'])
+            // The live one is the oldest, on the last page: reading the first page only would have called this customer Free.
+            ->and($subscriptions[204]['status'])->toBe('active');
+    });
+
+    it('reads one page when there is no more, even a full one', function (): void {
+        foreach (range(1, 100) as $ignored) {
+            $this->stripe->subscribe('cus_1', 'canceled');
+        }
+
+        expect($this->client->subscriptionsOf('cus_1'))->toHaveCount(100)
+            ->and($this->stripe->requests)->toHaveCount(1);
+    });
+
+    it('refuses, for good, a customer with more subscriptions than the pages it reads, rather than give a list that is cut short', function (): void {
+        $this->stripe->answerWith(Http::response(['object' => 'list', 'has_more' => true, 'data' => [['id' => 'sub_endless', 'status' => 'canceled']]]));
+
+        expect(fn () => $this->client->subscriptionsOf('cus_1'))
+            ->toThrow(fn (StripeException $e) => expect($e->code())->toBe('invalid_response')->and($e->retryable())->toBeFalse()->and($e->getMessage())->toContain('1000 subscriptions'));
+        expect($this->stripe->requests)->toHaveCount(StripeClient::MAX_PAGES);
+    });
+
+    it('refuses a page that says more follow but gives nothing to go on from', function (mixed $data): void {
+        $this->stripe->answerWith(Http::response(['object' => 'list', 'has_more' => true, 'data' => $data]));
+
+        expect(fn () => $this->client->subscriptionsOf('cus_1'))
+            ->toThrow(fn (StripeException $e) => expect($e->code())->toBe('invalid_response')->and($e->retryable())->toBeFalse());
+        expect($this->stripe->requests)->toHaveCount(1);
+    })->with([
+        'no subscription' => [[]],
+        'no id' => [[['status' => 'active']]],
+        'an id that is no id' => [[['id' => 'sub_1&limit=1']]],
+    ]);
+
+    it('fails as a whole when a later page fails, with the failure of that page', function (): void {
+        foreach (range(1, 150) as $ignored) {
+            $this->stripe->subscribe('cus_1', 'canceled');
+        }
+
+        $seen = 0;
+        $this->stripe->onCall('GET /v1/subscriptions', function () use (&$seen): void {
+            if (++$seen === 2) {
+                $this->stripe->failNext('GET /v1/subscriptions', 503);
+            }
+        });
+
+        expect(fn () => $this->client->subscriptionsOf('cus_1'))
+            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(503)->and($e->retryable())->toBeTrue());
+        expect($this->stripe->requests)->toHaveCount(2);
     });
 
     it('gives them as Stripe writes them, the most recent first', function (): void {
@@ -379,21 +460,83 @@ describe('reading the subscriptions of a customer', function (): void {
     ]);
 });
 
-describe('reading a charge', function (): void {
-    it('gives it as Stripe writes it', function (): void {
-        $this->stripe->charge('ch_1', ['customer' => 'cus_1', 'refunded' => true]);
+describe('the open Checkout sessions of a customer', function (): void {
+    it('lists the ones that are open, a hundred a page, and no others', function (): void {
+        $this->stripe->addCustomer('cus_1')->addCustomer('cus_2');
+        $open = clientOpenSession($this->client, 'cus_1');
+        $expired = clientOpenSession($this->client, 'cus_1');
+        $this->client->expireCheckoutSession($expired);
+        $done = clientOpenSession($this->client, 'cus_1');
+        $this->stripe->completeCheckout($done);
+        clientOpenSession($this->client, 'cus_2');
+        $this->stripe->requests = [];
 
-        $charge = $this->client->retrieveCharge('ch_1');
+        $ids = $this->client->openCheckoutSessionsOf('cus_1');
 
-        expect($charge['id'])->toBe('ch_1')
-            ->and($charge['customer'])->toBe('cus_1')
-            ->and($charge['refunded'])->toBeTrue()
-            ->and($this->stripe->requests[0]->url())->toBe('https://api.stripe.com/v1/charges/ch_1');
+        $request = $this->stripe->requests[0];
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+        expect($ids)->toBe([$open])
+            ->and($request->method())->toBe('GET')
+            ->and((string) parse_url($request->url(), PHP_URL_PATH))->toBe('/v1/checkout/sessions')
+            ->and($query)->toBe(['customer' => 'cus_1', 'status' => 'open', 'limit' => '100']);
     });
 
-    it('says when the charge is not there', function (): void {
-        expect(fn () => $this->client->retrieveCharge('ch_gone'))
-            ->toThrow(fn (StripeException $e) => expect($e->notFound())->toBeTrue());
+    it('gives none for a customer that has none', function (): void {
+        $this->stripe->addCustomer('cus_1');
+
+        expect($this->client->openCheckoutSessionsOf('cus_1'))->toBe([]);
+    });
+
+    it('follows the pages, so that none stays open', function (): void {
+        $this->stripe->addCustomer('cus_1');
+        $made = [];
+
+        foreach (range(1, 130) as $ignored) {
+            $made[] = clientOpenSession($this->client, 'cus_1');
+        }
+
+        $this->stripe->requests = [];
+
+        expect($this->client->openCheckoutSessionsOf('cus_1'))->toBe(array_reverse($made))
+            ->and($this->stripe->requests)->toHaveCount(2);
+    });
+
+    it('refuses a list with something in it that is no session id', function (): void {
+        $this->stripe->answerWith(Http::response(['object' => 'list', 'has_more' => false, 'data' => [['id' => 'cs_1/../x']]]));
+
+        expect(fn () => $this->client->openCheckoutSessionsOf('cus_1'))
+            ->toThrow(fn (StripeException $e) => expect($e->code())->toBe('invalid_response')->and($e->retryable())->toBeFalse());
+    });
+
+    it('expires one with a POST that carries an idempotency key, and the page of the session is over', function (): void {
+        $this->stripe->addCustomer('cus_1');
+        $id = clientOpenSession($this->client, 'cus_1');
+        $this->stripe->requests = [];
+
+        $this->client->expireCheckoutSession($id);
+
+        $request = $this->stripe->requests[0];
+        expect($request->method())->toBe('POST')
+            ->and($request->url())->toBe("https://api.stripe.com/v1/checkout/sessions/{$id}/expire")
+            ->and($request->hasHeader('Idempotency-Key'))->toBeTrue()
+            ->and($this->stripe->sessions[$id]['status'])->toBe('expired');
+    });
+
+    it('does not let the id of a session change the address that is called', function (): void {
+        expect(fn () => $this->client->expireCheckoutSession('cs_1/../../customers'))->toThrow(StripeException::class);
+
+        expect($this->stripe->requests[0]->url())->toBe('https://api.stripe.com/v1/checkout/sessions/cs_1%2F..%2F..%2Fcustomers/expire');
+    });
+
+    it('says when the session is gone, or is not open any more (it was paid on)', function (): void {
+        $this->stripe->addCustomer('cus_1');
+        $paid = clientOpenSession($this->client, 'cus_1');
+        $this->stripe->completeCheckout($paid);
+
+        expect(fn () => $this->client->expireCheckoutSession('cs_gone'))
+            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(404)->and($e->code())->toBe('resource_missing'));
+        expect(fn () => $this->client->expireCheckoutSession($paid))
+            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(400)->and($e->retryable())->toBeFalse()->and($e->code())->toBe('invalid_request_error'));
     });
 });
 
@@ -414,7 +557,7 @@ describe('ending a subscription', function (): void {
 
         foreach (['sub_gone', $done] as $id) {
             expect(fn () => $this->client->cancelSubscription($id))
-                ->toThrow(fn (StripeException $e) => expect($e->notFound())->toBeTrue()->and($e->retryable())->toBeFalse());
+                ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(404)->and($e->retryable())->toBeFalse());
         }
     });
 

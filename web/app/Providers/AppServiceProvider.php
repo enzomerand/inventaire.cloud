@@ -135,6 +135,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('billing-refresh', fn (Request $request): Limit => Limit::perMinute(6)
             ->by('billing-refresh:'.$this->signedInKey($request)));
 
+        // Opening a Checkout session or a portal session at Stripe makes several calls that each wait for the answer (the customer, its open
+        // sessions, the session), and every Checkout session is a page of Stripe that stays open for a day: ten a minute per person, each
+        // kind with its own count.
+        RateLimiter::for('billing-checkout', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('billing-checkout:'.$this->signedInKey($request)));
+        RateLimiter::for('billing-portal', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('billing-portal:'.$this->signedInKey($request)));
+
         // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
         RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))
             ->by('official-versions:'.$this->signedInKey($request)));

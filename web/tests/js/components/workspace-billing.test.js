@@ -204,6 +204,45 @@ describe('the subscription page of a workspace', () => {
         });
     });
 
+    describe('a workspace whose subscription is waiting to be settled', () => {
+        it.each(['incomplete', 'unpaid', 'paused'])(
+            'offers the portal, not the purchase, for a subscription that is %s',
+            async (status) => {
+                await open(overview({ status }));
+
+                expect(component.isPro).toBe(false);
+                expect(component.unsettled).toBe(true);
+                expect(component.canUpgrade).toBe(false);
+                expect(component.upgradeShown).toBe(false);
+                expect(component.canOpenPortal).toBe(true);
+                expect(component.notice).toBe(
+                    'A subscription of this workspace is waiting to be settled. Open the subscription management to settle it.',
+                );
+
+                http.post.mockResolvedValue({ data: { url: 'https://billing.stripe.com/session/bps_1' } });
+                await component.upgrade();
+
+                expect(http.post).not.toHaveBeenCalled();
+            },
+        );
+
+        it('keeps the purchase for a Free workspace whose subscription is over, and says nothing', async () => {
+            await open(overview({ status: 'canceled' }));
+
+            expect(component.unsettled).toBe(false);
+            expect(component.canUpgrade).toBe(true);
+            expect(component.upgradeShown).toBe(true);
+            expect(component.canOpenPortal).toBe(false);
+            expect(component.hasNotice).toBe(false);
+        });
+
+        it('tells the owner only: a member has nothing to settle', async () => {
+            await open(overview({ status: 'unpaid', can_manage: false }));
+
+            expect(component.hasNotice).toBe(false);
+        });
+    });
+
     describe('a workspace on Pro', () => {
         it('tells the plan, the status, how often it is paid and when it renews', async () => {
             await open(pro());
@@ -386,6 +425,22 @@ describe('the subscription page of a workspace', () => {
             expect(notify).toHaveBeenCalledWith('danger', 'This workspace already has a subscription.');
         });
 
+        it('tells, and reads the overview again, when a subscription of the workspace is waiting to be settled', async () => {
+            await open(overview());
+            http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'subscription_pending' }));
+            http.get.mockResolvedValue({ data: overview({ status: 'unpaid' }) });
+
+            await component.upgrade();
+            await vi.waitFor(() => expect(component.unsettled).toBe(true));
+
+            expect(redirectTo).not.toHaveBeenCalled();
+            expect(component.busy).toBe(false);
+            expect(notify).toHaveBeenCalledWith(
+                'danger',
+                'This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.',
+            );
+        });
+
         it.each([
             ['billing_disabled', 409, 'This service is not offered on this instance.'],
             ['interval_not_offered', 422, 'This billing period is not offered.'],
@@ -560,6 +615,8 @@ describe('the subscription page of a workspace', () => {
                 'Your payment is still being confirmed. The plan changes as soon as it is: reload this page in a moment.',
             );
             expect(component.hasNotice).toBe(true);
+            // The payment the person just made is not paid again: nothing to buy while it is waited for.
+            expect(component.canUpgrade).toBe(false);
             expect(notify).not.toHaveBeenCalled();
             expect(window.location.search).toBe('');
         });
@@ -576,17 +633,44 @@ describe('the subscription page of a workspace', () => {
             expect(notify).not.toHaveBeenCalledWith('danger', expect.anything());
         });
 
-        it('only reads the overview for a member who cannot have the subscription read', async () => {
+        it('waits for nothing for a member who is not an owner (there is no payment of theirs to wait for), and takes the parameter off', async () => {
             returnFromCheckout();
-            http.get
-                .mockResolvedValueOnce({ data: overview({ can_manage: false }) })
-                .mockResolvedValueOnce({ data: pro({ can_manage: false }) });
+            http.get.mockResolvedValue({ data: overview({ can_manage: false }) });
 
             await component.init();
 
             expect(http.post).not.toHaveBeenCalled();
-            expect(http.get).toHaveBeenCalledTimes(2);
-            expect(component.isPro).toBe(true);
+            expect(http.get).toHaveBeenCalledTimes(1);
+            expect(component.confirming).toBe(false);
+            expect(component.stillPending).toBe(false);
+            expect(component.hasNotice).toBe(false);
+            expect(notify).not.toHaveBeenCalled();
+            expect(window.location.search).toBe('');
+        });
+
+        it('waits for nothing on an instance that sells no plan, and takes the parameter off', async () => {
+            returnFromCheckout();
+            http.get.mockResolvedValue({ data: overview({ enabled: false }) });
+
+            await component.init();
+
+            expect(http.post).not.toHaveBeenCalled();
+            expect(http.get).toHaveBeenCalledTimes(1);
+            expect(component.stillPending).toBe(false);
+            expect(window.location.search).toBe('');
+        });
+
+        it('takes the parameter off even when the reading goes wrong half-way', async () => {
+            returnFromCheckout();
+            http.get.mockResolvedValue({ data: overview() });
+            http.post.mockResolvedValue({ data: pro() });
+            notify.mockImplementation(() => {
+                throw new Error('Unexpected');
+            });
+
+            await expect(component.init()).rejects.toThrow('Unexpected');
+
+            expect(window.location.search).toBe('');
         });
 
         it('has nothing to wait for when the plan is Pro already, and takes the parameter off all the same', async () => {
@@ -620,7 +704,8 @@ describe('the subscription page of a workspace', () => {
 
             expect(http.post).not.toHaveBeenCalled();
             expect(component.loadFailed).toBe(true);
-            expect(window.location.search).toBe('?checkout=done');
+            // Nothing to come back to: a reload must not start it again.
+            expect(window.location.search).toBe('');
         });
 
         it('ignores any other value of the parameter', async () => {

@@ -42,8 +42,12 @@ final class CancelStripeSubscription implements ShouldQueue
     /** How many times the job is tried. */
     public int $tries = 5;
 
-    /** The seconds the job may run: a few calls that wait for 20 seconds at the longest, with room. */
-    public int $timeout = 120;
+    /**
+     * The seconds the job may run: the list of the subscriptions (a page at a time, up to {@see StripeClient::MAX_PAGES}) and the
+     * cancellation of each one that is live, every call waiting 20 seconds at the longest. Well under the `retry_after` of the queue
+     * (960 seconds), so that a job that is still running is never handed to a second worker.
+     */
+    public int $timeout = 300;
 
     /** The key Stripe recognises a retry of the same cancellation by: made once, kept by the job across its tries. */
     public readonly string $idempotencyKey;

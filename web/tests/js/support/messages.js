@@ -171,6 +171,7 @@ export const MESSAGES = {
     'photoEntry.error.turned_off':
         'Adding items from photos was turned off before the analysis could start. The photos were deleted without being sent.',
     'photoEntry.error.disabled': 'Adding items from photos is turned off.',
+    'photoEntry.error.not_in_plan': 'Adding items from photos is not included in the plan of this workspace.',
     'photoEntry.error.instance_limit': 'The instance reached its daily number of photo analyses; try again tomorrow.',
     'photoEntry.error.no_fields': 'This inventory has no field the photos could fill in.',
     'photoEntry.error.gone': 'This analysis is no longer available. Send the photos again.',
@@ -392,6 +393,8 @@ export const MESSAGES = {
     'billing.confirming': 'Payment being confirmed…',
     'billing.still_pending':
         'Your payment is still being confirmed. The plan changes as soon as it is: reload this page in a moment.',
+    'billing.unsettled':
+        'A subscription of this workspace is waiting to be settled. Open the subscription management to settle it.',
     'billing.plan.free': 'Free',
     'billing.plan.pro': 'Pro',
     'billing.price.month': ':amount per month',
@@ -416,6 +419,8 @@ export const MESSAGES = {
     'billing.notice.pro_active': 'The Pro plan is active.',
     'billing.error.disabled': 'This service is not offered on this instance.',
     'billing.error.already_subscribed': 'This workspace already has a subscription.',
+    'billing.error.subscription_pending':
+        'This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.',
     'billing.error.no_account': 'This workspace has no subscription to manage yet.',
     'billing.error.interval': 'This billing period is not offered.',
 };

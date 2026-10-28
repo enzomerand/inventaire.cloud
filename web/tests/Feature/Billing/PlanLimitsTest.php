@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use App\PhotoEntry\PhotoEntry;
+use App\Settings\InstanceSettings;
 use App\Workspaces\Exceptions\MembershipRefused;
 use App\Workspaces\Invitations;
 use App\Workspaces\WorkspaceRole;
@@ -289,7 +290,7 @@ describe('the photo entry', function (): void {
             ->and(planPhotoFlag($this, $team))->toBe($pro ? '1' : '0');
     })->with(planStatuses());
 
-    it('answers photo_entry_disabled to the photos of a Free workspace, and takes those of a Pro one', function (): void {
+    it('answers photo_entry_not_in_plan to the photos of a Free workspace, and takes those of a Pro one', function (): void {
         Queue::fake();
         $free = photoCase();
         photoTurnedOn($free['team']['workspace']);
@@ -299,10 +300,38 @@ describe('the photo entry', function (): void {
         BillingAccount::factory()->for($pro['team']['workspace'])->subscribed('active')->create();
         fieldIn($pro['inventory'], 'text', 'Name');
 
-        photoPost($this, $free['team']['editor'], $free['inventory'], [photoUpload('one.jpg')])->assertStatus(409)->assertJsonPath('code', 'photo_entry_disabled');
+        photoPost($this, $free['team']['editor'], $free['inventory'], [photoUpload('one.jpg')])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'photo_entry_not_in_plan')
+            ->assertJsonPath('message', 'The plan of this workspace does not include the photo entry.');
         photoPost($this, $pro['team']['editor'], $pro['inventory'], [photoUpload('one.jpg')])->assertStatus(202);
 
         Queue::assertPushed(AnalyzePhotos::class, 1);
+    });
+
+    it('blames the plan only when it is the plan that refuses: the switch of the administrator and the consent of a Pro owner stay photo_entry_disabled', function (): void {
+        Queue::fake();
+        $free = photoCase();
+        photoTurnedOn($free['team']['workspace']);
+        fieldIn($free['inventory'], 'text', 'Name');
+        $pro = photoCase('Pro stock');
+        photoTurnedOn($pro['team']['workspace']);
+        BillingAccount::factory()->for($pro['team']['workspace'])->subscribed('active')->create();
+        fieldIn($pro['inventory'], 'text', 'Name');
+
+        // The owner of a Free workspace did not consent: turning the consent on would not be enough, the plan is what is told.
+        $free['team']['workspace']->forceFill(['photo_entry_enabled' => false])->save();
+        photoPost($this, $free['team']['editor'], $free['inventory'], [photoUpload('one.jpg')])->assertStatus(409)->assertJsonPath('code', 'photo_entry_not_in_plan');
+
+        // The owner of a Pro workspace did not: nothing to do with the plan.
+        $pro['team']['workspace']->forceFill(['photo_entry_enabled' => false])->save();
+        photoPost($this, $pro['team']['editor'], $pro['inventory'], [photoUpload('one.jpg')])->assertStatus(409)->assertJsonPath('code', 'photo_entry_disabled');
+
+        // The administrator turned the feature off: not even Pro would help, so the plan is not blamed.
+        app(InstanceSettings::class)->update([InstanceSettings::PHOTO_ENTRY_ENABLED => false]);
+        photoPost($this, $free['team']['editor'], $free['inventory'], [photoUpload('one.jpg')])->assertStatus(409)->assertJsonPath('code', 'photo_entry_disabled');
+
+        Queue::assertNothingPushed();
     });
 
     it('keeps the consent of the owner when the plan does not allow it, and offers the photo entry again as soon as the plan does', function (): void {

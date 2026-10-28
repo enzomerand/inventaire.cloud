@@ -15,6 +15,7 @@ use App\PhotoEntry\Exceptions\AnalysisNotStartedException;
 use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\Exceptions\NoFieldsToFillException;
 use App\PhotoEntry\Exceptions\PhotoEntryDisabledException;
+use App\PhotoEntry\Exceptions\PhotoEntryNotInPlanException;
 use App\PhotoEntry\PhotoAnalyses;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\UnreadablePhotoException;
@@ -53,6 +54,8 @@ final class PhotoAnalysisController extends Controller
     {
         try {
             $analysis = $this->analyses->request($inventory, $this->user($request), $request->photos(), app()->getLocale());
+        } catch (PhotoEntryNotInPlanException) {
+            return ApiError::conflict(__('The plan of this workspace does not include the photo entry.'), PhotoEntryNotInPlanException::CODE);
         } catch (PhotoEntryDisabledException) {
             return ApiError::conflict(__('The photo entry is not turned on for this workspace.'), PhotoEntryDisabledException::CODE);
         } catch (NoFieldsToFillException) {

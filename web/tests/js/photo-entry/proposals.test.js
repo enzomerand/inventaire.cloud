@@ -141,6 +141,14 @@ describe('the words of a failure', () => {
         });
     });
 
+    it('says the plan of the workspace does not include the photo entry, without offering to try again, when the API says so (409)', () => {
+        expect(requestFailure({ status: 409, code: 'photo_entry_not_in_plan', message: 'Nope.' })).toEqual({
+            text: 'Adding items from photos is not included in the plan of this workspace.',
+            retry: false,
+            resume: false,
+        });
+    });
+
     it('says the instance is out of analyses, without offering to try again, when the API says so (429)', () => {
         expect(
             requestFailure({ status: 429, code: 'photo_analyses_instance_limit', message: 'Slow', retryAfter: 600 }),

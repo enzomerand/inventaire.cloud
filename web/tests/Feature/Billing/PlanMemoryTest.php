@@ -69,6 +69,30 @@ describe('the reads', function (): void {
         expect($reads)->toHaveCount(3)->and($answers)->toBe([Plan::Pro, Plan::Free, Plan::Free]);
     });
 
+    it('are one for all the workspaces of a listing when they are preloaded, those without an account included', function (): void {
+        $pro = billingWorkspace('active');
+        $free = billingWorkspace();
+        $canceled = billingWorkspace('canceled');
+        $answers = [];
+
+        $reads = planReads(function () use ($pro, $free, $canceled, &$answers): void {
+            WorkspacePlan::preload([$pro->id, $free->id, $canceled->id]);
+            $answers = [WorkspacePlan::for($pro), WorkspacePlan::for($free), WorkspacePlan::for($canceled), WorkspacePlan::for($pro->id)];
+        });
+
+        expect($reads)->toHaveCount(1)->and($answers)->toBe([Plan::Pro, Plan::Free, Plan::Free, Plan::Pro]);
+    });
+
+    it('are none when billing is off or nothing is preloaded', function (): void {
+        $workspace = billingWorkspace('active');
+
+        expect(planReads(fn () => WorkspacePlan::preload([])))->toBe([]);
+
+        billingOff();
+
+        expect(planReads(fn () => WorkspacePlan::preload([$workspace->id])))->toBe([]);
+    });
+
     it('take the id of the workspace as well as the workspace, and share their answer', function (): void {
         $workspace = billingWorkspace('active');
 

@@ -13,6 +13,7 @@ use App\PhotoEntry\Exceptions\AnalysisNotStartedException;
 use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\Exceptions\NoFieldsToFillException;
 use App\PhotoEntry\Exceptions\PhotoEntryDisabledException;
+use App\PhotoEntry\Exceptions\PhotoEntryNotInPlanException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
@@ -52,7 +53,8 @@ final class PhotoAnalyses
      * @param  list<UploadedFile>  $photos  The photos, one to the most the configuration allows (the request checked their number and size).
      * @param  string  $locale  The language of the person, the one the evidence is written in.
      *
-     * @throws PhotoEntryDisabledException When the workspace of the inventory may not use the photo entry.
+     * @throws PhotoEntryNotInPlanException When the plan of the workspace of the inventory does not include the photo entry (the instance offers it).
+     * @throws PhotoEntryDisabledException When the workspace may not use the photo entry for another reason (the switch of the administrator, the API key, the consent of the owner).
      * @throws NoFieldsToFillException When no field of the inventory can be filled from a photo.
      * @throws ThrottleRequestsException When the person has asked for all the analyses they may today.
      * @throws InstanceQuotaReachedException When the instance has run all the analyses it may today.
@@ -64,7 +66,7 @@ final class PhotoAnalyses
         $workspace = $inventory->workspace()->firstOrFail();
 
         if (! $this->photoEntry->enabledFor($workspace)) {
-            throw new PhotoEntryDisabledException;
+            throw $this->photoEntry->refusedByPlan($workspace) ? new PhotoEntryNotInPlanException : new PhotoEntryDisabledException;
         }
 
         if ($this->fields->eligible($inventory->fields()->get()) === []) {

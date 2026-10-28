@@ -143,8 +143,9 @@ const PAGE = {
     photoEntryKey: true,
     // The consent of the workspaces the person owns, by ULID, as the page of the workspaces is rendered; null when the instance does not offer it.
     photoEntry: null,
-    // The ULIDs of the owned workspaces whose plan leaves the photo entry out, as the page of the workspaces is rendered.
-    photoEntryLocked: [],
+    // The ULIDs of the owned workspaces whose plan includes the photo entry, as the page of the workspaces is rendered; null when the
+    // instance sells no plan (none is locked).
+    photoEntryUnlocked: null,
     // Whether the instance sells plans: the page of a workspace then links to its subscription.
     billingOffered: false,
 };
@@ -350,8 +351,8 @@ function render(path, { scannerSlot = '' } = {}) {
             return escape(JSON.stringify(PAGE.photoEntry));
         }
 
-        if (expression === 'json_encode($photoEntryLocked, JSON_THROW_ON_ERROR)') {
-            return escape(JSON.stringify(PAGE.photoEntryLocked));
+        if (expression === 'json_encode($photoEntryUnlocked, JSON_THROW_ON_ERROR)') {
+            return escape(JSON.stringify(PAGE.photoEntryUnlocked));
         }
 
         if (expression.startsWith('json_encode($list')) {
@@ -554,7 +555,7 @@ describe('the pages under the real Alpine CSP build', () => {
         PAGE.photoEntryEnabled = false;
         PAGE.photoEntryKey = true;
         PAGE.photoEntry = null;
-        PAGE.photoEntryLocked = [];
+        PAGE.photoEntryUnlocked = null;
         PAGE.billingOffered = false;
     });
 
@@ -837,7 +838,7 @@ describe('the pages under the real Alpine CSP build', () => {
             });
 
             it('shows the switch of a workspace on a plan without the photo entry off and disabled, with the way to its subscription', async () => {
-                PAGE.photoEntryLocked = ['shop'];
+                PAGE.photoEntryUnlocked = ['personal'];
                 await offered({ personal: false, shop: true });
 
                 const input = photoSwitch(rows()[1]);
@@ -857,7 +858,7 @@ describe('the pages under the real Alpine CSP build', () => {
             });
 
             it('does not ask the server when the switch of a workspace on a plan without the photo entry is clicked all the same', async () => {
-                PAGE.photoEntryLocked = ['shop'];
+                PAGE.photoEntryUnlocked = ['personal'];
                 await offered({ personal: false, shop: false });
                 const input = photoSwitch(rows()[1]);
 

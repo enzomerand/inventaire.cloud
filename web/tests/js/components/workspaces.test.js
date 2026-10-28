@@ -388,23 +388,27 @@ describe('workspaces page', () => {
         });
 
         describe('on an instance that sells plans', () => {
-            /** Renders the page with the ULIDs of the workspaces whose plan leaves the photo entry out. */
-            function renderLocked(consents, locked) {
+            /** Renders the page with the ULIDs of the workspaces whose plan includes the photo entry (null: the instance sells no plan). */
+            function renderPlans(consents, unlocked) {
                 component.$root.dataset.billingUrl = '/app/w/__id__/billing';
-                component.$root.dataset.photoEntryLocked = JSON.stringify(locked);
+                component.$root.dataset.photoEntryUnlocked = JSON.stringify(unlocked);
                 render(consents);
             }
 
-            it('has no workspace locked when the page says nothing', () => {
+            it('has no workspace locked when the page says nothing, or says null', () => {
                 render({ mine: true });
 
                 expect(component.photoEntryLockedByPlan(MINE)).toBe(false);
                 expect(component.photoEntryDisabled(MINE)).toBe(false);
                 expect(component.photoEntryHintIds(MINE)).toBe('workspace-photo-entry-hint-mine');
+
+                renderPlans({ mine: true }, null);
+
+                expect(component.photoEntryLockedByPlan(MINE)).toBe(false);
             });
 
             it('shows the switch of a workspace on Free off and disabled, with the hint that leads to its subscription', () => {
-                renderLocked({ mine: true }, ['mine']);
+                renderPlans({ mine: true }, []);
 
                 expect(component.canPhotoEntry(MINE)).toBe(true);
                 expect(component.photoEntryLockedByPlan(MINE)).toBe(true);
@@ -417,15 +421,28 @@ describe('workspaces page', () => {
                 expect(component.billingUrl(MINE)).toBe('/app/w/mine/billing');
             });
 
-            it('leaves the other workspaces alone', () => {
-                renderLocked({ mine: true, other: true }, ['other']);
+            it('leaves the workspaces on a plan that includes it alone', () => {
+                renderPlans({ mine: true, other: true }, ['mine']);
 
+                expect(component.photoEntryLockedByPlan(MINE)).toBe(false);
                 expect(component.photoEntryDisabled(MINE)).toBe(false);
                 expect(component.photoEntryOn(MINE)).toBe(true);
             });
 
+            it('locks a workspace the page does not know, as one created since it was rendered (it is on Free)', () => {
+                const created = { id: 'new', name: 'Warehouse', role: 'owner', current: true };
+                renderPlans({ mine: true }, ['mine']);
+
+                expect(component.photoEntryLockedByPlan(created)).toBe(true);
+                expect(component.photoEntryDisabled(created)).toBe(true);
+                expect(component.photoEntryOn(created)).toBe(false);
+                expect(component.photoEntryHintIds(created)).toBe(
+                    'workspace-photo-entry-hint-new workspace-photo-entry-plan-new',
+                );
+            });
+
             it('keeps the disabled switch where it is, without asking the server', async () => {
-                renderLocked({ mine: true }, ['mine']);
+                renderPlans({ mine: true }, []);
                 const checkbox = box(true);
 
                 await component.togglePhotoEntry(MINE, checkbox);

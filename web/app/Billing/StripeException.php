@@ -122,14 +122,6 @@ final class StripeException extends RuntimeException
     }
 
     /**
-     * Whether Stripe answered that what was asked for is not there (`404`).
-     */
-    public function notFound(): bool
-    {
-        return $this->httpStatus === 404;
-    }
-
-    /**
      * Whether Stripe refused the key (`401`, `403`): the configuration is wrong, which is not about the customer.
      */
     public function unauthorized(): bool

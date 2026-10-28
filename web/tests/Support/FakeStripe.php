@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * A Stripe for the tests, behind `Http::fake()`: it answers the calls of the API that the application makes (`/v1/customers`,
- * `/v1/checkout/sessions`, `/v1/billing_portal/sessions`, `/v1/subscriptions`, `/v1/charges/{id}`) the way the real one does, with the state of
+ * `/v1/checkout/sessions`, `/v1/billing_portal/sessions`, `/v1/subscriptions`) the way the real one does, with the state of
  * a few customers and subscriptions, and it records every call. Any other request is refused (`Http::preventStrayRequests()`).
  *
  * A test drives it: it gives a customer a subscription in a status, changes that status, price or period end the way the customer would in
@@ -45,9 +45,6 @@ final class FakeStripe
 
     /** @var array<string, array<string, mixed>> The portal sessions that were created, by id, with the parameters they were created with. */
     public array $portals = [];
-
-    /** @var array<string, array<string, mixed>> The charges Stripe has, by id. */
-    public array $charges = [];
 
     /** @var list<Request> Every request, in order. */
     public array $requests = [];
@@ -260,13 +257,12 @@ final class FakeStripe
     }
 
     /**
-     * Declares that Stripe has a charge.
-     *
-     * @param  array<string, mixed>  $attributes  What the charge holds besides the defaults (`customer`, `amount`, `currency`, `refunded`...).
+     * The customer completes a Checkout session: it is not open any more (and the subscription it bought is up to the test to declare,
+     * see {@see self::subscribe()}).
      */
-    public function charge(string $id, array $attributes = []): self
+    public function completeCheckout(string $sessionId): self
     {
-        $this->charges[$id] = $attributes + ['id' => $id, 'object' => 'charge', 'customer' => null, 'amount' => 600, 'currency' => 'eur', 'refunded' => false];
+        $this->sessions[$sessionId]['status'] = 'complete';
 
         return $this;
     }
@@ -379,10 +375,11 @@ final class FakeStripe
             'POST /v1/customers/{id}' => $this->updateCustomer($request, $path),
             'POST /v1/checkout/sessions' => $this->createSession($request),
             'POST /v1/billing_portal/sessions' => $this->createPortal($request),
+            'GET /v1/checkout/sessions' => $this->listSessions($request),
+            'POST /v1/checkout/sessions/{id}/expire' => $this->expireSession($path),
             'GET /v1/subscriptions' => $this->listSubscriptions($request),
             'POST /v1/subscriptions/{id}' => $this->updateSubscription($request, $path),
             'DELETE /v1/subscriptions/{id}' => $this->deleteSubscription($path),
-            'GET /v1/charges/{id}' => $this->readCharge($path),
             default => ['status' => 404, 'body' => ['error' => ['type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'Unrecognized request URL.']]],
         };
 
@@ -398,7 +395,11 @@ final class FakeStripe
      */
     private function generic(string $path): string
     {
-        return (string) preg_replace('#^/v1/(customers|subscriptions|charges)/[^/]+$#', '/v1/$1/{id}', $path);
+        return (string) preg_replace(
+            ['#^/v1/(customers|subscriptions)/[^/]+$#', '#^/v1/checkout/sessions/[^/]+/expire$#'],
+            ['/v1/$1/{id}', '/v1/checkout/sessions/{id}/expire'],
+            $path,
+        );
     }
 
     /**
@@ -457,9 +458,9 @@ final class FakeStripe
         }
 
         $id = 'cs_test_'.++$this->counter;
-        $this->sessions[$id] = $data + ['id' => $id];
+        $this->sessions[$id] = $data + ['id' => $id, 'status' => 'open'];
 
-        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'checkout.session', 'url' => "https://checkout.stripe.com/c/pay/{$id}", 'customer' => $customer, 'mode' => 'subscription']];
+        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'checkout.session', 'url' => "https://checkout.stripe.com/c/pay/{$id}", 'customer' => $customer, 'mode' => 'subscription', 'status' => 'open']];
     }
 
     /**
@@ -483,7 +484,7 @@ final class FakeStripe
     }
 
     /**
-     * Lists the subscriptions of a customer: without `status=all` the canceled ones are left out, as Stripe does.
+     * Lists the subscriptions of a customer, a page at a time (`limit`, `starting_after`, `has_more`): without `status=all` the canceled ones are left out, as Stripe does.
      *
      * @return array{status: int, body: array<string, mixed>}
      */
@@ -501,9 +502,78 @@ final class FakeStripe
             ));
         }
 
-        $subscriptions = array_slice($subscriptions, 0, (int) ($query['limit'] ?? 10));
+        return $this->page($subscriptions, $query, '/v1/subscriptions');
+    }
 
-        return ['status' => 200, 'body' => ['object' => 'list', 'url' => '/v1/subscriptions', 'has_more' => false, 'data' => $subscriptions]];
+    /**
+     * Lists the Checkout sessions of a customer, a page at a time, the most recent first; `status` filters (`open`, `complete`, `expired`).
+     *
+     * @return array{status: int, body: array<string, mixed>}
+     */
+    private function listSessions(Request $request): array
+    {
+        $query = [];
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+        $sessions = array_filter(
+            array_reverse(array_values($this->sessions)),
+            fn (array $session): bool => ($session['customer'] ?? null) === ($query['customer'] ?? null) && (! isset($query['status']) || $session['status'] === $query['status']),
+        );
+        $sessions = array_map(fn (array $session): array => [
+            'id' => $session['id'],
+            'object' => 'checkout.session',
+            'customer' => $session['customer'],
+            'status' => $session['status'],
+            'mode' => 'subscription',
+        ], array_values($sessions));
+
+        return $this->page($sessions, $query, '/v1/checkout/sessions');
+    }
+
+    /**
+     * Expires a Checkout session; Stripe refuses one that is not open any more (`400`, with no `code`).
+     *
+     * @return array{status: int, body: array<string, mixed>}
+     */
+    private function expireSession(string $path): array
+    {
+        $id = rawurldecode(basename(dirname($path)));
+
+        if (! isset($this->sessions[$id])) {
+            return $this->missing('checkout.session', $id);
+        }
+
+        if ($this->sessions[$id]['status'] !== 'open') {
+            return ['status' => 400, 'body' => ['error' => ['type' => 'invalid_request_error', 'message' => 'Only Checkout Sessions with a status in (open) can be expired.']]];
+        }
+
+        $this->sessions[$id]['status'] = 'expired';
+
+        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'checkout.session', 'customer' => $this->sessions[$id]['customer'] ?? null, 'status' => 'expired']];
+    }
+
+    /**
+     * A page of a list, the way Stripe pages: from the one after `starting_after` (an id), `limit` at a time (10 when not asked), and
+     * whether more follow.
+     *
+     * @param  list<array<string, mixed>>  $objects  Everything the list holds, in order.
+     * @param  array<string, mixed>  $query
+     * @return array{status: int, body: array<string, mixed>}
+     */
+    private function page(array $objects, array $query, string $url): array
+    {
+        if (isset($query['starting_after'])) {
+            $position = array_search($query['starting_after'], array_column($objects, 'id'), true);
+
+            if ($position === false) {
+                return $this->missing('object', (string) $query['starting_after']);
+            }
+
+            $objects = array_slice($objects, $position + 1);
+        }
+
+        $limit = (int) ($query['limit'] ?? 10);
+
+        return ['status' => 200, 'body' => ['object' => 'list', 'url' => $url, 'has_more' => count($objects) > $limit, 'data' => array_slice($objects, 0, $limit)]];
     }
 
     /**
@@ -542,18 +612,6 @@ final class FakeStripe
         $this->subscriptions[$id]['status'] = 'canceled';
 
         return ['status' => 200, 'body' => $this->subscriptionObject($this->subscriptions[$id])];
-    }
-
-    /**
-     * Reads a charge.
-     *
-     * @return array{status: int, body: array<string, mixed>}
-     */
-    private function readCharge(string $path): array
-    {
-        $id = $this->idIn($path);
-
-        return isset($this->charges[$id]) ? ['status' => 200, 'body' => $this->charges[$id]] : $this->missing('charge', $id);
     }
 
     /**

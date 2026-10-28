@@ -8,6 +8,7 @@ use App\Models\Workspace;
 use App\Settings\InstanceSettings;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 
@@ -58,15 +59,16 @@ function billingPageOffersPhotoEntry(): void
 }
 
 /**
- * The ULIDs the workspaces page says are on a plan without the photo entry, decoded as the browser decodes them.
+ * The ULIDs the workspaces page says are on a plan that includes the photo entry, decoded as the browser decodes them; null when it says
+ * that no plan is sold (so that no workspace is locked).
  *
- * @return list<string>
+ * @return list<string>|null
  */
-function billingPageLockedWorkspaces(TestResponse $page): array
+function billingPageUnlockedWorkspaces(TestResponse $page): ?array
 {
-    preg_match('/data-photo-entry-locked="([^"]*)"/', $page->getContent(), $match);
+    preg_match('/data-photo-entry-unlocked="([^"]*)"/', $page->getContent(), $match);
 
-    expect($match)->not->toBe([], 'the page has a data-photo-entry-locked attribute');
+    expect($match)->not->toBe([], 'the page has a data-photo-entry-unlocked attribute');
 
     return json_decode(html_entity_decode($match[1], ENT_QUOTES), true, flags: JSON_THROW_ON_ERROR);
 }
@@ -145,7 +147,7 @@ describe('the subscription page of a workspace', function (): void {
         expect($messages)->toHaveKeys([
             'billing.plan.free', 'billing.plan.pro', 'billing.price.month', 'billing.price.year', 'billing.interval.month',
             'billing.status.past_due', 'billing.renews', 'billing.ends', 'billing.usage.of', 'billing.limit.photo_entry',
-            'billing.confirming', 'billing.still_pending', 'billing.error.already_subscribed',
+            'billing.confirming', 'billing.still_pending', 'billing.unsettled', 'billing.error.already_subscribed', 'billing.error.subscription_pending',
         ])
             ->and($messages['billing.plan.pro'])->toBe($pro)
             ->and($messages['billing.confirming'])->toBe($confirming);
@@ -216,7 +218,7 @@ describe('the workspaces page and the photo entry', function (): void {
         config(['services.anthropic.key' => null]);
     });
 
-    it('lists the workspaces whose plan leaves the photo entry out, so that their switch is disabled', function (): void {
+    it('lists the workspaces whose plan includes the photo entry, so that the switch of any other is disabled', function (): void {
         billingOn();
         billingPageOffersPhotoEntry();
         $owner = inventoryPerson();
@@ -226,7 +228,7 @@ describe('the workspaces page and the photo entry', function (): void {
 
         $page = $this->actingAs($owner)->get(route('app.workspaces'))->assertOk();
 
-        expect(billingPageLockedWorkspaces($page))->toContain($free->ulid)->not->toContain($pro->ulid)
+        expect(billingPageUnlockedWorkspaces($page))->toContain($pro->ulid)->not->toContain($free->ulid)
             ->and($page->getContent())->toContain('data-billing-url="/app/w/__id__/billing"');
     });
 
@@ -234,13 +236,14 @@ describe('the workspaces page and the photo entry', function (): void {
         billingOn();
         billingPageOffersPhotoEntry();
         $team = inventoryTeam();
+        BillingAccount::factory()->for($team['workspace'])->subscribed()->create();
 
         $page = $this->actingAs($team['editor'])->get(route('app.workspaces'))->assertOk();
 
-        expect(billingPageLockedWorkspaces($page))->not->toContain($team['workspace']->ulid);
+        expect(billingPageUnlockedWorkspaces($page))->toBe([]);
     });
 
-    it('lists none while the instance sells no plan, or does not offer the photo entry at all', function (bool $plans, bool $photoEntry): void {
+    it('says nothing is locked while the instance sells no plan, or does not offer the photo entry at all', function (bool $plans, bool $photoEntry): void {
         $plans ? billingOn() : billingOff();
 
         if ($photoEntry) {
@@ -252,12 +255,35 @@ describe('the workspaces page and the photo entry', function (): void {
 
         $page = $this->actingAs($owner)->get(route('app.workspaces'))->assertOk();
 
-        expect(billingPageLockedWorkspaces($page))->toBe([]);
+        expect(billingPageUnlockedWorkspaces($page))->toBeNull();
     })->with([
         'no plan, photo entry offered' => [false, true],
         'plans, no photo entry' => [true, false],
         'neither' => [false, false],
     ]);
+
+    it('reads the plans of the workspaces in one query, however many are listed', function (): void {
+        billingOn();
+        billingPageOffersPhotoEntry();
+        $owner = inventoryPerson();
+        app(Workspaces::class)->create($owner, 'First');
+        $reads = function () use ($owner): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->actingAs($owner)->get(route('app.workspaces'))->assertOk();
+            DB::disableQueryLog();
+
+            return count(array_filter(DB::getQueryLog(), fn (array $query): bool => str_contains($query['query'], 'billing_accounts')));
+        };
+
+        $one = $reads();
+
+        foreach (['Second', 'Third', 'Fourth', 'Fifth'] as $name) {
+            BillingAccount::factory()->for(app(Workspaces::class)->create($owner, $name))->subscribed()->create();
+        }
+
+        expect($one)->toBe(1)->and($reads())->toBe($one);
+    });
 
     it('keeps the choice of an owner whose workspace went back to Free', function (): void {
         billingOn();
@@ -270,7 +296,7 @@ describe('the workspaces page and the photo entry', function (): void {
         $page = $this->actingAs($owner)->get(route('app.workspaces'))->assertOk();
         preg_match('/data-photo-entry="([^"]*)"/', $page->getContent(), $match);
 
-        expect(billingPageLockedWorkspaces($page))->toContain($shop->ulid)
+        expect(billingPageUnlockedWorkspaces($page))->not->toContain($shop->ulid)
             ->and(json_decode(html_entity_decode($match[1], ENT_QUOTES), true)[$shop->ulid])->toBeTrue();
     });
 });

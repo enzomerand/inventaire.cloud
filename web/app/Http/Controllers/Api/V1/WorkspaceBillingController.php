@@ -9,14 +9,15 @@ use App\Billing\BillingCustomers;
 use App\Billing\BillingOverview;
 use App\Billing\BillingSync;
 use App\Billing\CheckoutParameters;
-use App\Billing\Plan;
 use App\Billing\StripeClient;
 use App\Billing\StripeException;
+use App\Billing\SubscriptionStatus;
 use App\Billing\WorkspacePlan;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\ManageBillingRequest;
 use App\Http\Requests\Billing\StartCheckoutRequest;
 use App\Http\Responses\ApiError;
+use App\Models\BillingAccount;
 use App\Models\Workspace;
 use App\Support\PublicUrls;
 use Illuminate\Http\JsonResponse;
@@ -33,7 +34,7 @@ use Illuminate\Support\Facades\Log;
  * synchronisation reads the subscription ({@see BillingSync}), and `refresh` is how the page asks for that to be done now.
  *
  * Every answer that is not a success carries a `code` the page switches on: `billing_disabled` (the instance sells no plan),
- * `already_subscribed`, `no_billing_account` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could
+ * `already_subscribed`, `subscription_pending`, `no_billing_account` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could
  * not be reached or refused the call).
  */
 final class WorkspaceBillingController extends Controller
@@ -64,8 +65,14 @@ final class WorkspaceBillingController extends Controller
      * Opens a Stripe Checkout session that sells Pro to the workspace for the interval asked for, and answers `{data: {url}}`, the page of
      * Stripe to send the person to (the request checks that they are an owner).
      *
-     * `409` `billing_disabled` when the instance sells no plan, and `already_subscribed` when the workspace is on Pro already; `422`
-     * (`interval_not_offered`) for a yearly plan when no yearly Price is set; `503` (`billing_unavailable`) when Stripe fails.
+     * A workspace is never sold a second subscription. When it has a customer, the subscriptions of that customer are read at Stripe first
+     * (not taken from the row, which a payment whose webhook is on its way has not changed yet): `409` `already_subscribed` when one gives
+     * Pro, `subscription_pending` when one is still in play without giving it (incomplete, unpaid, paused: it is settled in the portal, not
+     * bought again). The Checkout sessions of the customer that are still open are then expired, so that two tabs cannot both end in a
+     * subscription. The route paces the calls per person.
+     *
+     * `409` `billing_disabled` when the instance sells no plan; `422` (`interval_not_offered`) for a yearly plan when no yearly Price is
+     * set; `503` (`billing_unavailable`) when Stripe fails.
      */
     public function checkout(StartCheckoutRequest $request, Workspace $workspace): JsonResponse
     {
@@ -80,12 +87,24 @@ final class WorkspaceBillingController extends Controller
             return ApiError::invalid(__('This billing period is not offered.'), 'interval', 'interval_not_offered');
         }
 
-        if (WorkspacePlan::for($workspace) === Plan::Pro) {
-            return ApiError::conflict(__('This workspace already has a subscription.'), 'already_subscribed');
-        }
-
         try {
+            $account = $this->customers->find($workspace);
+
+            if ($account !== null) {
+                // Outside any transaction, as every call to Stripe.
+                $refusal = $this->refusalFor($this->sync->sync($account));
+
+                if ($refusal !== null) {
+                    return $refusal;
+                }
+            }
+
             $account = $this->customers->ensure($workspace, $this->user($request), App::getLocale());
+
+            foreach ($this->stripe->openCheckoutSessionsOf($account->stripe_customer_id) as $open) {
+                $this->stripe->expireCheckoutSession($open);
+            }
+
             $session = $this->stripe->createCheckoutSession(CheckoutParameters::make(
                 $account->stripe_customer_id,
                 $price,
@@ -151,6 +170,29 @@ final class WorkspaceBillingController extends Controller
         }
 
         return $this->payload($workspace);
+    }
+
+    /**
+     * Why the workspace may not be sold a subscription, from the account as the synchronisation just wrote it (the subscription it keeps
+     * is the one that ranks first: Pro, else one still in play, else the newest that is over); null when it may.
+     */
+    private function refusalFor(BillingAccount $account): ?JsonResponse
+    {
+        $status = $account->status;
+
+        if ($status === null) {
+            return null;
+        }
+
+        if (in_array($status, WorkspacePlan::PRO_STATUSES, true)) {
+            return ApiError::conflict(__('This workspace already has a subscription.'), 'already_subscribed');
+        }
+
+        if (in_array($status, SubscriptionStatus::CURRENT, true)) {
+            return ApiError::conflict(__('This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.'), 'subscription_pending');
+        }
+
+        return null;
     }
 
     /**

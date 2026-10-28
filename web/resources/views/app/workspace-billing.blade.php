@@ -109,12 +109,12 @@
                     </div>
 
                     <div class="card-footer" hidden :hidden="!canManage">
-                        <button type="button" class="btn btn-primary" hidden :hidden="isPro" @click="upgrade" :disabled="!canUpgrade || busy">
+                        <button type="button" class="btn btn-primary" hidden :hidden="!upgradeShown" @click="upgrade" :disabled="!canUpgrade || busy">
                             <span class="spinner-border spinner-border-sm me-2" hidden :hidden="!busy" aria-hidden="true"></span>
                             <x-tabler-rocket aria-hidden="true" />
                             {{ __('Upgrade to Pro') }}
                         </button>
-                        <button type="button" class="btn" hidden :hidden="!isPro" @click="manage" :disabled="busy">
+                        <button type="button" class="btn" hidden :hidden="!canOpenPortal" @click="manage" :disabled="busy">
                             <span class="spinner-border spinner-border-sm me-2" hidden :hidden="!busy" aria-hidden="true"></span>
                             <x-tabler-credit-card aria-hidden="true" />
                             {{ __('Manage the subscription') }}

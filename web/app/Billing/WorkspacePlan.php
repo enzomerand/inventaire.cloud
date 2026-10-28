@@ -40,12 +40,33 @@ final class WorkspacePlan
         $plan = $memory->recall($id);
 
         if ($plan === null) {
-            $status = BillingAccount::query()->where('workspace_id', $id)->value('status');
-            $plan = is_string($status) && in_array($status, self::PRO_STATUSES, true) ? Plan::Pro : Plan::Free;
+            $plan = self::planOf(BillingAccount::query()->where('workspace_id', $id)->value('status'));
             $memory->remember($id, $plan);
         }
 
         return $plan;
+    }
+
+    /**
+     * Reads the plans of several workspaces in one query, so that a listing that asks about each of them ({@see self::for()}) does not
+     * read the database once per workspace. A workspace with no account is on Free, and is remembered as such. Nothing is read while
+     * billing is off.
+     *
+     * @param  list<int>  $workspaceIds  The ids of the workspaces.
+     */
+    public static function preload(array $workspaceIds): void
+    {
+        if (! Billing::enabled() || $workspaceIds === []) {
+            return;
+        }
+
+        /** @var array<int, string|null> $statuses */
+        $statuses = BillingAccount::query()->whereIn('workspace_id', $workspaceIds)->pluck('status', 'workspace_id')->all();
+        $memory = self::memory();
+
+        foreach ($workspaceIds as $id) {
+            $memory->remember($id, self::planOf($statuses[$id] ?? null));
+        }
     }
 
     /**
@@ -55,6 +76,14 @@ final class WorkspacePlan
     public static function forget(): void
     {
         self::memory()->forget();
+    }
+
+    /**
+     * The plan a subscription status gives: Pro for the statuses of {@see self::PRO_STATUSES}, Free for any other word and for none.
+     */
+    private static function planOf(mixed $status): Plan
+    {
+        return is_string($status) && in_array($status, self::PRO_STATUSES, true) ? Plan::Pro : Plan::Free;
     }
 
     /**

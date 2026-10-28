@@ -28,6 +28,12 @@ final class StripeClient
     /** Seconds to establish the connection. */
     private const CONNECT_TIMEOUT = 5;
 
+    /** How many subscriptions a page of the list holds (the most Stripe gives). */
+    public const PAGE_SIZE = 100;
+
+    /** How many pages of subscriptions are read at most: a customer with more than that is not a workspace, and is refused rather than cut short. */
+    public const MAX_PAGES = 10;
+
     /**
      * Creates the Stripe customer of a workspace.
      *
@@ -101,48 +107,57 @@ final class StripeClient
     }
 
     /**
-     * Reads the subscriptions of a customer, the canceled ones included, most recent first (at most ten: a workspace has one at a time).
-     * Each is the subscription object of the API: `id`, `status`, `cancel_at_period_end`, `created` and `items.data[]` with the `price`
-     * and the `current_period_end` of the item.
+     * Reads the subscriptions of a customer, the canceled ones included, most recent first. A workspace has one at a time, but a customer
+     * that was through many checkouts can have more than a page of them: the pages (a hundred each) are followed until Stripe says there
+     * is no more, so that no live subscription is missed. Each is the subscription object of the API: `id`, `status`,
+     * `cancel_at_period_end`, `created` and `items.data[]` with the `price` and the `current_period_end` of the item.
      *
      * @return list<array<string, mixed>>
      *
-     * @throws StripeException
+     * @throws StripeException Also, and not worth a new try, when there are still more after {@see self::MAX_PAGES} pages: a list that is
+     *                         cut short would silently miss a subscription, so none is given.
      */
     public function subscriptionsOf(string $customerId): array
     {
-        $call = 'GET /v1/subscriptions';
-        $response = $this->send($call, fn (PendingRequest $request): Response => $request
-            ->get(Billing::baseUrl().'/v1/subscriptions', ['customer' => $customerId, 'status' => 'all', 'limit' => 10]));
-        $subscriptions = $response->json('data');
-
-        if (! is_array($subscriptions) || ! array_is_list($subscriptions) || array_filter($subscriptions, fn (mixed $one): bool => ! is_array($one)) !== []) {
-            throw StripeException::invalidResponse($call, 'no list of subscriptions');
-        }
-
-        /** @var list<array<string, mixed>> $subscriptions */
-        return $subscriptions;
+        return $this->listAll('GET /v1/subscriptions', '/v1/subscriptions', ['customer' => $customerId, 'status' => 'all'], 'subscriptions');
     }
 
     /**
-     * Reads a charge (what a customer paid), to tell who and what a refund or a dispute is about.
+     * The ids of the Checkout sessions of a customer that are still open: a page of Stripe that somebody may yet pay on. Read before a new
+     * session is opened, to end those ({@see self::expireCheckoutSession()}) so that two tabs cannot both end in a subscription.
      *
-     * @return array<string, mixed>
+     * @return list<string>
      *
-     * @throws StripeException With a status of 404 when the charge is not there.
+     * @throws StripeException
      */
-    public function retrieveCharge(string $chargeId): array
+    public function openCheckoutSessionsOf(string $customerId): array
     {
-        $call = 'GET /v1/charges/{id}';
-        $response = $this->send($call, fn (PendingRequest $request): Response => $request
-            ->get(Billing::baseUrl().'/v1/charges/'.rawurlencode($chargeId)));
-        $charge = $response->json();
+        $call = 'GET /v1/checkout/sessions';
+        $ids = [];
 
-        if (! is_array($charge) || ! is_string($charge['id'] ?? null)) {
-            throw StripeException::invalidResponse($call, 'no charge');
+        foreach ($this->listAll($call, '/v1/checkout/sessions', ['customer' => $customerId, 'status' => 'open'], 'checkout sessions') as $session) {
+            $id = $session['id'] ?? null;
+
+            if (! is_string($id) || preg_match('/^[A-Za-z0-9_]{1,255}\z/', $id) !== 1) {
+                throw StripeException::invalidResponse($call, 'a checkout session with no usable id');
+            }
+
+            $ids[] = $id;
         }
 
-        return $charge;
+        return $ids;
+    }
+
+    /**
+     * Ends a Checkout session that is open: its page says it has expired, and nobody can pay on it any more. Refused by Stripe (`400`)
+     * when the session is not open any more, which is why the caller reads the subscriptions again if this fails: the payment may have
+     * been made in the meantime.
+     *
+     * @throws StripeException
+     */
+    public function expireCheckoutSession(string $sessionId, ?string $idempotencyKey = null): void
+    {
+        $this->post('POST /v1/checkout/sessions/{id}/expire', '/v1/checkout/sessions/'.rawurlencode($sessionId).'/expire', [], $idempotencyKey);
     }
 
     /**
@@ -165,6 +180,50 @@ final class StripeClient
     public function cancelAtPeriodEnd(string $subscriptionId, ?string $idempotencyKey = null): void
     {
         $this->post('POST /v1/subscriptions/{id}', '/v1/subscriptions/'.rawurlencode($subscriptionId), ['cancel_at_period_end' => true], $idempotencyKey);
+    }
+
+    /**
+     * Reads every object of a list of the API, a page at a time (a hundred), most recent first, following `starting_after` until Stripe
+     * says (`has_more`) there is no more.
+     *
+     * @param  string  $call  What is asked, `METHOD /path`, for the messages.
+     * @param  string  $path  The path of the endpoint.
+     * @param  array<string, string>  $filters  The query of the first page.
+     * @param  string  $what  What the list holds, for the messages.
+     * @return list<array<string, mixed>>
+     *
+     * @throws StripeException When the answer is not a list, or when there are still more after {@see self::MAX_PAGES} pages (not worth
+     *                         a new try): a list that is cut short would silently miss an object, so none is given.
+     */
+    private function listAll(string $call, string $path, array $filters, string $what): array
+    {
+        $objects = [];
+        $after = null;
+
+        for ($page = 1; $page <= self::MAX_PAGES; $page++) {
+            $query = $filters + ['limit' => self::PAGE_SIZE] + ($after === null ? [] : ['starting_after' => $after]);
+            $response = $this->send($call, fn (PendingRequest $request): Response => $request->get(Billing::baseUrl().$path, $query));
+            $data = $response->json('data');
+
+            if (! is_array($data) || ! array_is_list($data) || array_filter($data, fn (mixed $one): bool => ! is_array($one)) !== []) {
+                throw StripeException::invalidResponse($call, "no list of {$what}");
+            }
+
+            /** @var list<array<string, mixed>> $data */
+            $objects = [...$objects, ...$data];
+
+            if ($response->json('has_more') !== true) {
+                return $objects;
+            }
+
+            $after = $data === [] ? null : ($data[array_key_last($data)]['id'] ?? null);
+
+            if (! is_string($after) || preg_match('/^[A-Za-z0-9_]{1,255}\z/', $after) !== 1) {
+                throw StripeException::invalidResponse($call, "a page of {$what} to continue from that has no usable id");
+            }
+        }
+
+        throw StripeException::invalidResponse($call, 'more than '.(self::MAX_PAGES * self::PAGE_SIZE)." {$what}");
     }
 
     /**

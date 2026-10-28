@@ -397,6 +397,15 @@ describe('what goes wrong', function (): void {
     });
 });
 
+describe('the time it is given', function (): void {
+    it('leaves room to list the subscriptions page by page and to end the live ones, each call taking 20 seconds, and stays under what the queue waits before handing the job to another worker', function (): void {
+        $job = new CancelStripeSubscription('cus_a');
+
+        expect($job->timeout)->toBeGreaterThanOrEqual((StripeClient::MAX_PAGES + 2) * StripeClient::TIMEOUT)
+            ->and($job->timeout)->toBeLessThan(config('queue.connections.database.retry_after'));
+    });
+});
+
 describe('on a real queue', function (): void {
     beforeEach(function (): void {
         config(['queue.default' => 'database']);

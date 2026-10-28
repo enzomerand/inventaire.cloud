@@ -52,7 +52,10 @@ use Throwable;
  *   administrators. Stripe sends the event again for any answer that is not a success, for days.
  *
  * Stripe may send an event twice; the synchronisation is unique per account while it waits in the queue, and the mail of an alert is sent
- * once per event (the id of the event is remembered for a day).
+ * once per event (the id of the event is remembered for a day). The one case where an administrator gets the same alert twice is a
+ * failure half-way: the mails are queued one administrator after the other, so when queueing fails at administrator N (the answer is a
+ * `500`), Stripe's new delivery mails administrators 1 to N-1 again as well as the rest. A repeated alert was judged better than one that
+ * never reaches somebody, and the number of administrators of an instance is small.
  *
  * The answers carry a `message` for people; the refusals have a `code` like those of the API, the success none: this is not part of the
  * API clients use.

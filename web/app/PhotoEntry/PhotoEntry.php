@@ -46,6 +46,17 @@ final class PhotoEntry
     }
 
     /**
+     * Whether the plan of the workspace is what keeps it from the photo entry: the instance offers the feature, and the plan, which only
+     * exists where billing is on, does not include it. The one refusal that subscribing mends, so it is told apart from the others
+     * (the switch of the administrator, the API key), which no workspace can mend. The consent of the owner is not looked at: the plan
+     * comes first, since turning the consent on would not be enough.
+     */
+    public function refusedByPlan(Workspace $workspace): bool
+    {
+        return $this->availableOnInstance() && ! WorkspaceLimits::photoEntry($workspace);
+    }
+
+    /**
      * Records the choice of the owner of a workspace: whether its editors may use the photo entry. The caller checked that the person is an owner.
      *
      * Turning it off is always possible, whatever the instance offers (a workspace must be able to withdraw its consent). Turning it on needs

@@ -102,8 +102,8 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 // The subscription of a workspace (Stripe): any member reads the plan and the usage; its owners buy Pro, open the portal of the
                 // customer and ask for the subscription to be read again. A person who pays does it at their browser, never a script.
                 Route::get('/workspaces/{workspace}/billing', [WorkspaceBillingController::class, 'show'])->name('workspaces.billing.show');
-                Route::post('/workspaces/{workspace}/billing/checkout', [WorkspaceBillingController::class, 'checkout'])->name('workspaces.billing.checkout');
-                Route::post('/workspaces/{workspace}/billing/portal', [WorkspaceBillingController::class, 'portal'])->name('workspaces.billing.portal');
+                Route::post('/workspaces/{workspace}/billing/checkout', [WorkspaceBillingController::class, 'checkout'])->middleware('throttle:billing-checkout')->name('workspaces.billing.checkout');
+                Route::post('/workspaces/{workspace}/billing/portal', [WorkspaceBillingController::class, 'portal'])->middleware('throttle:billing-portal')->name('workspaces.billing.portal');
                 Route::post('/workspaces/{workspace}/billing/refresh', [WorkspaceBillingController::class, 'refresh'])->middleware('throttle:billing-refresh')->name('workspaces.billing.refresh');
 
                 // The photo entry: the photos of an object are sent to Claude (Anthropic) and the proposals read back until they are ready. The

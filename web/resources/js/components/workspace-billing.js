@@ -6,9 +6,10 @@
  * ask the API for the address of a page Stripe hosts and send the browser there; nothing about the payment is decided here. The endpoints
  * come from the markup (`data-*` on the root), because the CSP build of Alpine does not allow Blade to inject values into expressions.
  *
- * Stripe brings the person back to this page with `?checkout=done`. That address proves nothing, so the page asks the API to read the
- * subscription (the plan changes only when it is read from Stripe), then reads the overview twice more, a few seconds apart, until the
- * plan is Pro; the parameter is taken off the address whatever came out of it, so that a reload does not start it again.
+ * Stripe brings the person back to this page with `?checkout=done`. That address proves nothing, so an owner's page asks the API to read
+ * the subscription (the plan changes only when it is read from Stripe), then reads the overview twice more, a few seconds apart, until the
+ * plan is Pro. Nothing is waited for when the instance sells no plan, when the person is not an owner, or when the overview could not be
+ * read; the parameter is taken off the address whatever came out of it, so that a reload does not start it again.
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; a refusal the API explains with a code
  * is told in words of our own, because the helper trusts the message of a response only for a validation error.
@@ -37,6 +38,9 @@ import { redirectTo } from '../lib/page.js';
 /** The statuses of a subscription the page has a word for. */
 const STATUSES = ['active', 'trialing', 'past_due'];
 
+/** The statuses of a subscription that is in play without giving Pro: it is settled in the portal, not bought again. */
+const UNSETTLED_STATUSES = ['incomplete', 'unpaid', 'paused'];
+
 /** How many times the overview is read after the synchronisation when the plan is not Pro yet. */
 const POLL_ATTEMPTS = 2;
 
@@ -44,6 +48,7 @@ const POLL_ATTEMPTS = 2;
 const MESSAGE_KEYS = {
     billing_disabled: 'billing.error.disabled',
     already_subscribed: 'billing.error.already_subscribed',
+    subscription_pending: 'billing.error.subscription_pending',
     no_billing_account: 'billing.error.no_account',
     interval_not_offered: 'billing.error.interval',
 };
@@ -170,9 +175,30 @@ export default function workspaceBilling() {
             return this.billing?.can_manage === true;
         },
 
-        /** Whether the form that buys Pro is offered: an owner, a workspace that is not Pro, and no payment being confirmed. */
+        /**
+         * Whether a subscription is in play without giving Pro (incomplete, unpaid, paused): the workspace is not sold a second one, the
+         * first is settled in the portal.
+         */
+        get unsettled() {
+            return !this.isPro && UNSETTLED_STATUSES.includes(this.billing?.status ?? '');
+        },
+
+        /**
+         * Whether the form that buys Pro is offered: an owner, a workspace that is not Pro, no subscription waiting to be settled, and no
+         * payment being confirmed or still waited for (the one the person just made would be paid twice).
+         */
         get canUpgrade() {
-            return this.canManage && !this.isPro && !this.confirming;
+            return this.canManage && !this.isPro && !this.confirming && !this.stillPending && !this.unsettled;
+        },
+
+        /** Whether the button that buys Pro is on the page: not for a workspace that is on Pro or that has a subscription to settle. */
+        get upgradeShown() {
+            return !this.isPro && !this.unsettled;
+        },
+
+        /** Whether the customer portal is offered: the workspace is on Pro, or has a subscription to settle there. */
+        get canOpenPortal() {
+            return this.isPro || this.unsettled;
         },
 
         /** Whether a yearly Price is offered. */
@@ -250,7 +276,11 @@ export default function workspaceBilling() {
                 return t('billing.confirming');
             }
 
-            return this.stillPending ? t('billing.still_pending') : '';
+            if (this.stillPending) {
+                return t('billing.still_pending');
+            }
+
+            return this.canManage && this.unsettled ? t('billing.unsettled') : '';
         },
 
         /** Whether there is a message to show. */
@@ -313,10 +343,18 @@ export default function workspaceBilling() {
          */
         async init() {
             this.rootElement = this.$root;
-            await this.load();
 
-            if (this.billing !== null && this.returnedFromCheckout()) {
-                await this.confirmPayment();
+            try {
+                await this.load();
+
+                // Only an owner of a workspace on an instance that sells plans has a payment to wait for.
+                if (this.offered && this.canManage && this.returnedFromCheckout()) {
+                    await this.confirmPayment();
+                }
+            } finally {
+                // Whatever came of it (an overview that could not be read, a person who is not an owner, an instance that sells no plan,
+                // a failure): a reload must not start it again.
+                this.dropCheckoutParameter();
             }
         },
 
@@ -429,8 +467,6 @@ export default function workspaceBilling() {
             } else {
                 this.stillPending = true;
             }
-
-            this.dropCheckoutParameter();
         },
 
         /**
@@ -463,6 +499,10 @@ export default function workspaceBilling() {
          */
         dropCheckoutParameter() {
             const address = new URL(window.location.href);
+
+            if (!address.searchParams.has('checkout')) {
+                return;
+            }
 
             address.searchParams.delete('checkout');
             window.history.replaceState(window.history.state, '', address.pathname + address.search + address.hash);

@@ -23,6 +23,9 @@ export const MAX_POLL_FAILURES = 3;
 /** The code the API gives to a request when the photo entry is off for the workspace (or the instance). */
 const DISABLED_CODE = 'photo_entry_disabled';
 
+/** The code the API gives to a request when the plan of the workspace does not include the photo entry (subscribing mends it). */
+const NOT_IN_PLAN_CODE = 'photo_entry_not_in_plan';
+
 /** The code the API gives to a request when the inventory has no field the photos could fill. */
 const NO_FIELDS_CODE = 'no_fields_to_fill';
 
@@ -180,6 +183,10 @@ export function failureOf(analysis) {
 export function requestFailure(error) {
     if (error.status === 409 && error.code === DISABLED_CODE) {
         return { text: t('photoEntry.error.disabled'), retry: false, resume: false };
+    }
+
+    if (error.status === 409 && error.code === NOT_IN_PLAN_CODE) {
+        return { text: t('photoEntry.error.not_in_plan'), retry: false, resume: false };
     }
 
     if (error.status === 409 && error.code === NO_FIELDS_CODE) {
