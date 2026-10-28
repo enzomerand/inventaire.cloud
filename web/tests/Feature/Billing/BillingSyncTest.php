@@ -499,6 +499,47 @@ describe('when Stripe does not give a subscription', function (): void {
         expect(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active');
     });
 
+    it('says the subscription is cleared only when it was: a read that began later was written first', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, null, 'month', ['status' => 'canceled', 'stripe_subscription_id' => 'sub_over']);
+        $stripe->loseCustomer($account->stripe_customer_id);
+        $later = now()->addMinutes(5)->startOfSecond();
+        $account->forceFill(['synced_at' => $later])->save();
+
+        $returned = billingSync($account);
+
+        expect($returned->status)->toBe('canceled')
+            ->and($returned->stripe_subscription_id)->toBe('sub_over')
+            ->and(BillingAccount::query()->findOrFail($account->id)->stripe_subscription_id)->toBe('sub_over');
+        Log::shouldNotHaveReceived('warning');
+    });
+
+    it('writes nothing and tells nobody when the customer was replaced while Stripe was being asked: what it said is about a customer that is gone', function (bool $lost): void {
+        Log::spy();
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+
+        if ($lost) {
+            $stripe->loseCustomer($account->stripe_customer_id);
+        }
+
+        // Another request replaced the customer (see BillingCustomers); the new one holds a subscription in play, which a read of the old one must not touch.
+        $replacement = ['stripe_customer_id' => 'cus_replacement', 'status' => $lost ? 'active' : null, 'stripe_subscription_id' => $lost ? 'sub_replacement' : null, 'synced_at' => null];
+        $stripe->onCall('GET /v1/subscriptions', fn () => BillingAccount::query()->whereKey($account->id)->update($replacement));
+
+        $returned = billingSync($account);
+
+        $stored = BillingAccount::query()->findOrFail($account->id);
+        expect($returned->stripe_customer_id)->toBe('cus_replacement')
+            ->and($stored->only(array_keys($replacement)))->toBe($replacement);
+        Log::shouldNotHaveReceived('warning');
+        Log::shouldNotHaveReceived('error');
+        Mail::assertNothingQueued();
+    })->with(['the subscriptions are read' => false, 'the customer is not known' => true]);
+
     it('does not take a 404 that is not the answer of Stripe for a deleted customer: nothing turns the workspace Free', function (): void {
         $stripe = billingOn();
         $account = billingAccountAt($stripe, 'active');

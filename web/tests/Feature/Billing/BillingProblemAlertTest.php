@@ -68,6 +68,13 @@ describe('the mail of a problem', function (): void {
         expect(html_entity_decode($mail->locale('fr')->render(), ENT_QUOTES))->toContain('vérifiez STRIPE_SECRET avant que quiconque paie à nouveau.');
     });
 
+    it('tells of a customer Stripe does not know that it names the first one found and that others may follow', function (): void {
+        $mail = BillingAlertMail::problem('customer_lost', 'cus_123', '01jworkspace0000000000000x', true);
+
+        $mail->assertSeeInText('This alert is sent once a day for the whole instance and names the first customer found: others may follow, the log lists each of them.');
+        expect(html_entity_decode($mail->locale('fr')->render(), ENT_QUOTES))->toContain("d'autres peuvent suivre, le journal les liste tous.");
+    });
+
     it('leaves out the workspace when it is not known, and says it comes from the test mode of Stripe', function (): void {
         $mail = BillingAlertMail::problem('cancellation_failed', 'cus_123', null, false);
 
@@ -132,20 +139,49 @@ describe('telling the administrators', function (): void {
         Mail::assertQueued(BillingAlertMail::class, 4);
     });
 
+    it('tells a customer Stripe does not know once a day for the whole instance, whichever the customer: the keys are wrong for all of them', function (): void {
+        User::factory()->admin()->create();
+        $alerts = app(BillingAlerts::class);
+
+        $alerts->tellProblem('customer_lost', 'cus_1', '01jws1');
+        $alerts->tellProblem('customer_lost', 'cus_2', '01jws2');
+        $alerts->tellProblem('customer_lost', 'cus_1', '01jws1');
+
+        // The mail names the first customer found.
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === 'cus_1' && $mail->workspaceUlid === '01jws1');
+
+        $this->travel(25)->hours();
+        $alerts->tellProblem('customer_lost', 'cus_2', '01jws2');
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === 'cus_2');
+    });
+
+    it('does not make the other problems instance-wide: each customer has its own day', function (string $kind): void {
+        User::factory()->admin()->create();
+        $alerts = app(BillingAlerts::class);
+
+        $alerts->tellProblem($kind, 'cus_1', null);
+        $alerts->tellProblem($kind, 'cus_2', null);
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+    })->with(['checkout_orphaned', 'checkout_unmarked', 'cancellation_failed', 'double_subscription']);
+
     it('marks a problem as told only once its mails are queued', function (): void {
         User::factory()->admin()->create();
         Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('The queue is down.'));
 
         expect(fn () => app(BillingAlerts::class)->tellProblem('customer_lost', 'cus_1', null))->toThrow(RuntimeException::class);
-        expect(Cache::has('billing-alert:customer_lost:cus_1'))->toBeFalse();
+        expect(Cache::has('billing-alert:customer_lost'))->toBeFalse();
     });
 
     it('takes the mode of Stripe from the key of the instance unless told', function (): void {
         User::factory()->admin()->create();
         billingOn();
 
-        app(BillingAlerts::class)->tellProblem('customer_lost', 'cus_1', null);
-        app(BillingAlerts::class)->tellProblem('customer_lost', 'cus_2', null, true);
+        app(BillingAlerts::class)->tellProblem('cancellation_failed', 'cus_1', null);
+        app(BillingAlerts::class)->tellProblem('cancellation_failed', 'cus_2', null, true);
 
         Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === 'cus_1' && ! $mail->livemode);
         Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === 'cus_2' && $mail->livemode);
@@ -167,7 +203,7 @@ describe('telling the administrators', function (): void {
         app(BillingAlerts::class)->reportProblem('customer_lost', 'cus_1', '01jws');
 
         Mail::assertNothingQueued();
-        expect(Cache::has('billing-alert:customer_lost:cus_1'))->toBeFalse();
+        expect(Cache::has('billing-alert:customer_lost'))->toBeFalse();
         Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'no administrator')
             && $context === ['kind' => 'customer_lost', 'customer' => 'cus_1', 'workspace' => '01jws'])->once();
     });
@@ -192,7 +228,7 @@ describe('telling the administrators', function (): void {
         User::factory()->admin()->create();
         $alerts = app(BillingAlerts::class);
         // Another request claimed it between this one's look and its mails: with a read first and a write after, both would tell it.
-        Cache::shouldReceive('add')->once()->with('billing-alert:customer_lost:cus_1', true, Mockery::any())->andReturn(false);
+        Cache::shouldReceive('add')->once()->with('billing-alert:customer_lost', true, Mockery::any())->andReturn(false);
         Cache::shouldReceive('has')->never();
 
         $alerts->tellProblem('customer_lost', 'cus_1', null);
@@ -206,7 +242,7 @@ describe('telling the administrators', function (): void {
         $alerts = app(BillingAlerts::class);
 
         expect(fn () => $alerts->tellProblem('customer_lost', 'cus_1', null))->toThrow(RuntimeException::class);
-        expect(Cache::has('billing-alert:customer_lost:cus_1'))->toBeFalse();
+        expect(Cache::has('billing-alert:customer_lost'))->toBeFalse();
 
         app()->forgetInstance('mail.manager');
         Mail::clearResolvedInstance('mail.manager');

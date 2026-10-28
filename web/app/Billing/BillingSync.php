@@ -75,15 +75,18 @@ final class BillingSync
                 throw $exception;
             }
 
-            $cleared = $this->clearLost($account, $readAt);
+            [$cleared, $wrote] = $this->clearLost($account, $readAt);
 
             if ($cleared === null) {
-                $this->refuseToForget($account);
+                $this->reportLostCustomer($account);
 
                 throw $exception;
             }
 
-            Log::warning('The Stripe customer of a workspace is gone: its subscription is cleared.', ['billing_account' => $account->getKey()]);
+            // Not when nothing was written: a read made later was written first, or the customer was replaced meanwhile.
+            if ($wrote) {
+                Log::warning('The Stripe customer of a workspace is gone: its subscription is cleared.', ['billing_account' => $account->getKey()]);
+            }
 
             return $cleared;
         }
@@ -107,9 +110,10 @@ final class BillingSync
 
     /**
      * Writes down that a customer Stripe does not know belongs to a workspace that has a subscription in play, which is left as it is: the
-     * log (with the customer and the workspace) and the administrators, who are told once a day for the customer.
+     * log (with the customer and the workspace) and the administrators, who are told once a day for the instance. Also the way the customer
+     * portal tells it when it finds such a customer.
      */
-    private function refuseToForget(BillingAccount $account): void
+    public function reportLostCustomer(BillingAccount $account): void
     {
         $workspace = Workspace::query()->whereKey($account->workspace_id)->value('ulid');
 
@@ -212,7 +216,7 @@ final class BillingSync
     private function write(BillingAccount $account, array $columns, CarbonImmutable $readAt): BillingAccount
     {
         // Never null: the stored subscription is only spared when the caller asks for it.
-        return $this->store($account, $columns, $readAt, false) ?? $account;
+        return $this->store($account, $columns, $readAt, false)[0] ?? $account;
     }
 
     /**
@@ -220,50 +224,59 @@ final class BillingSync
      * says the workspace has a subscription in play: the row is read again under the lock, a synchronisation that wrote one meanwhile (or a
      * stale copy of the account in the caller's hands) must not be believed.
      *
-     * @return BillingAccount|null The account as stored; null when it has a subscription in play (nothing was written).
+     * @return array{0: BillingAccount|null, 1: bool} The account as stored (null when it has a subscription in play: nothing was written)
+     *                                                and whether the cleared state was written.
      */
-    private function clearLost(BillingAccount $account, CarbonImmutable $readAt): ?BillingAccount
+    private function clearLost(BillingAccount $account, CarbonImmutable $readAt): array
     {
         return $this->store($account, self::columns(null), $readAt, true);
     }
 
     /**
      * Writes the columns of the account under the lock of its workspace, in a transaction run again when the database picks it as the
-     * loser of a deadlock.
+     * loser of a deadlock. Nothing is written for an account whose customer was replaced meanwhile ({@see BillingCustomers}): what was
+     * read is the subscription of the customer that is gone, and the stored row is returned as it is.
      *
      * @param  array<string, mixed>  $columns
      * @param  CarbonImmutable  $readAt  When the read they come from began.
      * @param  bool  $sparePaid  Write nothing when the stored subscription is in play ({@see SubscriptionStatus::CURRENT}).
-     * @return BillingAccount|null The account as stored (or as it was when nothing was written); null only when `$sparePaid` and the stored subscription is in play.
+     * @return array{0: BillingAccount|null, 1: bool} The account as stored (or as it was when nothing was written; null only when `$sparePaid`
+     *                                                and the stored subscription is in play), and whether the columns were written.
      */
-    private function store(BillingAccount $account, array $columns, CarbonImmutable $readAt, bool $sparePaid): ?BillingAccount
+    private function store(BillingAccount $account, array $columns, CarbonImmutable $readAt, bool $sparePaid): array
     {
         try {
-            return DeadlockRetries::run(fn (): ?BillingAccount => $this->db->transaction(function () use ($account, $columns, $readAt, $sparePaid): ?BillingAccount {
+            return DeadlockRetries::run(fn (): array => $this->db->transaction(function () use ($account, $columns, $readAt, $sparePaid): array {
                 // The workspace first, as everything that writes to what hangs from it: the account of a workspace that is being deleted is
                 // not worth writing, and what it was is returned.
                 if ($this->locks->workspaces([$account->workspace_id])->isEmpty()) {
-                    return $account;
+                    return [$account, false];
                 }
 
                 $stored = BillingAccount::query()->whereKey($account->getKey())->first();
 
                 if ($stored === null) {
-                    return $account;
+                    return [$account, false];
+                }
+
+                // The customer was replaced since the read (see BillingCustomers): what Stripe said is about one that is gone. It must neither
+                // be written nor told to the administrators.
+                if ($stored->stripe_customer_id !== $account->stripe_customer_id) {
+                    return [$stored, false];
                 }
 
                 if ($sparePaid && in_array($stored->status, SubscriptionStatus::CURRENT, true)) {
-                    return null;
+                    return [null, false];
                 }
 
                 // A read that began after this one has been written already: it saw what happened since.
                 if ($stored->synced_at !== null && $stored->synced_at->greaterThan($readAt)) {
-                    return $stored;
+                    return [$stored, false];
                 }
 
                 $stored->forceFill($columns + ['synced_at' => $readAt])->save();
 
-                return $stored;
+                return [$stored, true];
             }));
         } finally {
             // Whatever the plans were read as before, in this process, is out of date now (or was read from a row that did not commit).

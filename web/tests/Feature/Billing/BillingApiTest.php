@@ -544,7 +544,7 @@ describe('Checkout', function (): void {
             ->and($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(0);
     });
 
-    it('refuses the owner whose customer was stored second: another owner won the race, and the customer is theirs', function (): void {
+    it('asks the owner whose customer was stored second to try again: another owner won the race, and the customer is theirs', function (): void {
         $team = billingApiTeam();
         $second = inventoryPerson('Second owner');
         $team['workspace']->members()->attach($second->id, ['role' => 'owner']);
@@ -555,7 +555,7 @@ describe('Checkout', function (): void {
 
         inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
-            ->assertJsonPath('code', 'previous_owner_subscription');
+            ->assertJsonPath('code', 'checkout_in_progress');
 
         expect(BillingAccount::query()->sole()->only(['stripe_customer_id', 'payer_id']))->toBe(['stripe_customer_id' => 'cus_stored_first', 'payer_id' => $second->id])
             ->and($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(0);
@@ -794,6 +794,47 @@ describe('a customer that Stripe does not know any more', function (): void {
         expect($team['account']->fresh()->status)->toBe('active')
             ->and(WorkspacePlan::for($team['workspace']))->toBe(Plan::Pro);
     })->with(['refresh', 'portal']);
+
+    it('tells the administrators when the portal finds the customer of a subscription in play gone at Stripe: the error in the log, one mail, a 503, nothing changed', function (): void {
+        Log::spy();
+        Mail::fake();
+        $administrator = User::factory()->admin()->create(['email' => 'admin@example.test', 'locale' => 'en']);
+        $team = billingApiTeamWithLostCustomer('active');
+        $team['stripe']->loseCustomer('cus_lost');
+
+        foreach ([1, 2] as $ignored) {
+            inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'portal'))
+                ->assertStatus(503)
+                ->assertJsonPath('code', 'billing_unavailable');
+        }
+
+        $account = $team['account']->fresh();
+        expect($account->stripe_customer_id)->toBe('cus_lost')
+            ->and($account->status)->toBe('active')
+            ->and($team['stripe']->count('POST /v1/billing_portal/sessions'))->toBe(0)
+            ->and($team['stripe']->count('POST /v1/customers'))->toBe(0);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'wrong-mode API key')
+            && ($context['customer'] ?? null) === 'cus_lost'
+            && ($context['workspace'] ?? null) === $team['workspace']->ulid)->twice();
+        // Once a day for the instance, however often it is asked.
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->hasTo($administrator->email) && $mail->eventType === 'customer_lost' && $mail->objectId === 'cus_lost');
+    });
+
+    it('tells nobody when the portal finds the customer gone and the row has no subscription in play: the answer is the same 503', function (): void {
+        Log::spy();
+        Mail::fake();
+        User::factory()->admin()->create();
+        $team = billingApiTeamWithLostCustomer('canceled');
+        $team['stripe']->loseCustomer('cus_lost');
+
+        inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'portal'))
+            ->assertStatus(503)
+            ->assertJsonPath('code', 'billing_unavailable');
+
+        Log::shouldNotHaveReceived('error');
+        Mail::assertNothingQueued();
+    });
 
     it('is told the workspace is gone when it was deleted while the new customer was made', function (): void {
         $team = billingApiTeamWithLostCustomer();

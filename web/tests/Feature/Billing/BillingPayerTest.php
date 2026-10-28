@@ -233,7 +233,8 @@ describe('Checkout by an owner who is not the payer', function (): void {
             ->and($world['account']->fresh()->payer_id)->toBe($world['previous']->id);
     });
 
-    it('is refused when another owner replaced the customer first: the customer that was stored is theirs', function (): void {
+    it('is asked to try again when another owner replaced the customer first: the customer that was stored is theirs, the one made for nothing is in the log', function (): void {
+        Log::spy();
         $world = billingPayerHandedOver('canceled', false);
         $second = inventoryPerson('Second owner');
         $world['workspace']->members()->attach($second->id, ['role' => 'owner']);
@@ -245,10 +246,30 @@ describe('Checkout by an owner who is not the payer', function (): void {
 
         inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
-            ->assertJsonPath('code', 'previous_owner_subscription');
+            ->assertJsonPath('code', 'checkout_in_progress');
 
         expect($world['account']->fresh()->only(['stripe_customer_id', 'payer_id']))->toBe(['stripe_customer_id' => 'cus_swapped_first', 'payer_id' => $second->id])
             ->and($world['stripe']->count('POST /v1/checkout/sessions'))->toBe(0);
+        $orphan = array_values(array_diff(array_keys($world['stripe']->customers), ['cus_previous', 'cus_swapped_first']));
+        expect($orphan)->toHaveCount(1);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'is not kept')
+            && ($context['customer'] ?? null) === $orphan[0]
+            && ($context['kept'] ?? null) === 'cus_swapped_first'
+            && ($context['workspace'] ?? null) === $world['workspace']->ulid)->once();
+    });
+
+    it('is refused as before when the customer another owner replaced first already has a subscription in play', function (): void {
+        $world = billingPayerHandedOver('canceled', false);
+        $second = inventoryPerson('Second owner');
+        $world['workspace']->members()->attach($second->id, ['role' => 'owner']);
+        $world['stripe']->onCall('POST /v1/customers', function () use ($world, $second): void {
+            $world['stripe']->addCustomer('cus_swapped_first');
+            $world['account']->forceFill(['stripe_customer_id' => 'cus_swapped_first', 'payer_id' => $second->id, 'status' => 'active', 'stripe_subscription_id' => 'sub_second'])->save();
+        });
+
+        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'previous_owner_subscription');
     });
 
     it('is told the workspace is gone when it was deleted while the new customer was made', function (): void {
@@ -331,7 +352,8 @@ describe('who is the payer', function (): void {
         expect(BillingAccount::query()->sole()->payer_id)->toBe($team['owner']->id);
     });
 
-    it('is the owner whose request stored the customer first, when two owners start a checkout together: the other is refused', function (): void {
+    it('is the owner whose request stored the customer first, when two owners start a checkout together: the other is asked to try again', function (): void {
+        Log::spy();
         $stripe = billingOn();
         $team = inventoryTeam();
         $second = inventoryPerson('Second owner');
@@ -342,13 +364,20 @@ describe('who is the payer', function (): void {
             BillingAccount::factory()->paidBy($second)->create(['workspace_id' => $team['workspace']->id, 'stripe_customer_id' => 'cus_stored_first']);
         });
 
-        // The customer that was stored is the second owner's: the first is refused, not handed it.
+        // The customer that was stored is the second owner's: the first is not handed it, and may try again.
         inventoryCall($this, $team['owner'], 'POST', billingPayerUri($team['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
-            ->assertJsonPath('code', 'previous_owner_subscription');
+            ->assertJsonPath('code', 'checkout_in_progress');
 
         expect(BillingAccount::query()->sole()->payer_id)->toBe($second->id)
             ->and($stripe->count('POST /v1/checkout/sessions'))->toBe(0);
+        // The customer this request made at Stripe, which nothing keeps, is written in the log.
+        $orphan = array_values(array_diff(array_keys($stripe->customers), ['cus_stored_first']));
+        expect($orphan)->toHaveCount(1);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'is not kept')
+            && ($context['customer'] ?? null) === $orphan[0]
+            && ($context['kept'] ?? null) === 'cus_stored_first'
+            && ($context['workspace'] ?? null) === $team['workspace']->ulid)->once();
     });
 
     it('is known by the service, which compares the user and not their position', function (): void {

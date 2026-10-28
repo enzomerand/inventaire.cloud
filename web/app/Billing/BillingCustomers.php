@@ -21,8 +21,10 @@ use Illuminate\Support\Facades\Log;
  * first, and stored afterwards under the locks of the owner who pays (the row points to their account) and of the workspace, in that
  * order ({@see Locks}). A request that finds another one stored meanwhile keeps the stored one when it is its own owner's (the same person
  * clicking twice: the idempotency key of the creation is the same for two identical requests, so they get the same customer from Stripe
- * and nothing is left behind); when the stored one is another owner's (two owners clicking at once) the request is refused like an owner
- * who finds the customer of the payer before them ({@see PreviousOwnerSubscriptionException}).
+ * and nothing is left behind); when the stored one is another owner's (two owners clicking at once) the request is asked to try again
+ * ({@see CheckoutInProgressException}; the customer it made is written in the log, to be deleted at Stripe), unless a subscription is in
+ * play for the stored one, which is refused like an owner who finds the customer of the payer before them
+ * ({@see PreviousOwnerSubscriptionException}).
  *
  * **The customer follows the payer, not the workspace.** It holds the email, the name, the invoices and the cards of the person who pays.
  * When the workspace changes hands the new owner is not the payer, and is never given that customer (their receipts would go to the old
@@ -73,8 +75,8 @@ final class BillingCustomers
      *
      * @throws StripeException When Stripe cannot be reached or refuses (also when the customer is not at Stripe and cannot be replaced,
      *                         see {@see self::replaceLost()}).
-     * @throws PreviousOwnerSubscriptionException When the owner is not the payer and the subscription of the payer is still in play, or when
-     *                                            another owner stored (or replaced) the customer first.
+     * @throws PreviousOwnerSubscriptionException When the owner is not the payer and the subscription of the payer is still in play.
+     * @throws CheckoutInProgressException When another owner stored (or replaced) the customer first.
      * @throws ModelNotFoundException When the workspace, or the owner, was deleted meanwhile.
      */
     public function ensure(Workspace $workspace, User $owner, string $locale): BillingAccount
@@ -124,6 +126,7 @@ final class BillingCustomers
      * subscription stay at Stripe, untouched.
      *
      * @throws PreviousOwnerSubscriptionException When a subscription of the old payer is in play (also when it turns out so under the lock).
+     * @throws CheckoutInProgressException When another owner replaced the customer first.
      * @throws StripeException
      * @throws ModelNotFoundException When the workspace is gone.
      */
@@ -199,7 +202,8 @@ final class BillingCustomers
      * @return BillingAccount|null The account as stored; null when it has a subscription in play under the lock (nothing was changed).
      *
      * @throws StripeException
-     * @throws PreviousOwnerSubscriptionException When the customer was replaced meanwhile by a request of another owner.
+     * @throws PreviousOwnerSubscriptionException When the customer was replaced meanwhile by a request of another owner, whose subscription is in play.
+     * @throws CheckoutInProgressException When the customer was replaced meanwhile by a request of another owner.
      * @throws ModelNotFoundException When the workspace, or the owner, is gone.
      */
     private function swap(Workspace $workspace, BillingAccount $account, User $owner, string $locale, string $reason): ?BillingAccount
@@ -223,7 +227,7 @@ final class BillingCustomers
 
             if ($stored->stripe_customer_id !== $gone) {
                 // Another request replaced the customer first: it is kept, but it is the customer of whoever won, who may not be this owner.
-                return $this->payerOrRefuse($stored, $owner);
+                return $this->keepWinner($workspace, $stored, $owner, $customerId);
             }
 
             // A subscription that was written meanwhile (a synchronisation, a webhook) is not forgotten.
@@ -256,10 +260,11 @@ final class BillingCustomers
 
     /**
      * Stores the customer that was just created, under the lock of the workspace, with the owner who creates it as the payer; keeps the
-     * one another request stored first, unless that request was another owner's: the customer is then theirs, and this owner is refused
-     * ({@see PreviousOwnerSubscriptionException}, `409`) rather than handed the customer of somebody else.
+     * one another request stored first, unless that request was another owner's: the customer is then theirs, and this owner is asked
+     * to try again ({@see CheckoutInProgressException}, `409`) rather than handed the customer of somebody else.
      *
-     * @throws PreviousOwnerSubscriptionException When another owner stored a customer first.
+     * @throws PreviousOwnerSubscriptionException When another owner stored a customer first, and a subscription of it is in play.
+     * @throws CheckoutInProgressException When another owner stored a customer first.
      * @throws ModelNotFoundException When the workspace, or the owner, is gone.
      */
     private function store(Workspace $workspace, User $owner, string $customerId): BillingAccount
@@ -276,7 +281,7 @@ final class BillingCustomers
             $stored = $this->find($workspace);
 
             if ($stored !== null) {
-                return $this->payerOrRefuse($stored, $owner);
+                return $this->keepWinner($workspace, $stored, $owner, $customerId);
             }
 
             return BillingAccount::query()->create([
@@ -289,16 +294,27 @@ final class BillingCustomers
 
     /**
      * The account another request stored (or replaced) first, when the owner is the payer of it; otherwise it is the customer of another
-     * owner, and this one is refused.
+     * owner, and this one is not handed it: the customer this request made is of no use to anybody, so it is written in the log (to be
+     * deleted in the dashboard of Stripe, which nothing here does), and the request is asked to try again, or refused when a subscription of
+     * the other owner is in play.
+     *
+     * @param  string  $customerId  The customer this request created, which is not kept when the owner is not the payer of the stored one.
      *
      * @throws PreviousOwnerSubscriptionException
+     * @throws CheckoutInProgressException
      */
-    private function payerOrRefuse(BillingAccount $stored, User $owner): BillingAccount
+    private function keepWinner(Workspace $workspace, BillingAccount $stored, User $owner, string $customerId): BillingAccount
     {
-        if (! $this->isPayer($stored, $owner)) {
-            throw new PreviousOwnerSubscriptionException($stored);
+        if ($this->isPayer($stored, $owner)) {
+            return $stored;
         }
 
-        return $stored;
+        Log::warning('A Stripe customer was created for a workspace and is not kept: another owner stored theirs first (delete it in the dashboard of Stripe).', [
+            'workspace' => $workspace->ulid,
+            'customer' => $customerId,
+            'kept' => $stored->stripe_customer_id,
+        ]);
+
+        throw in_array($stored->status, SubscriptionStatus::CURRENT, true) ? new PreviousOwnerSubscriptionException($stored) : new CheckoutInProgressException;
     }
 }

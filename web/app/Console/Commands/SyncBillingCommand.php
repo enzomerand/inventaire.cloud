@@ -28,9 +28,11 @@ use Throwable;
  * written in the log and the others go on. An account that fails is marked as looked at (its `updated_at`), so that one that fails every
  * time, for a reason that will not go away, does not take a place at the head of every run and starve the others.
  *
- * Three things stop a run: a configuration that is broken, which makes it fail (the key is refused by Stripe); {@see self::OUTAGE_AFTER}
+ * Four things stop a run: a configuration that is broken, which makes it fail (the key is refused by Stripe); {@see self::OUTAGE_AFTER}
  * failures in a row of the kind worth trying again later (Stripe cannot be reached, or is failing), since the next account will not do any
- * better; and the time budget ({@see self::TIME_BUDGET} seconds, not counting the call in progress), which keeps a run from still being
+ * better; {@see self::LOST_AFTER} answers in a row that Stripe does not know the customer of an account that has a subscription in play
+ * (`resource_missing`: the key is far more likely to be for another mode or account than every customer to be gone, and the administrators
+ * were told by the first); and the time budget ({@see self::TIME_BUDGET} seconds, not counting the call in progress), which keeps a run from still being
  * there when the next one is due. What is left is done by the next run.
  *
  * Scheduled hourly (`routes/console.php`); safe to run at any time and as often as wanted. An instance that does not sell plans has
@@ -49,6 +51,9 @@ final class SyncBillingCommand extends Command
 
     /** The failures worth trying again, in a row, after which the run gives up: Stripe is down, not the account. */
     public const OUTAGE_AFTER = 3;
+
+    /** The answers "Stripe does not know this customer", in a row, after which the run gives up: the key is for another mode or account, not every customer deleted. */
+    public const LOST_AFTER = 3;
 
     /** The seconds after which no new account is started (a call in progress may take 20 more). */
     public const TIME_BUDGET = 45;
@@ -71,6 +76,7 @@ final class SyncBillingCommand extends Command
         $done = 0;
         $failed = 0;
         $inARow = 0;
+        $lostInARow = 0;
         $started = now();
         $stopped = null;
 
@@ -85,6 +91,7 @@ final class SyncBillingCommand extends Command
                 $sync->sync($account);
                 $done++;
                 $inARow = 0;
+                $lostInARow = 0;
             } catch (StripeException $exception) {
                 if ($exception->unauthorized() || $exception->code() === 'not_configured') {
                     // The same answer would come for every account: the key is wrong, there is no point in asking again.
@@ -103,15 +110,23 @@ final class SyncBillingCommand extends Command
                 ]);
 
                 $inARow = $exception->retryable() ? $inARow + 1 : 0;
+                $lostInARow = $exception->code() === 'resource_missing' ? $lostInARow + 1 : 0;
 
                 if ($inARow >= self::OUTAGE_AFTER) {
                     $stopped = 'Stripe fails to answer';
 
                     break;
                 }
+
+                if ($lostInARow >= self::LOST_AFTER) {
+                    $stopped = 'Stripe does not know the customers of several accounts in a row (wrong STRIPE_SECRET?)';
+
+                    break;
+                }
             } catch (Throwable $exception) {
                 $failed++;
                 $inARow = 0;
+                $lostInARow = 0;
                 $this->markAttempted($account);
                 Log::error('The subscription of a workspace could not be synchronised.', ['billing_account' => $account->getKey(), 'exception' => $exception]);
             }

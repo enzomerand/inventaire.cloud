@@ -237,8 +237,11 @@ describe('the parameters of a Checkout session', function (): void {
             ->and($marker)->toMatch('/^[0-9a-f]{16}\z/')
             ->and(Billing::instanceMarker())->toBe($marker);
 
-        // The trailing slash does not change it; another address does.
+        // The trailing slash does not change it, nor the case (the host is not case-sensitive); another address does.
         config(['app.url' => 'https://inventaire.example']);
+        expect(Billing::instanceMarker())->toBe($marker);
+
+        config(['app.url' => 'https://Inventaire.Example/']);
         expect(Billing::instanceMarker())->toBe($marker);
 
         config(['app.url' => 'https://other.example']);

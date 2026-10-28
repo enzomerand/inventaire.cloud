@@ -8,6 +8,7 @@ use App\Billing\Billing;
 use App\Billing\BillingCustomers;
 use App\Billing\BillingOverview;
 use App\Billing\BillingSync;
+use App\Billing\CheckoutInProgressException;
 use App\Billing\CheckoutParameters;
 use App\Billing\PreviousOwnerSubscriptionException;
 use App\Billing\StripeClient;
@@ -39,7 +40,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Every answer that is not a success carries a `code` the page switches on: `billing_disabled` (the instance sells no plan),
  * `already_subscribed`, `subscription_pending`, `previous_owner_subscription` (the workspace changed hands and the subscription of the
- * owner before is still running), `checkout_in_progress` (another request is opening a payment page for the workspace),
+ * owner before is still running), `checkout_in_progress` (another request, or another owner, is opening a payment page for the workspace),
  * `no_billing_account` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could not be reached or refused
  * the call).
  */
@@ -112,7 +113,7 @@ final class WorkspaceBillingController extends Controller
         $lock = Cache::lock('billing-checkout:'.$workspace->ulid, self::CHECKOUT_LOCK_SECONDS);
 
         if (! $lock->get()) {
-            return ApiError::conflict(__('A payment page is already being opened for this workspace. Try again in a moment.'), 'checkout_in_progress');
+            return $this->checkoutInProgress();
         }
 
         try {
@@ -153,6 +154,8 @@ final class WorkspaceBillingController extends Controller
             ));
         } catch (PreviousOwnerSubscriptionException $previous) {
             return $this->previousOwnerSubscription($previous->account);
+        } catch (CheckoutInProgressException) {
+            return $this->checkoutInProgress();
         } catch (StripeException $exception) {
             return $this->unavailable($exception, $workspace);
         }
@@ -164,8 +167,9 @@ final class WorkspaceBillingController extends Controller
      * Opens a session of the Stripe customer portal for the workspace and answers `{data: {url}}` (the request checks that the person is an
      * owner). `409` `billing_disabled`, or `no_billing_account` when the workspace never went to Checkout; `409`
      * `previous_owner_subscription` for an owner who is not the payer while the subscription of the payer is in play (they are not handed
-     * the customer of somebody else: once that subscription is over they get a customer of their own, see {@see BillingCustomers}); `503`
-     * when Stripe fails.
+     * the customer of somebody else: once that subscription is over they get a customer of their own, see {@see BillingCustomers}); `409`
+     * `checkout_in_progress` when another owner stored their customer first; `503` when Stripe fails (also, and told to the administrators
+     * as the synchronisation tells it, when the payer's customer is not at Stripe while the row says the workspace has a subscription).
      */
     public function portal(ManageBillingRequest $request, Workspace $workspace): JsonResponse
     {
@@ -183,7 +187,7 @@ final class WorkspaceBillingController extends Controller
 
         try {
             if ($this->customers->isPayer($account, $owner)) {
-                $this->customers->follow($account, $owner);
+                $this->follow($account, $owner);
             } else {
                 // Read now: the row may be hours old, and a subscription in play must not be forgotten.
                 $account = $this->sync->sync($account);
@@ -198,11 +202,33 @@ final class WorkspaceBillingController extends Controller
             $url = $this->stripe->createPortalSession($account->stripe_customer_id, PublicUrls::to($this->pagePath($workspace)), App::getLocale());
         } catch (PreviousOwnerSubscriptionException $previous) {
             return $this->previousOwnerSubscription($previous->account);
+        } catch (CheckoutInProgressException) {
+            return $this->checkoutInProgress();
         } catch (StripeException $exception) {
             return $this->unavailable($exception, $workspace);
         }
 
         return new JsonResponse(['data' => ['url' => $url]]);
+    }
+
+    /**
+     * Gives the customer of the payer their current email before the portal is opened. A customer Stripe does not know while the row says
+     * the workspace has a subscription in play is told like the synchronisation tells it ({@see BillingSync::reportLostCustomer()}: the log
+     * and the administrators), and the error of Stripe goes up as it would.
+     *
+     * @throws StripeException
+     */
+    private function follow(BillingAccount $account, User $owner): void
+    {
+        try {
+            $this->customers->follow($account, $owner);
+        } catch (StripeException $exception) {
+            if ($exception->code() === 'resource_missing' && in_array($account->status, SubscriptionStatus::CURRENT, true)) {
+                $this->sync->reportLostCustomer($account);
+            }
+
+            throw $exception;
+        }
     }
 
     /**
@@ -332,6 +358,14 @@ final class WorkspaceBillingController extends Controller
     private function disabled(): JsonResponse
     {
         return ApiError::conflict(__('This service is not offered on this instance.'), 'billing_disabled');
+    }
+
+    /**
+     * The answer when another request is opening a payment page for the workspace: the person tries again in a moment.
+     */
+    private function checkoutInProgress(): JsonResponse
+    {
+        return ApiError::conflict(__('A payment page is already being opened for this workspace. Try again in a moment.'), 'checkout_in_progress');
     }
 
     /**

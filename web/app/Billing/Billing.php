@@ -6,6 +6,7 @@ namespace App\Billing;
 
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Signatures\Documenso;
+use App\Support\PublicUrls;
 
 /**
  * What the instance is configured to do with Stripe: whether workspaces can buy a plan, which Prices they buy, whether the webhook is
@@ -143,13 +144,14 @@ final class Billing
 
     /**
      * The marker this instance writes in the metadata of the Checkout sessions and subscriptions it opens (`instance`): the first 16
-     * hexadecimal characters of the SHA-256 of its public address (`APP_URL`, without a trailing slash). It tells the payments of this
+     * hexadecimal characters of the SHA-256 of its public address (`APP_URL`, as {@see PublicUrls::root()} gives it: without a trailing
+     * slash, and lowercased, so that `https://Example.com/` and `https://example.com` are the same instance). It tells the payments of this
      * instance from those of another site that shares the Stripe account: the application cancels what it finds orphaned only when the
      * marker is its own (see {@see StripeWebhookController}).
      */
     public static function instanceMarker(): string
     {
-        return substr(hash('sha256', rtrim(config()->string('app.url'), '/')), 0, 16);
+        return substr(hash('sha256', strtolower(PublicUrls::root())), 0, 16);
     }
 
     /**

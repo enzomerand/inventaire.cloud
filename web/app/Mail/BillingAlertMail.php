@@ -45,6 +45,7 @@ final class BillingAlertMail extends Mailable
      * - `cancellation_failed`: the subscriptions of a customer could not be cancelled (the workspace is gone, or changed hands): cancel
      *   them there;
      * - `customer_lost`: a workspace has a subscription but Stripe does not know its customer (the keys of the instance were changed?);
+     *   told once a day for the whole instance, with the first customer found;
      * - `double_subscription`: a customer has two subscriptions in play (a double checkout); the older one is to be cancelled and refunded.
      */
     public const PROBLEMS = [
@@ -172,7 +173,7 @@ final class BillingAlertMail extends Mailable
             'checkout_orphaned' => __('A customer paid on Stripe for a workspace that was deleted meanwhile. The subscription is being cancelled automatically: check in the dashboard that it ended, and refund the payment.'),
             'checkout_unmarked' => __('A customer paid on Stripe for a workspace that does not exist on this instance, and the payment is not marked as made through it. Nothing was cancelled. If another site or instance uses the same Stripe account, ignore this alert; otherwise cancel the subscription and refund the payment in the dashboard.'),
             'cancellation_failed' => __('The subscriptions of this customer could not be cancelled automatically, and the customer may go on paying for a workspace that is gone or that they no longer own. Cancel them in the dashboard.'),
-            'customer_lost' => __('A workspace has a subscription on this instance, but Stripe does not know its customer (were the Stripe keys changed, or switched between the test and the live mode?). Nothing was changed: check STRIPE_SECRET before anyone pays again. If you checked in the dashboard that the customer really was deleted, forget it with: php artisan inventaire:billing-forget WORKSPACE (the workspace reference is given below).'),
+            'customer_lost' => __('A workspace has a subscription on this instance, but Stripe does not know its customer (were the Stripe keys changed, or switched between the test and the live mode?). Nothing was changed: check STRIPE_SECRET before anyone pays again. If you checked in the dashboard that the customer really was deleted, forget it with: php artisan inventaire:billing-forget WORKSPACE (the workspace reference is given below). This alert is sent once a day for the whole instance and names the first customer found: others may follow, the log lists each of them.'),
             'double_subscription' => __('This customer has more than one subscription in play (a double checkout). The newest one is followed: cancel the other in the dashboard and refund it.'),
             default => '',
         };

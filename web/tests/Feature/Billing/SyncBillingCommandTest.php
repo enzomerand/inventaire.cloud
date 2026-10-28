@@ -315,6 +315,51 @@ describe('what it does with them', function (): void {
         expect($stripe->count('GET /v1/subscriptions'))->toBe(6);
     });
 
+    it('gives up after three answers in a row that Stripe does not know the customer: the key is for another mode, not every customer gone', function (): void {
+        Log::spy();
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $accounts = [];
+
+        foreach (range(12, 8) as $hours) {
+            $accounts[] = $account = billingAccountSyncedAgo($stripe, $hours, 'active');
+            $stripe->loseCustomer($account->stripe_customer_id);
+        }
+
+        $this->artisan('inventaire:sync-billing')
+            ->expectsOutputToContain('Stopped early (Stripe does not know the customers of several accounts in a row')
+            ->expectsOutputToContain('0 account(s) synchronised, 3 failed.')
+            ->assertSuccessful();
+
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(SyncBillingCommand::LOST_AFTER)
+            ->and(billingAsked($stripe))->toBe([$accounts[0]->stripe_customer_id, $accounts[1]->stripe_customer_id, $accounts[2]->stripe_customer_id]);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'stopped early')
+            && str_contains((string) $context['reason'], 'does not know the customers') && $context['failed'] === 3)->once();
+        // One mail for the whole run, the first customer in it.
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === $accounts[0]->stripe_customer_id);
+    });
+
+    it('does not give up on customers Stripe does not know that are not in a row', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+
+        // Two lost, one known, two lost: never three in a row.
+        foreach ([12 => true, 11 => true, 10 => false, 9 => true, 8 => true] as $hours => $lost) {
+            $account = billingAccountSyncedAgo($stripe, $hours, 'active');
+
+            if ($lost) {
+                $stripe->loseCustomer($account->stripe_customer_id);
+            }
+        }
+
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('1 account(s) synchronised, 4 failed.')->assertSuccessful();
+
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(5);
+    });
+
     it('does not take a refusal for an outage: it is the account that is wrong, not Stripe', function (): void {
         $stripe = billingOn();
 

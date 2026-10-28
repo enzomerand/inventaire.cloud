@@ -19,7 +19,8 @@ use Throwable;
  * every day.
  *
  * One mail for each administrator, in their language, queued like any mail that holds no secret. A problem the application finds again
- * and again (a synchronisation that runs every few hours) is told once a day for each customer and kind of problem: the day is claimed
+ * and again (a synchronisation that runs every few hours) is told once a day for each customer and kind of problem (once a day for the
+ * whole instance for the kinds of {@see self::INSTANCE_WIDE}): the day is claimed
  * with one atomic write of the cache before the mails are queued (two requests that find the same problem at the same moment tell it
  * once), and given back when nobody could be told, so that a queue that was down, or an instance with no administrator yet, does not hide
  * the problem for a day ({@see self::tellProblem()}).
@@ -28,6 +29,13 @@ final class BillingAlerts
 {
     /** How long a problem that was told is not told again for the same customer. */
     private const REPEAT_AFTER_HOURS = 24;
+
+    /**
+     * The kinds of problem that are told once a day for the whole instance, whichever customer they are about: a customer Stripe does not
+     * know is most often the sign of keys switched to another mode or account, and then every customer is lost at once, which must not
+     * be one mail for each of them. The mail names the first one and says that others may follow; the log lists each.
+     */
+    private const INSTANCE_WIDE = ['customer_lost'];
 
     /**
      * Queues the mail for every administrator of the instance. The mailable is built for each of them: a mailable keeps the recipients it
@@ -54,7 +62,8 @@ final class BillingAlerts
     }
 
     /**
-     * Tells the administrators of a problem with a customer, at most once a day for that customer and kind of problem. The day is claimed
+     * Tells the administrators of a problem with a customer, at most once a day for that customer and kind of problem (for the whole
+     * instance, whichever the customer, for the kinds of {@see self::INSTANCE_WIDE}). The day is claimed
      * first, with one atomic write of the cache, so that two requests finding the problem together tell it once; the claim is given back
      * when the mails could not be queued, and when there was nobody to tell (an instance with no administrator: the problem is written in
      * the log as an error, and told as soon as there is one).
@@ -68,7 +77,7 @@ final class BillingAlerts
      */
     public function tellProblem(string $kind, string $customerId, ?string $workspaceUlid, ?bool $livemode = null): void
     {
-        $key = 'billing-alert:'.$kind.':'.$customerId;
+        $key = 'billing-alert:'.$kind.(in_array($kind, self::INSTANCE_WIDE, true) ? '' : ':'.$customerId);
 
         // Atomic: of two requests that find the problem at the same moment, only one gets to tell it.
         if (! Cache::add($key, true, now()->addHours(self::REPEAT_AFTER_HOURS))) {
