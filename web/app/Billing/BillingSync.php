@@ -25,8 +25,14 @@ use Illuminate\Support\Facades\Log;
  * otherwise the most recent one of any status (a canceled one is worth remembering: the page shows that the plan ended), otherwise
  * none. A newer subscription that is only `incomplete` (a checkout that was abandoned) does not hide an older one that is `active`. A customer that went through the checkout twice has two current subscriptions, which is written in the log as a warning: the
  * one chosen is the newest, and somebody has to refund the other: the administrators are told by mail as well, once a day for each customer
- * ({@see BillingAlerts}). A customer that was deleted at Stripe has none (the answer is a
- * `404`): the columns are cleared, and the workspace is Free.
+ * ({@see BillingAlerts}).
+ *
+ * **A customer Stripe does not know** (the answer is `resource_missing`) is a customer that was deleted, or, far more likely, an instance
+ * whose keys were switched to another mode or another Stripe account. When the row says the workspace has a subscription in play
+ * ({@see SubscriptionStatus::CURRENT}) nothing is written: clearing it would turn a paying workspace Free on the strength of a wrong key.
+ * The problem is logged, the administrators are told (`customer_lost`), and a `StripeException` that is not worth trying again goes up
+ * (the page answers that the service is unavailable, the job gives up). An administrator who checked in the dashboard that the customer
+ * really is gone says so with `inventaire:billing-forget`. A row with no subscription in play is cleared, and the workspace is Free.
  *
  * The call to Stripe is made outside any transaction. The columns are written under the lock of the workspace ({@see Locks}, the order
  * of its documentation), by the transaction run again when the database picks it as the loser of a deadlock ({@see DeadlockRetries}),
@@ -54,7 +60,9 @@ final class BillingSync
      *
      * @return BillingAccount The account as it is stored now.
      *
-     * @throws StripeException When Stripe cannot be reached or refuses (`retryable()` tells whether to try again).
+     * @throws StripeException When Stripe cannot be reached or refuses (`retryable()` tells whether to try again); also, and never worth
+     *                         trying again, when Stripe does not know the customer of an account that has a subscription in play (nothing
+     *                         was written, the administrators were told: see the class).
      */
     public function sync(BillingAccount $account): BillingAccount
     {
@@ -67,9 +75,17 @@ final class BillingSync
                 throw $exception;
             }
 
+            $cleared = $this->clearLost($account, $readAt);
+
+            if ($cleared === null) {
+                $this->refuseToForget($account);
+
+                throw $exception;
+            }
+
             Log::warning('The Stripe customer of a workspace is gone: its subscription is cleared.', ['billing_account' => $account->getKey()]);
 
-            return $this->write($account, self::columns(null), $readAt);
+            return $cleared;
         }
 
         [$chosen, $current] = self::choose($subscriptions);
@@ -87,6 +103,21 @@ final class BillingSync
         }
 
         return $this->write($account, self::columns($chosen), $readAt);
+    }
+
+    /**
+     * Writes down that a customer Stripe does not know belongs to a workspace that has a subscription in play, which is left as it is: the
+     * log (with the customer and the workspace) and the administrators, who are told once a day for the customer.
+     */
+    private function refuseToForget(BillingAccount $account): void
+    {
+        $workspace = Workspace::query()->whereKey($account->workspace_id)->value('ulid');
+
+        Log::error('The Stripe customer of a workspace that has a subscription is not at Stripe: nothing is cleared (possible wrong-mode API key, or the customer was deleted: check STRIPE_SECRET, then forget it with inventaire:billing-forget).', [
+            'customer' => $account->stripe_customer_id,
+            'workspace' => $workspace,
+        ]);
+        $this->alerts->reportProblem('customer_lost', $account->stripe_customer_id, is_string($workspace) ? $workspace : null);
     }
 
     /**
@@ -180,8 +211,35 @@ final class BillingSync
      */
     private function write(BillingAccount $account, array $columns, CarbonImmutable $readAt): BillingAccount
     {
+        // Never null: the stored subscription is only spared when the caller asks for it.
+        return $this->store($account, $columns, $readAt, false) ?? $account;
+    }
+
+    /**
+     * Clears the subscription columns of an account whose customer Stripe does not know, with the workspace locked, unless the stored row
+     * says the workspace has a subscription in play: the row is read again under the lock, a synchronisation that wrote one meanwhile (or a
+     * stale copy of the account in the caller's hands) must not be believed.
+     *
+     * @return BillingAccount|null The account as stored; null when it has a subscription in play (nothing was written).
+     */
+    private function clearLost(BillingAccount $account, CarbonImmutable $readAt): ?BillingAccount
+    {
+        return $this->store($account, self::columns(null), $readAt, true);
+    }
+
+    /**
+     * Writes the columns of the account under the lock of its workspace, in a transaction run again when the database picks it as the
+     * loser of a deadlock.
+     *
+     * @param  array<string, mixed>  $columns
+     * @param  CarbonImmutable  $readAt  When the read they come from began.
+     * @param  bool  $sparePaid  Write nothing when the stored subscription is in play ({@see SubscriptionStatus::CURRENT}).
+     * @return BillingAccount|null The account as stored (or as it was when nothing was written); null only when `$sparePaid` and the stored subscription is in play.
+     */
+    private function store(BillingAccount $account, array $columns, CarbonImmutable $readAt, bool $sparePaid): ?BillingAccount
+    {
         try {
-            return DeadlockRetries::run(fn (): BillingAccount => $this->db->transaction(function () use ($account, $columns, $readAt): BillingAccount {
+            return DeadlockRetries::run(fn (): ?BillingAccount => $this->db->transaction(function () use ($account, $columns, $readAt, $sparePaid): ?BillingAccount {
                 // The workspace first, as everything that writes to what hangs from it: the account of a workspace that is being deleted is
                 // not worth writing, and what it was is returned.
                 if ($this->locks->workspaces([$account->workspace_id])->isEmpty()) {
@@ -192,6 +250,10 @@ final class BillingSync
 
                 if ($stored === null) {
                     return $account;
+                }
+
+                if ($sparePaid && in_array($stored->status, SubscriptionStatus::CURRENT, true)) {
+                    return null;
                 }
 
                 // A read that began after this one has been written already: it saw what happened since.

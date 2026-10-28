@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Billing;
 
+use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Signatures\Documenso;
 
 /**
@@ -138,6 +139,17 @@ final class Billing
     public static function integrationIdentifier(): string
     {
         return config()->string('billing.integration_identifier');
+    }
+
+    /**
+     * The marker this instance writes in the metadata of the Checkout sessions and subscriptions it opens (`instance`): the first 16
+     * hexadecimal characters of the SHA-256 of its public address (`APP_URL`, without a trailing slash). It tells the payments of this
+     * instance from those of another site that shares the Stripe account: the application cancels what it finds orphaned only when the
+     * marker is its own (see {@see StripeWebhookController}).
+     */
+    public static function instanceMarker(): string
+    {
+        return substr(hash('sha256', rtrim(config()->string('app.url'), '/')), 0, 16);
     }
 
     /**

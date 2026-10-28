@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Billing\Billing;
 use App\Billing\BillingSync;
+use App\Billing\CheckoutParameters;
 use App\Billing\Plan;
 use App\Billing\WorkspacePlan;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
@@ -669,6 +671,23 @@ function billingGoneWorkspace(): string
 }
 
 /**
+ * The object of a payment event for a workspace, as {@see CheckoutParameters} writes it: the ULID where the kind of event keeps
+ * it (`client_reference_id` of a session, `metadata.workspace` of a subscription), and the marker of an instance in `metadata.instance`.
+ *
+ * @param  bool|string  $marker  The marker of this instance (true), none (false), or the marker of another instance (a text).
+ * @return array<string, mixed>
+ */
+function billingPaymentOf(string $type, string $ulid, bool|string $marker = true): array
+{
+    $instance = $marker === true ? Billing::instanceMarker() : $marker;
+    $metadata = $instance === false ? [] : ['instance' => $instance];
+
+    return $type === 'checkout.session.completed'
+        ? ['client_reference_id' => $ulid] + ($metadata === [] ? [] : ['metadata' => $metadata])
+        : ['metadata' => ['workspace' => $ulid] + $metadata];
+}
+
+/**
  * The jobs that cancel subscriptions, as `[customer, at period end, billing account, workspace]`.
  *
  * @return list<array{0: string, 1: bool, 2: int|null, 3: string|null}>
@@ -691,10 +710,11 @@ describe('a payment for a workspace that no longer exists', function (): void {
         $this->administrator = billingAdmin();
     });
 
-    it('is cancelled at once, written in the log as an error and told to the administrators', function (string $type, string $where): void {
+    it('is cancelled at once when it carries the marker of this instance, written in the log as an error and told to the administrators', function (string $type, string $where): void {
         Log::spy();
         $ulid = billingGoneWorkspace();
-        $object = $where === 'session' ? ['client_reference_id' => $ulid] : ['metadata' => ['workspace' => $ulid]];
+        $object = billingPaymentOf($type, $ulid);
+        expect($where === 'session' ? isset($object['client_reference_id']) : isset($object['metadata']['workspace']))->toBeTrue();
 
         billingWebhook($this, billingEventFor($type, 'cus_orphan', $object))->assertOk()->assertExactJson(['received' => true]);
 
@@ -727,13 +747,73 @@ describe('a payment for a workspace that no longer exists', function (): void {
     it('reads the ULID in whatever case Stripe gives it back', function (): void {
         $ulid = billingGoneWorkspace();
 
-        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => strtoupper($ulid)]))->assertOk();
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => strtoupper($ulid), 'metadata' => ['instance' => Billing::instanceMarker()]]))->assertOk();
 
         expect(billingCancellationsQueued())->toBe([['cus_orphan', false, null, $ulid]]);
     });
 
+    it('is not cancelled when it does not carry the marker of this instance, or carries another one: the administrators are only told', function (string $type, bool|string $marker): void {
+        Log::spy();
+        $ulid = billingGoneWorkspace();
+
+        billingWebhook($this, billingEventFor($type, 'cus_other_site', billingPaymentOf($type, $ulid, $marker)))->assertOk()->assertExactJson(['received' => true]);
+
+        // Another site (or instance) that shares the Stripe account looks the same: its subscriptions are not ours to cancel.
+        Queue::assertNothingPushed();
+        Log::shouldNotHaveReceived('error');
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'not marked as made through it')
+            && $context === ['type' => $type, 'customer' => 'cus_other_site', 'workspace' => $ulid])->once();
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->hasTo('admin@example.test')
+            && $mail->eventType === 'checkout_unmarked'
+            && $mail->objectId === 'cus_other_site'
+            && $mail->workspaceUlid === $ulid
+            && str_contains($mail->render(), 'Nothing was cancelled'));
+    })->with([
+        'a session with no marker' => ['checkout.session.completed', false],
+        'a session of another instance' => ['checkout.session.completed', '0123456789abcdef'],
+        'a subscription with no marker' => ['customer.subscription.created', false],
+        'a subscription of another instance' => ['customer.subscription.updated', '0123456789abcdef'],
+        'a subscription with an empty marker' => ['customer.subscription.updated', ''],
+    ]);
+
+    it('takes a marker that is not a text for no marker', function (): void {
+        $ulid = billingGoneWorkspace();
+        $event = billingEventFor('customer.subscription.created', 'cus_other_site', ['metadata' => ['workspace' => $ulid, 'instance' => ['nested' => Billing::instanceMarker()]]]);
+
+        billingWebhook($this, $event)->assertOk();
+
+        Queue::assertNothingPushed();
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->eventType === 'checkout_unmarked');
+    });
+
+    it('is told once a day for a customer when it is not marked, as when it is', function (): void {
+        $ulid = billingGoneWorkspace();
+        $event = billingEventFor('checkout.session.completed', 'cus_other_site', billingPaymentOf('checkout.session.completed', $ulid, false));
+
+        billingWebhook($this, $event)->assertOk();
+        billingWebhook($this, $event)->assertOk();
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+
+        $this->travel(25)->hours();
+        billingWebhook($this, $event)->assertOk();
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+        Queue::assertNothingPushed();
+    });
+
+    it('is ignored when the workspace it names exists, marked or not', function (): void {
+        $ulid = Workspace::factory()->create()->ulid;
+
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_stranger', billingPaymentOf('checkout.session.completed', $ulid, false)))->assertOk();
+
+        Queue::assertNothingPushed();
+        Mail::assertNothingQueued();
+    });
+
     it('is told for the live mode of Stripe when the event comes from it', function (): void {
-        $event = billingEventFor('customer.subscription.created', 'cus_orphan', ['metadata' => ['workspace' => billingGoneWorkspace()]]);
+        $event = billingEventFor('customer.subscription.created', 'cus_orphan', billingPaymentOf('customer.subscription.created', billingGoneWorkspace()));
         $event['livemode'] = true;
 
         billingWebhook($this, $event)->assertOk();
@@ -744,15 +824,15 @@ describe('a payment for a workspace that no longer exists', function (): void {
     it('is told once a day for a customer, however many events Stripe sends for the same payment, and cancelled each time', function (): void {
         $ulid = billingGoneWorkspace();
 
-        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => $ulid]))->assertOk();
-        billingWebhook($this, billingEventFor('customer.subscription.created', 'cus_orphan', ['metadata' => ['workspace' => $ulid]]))->assertOk();
-        billingWebhook($this, billingEventFor('customer.subscription.updated', 'cus_orphan', ['metadata' => ['workspace' => $ulid]]))->assertOk();
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', billingPaymentOf('checkout.session.completed', $ulid)))->assertOk();
+        billingWebhook($this, billingEventFor('customer.subscription.created', 'cus_orphan', billingPaymentOf('customer.subscription.created', $ulid)))->assertOk();
+        billingWebhook($this, billingEventFor('customer.subscription.updated', 'cus_orphan', billingPaymentOf('customer.subscription.updated', $ulid)))->assertOk();
 
         Mail::assertQueued(BillingAlertMail::class, 1);
         expect(billingCancellationsQueued())->toHaveCount(3);
 
         $this->travel(25)->hours();
-        billingWebhook($this, billingEventFor('customer.subscription.updated', 'cus_orphan', ['metadata' => ['workspace' => $ulid]]))->assertOk();
+        billingWebhook($this, billingEventFor('customer.subscription.updated', 'cus_orphan', billingPaymentOf('customer.subscription.updated', $ulid)))->assertOk();
 
         Mail::assertQueued(BillingAlertMail::class, 2);
     });
@@ -816,14 +896,14 @@ describe('a payment for a workspace that no longer exists', function (): void {
     it('is answered with a failure when the cancellation cannot be queued, so that Stripe sends the event again', function (): void {
         $this->mock(Dispatcher::class, fn ($mock) => $mock->shouldReceive('dispatch')->once()->andThrow(new RuntimeException('The queue is down.')));
 
-        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => billingGoneWorkspace()]))->assertStatus(500);
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', billingPaymentOf('checkout.session.completed', billingGoneWorkspace())))->assertStatus(500);
 
         Mail::assertNothingQueued();
     });
 
     it('is answered with a failure when the mail cannot be queued, and is told on the next delivery', function (): void {
         $ulid = billingGoneWorkspace();
-        $event = billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => $ulid]);
+        $event = billingEventFor('checkout.session.completed', 'cus_orphan', billingPaymentOf('checkout.session.completed', $ulid));
         Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('The queue is down.'));
 
         billingWebhook($this, $event)->assertStatus(500);

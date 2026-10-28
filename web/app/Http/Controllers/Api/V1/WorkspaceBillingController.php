@@ -45,8 +45,14 @@ use Illuminate\Support\Facades\Log;
  */
 final class WorkspaceBillingController extends Controller
 {
-    /** The seconds a checkout holds the lock of its workspace: longer than the Stripe calls it makes (20 seconds each at the most). */
-    private const CHECKOUT_LOCK_SECONDS = 60;
+    /**
+     * The seconds a checkout holds the lock of its workspace: longer than all the Stripe calls it makes one after the other, each of which
+     * waits 20 seconds at the most (listing the open sessions, expiring one, reading the subscriptions, updating the customer or creating
+     * one, creating the session: about five, so 100 seconds and more with a second page of results). A lock that ran out while the request
+     * still worked would let a second checkout in. The lock is released as soon as the request ends, so a long TTL costs nothing but when
+     * the process dies (then the workspace waits for it to run out).
+     */
+    private const CHECKOUT_LOCK_SECONDS = 180;
 
     /**
      * Gets what the endpoints are made of.
@@ -229,11 +235,25 @@ final class WorkspaceBillingController extends Controller
      * Expires the Checkout sessions of the customer of an account that are still open. One that is not open any more (Stripe answers
      * `400`: it was paid, or it ended by itself) is left: the subscriptions are read right after, and see what a payment started.
      *
-     * @throws StripeException When the sessions cannot be listed, or one cannot be expired for another reason.
+     * A customer Stripe does not know (`resource_missing`) has no session to expire: the list is empty, and the rest of the checkout decides
+     * what to do with such a customer (a workspace with no subscription in play gets a new one, see {@see BillingCustomers::ensure()}; one
+     * that has a subscription in play is refused when it is synchronised).
+     *
+     * @throws StripeException When the sessions cannot be listed for another reason, or one cannot be expired for another reason.
      */
     private function expireOpenSessionsOf(BillingAccount $account): void
     {
-        foreach ($this->stripe->openCheckoutSessionsOf($account->stripe_customer_id) as $open) {
+        try {
+            $sessions = $this->stripe->openCheckoutSessionsOf($account->stripe_customer_id);
+        } catch (StripeException $exception) {
+            if ($exception->code() !== 'resource_missing') {
+                throw $exception;
+            }
+
+            $sessions = [];
+        }
+
+        foreach ($sessions as $open) {
             try {
                 $this->stripe->expireCheckoutSession($open);
             } catch (StripeException $exception) {

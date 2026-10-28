@@ -60,11 +60,13 @@ use Throwable;
  * site): nothing is done. But a payment can reach the instance after the workspace it was made for was deleted (a Checkout page left
  * open, paid after the deletion cancelled the subscriptions; sessions now expire within the half hour, and are expired when the
  * subscriptions are cancelled, which leaves a short window). The session (`client_reference_id`) and the subscription (`metadata.workspace`)
- * carry the ULID of the workspace they were opened for: when it names a workspace that no longer exists, the subscriptions of that
- * customer are cancelled at once ({@see CancelStripeSubscription}), the error is written in the log and the administrators are told by
- * mail, once a day for each customer, to refund the payment. No ULID, or a workspace that exists, is ignored: the ULID is only a trace
- * here, never a way to find an account. This assumes the Stripe account is the instance's own: a customer of another site that carries
- * the ULID of one of *its* workspaces looks the same.
+ * carry the ULID of the workspace they were opened for, and the marker of the instance that opened them (`metadata.instance`, see
+ * {@see Billing::instanceMarker()}): when the ULID names a workspace that no longer exists **and the marker is this instance's**, the
+ * subscriptions of that customer are cancelled at once ({@see CancelStripeSubscription}), the error is written in the log and the
+ * administrators are told by mail, once a day for each customer, to refund the payment. A ULID that names no workspace but comes without
+ * the marker, or with another one, is not this instance's to cancel (another site or instance that shares the Stripe account looks the
+ * same): the administrators are told (`checkout_unmarked`) and nothing is cancelled. No ULID, or a workspace that exists, is ignored:
+ * the ULID is only a trace here, never a way to find an account.
  *
  * Stripe may send an event twice; the synchronisation is unique per account while it waits in the queue, and the mail of an alert is sent
  * once per event (the id of the event is remembered for a day). The one case where an administrator gets the same alert twice is a
@@ -252,11 +254,13 @@ final class StripeWebhookController extends Controller
     /**
      * Cancels the subscriptions of a customer nobody knows when the event shows they were bought for a workspace that no longer exists: a
      * payment that reached the instance after the deletion of the workspace. The session carries the ULID of the workspace as
-     * `client_reference_id`, the subscription as `metadata.workspace` (both set by {@see CheckoutParameters}). The cancellation is queued
-     * at once, the error is written in the log, and the administrators are told to refund the payment.
+     * `client_reference_id`, the subscription as `metadata.workspace` (both set by {@see CheckoutParameters}, with the marker of the
+     * instance in their `metadata.instance`). When the marker is this instance's the cancellation is queued at once, the error is written
+     * in the log, and the administrators are told to refund the payment. Without the marker, or with another one, nothing is cancelled: the
+     * administrators are only told.
      *
      * @param  array<array-key, mixed>  $object  A Checkout session or a subscription.
-     * @return bool Whether it is such a payment.
+     * @return bool Whether it is such a payment (for a workspace that does not exist), cancelled or not.
      *
      * @throws Throwable When the job or the mail could not be queued.
      */
@@ -277,6 +281,19 @@ final class StripeWebhookController extends Controller
 
         if (Workspace::query()->where('ulid', $ulid)->exists()) {
             return false;
+        }
+
+        $marker = data_get($object, 'metadata.instance');
+
+        if (! is_string($marker) || ! hash_equals(Billing::instanceMarker(), $marker)) {
+            Log::warning('Stripe reports a payment for a workspace this instance does not know, that is not marked as made through it: nothing is cancelled (does another site share the Stripe account?).', [
+                'type' => $type,
+                'customer' => $customer,
+                'workspace' => $ulid,
+            ]);
+            $this->alerts->tellProblem('checkout_unmarked', $customer, $ulid, $livemode);
+
+            return true;
         }
 
         Log::error('Stripe reports a payment for a workspace that no longer exists: its subscriptions are being cancelled, the payment is to be refunded.', [

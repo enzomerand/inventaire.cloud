@@ -5,13 +5,16 @@ declare(strict_types=1);
 use App\Billing\BillingSync;
 use App\Billing\StripeException;
 use App\Jobs\SyncBillingAccount;
+use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
+use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Tests\Support\FakeStripe;
 
 require_once __DIR__.'/../../Support/billing.php';
@@ -90,6 +93,23 @@ describe('what it does with a failure', function (): void {
         Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['status'] === $status && ! str_contains(json_encode($context, JSON_THROW_ON_ERROR), FakeStripe::SECRET))->once();
         expect(BillingAccount::query()->findOrFail($account->id)->status)->toBeNull();
     })->with([400, 401, 403]);
+
+    it('gives up on a customer Stripe does not know while the account has a subscription in play, and leaves the account as it is', function (): void {
+        Log::spy();
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        (new SyncBillingAccount($account->id))->handle(app(BillingSync::class));
+        $stripe->loseCustomer($account->stripe_customer_id);
+
+        // Not thrown: the same answer comes each time, the job is done with and the administrators were told.
+        (new SyncBillingAccount($account->id))->handle(app(BillingSync::class));
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => ($context['reason'] ?? null) === 'resource_missing')->once();
+        expect(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active');
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->eventType === 'customer_lost');
+    });
 
     it('writes in the log that it gave up, with the account and not the key', function (): void {
         Log::spy();

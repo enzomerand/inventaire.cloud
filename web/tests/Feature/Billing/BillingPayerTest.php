@@ -211,13 +211,44 @@ describe('Checkout by an owner who is not the payer', function (): void {
             ->and($world['stripe']->count('POST /v1/checkout/sessions'))->toBe(0);
     });
 
-    it('makes the new customer with a key made of the workspace and of the customer it replaces, and no email', function (): void {
+    it('makes the new customer with a key made of the workspace, of the customer it replaces and of what is sent, and no email', function (): void {
         $world = billingPayerHandedOver('canceled', false);
 
         inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
 
         $key = $world['stripe']->requestsOf('POST /v1/customers')[0]->header('Idempotency-Key')[0];
-        expect($key)->toBe('customer-'.$world['workspace']->ulid.'-'.substr(hash('sha256', 'cus_previous'), 0, 16));
+        $sent = substr(hash('sha256', implode("\n", [$world['owner']->email, $world['workspace']->name, 'en'])), 0, 16);
+
+        expect($key)->toBe('customer-'.$world['workspace']->ulid.'-'.substr(hash('sha256', 'cus_previous'), 0, 16).'-'.$sent)
+            ->and($key)->not->toContain($world['owner']->email);
+    });
+
+    it('is told the account is gone when the owner was deleted while the new customer was made, and the old customer stays', function (): void {
+        $world = billingPayerHandedOver('canceled', false);
+        $world['stripe']->onCall('POST /v1/customers', fn () => DB::table('users')->where('id', $world['owner']->id)->delete());
+
+        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertNotFound();
+
+        expect($world['account']->fresh()->stripe_customer_id)->toBe('cus_previous')
+            ->and($world['account']->fresh()->payer_id)->toBe($world['previous']->id);
+    });
+
+    it('is refused when another owner replaced the customer first: the customer that was stored is theirs', function (): void {
+        $world = billingPayerHandedOver('canceled', false);
+        $second = inventoryPerson('Second owner');
+        $world['workspace']->members()->attach($second->id, ['role' => 'owner']);
+        // The second owner's request swaps the old customer while the first one is making its own.
+        $world['stripe']->onCall('POST /v1/customers', function () use ($world, $second): void {
+            $world['stripe']->addCustomer('cus_swapped_first');
+            $world['account']->forceFill(['stripe_customer_id' => 'cus_swapped_first', 'payer_id' => $second->id])->save();
+        });
+
+        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'previous_owner_subscription');
+
+        expect($world['account']->fresh()->only(['stripe_customer_id', 'payer_id']))->toBe(['stripe_customer_id' => 'cus_swapped_first', 'payer_id' => $second->id])
+            ->and($world['stripe']->count('POST /v1/checkout/sessions'))->toBe(0);
     });
 
     it('is told the workspace is gone when it was deleted while the new customer was made', function (): void {
@@ -300,7 +331,7 @@ describe('who is the payer', function (): void {
         expect(BillingAccount::query()->sole()->payer_id)->toBe($team['owner']->id);
     });
 
-    it('is the owner whose request stored the customer first, when two owners start a checkout together', function (): void {
+    it('is the owner whose request stored the customer first, when two owners start a checkout together: the other is refused', function (): void {
         $stripe = billingOn();
         $team = inventoryTeam();
         $second = inventoryPerson('Second owner');
@@ -311,9 +342,13 @@ describe('who is the payer', function (): void {
             BillingAccount::factory()->paidBy($second)->create(['workspace_id' => $team['workspace']->id, 'stripe_customer_id' => 'cus_stored_first']);
         });
 
-        inventoryCall($this, $team['owner'], 'POST', billingPayerUri($team['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
+        // The customer that was stored is the second owner's: the first is refused, not handed it.
+        inventoryCall($this, $team['owner'], 'POST', billingPayerUri($team['workspace'], 'checkout'), ['interval' => 'month'])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'previous_owner_subscription');
 
-        expect(BillingAccount::query()->sole()->payer_id)->toBe($second->id);
+        expect(BillingAccount::query()->sole()->payer_id)->toBe($second->id)
+            ->and($stripe->count('POST /v1/checkout/sessions'))->toBe(0);
     });
 
     it('is known by the service, which compares the user and not their position', function (): void {

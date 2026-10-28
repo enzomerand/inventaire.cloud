@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use App\Console\Commands\SyncBillingCommand;
+use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
+use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
@@ -11,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Tests\Support\FakeStripe;
 
 require_once __DIR__.'/../../Support/billing.php';
@@ -226,6 +229,23 @@ describe('what it does with them', function (): void {
 
         $this->artisan('inventaire:sync-billing')->assertSuccessful();
         expect($stripe->count('GET /v1/subscriptions'))->toBe(2)->and(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active');
+    });
+
+    it('goes on past an account whose customer Stripe does not know while it has a subscription in play: it is left as it is, counted as failed, and the administrators are told', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $lost = billingAccountSyncedAgo($stripe, 7, 'active');
+        $other = billingAccountSyncedAgo($stripe, 8, 'active');
+        $stripe->loseCustomer($lost->stripe_customer_id);
+
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('1 account(s) synchronised, 1 failed.')->assertSuccessful();
+
+        expect(BillingAccount::query()->findOrFail($lost->id)->status)->toBe('active')
+            ->and(BillingAccount::query()->findOrFail($lost->id)->synced_at?->lessThan(now()->subHours(6)))->toBeTrue()
+            ->and(BillingAccount::query()->findOrFail($other->id)->synced_at?->greaterThan(now()->subMinute()))->toBeTrue();
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->eventType === 'customer_lost' && $mail->objectId === $lost->stripe_customer_id);
     });
 
     it('marks an account that fails as looked at, so that it goes behind the others the next time, whatever its place in the table', function (): void {

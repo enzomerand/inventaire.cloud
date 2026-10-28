@@ -380,12 +380,11 @@ describe('which subscription is the workspace\'s', function (): void {
 });
 
 describe('when Stripe does not give a subscription', function (): void {
-    it('clears the subscription of a customer that was deleted at Stripe, and says so in the log', function (): void {
+    it('clears the subscription of a customer that was deleted at Stripe when the row has none in play, and says so in the log', function (string $stored): void {
         Log::spy();
         $stripe = billingOn();
-        $account = billingAccountAt($stripe, 'active');
-        billingSync($account);
-        expect(WorkspacePlan::for($account->workspace))->toBe(Plan::Pro);
+        $account = billingAccountAt($stripe, null, 'month', ['status' => $stored, 'stripe_subscription_id' => 'sub_over']);
+        expect(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
 
         $stripe->failNext('GET /v1/subscriptions', 404);
         $synced = billingSync($account);
@@ -398,18 +397,107 @@ describe('when Stripe does not give a subscription', function (): void {
             ->and($synced->stripe_customer_id)->toBe($account->stripe_customer_id)
             ->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'customer of a workspace is gone'))->once();
-    });
+        Log::shouldNotHaveReceived('error');
+    })->with(['canceled', 'incomplete_expired']);
 
-    it('clears the subscription for a customer Stripe says is missing, whatever the status of its answer', function (int $status): void {
+    it('clears the account of a customer Stripe says is missing, whatever the status of its answer, when the row has no subscription in play', function (int $status): void {
         $stripe = billingOn();
-        $account = billingAccountAt($stripe, 'active');
-        billingSync($account);
+        $account = billingAccountAt($stripe, null, 'month', ['status' => 'canceled', 'stripe_subscription_id' => 'sub_over']);
         $stripe->answerWith(Http::response(['error' => ['type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'No such customer', 'param' => 'customer']], $status));
 
         $synced = billingSync($account);
 
-        expect($synced->status)->toBeNull()->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
+        expect($synced->status)->toBeNull()->and($synced->stripe_subscription_id)->toBeNull()->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
     })->with([400, 404]);
+
+    it('clears the account of a customer that has no status at all, as a checkout that was never paid leaves it', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->loseCustomer($account->stripe_customer_id);
+
+        $synced = billingSync($account);
+
+        expect($synced->status)->toBeNull()->and($synced->synced_at)->not->toBeNull();
+    });
+
+    it('writes nothing for a customer Stripe does not know while the row has a subscription in play: it logs, tells the administrators and refuses', function (string $stored, int $status): void {
+        Log::spy();
+        Mail::fake();
+        $administrator = User::factory()->admin()->create(['email' => 'admin@example.test', 'locale' => 'en']);
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, $stored);
+        billingSync($account);
+        $before = BillingAccount::query()->findOrFail($account->id);
+        $ulid = $account->workspace->ulid;
+        $stripe->answerWith(Http::response(['error' => ['type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'No such customer', 'param' => 'customer']], $status));
+
+        try {
+            billingSync($account);
+            $thrown = null;
+        } catch (StripeException $exception) {
+            $thrown = $exception;
+        }
+
+        $after = BillingAccount::query()->findOrFail($account->id);
+        // Nothing changed, `synced_at` included: the row was not written at all.
+        expect($thrown)->not->toBeNull()
+            ->and($thrown->code())->toBe('resource_missing')
+            ->and($thrown->retryable())->toBeFalse()
+            ->and($after->getAttributes())->toEqual($before->getAttributes())
+            ->and(WorkspacePlan::for($account->workspace))->toBe(in_array($stored, WorkspacePlan::PRO_STATUSES, true) ? Plan::Pro : Plan::Free);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'possible wrong-mode API key')
+            && $context === ['customer' => $account->stripe_customer_id, 'workspace' => $ulid])->once();
+        Log::shouldNotHaveReceived('warning');
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, function (BillingAlertMail $mail) use ($administrator, $account, $ulid): bool {
+            $html = $mail->render();
+
+            return $mail->hasTo($administrator->email)
+                && $mail->eventType === 'customer_lost'
+                && $mail->objectId === $account->stripe_customer_id
+                && $mail->workspaceUlid === $ulid
+                // The way out is in the mail.
+                && str_contains($html, 'inventaire:billing-forget');
+        });
+    })->with(function (): array {
+        $cases = [];
+
+        foreach (['active', 'trialing', 'past_due', 'unpaid', 'paused', 'incomplete'] as $status) {
+            $cases["{$status}, 404"] = [$status, 404];
+        }
+
+        return $cases + ['active, 400' => ['active', 400]];
+    });
+
+    it('tells the administrators once a day, however often the subscription is read', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        billingSync($account);
+        $stripe->loseCustomer($account->stripe_customer_id);
+
+        foreach (range(1, 3) as $ignored) {
+            expect(fn () => billingSync($account))->toThrow(StripeException::class);
+        }
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+    });
+
+    it('goes by the row as it is stored under the lock, not by the copy in the hands of the caller', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->loseCustomer($account->stripe_customer_id);
+        // The caller holds a copy with no subscription, but a synchronisation wrote one meanwhile.
+        $stale = BillingAccount::query()->findOrFail($account->id);
+        BillingAccount::query()->whereKey($account->id)->update(['status' => 'active', 'stripe_subscription_id' => 'sub_written_meanwhile']);
+
+        expect(fn () => billingSync($stale))->toThrow(StripeException::class);
+
+        expect(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active');
+    });
 
     it('does not take a 404 that is not the answer of Stripe for a deleted customer: nothing turns the workspace Free', function (): void {
         $stripe = billingOn();

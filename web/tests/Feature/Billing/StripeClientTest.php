@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Billing\Billing;
 use App\Billing\CheckoutParameters;
 use App\Billing\StripeClient;
 use App\Billing\StripeException;
@@ -199,7 +200,8 @@ describe('the parameters of a Checkout session', function (): void {
             'cancel_url' => 'https://inventaire.test/app/w/01j/billing',
             'expires_at' => now()->getTimestamp() + 1860,
             'client_reference_id' => '01j0000000000000000000000x',
-            'subscription_data' => ['metadata' => ['workspace' => '01j0000000000000000000000x']],
+            'metadata' => ['instance' => Billing::instanceMarker()],
+            'subscription_data' => ['metadata' => ['workspace' => '01j0000000000000000000000x', 'instance' => Billing::instanceMarker()]],
             'allow_promotion_codes' => true,
             'billing_address_collection' => 'required',
             'tax_id_collection' => ['enabled' => true],
@@ -222,6 +224,25 @@ describe('the parameters of a Checkout session', function (): void {
 
     it('never name the payment methods: Stripe offers the ones enabled in the dashboard', function (): void {
         expect(CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', 'en'))->not->toHaveKey('payment_method_types');
+    });
+
+    it('carry the marker of the instance in the metadata of the session and of the subscription: 16 hexadecimal characters of the hash of its address', function (): void {
+        config(['app.url' => 'https://inventaire.example/']);
+
+        $parameters = CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', 'en');
+        $marker = substr(hash('sha256', 'https://inventaire.example'), 0, 16);
+
+        expect($parameters['metadata'])->toBe(['instance' => $marker])
+            ->and($parameters['subscription_data']['metadata']['instance'])->toBe($marker)
+            ->and($marker)->toMatch('/^[0-9a-f]{16}\z/')
+            ->and(Billing::instanceMarker())->toBe($marker);
+
+        // The trailing slash does not change it; another address does.
+        config(['app.url' => 'https://inventaire.example']);
+        expect(Billing::instanceMarker())->toBe($marker);
+
+        config(['app.url' => 'https://other.example']);
+        expect(Billing::instanceMarker())->not->toBe($marker);
     });
 
     it('ask Stripe to work the tax out only when the instance says so', function (): void {
@@ -258,7 +279,8 @@ describe('creating a Checkout session', function (): void {
                 'cancel_url' => 'https://inventaire.test/ko',
                 'expires_at' => (string) (now()->getTimestamp() + 1860),
                 'client_reference_id' => '01j0000000000000000000000x',
-                'subscription_data' => ['metadata' => ['workspace' => '01j0000000000000000000000x']],
+                'metadata' => ['instance' => Billing::instanceMarker()],
+                'subscription_data' => ['metadata' => ['workspace' => '01j0000000000000000000000x', 'instance' => Billing::instanceMarker()]],
                 'allow_promotion_codes' => 'true',
                 'billing_address_collection' => 'required',
                 'tax_id_collection' => ['enabled' => 'true'],

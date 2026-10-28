@@ -123,6 +123,23 @@ describe('one checkout at a time for a workspace', function (): void {
             ->and(Cache::lock('billing-checkout:'.$team['workspace']->ulid, 60)->get())->toBeTrue();
     })->with(['a success', 'a failure of Stripe', 'a subscription', 'a workspace that is gone']);
 
+    it('holds the lock for three minutes if the request lasts that long: longer than the five Stripe calls it makes, 20 seconds each at the most', function (): void {
+        $team = billingFlowTeam();
+        $held = [];
+        $team['stripe']->onCall('POST /v1/checkout/sessions', function () use ($team, &$held): void {
+            $this->travel(170)->seconds();
+            $held['after 170 s'] = ! Cache::lock('billing-checkout:'.$team['workspace']->ulid, 1)->get();
+            $this->travel(15)->seconds();
+            $held['after 185 s'] = ! Cache::lock('billing-checkout:'.$team['workspace']->ulid, 1)->get();
+        });
+
+        billingFlowCheckout($this, $team)->assertOk();
+
+        // Still the request's at 170 seconds (the whole of the calls it can make), gone for good soon after: a process that died does not
+        // block the workspace for long.
+        expect($held)->toBe(['after 170 s' => true, 'after 185 s' => false]);
+    });
+
     it('does not hold on to a lock for good: it ends after a minute', function (): void {
         $team = billingFlowTeam();
         Cache::lock('billing-checkout:'.$team['workspace']->ulid, 60)->get();

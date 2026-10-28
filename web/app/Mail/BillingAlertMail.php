@@ -40,6 +40,8 @@ final class BillingAlertMail extends Mailable
      *
      * - `checkout_orphaned`: a customer paid for a workspace that was deleted meanwhile; its subscription is being cancelled, the payment
      *   is to be refunded;
+     * - `checkout_unmarked`: a customer paid for a workspace this instance does not know, but the payment does not carry the marker of
+     *   this instance (another site sharing the Stripe account, or a payment opened before the marker existed); nothing was cancelled;
      * - `cancellation_failed`: the subscriptions of a customer could not be cancelled (the workspace is gone, or changed hands): cancel
      *   them there;
      * - `customer_lost`: a workspace has a subscription but Stripe does not know its customer (the keys of the instance were changed?);
@@ -47,6 +49,7 @@ final class BillingAlertMail extends Mailable
      */
     public const PROBLEMS = [
         'checkout_orphaned' => 'customers',
+        'checkout_unmarked' => 'customers',
         'cancellation_failed' => 'customers',
         'customer_lost' => 'customers',
         'double_subscription' => 'customers',
@@ -152,6 +155,7 @@ final class BillingAlertMail extends Mailable
         return match ($this->eventType) {
             'charge.dispute.created' => __('A customer disputed a payment'),
             'checkout_orphaned' => __('A payment was made for a workspace that no longer exists'),
+            'checkout_unmarked' => __('A payment was made for a workspace this instance does not know'),
             'cancellation_failed' => __('A subscription could not be cancelled'),
             'customer_lost' => __('Stripe does not know the customer of a workspace'),
             'double_subscription' => __('A customer has two subscriptions'),
@@ -166,8 +170,9 @@ final class BillingAlertMail extends Mailable
     {
         return match ($this->eventType) {
             'checkout_orphaned' => __('A customer paid on Stripe for a workspace that was deleted meanwhile. The subscription is being cancelled automatically: check in the dashboard that it ended, and refund the payment.'),
+            'checkout_unmarked' => __('A customer paid on Stripe for a workspace that does not exist on this instance, and the payment is not marked as made through it. Nothing was cancelled. If another site or instance uses the same Stripe account, ignore this alert; otherwise cancel the subscription and refund the payment in the dashboard.'),
             'cancellation_failed' => __('The subscriptions of this customer could not be cancelled automatically, and the customer may go on paying for a workspace that is gone or that they no longer own. Cancel them in the dashboard.'),
-            'customer_lost' => __('A workspace has a subscription on this instance, but Stripe does not know its customer (were the Stripe keys changed, or switched between the test and the live mode?). Nothing was changed: check STRIPE_SECRET before anyone pays again.'),
+            'customer_lost' => __('A workspace has a subscription on this instance, but Stripe does not know its customer (were the Stripe keys changed, or switched between the test and the live mode?). Nothing was changed: check STRIPE_SECRET before anyone pays again. If you checked in the dashboard that the customer really was deleted, forget it with: php artisan inventaire:billing-forget WORKSPACE (the workspace reference is given below).'),
             'double_subscription' => __('This customer has more than one subscription in play (a double checkout). The newest one is followed: cancel the other in the dashboard and refund it.'),
             default => '',
         };

@@ -43,6 +43,9 @@ final class FakeStripe
     /** @var array<string, array<string, mixed>> The Checkout sessions that were created, by id, with the parameters they were created with. */
     public array $sessions = [];
 
+    /** @var array<string, true> The customers that were deleted at Stripe ({@see self::loseCustomer()}), by id. */
+    public array $lostCustomers = [];
+
     /** @var array<string, array<string, mixed>> The portal sessions that were created, by id, with the parameters they were created with. */
     public array $portals = [];
 
@@ -185,6 +188,20 @@ final class FakeStripe
             'metadata' => $workspaceUlid === null ? [] : ['workspace' => $workspaceUlid],
             'preferred_locales' => [],
         ];
+
+        return $this;
+    }
+
+    /**
+     * Deletes a customer at Stripe, as it is when the keys of the instance are those of another mode or account: every call that names it
+     * (updating it, opening a session or the portal for it, listing its subscriptions or its Checkout sessions) answers `resource_missing`.
+     * Without this the fake lists no subscription for a customer it does not know, which is what a customer that exists without
+     * subscriptions looks like.
+     */
+    public function loseCustomer(string $id): self
+    {
+        unset($this->customers[$id]);
+        $this->lostCustomers[$id] = true;
 
         return $this;
     }
@@ -492,7 +509,13 @@ final class FakeStripe
     {
         $query = [];
         parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
-        $subscriptions = $this->subscriptionsOf((string) ($query['customer'] ?? ''));
+        $customer = (string) ($query['customer'] ?? '');
+
+        if (isset($this->lostCustomers[$customer])) {
+            return $this->missing('customer', $customer);
+        }
+
+        $subscriptions = $this->subscriptionsOf($customer);
 
         if (($query['status'] ?? null) !== 'all') {
             $wanted = $query['status'] ?? null;
@@ -514,6 +537,11 @@ final class FakeStripe
     {
         $query = [];
         parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        if (isset($this->lostCustomers[(string) ($query['customer'] ?? '')])) {
+            return $this->missing('customer', (string) $query['customer']);
+        }
+
         $sessions = array_filter(
             array_reverse(array_values($this->sessions)),
             fn (array $session): bool => ($session['customer'] ?? null) === ($query['customer'] ?? null) && (! isset($query['status']) || $session['status'] === $query['status']),

@@ -19,9 +19,10 @@ use Throwable;
  * every day.
  *
  * One mail for each administrator, in their language, queued like any mail that holds no secret. A problem the application finds again
- * and again (a synchronisation that runs every few hours) is told once a day for each customer and kind of problem: the day is counted from
- * the moment a mail was queued, and only then, so that a queue that was down does not hide the problem for a day
- * ({@see self::reportProblem()}).
+ * and again (a synchronisation that runs every few hours) is told once a day for each customer and kind of problem: the day is claimed
+ * with one atomic write of the cache before the mails are queued (two requests that find the same problem at the same moment tell it
+ * once), and given back when nobody could be told, so that a queue that was down, or an instance with no administrator yet, does not hide
+ * the problem for a day ({@see self::tellProblem()}).
  */
 final class BillingAlerts
 {
@@ -33,22 +34,30 @@ final class BillingAlerts
      * was sent to.
      *
      * @param  Closure(): BillingAlertMail  $make
+     * @return int How many administrators were told; 0 when the instance has none.
      *
      * @throws Throwable When a mail could not be queued: administrators before it were told, those after it were not.
      */
-    public function toAdministrators(Closure $make): void
+    public function toAdministrators(Closure $make): int
     {
+        $told = 0;
+
         // A plain read: an administrator who is promoted or demoted at this very moment is not a reason to lock the accounts.
         foreach (User::query()->where('is_admin', true)->orderBy('id')->get(['id', 'email', 'locale']) as $administrator) {
             Mail::to($administrator->email)
                 ->locale($administrator->locale ?? config()->string('app.default_locale'))
                 ->queue($make());
+            $told++;
         }
+
+        return $told;
     }
 
     /**
-     * Tells the administrators of a problem with a customer, at most once a day for that customer and kind of problem. The mark that it
-     * was told is written after the mails were queued, so that a failure to queue is told again next time.
+     * Tells the administrators of a problem with a customer, at most once a day for that customer and kind of problem. The day is claimed
+     * first, with one atomic write of the cache, so that two requests finding the problem together tell it once; the claim is given back
+     * when the mails could not be queued, and when there was nobody to tell (an instance with no administrator: the problem is written in
+     * the log as an error, and told as soon as there is one).
      *
      * @param  string  $kind  One of {@see BillingAlertMail::PROBLEMS}.
      * @param  string  $customerId  The customer at Stripe (`cus_…`).
@@ -61,14 +70,30 @@ final class BillingAlerts
     {
         $key = 'billing-alert:'.$kind.':'.$customerId;
 
-        if (Cache::has($key)) {
+        // Atomic: of two requests that find the problem at the same moment, only one gets to tell it.
+        if (! Cache::add($key, true, now()->addHours(self::REPEAT_AFTER_HOURS))) {
             return;
         }
 
         $livemode ??= Billing::livemode();
-        $this->toAdministrators(fn (): BillingAlertMail => BillingAlertMail::problem($kind, $customerId, $workspaceUlid, $livemode));
 
-        Cache::add($key, true, now()->addHours(self::REPEAT_AFTER_HOURS));
+        try {
+            $told = $this->toAdministrators(fn (): BillingAlertMail => BillingAlertMail::problem($kind, $customerId, $workspaceUlid, $livemode));
+        } catch (Throwable $exception) {
+            // Nobody may have been told: the next time the problem is found, it is told again.
+            Cache::forget($key);
+
+            throw $exception;
+        }
+
+        if ($told === 0) {
+            Cache::forget($key);
+            Log::error('A problem with a Stripe customer could not be told to anybody: the instance has no administrator (inventaire:make-admin creates one).', [
+                'kind' => $kind,
+                'customer' => $customerId,
+                'workspace' => $workspaceUlid,
+            ]);
+        }
     }
 
     /**

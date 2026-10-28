@@ -18,9 +18,11 @@ use Illuminate\Support\Facades\Log;
  * {@see BillingAccount} of the workspace, together with the owner who started that checkout (the **payer**).
  *
  * Stripe is never called inside a transaction (the locks would be held for as long as it takes to answer): the customer is created
- * first, and stored afterwards under the lock of the workspace. A request that finds another one stored meanwhile (two owners clicking
- * at once) keeps the stored one; the idempotency key of the creation is the same for two identical requests, so they get the same
- * customer from Stripe and nothing is left behind.
+ * first, and stored afterwards under the locks of the owner who pays (the row points to their account) and of the workspace, in that
+ * order ({@see Locks}). A request that finds another one stored meanwhile keeps the stored one when it is its own owner's (the same person
+ * clicking twice: the idempotency key of the creation is the same for two identical requests, so they get the same customer from Stripe
+ * and nothing is left behind); when the stored one is another owner's (two owners clicking at once) the request is refused like an owner
+ * who finds the customer of the payer before them ({@see PreviousOwnerSubscriptionException}).
  *
  * **The customer follows the payer, not the workspace.** It holds the email, the name, the invoices and the cards of the person who pays.
  * When the workspace changes hands the new owner is not the payer, and is never given that customer (their receipts would go to the old
@@ -71,8 +73,9 @@ final class BillingCustomers
      *
      * @throws StripeException When Stripe cannot be reached or refuses (also when the customer is not at Stripe and cannot be replaced,
      *                         see {@see self::replaceLost()}).
-     * @throws PreviousOwnerSubscriptionException When the owner is not the payer and the subscription of the payer is still in play.
-     * @throws ModelNotFoundException When the workspace was deleted meanwhile.
+     * @throws PreviousOwnerSubscriptionException When the owner is not the payer and the subscription of the payer is still in play, or when
+     *                                            another owner stored (or replaced) the customer first.
+     * @throws ModelNotFoundException When the workspace, or the owner, was deleted meanwhile.
      */
     public function ensure(Workspace $workspace, User $owner, string $locale): BillingAccount
     {
@@ -141,8 +144,10 @@ final class BillingCustomers
 
     /**
      * Creates the customer at Stripe. The idempotency key is the same for two identical requests (two owners clicking at once get the same
-     * customer) and, for a customer that replaces another, is made of the workspace and the customer it replaces only (a key is remembered
-     * by Stripe for a day: it must not hand back the customer that is gone, and it holds no email, which is the address of a person).
+     * customer) and changes with what is sent (the email, the name and the locale, through a short hash: Stripe refuses a key reused with
+     * other parameters, `idempotency_error`, which would lock a person out for a day after they changed their name). For a customer that
+     * replaces another it also holds the customer it replaces (a key is remembered by Stripe for a day: it must not hand back the customer
+     * that is gone). It holds no email, which is the address of a person, only hashes.
      *
      * @param  string|null  $replaces  The id of the customer that is replaced, if any.
      *
@@ -150,15 +155,10 @@ final class BillingCustomers
      */
     private function createCustomer(Workspace $workspace, User $owner, string $locale, ?string $replaces): string
     {
-        $fingerprint = $replaces ?? implode("\n", [$owner->email, $workspace->name, $locale]);
+        $sent = substr(hash('sha256', implode("\n", [$owner->email, $workspace->name, $locale])), 0, 16);
+        $key = 'customer-'.$workspace->ulid.'-'.($replaces === null ? '' : substr(hash('sha256', $replaces), 0, 16).'-').$sent;
 
-        return $this->client->createCustomer(
-            $owner->email,
-            $workspace->name,
-            $workspace->ulid,
-            $locale,
-            'customer-'.$workspace->ulid.'-'.substr(hash('sha256', $fingerprint), 0, 16),
-        );
+        return $this->client->createCustomer($owner->email, $workspace->name, $workspace->ulid, $locale, $key);
     }
 
     /**
@@ -199,7 +199,8 @@ final class BillingCustomers
      * @return BillingAccount|null The account as stored; null when it has a subscription in play under the lock (nothing was changed).
      *
      * @throws StripeException
-     * @throws ModelNotFoundException When the workspace is gone.
+     * @throws PreviousOwnerSubscriptionException When the customer was replaced meanwhile by a request of another owner.
+     * @throws ModelNotFoundException When the workspace, or the owner, is gone.
      */
     private function swap(Workspace $workspace, BillingAccount $account, User $owner, string $locale, string $reason): ?BillingAccount
     {
@@ -207,6 +208,9 @@ final class BillingCustomers
         $customerId = $this->createCustomer($workspace, $owner, $locale, $gone);
 
         return DeadlockRetries::run(fn (): ?BillingAccount => $this->db->transaction(function () use ($workspace, $account, $owner, $gone, $customerId, $reason): ?BillingAccount {
+            // The person who pays first (the account is a foreign key of the row: see Locks::author()), then the workspace.
+            $this->locks->author($owner);
+
             if ($this->locks->workspaces([$workspace->getKey()])->isEmpty()) {
                 throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
             }
@@ -218,7 +222,8 @@ final class BillingCustomers
             }
 
             if ($stored->stripe_customer_id !== $gone) {
-                return $stored;
+                // Another request replaced the customer first: it is kept, but it is the customer of whoever won, who may not be this owner.
+                return $this->payerOrRefuse($stored, $owner);
             }
 
             // A subscription that was written meanwhile (a synchronisation, a webhook) is not forgotten.
@@ -251,23 +256,49 @@ final class BillingCustomers
 
     /**
      * Stores the customer that was just created, under the lock of the workspace, with the owner who creates it as the payer; keeps the
-     * one another request stored first.
+     * one another request stored first, unless that request was another owner's: the customer is then theirs, and this owner is refused
+     * ({@see PreviousOwnerSubscriptionException}, `409`) rather than handed the customer of somebody else.
      *
-     * @throws ModelNotFoundException When the workspace is gone.
+     * @throws PreviousOwnerSubscriptionException When another owner stored a customer first.
+     * @throws ModelNotFoundException When the workspace, or the owner, is gone.
      */
     private function store(Workspace $workspace, User $owner, string $customerId): BillingAccount
     {
         return DeadlockRetries::run(fn (): BillingAccount => $this->db->transaction(function () use ($workspace, $owner, $customerId): BillingAccount {
+            // The person who pays first (the account is a foreign key of the row: see Locks::author()), then the workspace.
+            $this->locks->author($owner);
+
             if ($this->locks->workspaces([$workspace->getKey()])->isEmpty()) {
                 throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
             }
 
             // A plain read after the lock: it sees what a request that held the lock before this one committed.
-            return $this->find($workspace) ?? BillingAccount::query()->create([
+            $stored = $this->find($workspace);
+
+            if ($stored !== null) {
+                return $this->payerOrRefuse($stored, $owner);
+            }
+
+            return BillingAccount::query()->create([
                 'workspace_id' => $workspace->getKey(),
                 'stripe_customer_id' => $customerId,
                 'payer_id' => $owner->getKey(),
             ]);
         }));
+    }
+
+    /**
+     * The account another request stored (or replaced) first, when the owner is the payer of it; otherwise it is the customer of another
+     * owner, and this one is refused.
+     *
+     * @throws PreviousOwnerSubscriptionException
+     */
+    private function payerOrRefuse(BillingAccount $stored, User $owner): BillingAccount
+    {
+        if (! $this->isPayer($stored, $owner)) {
+            throw new PreviousOwnerSubscriptionException($stored);
+        }
+
+        return $stored;
     }
 }

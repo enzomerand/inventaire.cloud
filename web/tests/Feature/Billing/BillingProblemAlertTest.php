@@ -38,8 +38,9 @@ describe('the mail of a problem', function (): void {
             ->and($mail->render())->not->toContain('Stripe event:')->not->toContain('Amount:')->not->toContain('Stripe reference:');
     })->with([
         'a payment for a workspace that is gone' => ['checkout_orphaned', 'A payment was made for a workspace that no longer exists', 'refund the payment'],
+        'a payment for a workspace this instance does not know' => ['checkout_unmarked', 'A payment was made for a workspace this instance does not know', 'Nothing was cancelled'],
         'a cancellation that failed' => ['cancellation_failed', 'A subscription could not be cancelled', 'Cancel them in the dashboard'],
-        'a customer Stripe does not know' => ['customer_lost', 'Stripe does not know the customer of a workspace', 'check STRIPE_SECRET'],
+        'a customer Stripe does not know' => ['customer_lost', 'Stripe does not know the customer of a workspace', 'php artisan inventaire:billing-forget WORKSPACE'],
         'a double subscription' => ['double_subscription', 'A customer has two subscriptions', 'cancel the other in the dashboard and refund it'],
     ]);
 
@@ -52,10 +53,20 @@ describe('the mail of a problem', function (): void {
             ->toContain('Quelque chose à propos des paiements demande votre attention');
     })->with([
         ['checkout_orphaned', "Un paiement a été effectué pour un espace de travail qui n'existe plus", 'remboursez le paiement'],
+        ['checkout_unmarked', 'Un paiement a été effectué pour un espace de travail que cette instance ne connaît pas', "Rien n'a été résilié"],
         ['cancellation_failed', "Un abonnement n'a pas pu être résilié", 'Résiliez-les dans le tableau de bord'],
-        ['customer_lost', "Stripe ne connaît pas le client d'un espace de travail", 'vérifiez STRIPE_SECRET'],
+        ['customer_lost', "Stripe ne connaît pas le client d'un espace de travail", 'php artisan inventaire:billing-forget ESPACE'],
         ['double_subscription', 'Un client a deux abonnements', 'résiliez l\'autre dans le tableau de bord et remboursez-le'],
     ]);
+
+    it('tells of a customer Stripe does not know to check the key first, and then how to forget the customer', function (): void {
+        $mail = BillingAlertMail::problem('customer_lost', 'cus_123', '01jworkspace0000000000000x', true);
+
+        $mail->assertSeeInText('Nothing was changed: check STRIPE_SECRET before anyone pays again.')
+            ->assertSeeInText('If you checked in the dashboard that the customer really was deleted, forget it with: php artisan inventaire:billing-forget WORKSPACE')
+            ->assertSeeInText('Workspace: 01jworkspace0000000000000x');
+        expect(html_entity_decode($mail->locale('fr')->render(), ENT_QUOTES))->toContain('vérifiez STRIPE_SECRET avant que quiconque paie à nouveau.');
+    });
 
     it('leaves out the workspace when it is not known, and says it comes from the test mode of Stripe', function (): void {
         $mail = BillingAlertMail::problem('cancellation_failed', 'cus_123', null, false);
@@ -150,9 +161,58 @@ describe('telling the administrators', function (): void {
         Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'administrators could not be told') && $context['kind'] === 'customer_lost' && $context['customer'] === 'cus_1')->once();
     });
 
-    it('has nobody to tell on an instance without administrator, and says nothing of it', function (): void {
-        app(BillingAlerts::class)->reportProblem('customer_lost', 'cus_1', null);
+    it('has nobody to tell on an instance without administrator: it writes an error in the log and does not mark the problem as told', function (): void {
+        Log::spy();
+
+        app(BillingAlerts::class)->reportProblem('customer_lost', 'cus_1', '01jws');
 
         Mail::assertNothingQueued();
+        expect(Cache::has('billing-alert:customer_lost:cus_1'))->toBeFalse();
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'no administrator')
+            && $context === ['kind' => 'customer_lost', 'customer' => 'cus_1', 'workspace' => '01jws'])->once();
+    });
+
+    it('tells the problem as soon as there is an administrator, though it was found before', function (): void {
+        Log::spy();
+        $alerts = app(BillingAlerts::class);
+
+        $alerts->tellProblem('customer_lost', 'cus_1', null);
+        $alerts->tellProblem('customer_lost', 'cus_1', null);
+        Mail::assertNothingQueued();
+        Log::shouldHaveReceived('error')->twice();
+
+        User::factory()->admin()->create();
+        $alerts->tellProblem('customer_lost', 'cus_1', null);
+        $alerts->tellProblem('customer_lost', 'cus_1', null);
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+    });
+
+    it('claims the day before the mails are queued, so that a problem found twice at the same moment is told once', function (): void {
+        User::factory()->admin()->create();
+        $alerts = app(BillingAlerts::class);
+        // Another request claimed it between this one's look and its mails: with a read first and a write after, both would tell it.
+        Cache::shouldReceive('add')->once()->with('billing-alert:customer_lost:cus_1', true, Mockery::any())->andReturn(false);
+        Cache::shouldReceive('has')->never();
+
+        $alerts->tellProblem('customer_lost', 'cus_1', null);
+
+        Mail::assertNothingQueued();
+    });
+
+    it('gives the day back when the mails could not be queued: the next time the problem is found, it is told', function (): void {
+        User::factory()->admin()->create();
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('The queue is down.'));
+        $alerts = app(BillingAlerts::class);
+
+        expect(fn () => $alerts->tellProblem('customer_lost', 'cus_1', null))->toThrow(RuntimeException::class);
+        expect(Cache::has('billing-alert:customer_lost:cus_1'))->toBeFalse();
+
+        app()->forgetInstance('mail.manager');
+        Mail::clearResolvedInstance('mail.manager');
+        Mail::fake();
+        $alerts->tellProblem('customer_lost', 'cus_1', null);
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
     });
 });
