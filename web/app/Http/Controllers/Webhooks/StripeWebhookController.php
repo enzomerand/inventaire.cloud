@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Webhooks;
 
 use App\Billing\Billing;
+use App\Billing\BillingAlerts;
 use App\Billing\BillingSync;
 use App\Billing\WebhookSignature;
 use App\Http\Controllers\Controller;
 use App\Http\Responses\TooManyRequests;
+use App\Jobs\CancelStripeSubscription;
 use App\Jobs\SyncBillingAccount;
 use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
-use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -28,9 +30,11 @@ use Throwable;
  * **What it says is never believed.** The call only wakes up a synchronisation: the customer an event is about is looked up among the
  * accounts, and a {@see SyncBillingAccount} job reads the subscriptions of that customer again through the API ({@see BillingSync}),
  * which is where the plan of a workspace comes from. So the worst a forged call (it needs the signing secret) can do is make the server
- * read a customer it already follows. The two events that warn of a risk (a dispute, an early fraud warning) are told to the
- * administrators of the instance by mail, with a link to the dashboard of Stripe where they are answered; nothing else is done with them.
- * The mode of the event (`livemode`) is not looked at: a test event on a live instance changes nothing, since the API is read again.
+ * read a customer it already follows (the one exception, a payment for a workspace that is gone, is described below). The two events
+ * that warn of a risk (a dispute, an early fraud warning) are told to the administrators of the instance by mail, with a link to the
+ * dashboard of Stripe where they are answered; nothing else is done with them. The mode of the event (`livemode`) does not decide what is
+ * done: a test event on a live instance changes nothing, since the API is read again (it only picks the side of the dashboard a mail
+ * links to).
  *
  * The call is authenticated by the signature Stripe puts in the `Stripe-Signature` header, made with the signing secret of the endpoint
  * (`STRIPE_WEBHOOK_SECRET`) over the exact body and a timestamp ({@see WebhookSignature}). The route has no session and no CSRF check.
@@ -46,10 +50,21 @@ use Throwable;
  * - `429` when an address that does authenticate makes more than {@see self::CALLS_PER_MINUTE} calls in a minute: a pace nothing but a
  *   loop reaches;
  * - `400` with the code `invalid_body` when the signed body is not a JSON object;
- * - `200 {"received": true}` otherwise, and quickly: for an event that is not one of those followed, a customer nobody knows, even a queue
- *   that is down when a synchronisation was to be queued (logged; the schedule catches up). The one exception is the alert of a risk
- *   that could not be queued: it is answered with a `500`, so that Stripe sends the event again, since nothing else would tell the
- *   administrators. Stripe sends the event again for any answer that is not a success, for days.
+ * - `200 {"received": true}` otherwise, and quickly: for an event that is not one of those followed, for a customer nobody knows. The
+ *   exceptions are a synchronisation or a cancellation that could not be queued, and the alert of a risk (or of a payment for a deleted
+ *   workspace) that could not be queued: they are answered with a `500`, so that Stripe sends the event again, since the schedule would
+ *   only catch up on the first and nothing would tell the administrators of the others. Stripe sends the event again for any answer that
+ *   is not a success, for days.
+ *
+ * **A customer nobody knows** is usually a customer of the same Stripe account that is not a workspace of this instance (a test, another
+ * site): nothing is done. But a payment can reach the instance after the workspace it was made for was deleted (a Checkout page left
+ * open, paid after the deletion cancelled the subscriptions; sessions now expire within the half hour, and are expired when the
+ * subscriptions are cancelled, which leaves a short window). The session (`client_reference_id`) and the subscription (`metadata.workspace`)
+ * carry the ULID of the workspace they were opened for: when it names a workspace that no longer exists, the subscriptions of that
+ * customer are cancelled at once ({@see CancelStripeSubscription}), the error is written in the log and the administrators are told by
+ * mail, once a day for each customer, to refund the payment. No ULID, or a workspace that exists, is ignored: the ULID is only a trace
+ * here, never a way to find an account. This assumes the Stripe account is the instance's own: a customer of another site that carries
+ * the ULID of one of *its* workspaces looks the same.
  *
  * Stripe may send an event twice; the synchronisation is unique per account while it waits in the queue, and the mail of an alert is sent
  * once per event (the id of the event is remembered for a day). The one case where an administrator gets the same alert twice is a
@@ -84,8 +99,20 @@ final class StripeWebhookController extends Controller
         'charge.refunded',
     ];
 
+    /** The events that can tell of a payment for a workspace that is gone: the object of each carries the ULID of the workspace. */
+    private const PAYMENT_EVENTS = [
+        'checkout.session.completed',
+        'customer.subscription.created',
+        'customer.subscription.updated',
+    ];
+
     /** The shape of an id at Stripe (`cus_…`, `du_…`, `evt_…`): letters, digits and underscores. */
     private const ID_PATTERN = '/^[A-Za-z0-9_]{1,255}\z/';
+
+    /**
+     * Gets the way to tell the administrators.
+     */
+    public function __construct(private readonly BillingAlerts $alerts) {}
 
     /**
      * Receives an event.
@@ -170,7 +197,12 @@ final class StripeWebhookController extends Controller
      * Does what an event asks for: queues the synchronisation of the customer it is about, or tells the administrators of a risk. Any
      * other event is ignored.
      *
+     * Nothing is caught: a synchronisation, a cancellation or an alert that could not be queued is answered with a failure, and Stripe
+     * sends the event again.
+     *
      * @param  array<array-key, mixed>  $event
+     *
+     * @throws Throwable When a job or a mail could not be queued.
      */
     private function follow(array $event): void
     {
@@ -182,31 +214,32 @@ final class StripeWebhookController extends Controller
         }
 
         if (in_array($type, self::SYNC_EVENTS, true)) {
-            try {
-                $this->synchronise($type, $object);
-            } catch (Throwable $exception) {
-                // The answer does not depend on it: Stripe would only send the event again, and the schedule reads the subscriptions anyway.
-                Log::error('A webhook of Stripe could not be followed.', ['exception' => $exception]);
-            }
+            $this->synchronise($type, $object, ($event['livemode'] ?? true) !== false);
         } elseif (BillingAlertMail::handles($type)) {
-            // Not caught: an alert that could not be queued is answered with a failure, and Stripe sends the event again (nothing else would
-            // tell the administrators).
             $this->alert($type, $event, $object);
         }
     }
 
     /**
-     * Queues the synchronisation of the account of the customer an event is about, if the instance has one.
+     * Queues the synchronisation of the account of the customer an event is about, if the instance has one; for a customer it does not
+     * know, cancels what it bought if that was for a workspace that is gone ({@see self::cancelForDeletedWorkspace()}).
      *
      * @param  array<array-key, mixed>  $object  The object the event is about (a subscription, an invoice, a charge, a session).
+     * @param  bool  $livemode  Whether the event comes from the live mode of Stripe.
+     *
+     * @throws Throwable When the job or the mail could not be queued.
      */
-    private function synchronise(string $type, array $object): void
+    private function synchronise(string $type, array $object, bool $livemode): void
     {
         $customer = $this->shaped($object['customer'] ?? null);
         // The ids of Stripe are case-sensitive: the column has a binary collation on MySQL and MariaDB, so the match is exact there too.
         $account = $customer === null ? null : BillingAccount::query()->where('stripe_customer_id', $customer)->value('id');
 
         if ($account === null) {
+            if ($customer !== null && $this->cancelForDeletedWorkspace($type, $object, $customer, $livemode)) {
+                return;
+            }
+
             // A customer of the same Stripe account that is not a workspace of this instance (a test, another site): nothing to read.
             Log::info('An event of Stripe is about a customer this instance does not know: ignored.', ['type' => $type]);
 
@@ -214,6 +247,47 @@ final class StripeWebhookController extends Controller
         }
 
         SyncBillingAccount::dispatch((int) $account);
+    }
+
+    /**
+     * Cancels the subscriptions of a customer nobody knows when the event shows they were bought for a workspace that no longer exists: a
+     * payment that reached the instance after the deletion of the workspace. The session carries the ULID of the workspace as
+     * `client_reference_id`, the subscription as `metadata.workspace` (both set by {@see CheckoutParameters}). The cancellation is queued
+     * at once, the error is written in the log, and the administrators are told to refund the payment.
+     *
+     * @param  array<array-key, mixed>  $object  A Checkout session or a subscription.
+     * @return bool Whether it is such a payment.
+     *
+     * @throws Throwable When the job or the mail could not be queued.
+     */
+    private function cancelForDeletedWorkspace(string $type, array $object, string $customer, bool $livemode): bool
+    {
+        if (! in_array($type, self::PAYMENT_EVENTS, true)) {
+            return false;
+        }
+
+        $named = $type === 'checkout.session.completed' ? ($object['client_reference_id'] ?? null) : data_get($object, 'metadata.workspace');
+
+        if (! is_string($named) || ! Str::isUlid($named)) {
+            return false;
+        }
+
+        // Stored in lowercase (see the model); PostgreSQL compares exactly.
+        $ulid = strtolower($named);
+
+        if (Workspace::query()->where('ulid', $ulid)->exists()) {
+            return false;
+        }
+
+        Log::error('Stripe reports a payment for a workspace that no longer exists: its subscriptions are being cancelled, the payment is to be refunded.', [
+            'type' => $type,
+            'customer' => $customer,
+            'workspace' => $ulid,
+        ]);
+        CancelStripeSubscription::dispatch($customer, false, null, $ulid);
+        $this->alerts->tellProblem('checkout_orphaned', $customer, $ulid, $livemode);
+
+        return true;
     }
 
     /**
@@ -247,13 +321,8 @@ final class StripeWebhookController extends Controller
         $livemode = ($event['livemode'] ?? true) !== false;
 
         try {
-            // A plain read: an administrator who is promoted or demoted at this very moment is not a reason to lock the accounts.
-            foreach (User::query()->where('is_admin', true)->orderBy('id')->get(['id', 'email', 'locale']) as $administrator) {
-                // One mail for each, in their language: a mailable keeps the recipients it was sent to.
-                Mail::to($administrator->email)
-                    ->locale($administrator->locale ?? config()->string('app.default_locale'))
-                    ->queue(new BillingAlertMail($type, $objectId, $amount, $currency, $livemode));
-            }
+            // One mail for each, in their language: a mailable keeps the recipients it was sent to.
+            $this->alerts->toAdministrators(fn (): BillingAlertMail => new BillingAlertMail($type, $objectId, $amount, $currency, $livemode));
         } catch (Throwable $exception) {
             if ($told !== null) {
                 Cache::forget($told);

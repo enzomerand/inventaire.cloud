@@ -108,7 +108,7 @@
                         <p class="text-secondary mb-0" hidden :hidden="canManage">{{ __('Only the owner manages the subscription.') }}</p>
                     </div>
 
-                    <div class="card-footer" hidden :hidden="!canManage">
+                    <div class="card-footer" hidden :hidden="!actionsShown">
                         <button type="button" class="btn btn-primary" hidden :hidden="!upgradeShown" @click="upgrade" :disabled="!canUpgrade || busy">
                             <span class="spinner-border spinner-border-sm me-2" hidden :hidden="!busy" aria-hidden="true"></span>
                             <x-tabler-rocket aria-hidden="true" />

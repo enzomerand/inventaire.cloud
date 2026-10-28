@@ -6,11 +6,16 @@ use App\Billing\BillingSync;
 use App\Billing\Plan;
 use App\Billing\StripeException;
 use App\Billing\WorkspacePlan;
+use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
+use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 require_once __DIR__.'/../../Support/billing.php';
 
@@ -283,6 +288,83 @@ describe('which subscription is the workspace\'s', function (): void {
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'more than one subscription') && $context['subscriptions'] === 2)->once();
     });
 
+    it('tells the administrators of a double checkout, with the customer and the workspace, once a day for the customer', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create(['email' => 'admin@example.test', 'locale' => 'en']);
+        User::factory()->create(['email' => 'member@example.test']);
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'active');
+        $stripe->subscribe($account->stripe_customer_id, 'trialing', 'year');
+
+        billingSync($account);
+        billingSync($account);
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, function (BillingAlertMail $mail) use ($account): bool {
+            $html = $mail->render();
+
+            return $mail->hasTo('admin@example.test')
+                && $mail->eventType === 'double_subscription'
+                && $mail->objectId === $account->stripe_customer_id
+                && $mail->workspaceUlid === $account->workspace->ulid
+                && str_contains($html, $account->stripe_customer_id)
+                && str_contains($html, $account->workspace->ulid);
+        });
+
+        // The day after, the problem is still there and is told again.
+        $this->travel(25)->hours();
+        billingSync($account);
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+    });
+
+    it('tells it for each customer, and not for one subscription in play next to some that are over', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $double = billingAccountAt($stripe);
+        $other = billingAccountAt($stripe);
+        $single = billingAccountAt($stripe);
+        $stripe->subscribe($double->stripe_customer_id, 'active');
+        $stripe->subscribe($double->stripe_customer_id, 'active');
+        $stripe->subscribe($other->stripe_customer_id, 'past_due');
+        $stripe->subscribe($other->stripe_customer_id, 'unpaid');
+        $stripe->subscribe($single->stripe_customer_id, 'canceled');
+        $stripe->subscribe($single->stripe_customer_id, 'active');
+
+        billingSync($double);
+        billingSync($other);
+        billingSync($single);
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+        Mail::assertNotQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === $single->stripe_customer_id);
+    });
+
+    it('is not stopped by a mail that cannot be queued: the subscription is written, the failure is in the log and the next read tells again', function (): void {
+        Log::spy();
+        User::factory()->admin()->create();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'active');
+        $newest = $stripe->subscribe($account->stripe_customer_id, 'active');
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('The queue is down.'));
+
+        $synced = billingSync($account);
+
+        expect($synced->status)->toBe('active')->and($synced->stripe_subscription_id)->toBe($newest);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'administrators could not be told') && $context['kind'] === 'double_subscription')->once();
+        // Only set once the mail was queued.
+        expect(Cache::has('billing-alert:double_subscription:'.$account->stripe_customer_id))->toBeFalse();
+
+        app()->forgetInstance('mail.manager');
+        Mail::clearResolvedInstance('mail.manager');
+        Mail::fake();
+        billingSync($account);
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+    });
+
     it('does not warn for one subscription in play next to some that are over', function (): void {
         Log::spy();
         $stripe = billingOn();
@@ -434,6 +516,44 @@ describe('how it is written', function (): void {
             ->and($stored->stripe_subscription_id)->toBe('sub_newer')
             ->and($stored->synced_at?->equalTo($later))->toBeTrue()
             ->and($returned->status)->toBe('active');
+    });
+
+    it('orders two reads that began in the same second by their microseconds', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $id = $stripe->subscribe($account->stripe_customer_id, 'active');
+        $second = CarbonImmutable::parse('2026-07-01 10:00:00', 'UTC');
+
+        // A read begins 0.7 s into the second and sees the subscription active.
+        $this->travelTo($second->addMicroseconds(700_000));
+        billingSync($account);
+        $stripe->setStatus($id, 'canceled');
+
+        // A read that began earlier in the same second (0.2 s) is written after it: it saw less, and must not overwrite it.
+        $this->travelTo($second->addMicroseconds(200_000));
+        $returned = billingSync($account);
+
+        $stored = BillingAccount::query()->findOrFail($account->id);
+        expect($stored->status)->toBe('active')
+            ->and($returned->status)->toBe('active')
+            ->and($stored->synced_at?->format('Y-m-d H:i:s.u'))->toBe('2026-07-01 10:00:00.700000');
+
+        // One that began later (0.9 s) is written over it.
+        $this->travelTo($second->addMicroseconds(900_000));
+        billingSync($account);
+
+        expect(BillingAccount::query()->findOrFail($account->id)->status)->toBe('canceled')
+            ->and(BillingAccount::query()->findOrFail($account->id)->synced_at?->format('Y-m-d H:i:s.u'))->toBe('2026-07-01 10:00:00.900000');
+    });
+
+    it('keeps the microseconds of the read in the column, in UTC', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $this->travelTo(CarbonImmutable::parse('2026-07-01 10:00:00.123456', 'UTC'));
+
+        billingSync($account);
+
+        expect(storedDate('billing_accounts', 'synced_at'))->toStartWith('2026-07-01 10:00:00.123456');
     });
 
     it('writes over a read made a moment ago', function (): void {

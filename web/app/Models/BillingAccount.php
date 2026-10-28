@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Billing\WorkspacePlan;
+use App\Models\Casts\PreciseMoment;
 use Carbon\CarbonImmutable;
 use Database\Factories\BillingAccountFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,16 +22,18 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $workspace_id
  * @property string $stripe_customer_id
+ * @property int|null $payer_id The owner who started the checkout the customer belongs to (the one who pays); null when that person's account is gone.
  * @property string|null $stripe_subscription_id The subscription the columns below describe; null while the customer has none.
  * @property string|null $status Stripe's word for it (`active`, `trialing`, `past_due`, `canceled`...).
  * @property string|null $price_id
  * @property string|null $interval `month` or `year`.
  * @property CarbonImmutable|null $current_period_end The end of the period that is paid for, in UTC.
  * @property bool $cancel_at_period_end Whether the subscription ends by itself at the end of the period.
- * @property CarbonImmutable|null $synced_at When the columns above were last read from Stripe.
+ * @property CarbonImmutable|null $synced_at When the read of Stripe the columns above come from began, to the microsecond.
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Workspace $workspace
+ * @property-read User|null $payer
  */
 final class BillingAccount extends Model
 {
@@ -59,6 +62,7 @@ final class BillingAccount extends Model
     protected $fillable = [
         'workspace_id',
         'stripe_customer_id',
+        'payer_id',
         'stripe_subscription_id',
         'status',
         'price_id',
@@ -83,9 +87,10 @@ final class BillingAccount extends Model
     protected function casts(): array
     {
         return [
+            'payer_id' => 'integer',
             'current_period_end' => 'immutable_datetime',
             'cancel_at_period_end' => 'boolean',
-            'synced_at' => 'immutable_datetime',
+            'synced_at' => PreciseMoment::class,
         ];
     }
 
@@ -97,5 +102,16 @@ final class BillingAccount extends Model
     public function workspace(): BelongsTo
     {
         return $this->belongsTo(Workspace::class);
+    }
+
+    /**
+     * The owner who pays: the person who started the checkout the customer belongs to. Not the owner of the workspace now, when it changed
+     * hands since.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function payer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'payer_id');
     }
 }

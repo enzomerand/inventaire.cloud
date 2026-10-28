@@ -395,6 +395,10 @@ export const MESSAGES = {
         'Your payment is still being confirmed. The plan changes as soon as it is: reload this page in a moment.',
     'billing.unsettled':
         'A subscription of this workspace is waiting to be settled. Open the subscription management to settle it.',
+    'billing.previous_owner':
+        'The subscription of the previous owner of this workspace is still running. You can subscribe once it has ended.',
+    'billing.previous_owner_until':
+        'The subscription of the previous owner of this workspace runs until :date. You can subscribe once it has ended.',
     'billing.plan.free': 'Free',
     'billing.plan.pro': 'Pro',
     'billing.price.month': ':amount per month',
@@ -421,6 +425,8 @@ export const MESSAGES = {
     'billing.error.already_subscribed': 'This workspace already has a subscription.',
     'billing.error.subscription_pending':
         'This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.',
+    'billing.error.checkout_in_progress':
+        'A payment page is already being opened for this workspace. Try again in a moment.',
     'billing.error.no_account': 'This workspace has no subscription to manage yet.',
     'billing.error.interval': 'This billing period is not offered.',
 };

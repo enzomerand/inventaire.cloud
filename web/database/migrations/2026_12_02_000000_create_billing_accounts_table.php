@@ -16,6 +16,10 @@ use Illuminate\Support\Facades\Schema;
  * subscription (`active`, `trialing`, `past_due`, `canceled`...), null while the customer has none; `interval` is `month` or `year`;
  * `current_period_end` is read from the subscription item, in UTC.
  *
+ * `payer_id` is the person who started the checkout that created the customer (or that the customer was last replaced for): the owner who
+ * pays. When the workspace changes hands the new owner is not the payer, and must not be handed the customer (its email, its invoices) of
+ * the old one. The user is not a parent of the row, only a pointer: the column is emptied when the user is deleted.
+ *
  * The row hangs from the workspace (cascade), at the first level below it: the chain stays within the three levels MySQL (9.7 at the
  * time of writing) can cascade. Deleting a workspace does not cancel its subscription at Stripe: the application does, in a job. The three
  * identifiers of Stripe compare exactly, case included ({@see ExactColumns}).
@@ -33,6 +37,8 @@ return new class extends Migration
             $table->foreignId('workspace_id')->unique()->constrained()->cascadeOnDelete();
             // The identifiers of Stripe are case-sensitive: binary collation on MySQL and MariaDB (a lookup and a unique index compare exactly).
             ExactColumns::apply($table->string('stripe_customer_id'))->unique();
+            // The owner who pays for the customer; emptied (not cascaded) when that person's account is deleted.
+            $table->foreignId('payer_id')->nullable()->index()->constrained('users')->nullOnDelete();
             ExactColumns::apply($table->string('stripe_subscription_id'))->nullable()->index();
             $table->string('status', 32)->nullable();
             ExactColumns::apply($table->string('price_id'))->nullable();
@@ -41,7 +47,9 @@ return new class extends Migration
             // `ON UPDATE CURRENT_TIMESTAMP` to. The application sets them.
             $table->timestamp('current_period_end')->nullable();
             $table->boolean('cancel_at_period_end')->default(false);
-            $table->timestamp('synced_at')->nullable();
+            // With microseconds: `synced_at` is the moment a read of Stripe began, compared with that of another read that may have begun in
+            // the same second (see BillingSync).
+            $table->timestamp('synced_at', 6)->nullable();
             $table->timestamps();
         });
     }

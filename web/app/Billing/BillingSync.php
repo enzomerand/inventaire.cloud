@@ -7,6 +7,7 @@ namespace App\Billing;
 use App\Database\DeadlockRetries;
 use App\Jobs\SyncBillingAccount;
 use App\Models\BillingAccount;
+use App\Models\Workspace;
 use App\Workspaces\Locks;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\DatabaseManager;
@@ -23,23 +24,26 @@ use Illuminate\Support\Facades\Log;
  * ({@see WorkspacePlan::PRO_STATUSES}), otherwise the most recent among the others that are still in play ({@see SubscriptionStatus::CURRENT}),
  * otherwise the most recent one of any status (a canceled one is worth remembering: the page shows that the plan ended), otherwise
  * none. A newer subscription that is only `incomplete` (a checkout that was abandoned) does not hide an older one that is `active`. A customer that went through the checkout twice has two current subscriptions, which is written in the log as a warning: the
- * one chosen is the newest, and somebody has to refund the other. A customer that was deleted at Stripe has none (the answer is a
+ * one chosen is the newest, and somebody has to refund the other: the administrators are told by mail as well, once a day for each customer
+ * ({@see BillingAlerts}). A customer that was deleted at Stripe has none (the answer is a
  * `404`): the columns are cleared, and the workspace is Free.
  *
  * The call to Stripe is made outside any transaction. The columns are written under the lock of the workspace ({@see Locks}, the order
  * of its documentation), by the transaction run again when the database picks it as the loser of a deadlock ({@see DeadlockRetries}),
- * and only if no read made after this one was written meanwhile: `synced_at` is the moment a read of Stripe *began*, so that two
- * synchronisations that overlap (a job and the command, say) leave what the newest read saw, whichever is written last.
+ * and only if no read made after this one was written meanwhile: `synced_at` is the moment a read of Stripe *began*, to the microsecond
+ * (two reads that begin in the same second are ordered all the same), so that two synchronisations that overlap (a job and the command,
+ * say) leave what the newest read saw, whichever is written last.
  */
 final class BillingSync
 {
     /**
-     * Gets the client, the database and the locks.
+     * Gets the client, the database, the locks and the way to tell the administrators.
      */
     public function __construct(
         private readonly StripeClient $client,
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
+        private readonly BillingAlerts $alerts,
     ) {}
 
     /**
@@ -54,7 +58,7 @@ final class BillingSync
      */
     public function sync(BillingAccount $account): BillingAccount
     {
-        $readAt = CarbonImmutable::now()->startOfSecond();
+        $readAt = CarbonImmutable::now();
 
         try {
             $subscriptions = $this->client->subscriptionsOf($account->stripe_customer_id);
@@ -75,6 +79,11 @@ final class BillingSync
                 'billing_account' => $account->getKey(),
                 'subscriptions' => $current,
             ]);
+            $this->alerts->reportProblem(
+                'double_subscription',
+                $account->stripe_customer_id,
+                Workspace::query()->whereKey($account->workspace_id)->value('ulid'),
+            );
         }
 
         return $this->write($account, self::columns($chosen), $readAt);

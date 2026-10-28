@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use App\Installer\ApplicationTables;
 use App\Models\BillingAccount;
+use App\Models\User;
 use App\Models\Workspace;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -31,7 +33,7 @@ function rawBillingAccount(int $workspaceId, array $attributes = []): void
 describe('the table of billing accounts', function (): void {
     it('has the columns the application relies on, and is one of the tables the installer knows', function (): void {
         expect(Schema::getColumnListing('billing_accounts'))
-            ->toEqualCanonicalizing(['id', 'workspace_id', 'stripe_customer_id', 'stripe_subscription_id', 'status', 'price_id', 'interval', 'current_period_end', 'cancel_at_period_end', 'synced_at', 'created_at', 'updated_at'])
+            ->toEqualCanonicalizing(['id', 'workspace_id', 'stripe_customer_id', 'payer_id', 'stripe_subscription_id', 'status', 'price_id', 'interval', 'current_period_end', 'cancel_at_period_end', 'synced_at', 'created_at', 'updated_at'])
             ->and(ApplicationTables::owns('billing_accounts'))->toBeTrue();
     });
 
@@ -130,11 +132,44 @@ describe('the table of billing accounts', function (): void {
         $account = BillingAccount::factory()->subscribed()->create(['current_period_end' => now()->addDays(30)]);
 
         expect(storedDate('billing_accounts', 'current_period_end'))->toBe('2026-07-31 10:00:00')
-            ->and(storedDate('billing_accounts', 'synced_at'))->toBe('2026-07-01 10:00:00')
+            // With a fraction of a second that is zero, which some engines write out and others leave off.
+            ->and(storedDate('billing_accounts', 'synced_at'))->toStartWith('2026-07-01 10:00:00')
             ->and($account->fresh()?->current_period_end)->toBeInstanceOf(DateTimeImmutable::class)
             ->and($account->fresh()?->current_period_end?->toIso8601String())->toBe('2026-07-31T10:00:00+00:00')
             ->and($account->fresh()?->synced_at)->toBeInstanceOf(DateTimeImmutable::class);
     });
+
+    it('keeps the microseconds of synced_at, which the framework\'s date format would drop', function (): void {
+        $account = BillingAccount::factory()->create(['synced_at' => CarbonImmutable::parse('2026-07-01 10:00:00.654321', 'UTC')]);
+
+        expect(storedDate('billing_accounts', 'synced_at'))->toStartWith('2026-07-01 10:00:00.654321')
+            ->and($account->fresh()?->synced_at?->format('Y-m-d H:i:s.u'))->toBe('2026-07-01 10:00:00.654321')
+            ->and($account->fresh()?->synced_at?->getTimezone()->getName())->toBe('UTC');
+
+        $account->forceFill(['synced_at' => null])->save();
+
+        expect($account->fresh()?->synced_at)->toBeNull();
+    });
+
+    it('knows who pays: the user of the owner who started the checkout, a pointer that is emptied with the user', function (): void {
+        $payer = User::factory()->create();
+        $account = BillingAccount::factory()->paidBy($payer)->create();
+
+        expect($account->fresh()?->payer_id)->toBe($payer->id)
+            ->and($account->payer->is($payer))->toBeTrue()
+            ->and(Schema::hasIndex('billing_accounts', ['payer_id']))->toBeTrue()
+            ->and(BillingAccount::factory()->create()->payer_id)->toBeNull();
+
+        // The account of the payer is deleted: the workspace stays with its customer, whose payer is not known any more.
+        DB::table('users')->where('id', $payer->id)->delete();
+
+        expect(BillingAccount::query()->whereKey($account->id)->exists())->toBeTrue()
+            ->and($account->fresh()?->payer_id)->toBeNull();
+    });
+
+    it('refuses a payer that is not a user', function (): void {
+        rawBillingAccount(Workspace::factory()->create()->id, ['payer_id' => User::factory()->create()->id + 1000]);
+    })->throws(QueryException::class);
 
     it('holds the longest id Stripe may give', function (): void {
         rawBillingAccount(Workspace::factory()->create()->id, ['stripe_customer_id' => 'cus_'.str_repeat('a', 251), 'stripe_subscription_id' => 'sub_'.str_repeat('b', 251)]);

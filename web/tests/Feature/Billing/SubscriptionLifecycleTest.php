@@ -185,6 +185,20 @@ describe('changing the owner of a workspace', function (): void {
         expect(billingCancellations())->toBe([[$customer, true, $accountId]]);
     });
 
+    it('tells the job the workspace, for the mail to the administrators if it cannot cancel', function (): void {
+        $team = inventoryTeam();
+        $workspace = $team['workspace'];
+        $deleted = app(Workspaces::class)->create(inventoryPerson(), 'Gone');
+        billingSubscribe($workspace);
+        billingSubscribe($deleted);
+
+        app(Members::class)->transferOwnership($team['owner'], $workspace, $team['editor']);
+        $deleted->delete();
+
+        $ulids = Queue::pushed(CancelStripeSubscription::class)->mapWithKeys(fn (CancelStripeSubscription $job): array => [$job->atPeriodEnd ? 'handed over' : 'deleted' => $job->workspaceUlid])->all();
+        expect($ulids)->toBe(['handed over' => $workspace->ulid, 'deleted' => $deleted->ulid]);
+    });
+
     it('queues it whatever the account recorded of the subscription: the job asks Stripe which are not over', function (?string $status): void {
         $team = inventoryTeam();
         $customer = $status === null ? billingCustomerOnly($team['workspace']) : billingSubscribe($team['workspace'], $status);

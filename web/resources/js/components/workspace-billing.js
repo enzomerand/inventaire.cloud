@@ -9,7 +9,13 @@
  * Stripe brings the person back to this page with `?checkout=done`. That address proves nothing, so an owner's page asks the API to read
  * the subscription (the plan changes only when it is read from Stripe), then reads the overview twice more, a few seconds apart, until the
  * plan is Pro. Nothing is waited for when the instance sells no plan, when the person is not an owner, or when the overview could not be
- * read; the parameter is taken off the address whatever came out of it, so that a reload does not start it again.
+ * read. The parameter is taken off the address once the overview was read, whatever came out of the wait, so that a reload does not start
+ * it again; while the overview could not be read it stays, so that a reload (the person's way to try again) still knows the person came
+ * back from a payment.
+ *
+ * A workspace that changed hands while the owner before it still pays is not sold a second subscription, nor handed the customer of the
+ * old owner: the API refuses the new owner (`previous_owner_subscription`, with the date the subscription ends when it does). The page
+ * then says so and offers neither button; it learns it from that refusal, as the overview does not carry it.
  *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; a refusal the API explains with a code
  * is told in words of our own, because the helper trusts the message of a response only for a validation error.
@@ -49,6 +55,7 @@ const MESSAGE_KEYS = {
     billing_disabled: 'billing.error.disabled',
     already_subscribed: 'billing.error.already_subscribed',
     subscription_pending: 'billing.error.subscription_pending',
+    checkout_in_progress: 'billing.error.checkout_in_progress',
     no_billing_account: 'billing.error.no_account',
     interval_not_offered: 'billing.error.interval',
 };
@@ -126,6 +133,14 @@ export default function workspaceBilling() {
         /** True when the plan did not change in the time the page waits: the person is told to come back. */
         stillPending: false,
 
+        /**
+         * Set once the API refused the owner because the owner before still has a subscription: the date it ends at (ISO 8601, in UTC) or ''
+         * when it is not known. Null while nothing said so.
+         *
+         * @type {string | null}
+         */
+        previousOwnerEndsAt: null,
+
         /** How often the person pays, as chosen in the form: `month` or `year`. */
         interval: 'month',
 
@@ -183,22 +198,57 @@ export default function workspaceBilling() {
             return !this.isPro && UNSETTLED_STATUSES.includes(this.billing?.status ?? '');
         },
 
+        /** Whether the subscription of the owner before is still running, which the API said by refusing this owner. */
+        get blockedByPreviousOwner() {
+            return this.previousOwnerEndsAt !== null;
+        },
+
         /**
-         * Whether the form that buys Pro is offered: an owner, a workspace that is not Pro, no subscription waiting to be settled, and no
-         * payment being confirmed or still waited for (the one the person just made would be paid twice).
+         * Whether the form that buys Pro is offered: an owner, a workspace that is not Pro, no subscription waiting to be settled, no
+         * subscription of the owner before, and no payment being confirmed or still waited for (the one the person just made would be paid
+         * twice).
          */
         get canUpgrade() {
-            return this.canManage && !this.isPro && !this.confirming && !this.stillPending && !this.unsettled;
+            return (
+                this.canManage &&
+                !this.isPro &&
+                !this.confirming &&
+                !this.stillPending &&
+                !this.unsettled &&
+                !this.blockedByPreviousOwner
+            );
         },
 
-        /** Whether the button that buys Pro is on the page: not for a workspace that is on Pro or that has a subscription to settle. */
+        /**
+         * Whether the button that buys Pro is on the page: not for a workspace that is on Pro, that has a subscription to settle, or whose
+         * owner before still pays.
+         */
         get upgradeShown() {
-            return !this.isPro && !this.unsettled;
+            return !this.isPro && !this.unsettled && !this.blockedByPreviousOwner;
         },
 
-        /** Whether the customer portal is offered: the workspace is on Pro, or has a subscription to settle there. */
+        /**
+         * Whether the customer portal is offered: the workspace is on Pro, or has a subscription to settle there (not to an owner who is
+         * refused it because the owner before still pays).
+         */
         get canOpenPortal() {
-            return this.isPro || this.unsettled;
+            return (this.isPro || this.unsettled) && !this.blockedByPreviousOwner;
+        },
+
+        /** Whether the card has a button to show: an owner who is offered at least one of the two. */
+        get actionsShown() {
+            return this.canManage && (this.upgradeShown || this.canOpenPortal);
+        },
+
+        /** What the page says of the subscription of the owner before, with the date it ends when it is known ("" when it was not refused). */
+        get previousOwnerText() {
+            if (this.previousOwnerEndsAt === null) {
+                return '';
+            }
+
+            const date = dateText(this.previousOwnerEndsAt);
+
+            return date === '' ? t('billing.previous_owner') : t('billing.previous_owner_until', { date });
         },
 
         /** Whether a yearly Price is offered. */
@@ -280,6 +330,10 @@ export default function workspaceBilling() {
                 return t('billing.still_pending');
             }
 
+            if (this.canManage && this.blockedByPreviousOwner) {
+                return this.previousOwnerText;
+            }
+
             return this.canManage && this.unsettled ? t('billing.unsettled') : '';
         },
 
@@ -352,9 +406,12 @@ export default function workspaceBilling() {
                     await this.confirmPayment();
                 }
             } finally {
-                // Whatever came of it (an overview that could not be read, a person who is not an owner, an instance that sells no plan,
-                // a failure): a reload must not start it again.
-                this.dropCheckoutParameter();
+                // Once the overview was read, whatever came of the wait (a person who is not an owner, an instance that sells no plan,
+                // a failure): a reload must not start it again. Not while it could not be read: the reload is how the person tries
+                // again, and it must still know the person came back from a payment.
+                if (this.billing !== null) {
+                    this.dropCheckoutParameter();
+                }
             }
         },
 
@@ -570,6 +627,19 @@ export default function workspaceBilling() {
 
             if (known && (error.status === 409 || error.status === 422)) {
                 void this.load();
+            }
+
+            // The owner before still pays: the new owner is told, and offered neither button (the overview does not say it).
+            if (error.status === 409 && error.code === 'previous_owner_subscription') {
+                const body = /** @type {{ ends_at?: unknown } | null} */ (error.body);
+
+                this.previousOwnerEndsAt = typeof body?.ends_at === 'string' ? body.ends_at : '';
+
+                if (!error.reported) {
+                    notify('danger', this.previousOwnerText);
+                }
+
+                return;
             }
 
             if (!error.reported) {

@@ -25,7 +25,8 @@ use WeakMap;
  * - **The workspace changes owner** (the owner handing it over, or the administrator deleting the account of an owner whose workspace
  *   others belong to). The subscriptions of the old payer's customer are set to end at the end of the period that is paid for: the
  *   workspace stays Pro until then, nobody is charged again, and the new owner subscribes on their own if they want to
- *   ({@see self::ownerChanged()}).
+ *   ({@see self::ownerChanged()}). The customer stays the one of the old payer: the new owner gets a customer of their own at their
+ *   first checkout, once that subscription is over ({@see BillingCustomers::startFresh()}).
  *
  * Both act on **the customer**, whenever the workspace has a billing account, and not on the subscription the account records: the job
  * lists the subscriptions of the customer at Stripe and ends those that are not over. What the account records is what the last
@@ -78,7 +79,7 @@ final class SubscriptionLifecycle
         unset($collected[$workspace]);
 
         if ($customer !== null) {
-            $this->cancelAfterCommit($customer, false, null);
+            $this->cancelAfterCommit($customer, false, null, $workspace->ulid);
         }
     }
 
@@ -92,7 +93,7 @@ final class SubscriptionLifecycle
         $account = $this->accountOf($workspace);
 
         if ($account !== null) {
-            $this->cancelAfterCommit($account->stripe_customer_id, true, (int) $account->getKey());
+            $this->cancelAfterCommit($account->stripe_customer_id, true, (int) $account->getKey(), $workspace->ulid);
         }
     }
 
@@ -108,11 +109,11 @@ final class SubscriptionLifecycle
      * Queues the cancellation of the subscriptions of a customer once the transaction in progress is committed (at once when there is
      * none): one that is rolled back, or retried after a deadlock, cancels nothing.
      */
-    private function cancelAfterCommit(string $customer, bool $atPeriodEnd, ?int $billingAccountId): void
+    private function cancelAfterCommit(string $customer, bool $atPeriodEnd, ?int $billingAccountId, string $workspaceUlid): void
     {
-        $this->db->connection()->afterCommit(function () use ($customer, $atPeriodEnd, $billingAccountId): void {
+        $this->db->connection()->afterCommit(function () use ($customer, $atPeriodEnd, $billingAccountId, $workspaceUlid): void {
             try {
-                CancelStripeSubscription::dispatch($customer, $atPeriodEnd, $billingAccountId);
+                CancelStripeSubscription::dispatch($customer, $atPeriodEnd, $billingAccountId, $workspaceUlid);
             } catch (Throwable $exception) {
                 Log::error('The cancellation of the subscriptions of a customer could not be queued: cancel them in the dashboard of Stripe.', ['customer' => $customer, 'at_period_end' => $atPeriodEnd, 'exception' => $exception]);
             }

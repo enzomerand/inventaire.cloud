@@ -188,6 +188,7 @@ describe('updating a customer', function (): void {
 
 describe('the parameters of a Checkout session', function (): void {
     it('are exactly the ones of the specification', function (): void {
+        $this->travelTo(now()->startOfSecond());
         $parameters = CheckoutParameters::make('cus_1', 'price_m', '01j0000000000000000000000x', 'https://inventaire.test/app/w/01j/billing?checkout=done', 'https://inventaire.test/app/w/01j/billing', 'fr');
 
         expect($parameters)->toBe([
@@ -196,6 +197,7 @@ describe('the parameters of a Checkout session', function (): void {
             'line_items' => [['price' => 'price_m', 'quantity' => 1]],
             'success_url' => 'https://inventaire.test/app/w/01j/billing?checkout=done',
             'cancel_url' => 'https://inventaire.test/app/w/01j/billing',
+            'expires_at' => now()->getTimestamp() + 1860,
             'client_reference_id' => '01j0000000000000000000000x',
             'subscription_data' => ['metadata' => ['workspace' => '01j0000000000000000000000x']],
             'allow_promotion_codes' => true,
@@ -206,6 +208,16 @@ describe('the parameters of a Checkout session', function (): void {
             'locale' => 'fr',
             'integration_identifier' => 'inventaire-cloud-pkqzrvmw',
         ]);
+    });
+
+    it('expire as soon as Stripe allows, a minute over its minimum of half an hour for the request to arrive', function (): void {
+        $this->travelTo(now()->startOfSecond());
+        $parameters = CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', 'en');
+
+        // Stripe takes from 30 minutes to 24 hours after the creation of the session, and refuses a session that would expire sooner.
+        expect($parameters['expires_at'] - now()->getTimestamp())->toBe(CheckoutParameters::EXPIRES_AFTER)
+            ->toBeGreaterThan(30 * 60)
+            ->toBeLessThan(2 * 30 * 60);
     });
 
     it('never name the payment methods: Stripe offers the ones enabled in the dashboard', function (): void {
@@ -226,6 +238,7 @@ describe('the parameters of a Checkout session', function (): void {
 
 describe('creating a Checkout session', function (): void {
     it('posts the form with the booleans written as Stripe reads them, and gives back the id and the page to go to', function (): void {
+        $this->travelTo(now()->startOfSecond());
         $this->stripe->addCustomer('cus_1');
         $parameters = CheckoutParameters::make('cus_1', FakeStripe::PRICE_MONTHLY, '01j0000000000000000000000x', 'https://inventaire.test/ok?checkout=done', 'https://inventaire.test/ko', 'fr');
 
@@ -243,6 +256,7 @@ describe('creating a Checkout session', function (): void {
                 'line_items' => [['price' => FakeStripe::PRICE_MONTHLY, 'quantity' => '1']],
                 'success_url' => 'https://inventaire.test/ok?checkout=done',
                 'cancel_url' => 'https://inventaire.test/ko',
+                'expires_at' => (string) (now()->getTimestamp() + 1860),
                 'client_reference_id' => '01j0000000000000000000000x',
                 'subscription_data' => ['metadata' => ['workspace' => '01j0000000000000000000000x']],
                 'allow_promotion_codes' => 'true',

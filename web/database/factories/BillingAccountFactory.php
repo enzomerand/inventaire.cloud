@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Models\BillingAccount;
+use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
 /**
- * Builds billing accounts for tests and local seeding: a Stripe customer of its own that has no subscription yet. Without a workspace
- * given (`->for($workspace)`), it builds a bare one.
+ * Builds billing accounts for tests and local seeding: a Stripe customer of its own that has no subscription yet and no known payer
+ * ({@see self::paidBy()} gives it one). Without a workspace given (`->for($workspace)`), it builds a bare one.
  *
  * @extends Factory<BillingAccount>
  */
@@ -28,6 +29,14 @@ class BillingAccountFactory extends Factory
             'workspace_id' => Workspace::factory(),
             'stripe_customer_id' => 'cus_'.Str::random(14),
         ];
+    }
+
+    /**
+     * Indicate the owner who pays for the customer (who started the checkout it was made for).
+     */
+    public function paidBy(User $payer): static
+    {
+        return $this->state(fn (): array => ['payer_id' => $payer->getKey()]);
     }
 
     /**

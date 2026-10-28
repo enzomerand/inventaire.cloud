@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use App\Billing\BillingCustomers;
 use App\Billing\Plan;
+use App\Billing\StripeException;
 use App\Billing\WorkspacePlan;
+use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
 use App\Models\User;
 use App\Models\Workspace;
@@ -12,6 +14,8 @@ use App\Models\WorkspaceInvitation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Tests\Support\FakeStripe;
 
 require_once __DIR__.'/../../Support/billing.php';
@@ -69,7 +73,8 @@ function billingApiTeam(?string $status = null, string $interval = 'month'): arr
     $account = null;
 
     if ($status !== null) {
-        $account = BillingAccount::factory()->for($team['workspace'])->subscribed($status, $interval)->create();
+        // The owner started the checkout the customer belongs to: they are the payer.
+        $account = BillingAccount::factory()->for($team['workspace'])->paidBy($team['owner'])->subscribed($status, $interval)->create();
         $stripe->addCustomer($account->stripe_customer_id, 'old-payer@example.test');
         $stripe->subscribe($account->stripe_customer_id, $status, $interval);
     }
@@ -204,7 +209,6 @@ describe('Checkout', function (): void {
         $team = billingApiTeam();
         $base = DB::transactionLevel();
         $team['stripe']->onCall('POST /v1/customers', fn () => expect(DB::transactionLevel())->toBe($base))
-            ->onCall('GET /v1/checkout/sessions', fn () => expect(DB::transactionLevel())->toBe($base))
             ->onCall('POST /v1/checkout/sessions', fn () => expect(DB::transactionLevel())->toBe($base));
 
         $answer = inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])
@@ -213,7 +217,9 @@ describe('Checkout', function (): void {
         $session = array_values($team['stripe']->sessions)[0];
 
         expect($answer->json())->toBe(['data' => ['url' => 'https://checkout.stripe.com/c/pay/'.$session['id']]])
-            ->and($team['stripe']->calls)->toBe(['POST /v1/customers', 'GET /v1/checkout/sessions', 'POST /v1/checkout/sessions'])
+            // A customer made for the request has no session to expire and no subscription to read.
+            ->and($team['stripe']->calls)->toBe(['POST /v1/customers', 'POST /v1/checkout/sessions'])
+            ->and($account->payer_id)->toBe($team['owner']->id)
             ->and($team['stripe']->customers[$account->stripe_customer_id])->toMatchArray([
                 'email' => $team['owner']->email,
                 'name' => 'Shop',
@@ -256,7 +262,7 @@ describe('Checkout', function (): void {
 
         inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
 
-        expect($team['stripe']->calls)->toBe(['GET /v1/subscriptions', 'POST /v1/customers/{id}', 'GET /v1/checkout/sessions', 'POST /v1/checkout/sessions'])
+        expect($team['stripe']->calls)->toBe(['GET /v1/checkout/sessions', 'GET /v1/subscriptions', 'POST /v1/customers/{id}', 'POST /v1/checkout/sessions'])
             ->and($team['stripe']->customers[$customer]['email'])->toBe($team['owner']->email)
             ->and(array_values($team['stripe']->sessions)[0]['customer'])->toBe($customer)
             ->and(BillingAccount::query()->where('workspace_id', $team['workspace']->id)->count())->toBe(1);
@@ -268,14 +274,14 @@ describe('Checkout', function (): void {
         inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
     });
 
-    it('reads the subscriptions at Stripe and refuses a workspace that is on Pro already, without opening anything', function (string $status): void {
+    it('expires what is open, reads the subscriptions at Stripe and refuses a workspace that is on Pro already, without opening anything', function (string $status): void {
         $team = billingApiTeam($status);
 
         inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'already_subscribed');
 
-        expect($team['stripe']->calls)->toBe(['GET /v1/subscriptions'])
+        expect($team['stripe']->calls)->toBe(['GET /v1/checkout/sessions', 'GET /v1/subscriptions'])
             ->and($team['stripe']->sessions)->toBe([]);
     })->with(['active', 'trialing', 'past_due']);
 
@@ -289,7 +295,7 @@ describe('Checkout', function (): void {
             ->assertJsonPath('code', 'already_subscribed');
 
         expect($team['account']->fresh()->status)->toBe('active')
-            ->and($team['stripe']->calls)->toBe(['GET /v1/subscriptions'])
+            ->and($team['stripe']->calls)->toBe(['GET /v1/checkout/sessions', 'GET /v1/subscriptions'])
             ->and($team['stripe']->sessions)->toBe([]);
     });
 
@@ -301,7 +307,7 @@ describe('Checkout', function (): void {
             ->assertJsonPath('code', 'subscription_pending')
             ->assertJsonPath('message', 'This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.');
 
-        expect($team['stripe']->calls)->toBe(['GET /v1/subscriptions'])
+        expect($team['stripe']->calls)->toBe(['GET /v1/checkout/sessions', 'GET /v1/subscriptions'])
             ->and($team['stripe']->sessions)->toBe([]);
     })->with(['incomplete', 'unpaid', 'paused']);
 
@@ -328,7 +334,8 @@ describe('Checkout', function (): void {
             ->and($team['stripe']->sessions[$second]['status'])->toBe('open')
             ->and($team['stripe']->sessions[$second]['customer'])->toBe($customer)
             ->and($team['stripe']->count('POST /v1/checkout/sessions/{id}/expire'))->toBe(1)
-            ->and(array_slice($team['stripe']->calls, 4))->toBe(['GET /v1/subscriptions', 'POST /v1/customers/{id}', 'GET /v1/checkout/sessions', 'POST /v1/checkout/sessions/{id}/expire', 'POST /v1/checkout/sessions']);
+            // The open sessions are expired before the subscriptions are read: nothing can be paid from then on.
+            ->and(array_slice($team['stripe']->calls, 4))->toBe(['GET /v1/checkout/sessions', 'POST /v1/checkout/sessions/{id}/expire', 'GET /v1/subscriptions', 'POST /v1/customers/{id}', 'POST /v1/checkout/sessions']);
         parse_str((string) parse_url($team['stripe']->requestsOf('GET /v1/checkout/sessions')[1]->url(), PHP_URL_QUERY), $query);
         expect($query)->toBe(['customer' => $customer, 'status' => 'open', 'limit' => '100']);
     });
@@ -347,7 +354,7 @@ describe('Checkout', function (): void {
             ->and($stripe->sessions['cs_other']['status'])->toBe('open');
     });
 
-    it('opens no session when one that was open cannot be expired (it was paid on meanwhile), and the next try sees the subscription', function (): void {
+    it('sees the payment made on a session that could not be expired any more (it was paid on meanwhile), and opens nothing', function (): void {
         $team = billingApiTeam('canceled');
         $uri = billingApiUri($team['workspace'], 'checkout');
         inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])->assertOk();
@@ -358,15 +365,39 @@ describe('Checkout', function (): void {
             $team['stripe']->subscribe($team['account']->stripe_customer_id, 'active');
         });
 
-        inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])
-            ->assertStatus(503)
-            ->assertJsonPath('code', 'billing_unavailable');
-
-        expect($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(1);
-
+        // The refusal of Stripe to expire it (400) is not a failure: the subscriptions are read right after, and it started one.
         inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'already_subscribed');
+
+        expect($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(1)
+            ->and($team['account']->fresh()->status)->toBe('active');
+    });
+
+    it('goes on to open the session when the one it could not expire had ended by itself', function (): void {
+        $team = billingApiTeam('canceled');
+        $uri = billingApiUri($team['workspace'], 'checkout');
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])->assertOk();
+        $open = array_key_first($team['stripe']->sessions);
+        // It expires by itself just as the second tab asks.
+        $team['stripe']->onCall('POST /v1/checkout/sessions/{id}/expire', function () use ($team, $open): void {
+            $team['stripe']->sessions[$open]['status'] = 'expired';
+        });
+
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])->assertOk();
+
+        expect($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(2);
+    });
+
+    it('says that Stripe cannot be asked, and opens nothing, when a session cannot be expired for another reason', function (): void {
+        $team = billingApiTeam('canceled');
+        $uri = billingApiUri($team['workspace'], 'checkout');
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])->assertOk();
+        $team['stripe']->failNext('POST /v1/checkout/sessions/{id}/expire', 500);
+
+        inventoryCall($this, $team['owner'], 'POST', $uri, ['interval' => 'month'])
+            ->assertStatus(503)
+            ->assertJsonPath('code', 'billing_unavailable');
 
         expect($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(1);
     });
@@ -562,7 +593,8 @@ describe('the portal', function (): void {
     })->with(['POST /v1/customers/{id}', 'POST /v1/billing_portal/sessions']);
 
     it('is paced: ten a minute for each person', function (): void {
-        $team = billingApiTeam('active');
+        // Back on Free, so that a second owner (who is not the payer) is not refused for the subscription of the payer.
+        $team = billingApiTeam('canceled');
         $uri = billingApiUri($team['workspace'], 'portal');
 
         for ($i = 0; $i < 10; $i++) {
@@ -581,15 +613,16 @@ describe('the portal', function (): void {
 });
 
 /**
- * A team whose account holds a customer and an active subscription that the Stripe of the test does not have.
+ * A team whose account holds a customer and a subscription (an active one unless told otherwise) that the Stripe of the test does not
+ * have, paid for by the owner.
  *
  * @return array{owner: User, editor: User, viewer: User, stranger: User, workspace: Workspace, stripe: FakeStripe, account: BillingAccount}
  */
-function billingApiTeamWithLostCustomer(): array
+function billingApiTeamWithLostCustomer(string $status = 'active'): array
 {
     $stripe = billingOn();
     $team = inventoryTeam();
-    $account = BillingAccount::factory()->for($team['workspace'])->subscribed('active')->create(['stripe_customer_id' => 'cus_lost']);
+    $account = BillingAccount::factory()->for($team['workspace'])->paidBy($team['owner'])->subscribed($status)->create(['stripe_customer_id' => 'cus_lost']);
 
     return $team + ['stripe' => $stripe, 'account' => $account];
 }
@@ -636,7 +669,9 @@ describe('a customer that Stripe does not know any more', function (): void {
         $key = $team['stripe']->requestsOf('POST /v1/customers')[0]->header('Idempotency-Key')[0];
         $first = 'customer-'.$team['workspace']->ulid.'-'.substr(hash('sha256', implode("\n", [$team['owner']->email, 'Shop', 'en'])), 0, 16);
 
-        expect($key)->toStartWith('customer-'.$team['workspace']->ulid.'-')->not->toBe($first);
+        // Made of the workspace and of the customer it replaces only: no email (the address of a person) goes into a key.
+        expect($key)->not->toBe($first)
+            ->and($key)->toBe('customer-'.$team['workspace']->ulid.'-'.substr(hash('sha256', 'cus_lost'), 0, 16));
     });
 
     it('is not replaced for a failure that is not Stripe saying the customer is not there', function (string $kind): void {
@@ -667,14 +702,64 @@ describe('a customer that Stripe does not know any more', function (): void {
     });
 
     it('is replaced by the service that makes the customer, which gives back the account with the new customer', function (): void {
-        $team = billingApiTeamWithLostCustomer();
+        Log::spy();
+        $team = billingApiTeamWithLostCustomer('canceled');
 
         $account = app(BillingCustomers::class)->ensure($team['workspace'], $team['owner'], 'fr');
 
         expect($account->stripe_customer_id)->not->toBe('cus_lost')
+            ->and($account->payer_id)->toBe($team['owner']->id)
             ->and($account->status)->toBeNull()
             ->and($team['stripe']->customers[$account->stripe_customer_id]['preferred_locales'])->toBe(['fr'])
             ->and(WorkspacePlan::for($team['workspace']))->toBe(Plan::Free);
+        // The customer that was replaced is always written in the log.
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context = []): bool => ($context['customer'] ?? null) === 'cus_lost'
+            && ($context['replaced_by'] ?? null) === $account->stripe_customer_id
+            && ($context['reason'] ?? null) === 'lost')->once();
+    });
+
+    it('is not replaced while the account has a subscription in play: the service refuses, writes the customer in the log and tells the administrators', function (): void {
+        Log::spy();
+        Mail::fake();
+        $administrator = User::factory()->admin()->create(['email' => 'admin@example.test', 'locale' => 'en']);
+        $team = billingApiTeamWithLostCustomer('active');
+        $customers = app(BillingCustomers::class);
+
+        // The row still says the subscription is in play (nothing synchronised it first).
+        expect(fn () => $customers->ensure($team['workspace'], $team['owner'], 'en'))->toThrow(StripeException::class, 'resource_missing');
+        expect(fn () => $customers->ensure($team['workspace'], $team['owner'], 'en'))->toThrow(StripeException::class);
+
+        $account = $team['account']->fresh();
+        expect($account->stripe_customer_id)->toBe('cus_lost')
+            ->and($account->status)->toBe('active')
+            ->and($account->payer_id)->toBe($team['owner']->id)
+            ->and($team['stripe']->count('POST /v1/customers'))->toBe(0);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'is not replaced')
+            && ($context['customer'] ?? null) === 'cus_lost'
+            && ($context['workspace'] ?? null) === $team['workspace']->ulid)->twice();
+        // Once a day for the account, however many times it is asked.
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->hasTo($administrator->email)
+            && $mail->eventType === 'customer_lost'
+            && $mail->objectId === 'cus_lost'
+            && $mail->workspaceUlid === $team['workspace']->ulid);
+    });
+
+    it('is told the service is unavailable, with nothing changed, when a subscription was written while the new customer was made', function (): void {
+        Mail::fake();
+        User::factory()->admin()->create(['email' => 'admin@example.test']);
+        $team = billingApiTeamWithLostCustomer('canceled');
+        // A synchronisation (or a webhook) wrote a subscription between the moment the customer was found missing and the moment it is replaced.
+        $team['stripe']->onCall('POST /v1/customers', fn () => $team['account']->forceFill(['status' => 'active', 'stripe_subscription_id' => 'sub_written_meanwhile'])->save());
+
+        inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])
+            ->assertStatus(503)
+            ->assertJsonPath('code', 'billing_unavailable');
+
+        expect($team['account']->fresh()->stripe_customer_id)->toBe('cus_lost')
+            ->and($team['account']->fresh()->stripe_subscription_id)->toBe('sub_written_meanwhile')
+            ->and($team['stripe']->count('POST /v1/checkout/sessions'))->toBe(0);
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->eventType === 'customer_lost');
     });
 });
 

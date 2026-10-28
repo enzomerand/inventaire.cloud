@@ -285,6 +285,49 @@ describe('the workspaces page and the photo entry', function (): void {
         expect($one)->toBe(1)->and($reads())->toBe($one);
     });
 
+    it('reads nothing more than the page needs when the instance does not offer the photo entry, whether it sells plans or not', function (bool $plans): void {
+        $plans ? billingOn() : billingOff();
+        $owner = inventoryPerson();
+        $first = app(Workspaces::class)->create($owner, 'First');
+        BillingAccount::factory()->for($first)->subscribed()->create();
+        $queries = function () use ($owner): array {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->actingAs($owner)->get(route('app.workspaces'))->assertOk();
+            DB::disableQueryLog();
+
+            return array_column(DB::getQueryLog(), 'query');
+        };
+
+        $without = $queries();
+        billingPageOffersPhotoEntry();
+        $with = $queries();
+        $memberships = fn (array $sql): int => count(array_filter($sql, fn (string $query): bool => str_contains($query, 'workspace_user')));
+
+        // No plan is read for a switch that is not on the page, and the workspaces of the person are not listed again for it: the only
+        // read of them is the one of the layout (the switcher), which the page makes whatever the controller does.
+        expect(array_filter($without, fn (string $sql): bool => str_contains($sql, 'billing_accounts')))->toBe([])
+            ->and($memberships($without))->toBe(1)
+            ->and($memberships($with))->toBe(2);
+    })->with([
+        'plans sold' => [true],
+        'no plan sold' => [false],
+    ]);
+
+    it('reads no plan either when plans are not sold, even where the photo entry is offered', function (): void {
+        billingOff();
+        billingPageOffersPhotoEntry();
+        $owner = inventoryPerson();
+        BillingAccount::factory()->for(app(Workspaces::class)->create($owner, 'First'))->subscribed()->create();
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($owner)->get(route('app.workspaces'))->assertOk();
+        DB::disableQueryLog();
+
+        expect(array_filter(array_column(DB::getQueryLog(), 'query'), fn (string $sql): bool => str_contains($sql, 'billing_accounts')))->toBe([]);
+    });
+
     it('keeps the choice of an owner whose workspace went back to Free', function (): void {
         billingOn();
         billingPageOffersPhotoEntry();

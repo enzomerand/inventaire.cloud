@@ -19,10 +19,10 @@ use Illuminate\Http\Request;
  *
  * The page also hands the markup the consent of the workspaces the person owns to the photo entry, as `{ulid: bool}`, because the list
  * endpoint (`GET /workspaces`) is a token route that does not carry it: only when the instance offers the feature (else `null`, and the
- * page shows no switch), and only for the workspaces the person owns, since the owner alone chooses. Read each time, so that a change of
- * the administrator shows on the next visit. On an instance that sells plans it also says which of those workspaces are on a plan that
- * includes the photo entry (Pro; `null` when the instance sells no plan): the switch of any other, a workspace created on the page since
- * included, is shown off and disabled, with the way to the subscription page.
+ * page shows no switch, and no workspace is read for it), and only for the workspaces the person owns, since the owner alone chooses.
+ * Read each time, so that a change of the administrator shows on the next visit. On an instance that sells plans it also says which of
+ * those workspaces are on a plan that includes the photo entry (Pro; `null` when the instance sells no plan): the switch of any other, a
+ * workspace created on the page since included, is shown off and disabled, with the way to the subscription page.
  */
 final class WorkspaceListPageController extends Controller
 {
@@ -31,15 +31,20 @@ final class WorkspaceListPageController extends Controller
      */
     public function __invoke(Request $request, Workspaces $workspaces, PhotoEntry $photoEntry): View
     {
+        // Nothing is read for an instance that does not offer the photo entry: the page has no switch to fill, and the plans of the
+        // workspaces (billing) only matter to those switches.
+        if (! $photoEntry->availableOnInstance()) {
+            return view('app.workspaces', ['photoEntry' => null, 'photoEntryUnlocked' => null]);
+        }
+
         $owned = array_values(array_filter(
             $workspaces->memberships($this->user($request)),
             fn (Membership $membership): bool => $membership->role->canManage(),
         ));
-        $consents = $this->consents($owned, $photoEntry);
 
         return view('app.workspaces', [
-            'photoEntry' => $consents,
-            'photoEntryUnlocked' => $consents === null ? null : $this->unlockedByPlan($owned),
+            'photoEntry' => $this->consents($owned),
+            'photoEntryUnlocked' => $this->unlockedByPlan($owned),
         ]);
     }
 
@@ -70,17 +75,13 @@ final class WorkspaceListPageController extends Controller
     }
 
     /**
-     * The consent of each workspace the user owns (by ULID), or null when the instance does not offer the photo entry.
+     * The consent of each workspace the user owns (by ULID).
      *
      * @param  list<Membership>  $owned  The workspaces the person owns.
-     * @return array<string, bool>|null
+     * @return array<string, bool>
      */
-    private function consents(array $owned, PhotoEntry $photoEntry): ?array
+    private function consents(array $owned): array
     {
-        if (! $photoEntry->availableOnInstance()) {
-            return null;
-        }
-
         $consents = [];
 
         foreach ($owned as $membership) {

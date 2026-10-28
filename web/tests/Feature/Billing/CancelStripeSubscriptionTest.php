@@ -2,15 +2,19 @@
 
 declare(strict_types=1);
 
+use App\Billing\Billing;
 use App\Billing\StripeClient;
 use App\Billing\StripeException;
 use App\Jobs\CancelStripeSubscription;
 use App\Jobs\SyncBillingAccount;
+use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\FakeStripe;
 
@@ -107,16 +111,19 @@ describe('cancelling now', function (): void {
         expect($stripe->count('DELETE /v1/subscriptions/{id}'))->toBe(0)->and($stripe->count('POST /v1/subscriptions/{id}'))->toBe(0);
     });
 
-    it('takes a customer that Stripe does not have any more for done', function (): void {
+    it('takes a customer that Stripe does not have any more for done, but writes it in the log as an error: the keys may be those of another mode', function (): void {
         Log::spy();
+        Mail::fake();
+        User::factory()->admin()->create();
         $stripe = billingOn();
         $stripe->failNext('GET /v1/subscriptions', 404);
 
         billingCancel(new CancelStripeSubscription('cus_gone'));
 
         expect($stripe->count('DELETE /v1/subscriptions/{id}'))->toBe(0);
-        Log::shouldNotHaveReceived('error');
-        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'not at Stripe any more') && $context['customer'] === 'cus_gone')->once();
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'is not at Stripe') && $context['customer'] === 'cus_gone')->once();
+        // Done, not failed: nobody is mailed for a customer there is nothing to cancel for.
+        Mail::assertNothingQueued();
     });
 
     it('takes a subscription that is gone by the time it is cancelled for cancelled', function (): void {
@@ -198,11 +205,13 @@ describe('cancelling with the period', function (): void {
     });
 
     it('takes a customer that Stripe does not have any more for done', function (): void {
+        Log::spy();
         $stripe = billingOn();
         $stripe->failNext('GET /v1/subscriptions', 404);
 
         billingCancel(new CancelStripeSubscription('cus_gone', true));
 
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'is not at Stripe') && $context['customer'] === 'cus_gone')->once();
         expect($stripe->count('POST /v1/subscriptions/{id}'))->toBe(0);
     });
 
@@ -449,5 +458,177 @@ describe('on a real queue', function (): void {
 
         expect(DB::table('jobs')->count())->toBe(0)->and(DB::table('failed_jobs')->count())->toBe(1)->and($stripe->count('DELETE /v1/subscriptions/{id}'))->toBe(5);
         Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'dashboard of Stripe') && ($context['customer'] ?? null) === 'cus_a' && array_key_exists('exception', $context))->once();
+    });
+});
+
+describe('the Checkout sessions that are still open', function (): void {
+    it('are expired before the subscriptions are listed and ended, now or with the period', function (bool $atPeriodEnd): void {
+        $stripe = billingOn();
+        $stripe->subscribe('cus_a');
+        $stripe->addCustomer('cus_other');
+        $stripe->sessions['cs_open'] = ['id' => 'cs_open', 'customer' => 'cus_a', 'status' => 'open'];
+        $stripe->sessions['cs_other'] = ['id' => 'cs_other', 'customer' => 'cus_other', 'status' => 'open'];
+        $stripe->sessions['cs_done'] = ['id' => 'cs_done', 'customer' => 'cus_a', 'status' => 'complete'];
+
+        billingCancel(new CancelStripeSubscription('cus_a', $atPeriodEnd));
+
+        expect($stripe->calls)->toBe([
+            'GET /v1/checkout/sessions',
+            'POST /v1/checkout/sessions/{id}/expire',
+            'GET /v1/subscriptions',
+            $atPeriodEnd ? 'POST /v1/subscriptions/{id}' : 'DELETE /v1/subscriptions/{id}',
+        ])
+            ->and($stripe->sessions['cs_open']['status'])->toBe('expired')
+            ->and($stripe->sessions['cs_other']['status'])->toBe('open')
+            ->and($stripe->sessions['cs_done']['status'])->toBe('complete');
+    })->with([false, true]);
+
+    it('are no failure when one is not open any more: it was paid, and the subscription it started is ended with the others', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+        $stripe->addCustomer('cus_a');
+        $stripe->sessions['cs_open'] = ['id' => 'cs_open', 'customer' => 'cus_a', 'status' => 'open'];
+        // The customer pays just as the session is expired.
+        $stripe->onCall('POST /v1/checkout/sessions/{id}/expire', function () use ($stripe): void {
+            $stripe->completeCheckout('cs_open');
+            $stripe->subscribe('cus_a', 'active', id: 'sub_started_by_the_session');
+        });
+
+        billingCancel(new CancelStripeSubscription('cus_a'));
+
+        expect($stripe->subscriptions['sub_started_by_the_session']['status'])->toBe('canceled');
+        Log::shouldNotHaveReceived('error');
+    });
+
+    it('go on to the subscriptions when Stripe cannot list or expire them, and come back for it', function (string $call): void {
+        $stripe = billingOn();
+        $id = $stripe->subscribe('cus_a');
+        $stripe->sessions['cs_open'] = ['id' => 'cs_open', 'customer' => 'cus_a', 'status' => 'open'];
+        $stripe->failNext($call, 500);
+
+        expect(fn () => billingCancel(new CancelStripeSubscription('cus_a')))->toThrow(StripeException::class);
+
+        // The subscription is ended all the same; the queue comes back to expire the session.
+        expect($stripe->subscriptions[$id]['status'])->toBe('canceled');
+
+        billingCancel(new CancelStripeSubscription('cus_a'));
+
+        expect($stripe->sessions['cs_open']['status'])->toBe('expired');
+    })->with(['GET /v1/checkout/sessions', 'POST /v1/checkout/sessions/{id}/expire']);
+
+    it('are left to expire by themselves, with an error in the log and a mail to the administrators, when Stripe refuses for good', function (): void {
+        Log::spy();
+        Mail::fake();
+        User::factory()->admin()->create(['email' => 'admin@example.test', 'locale' => 'en']);
+        $stripe = billingOn();
+        $id = $stripe->subscribe('cus_a');
+        $stripe->sessions['cs_open'] = ['id' => 'cs_open', 'customer' => 'cus_a', 'status' => 'open'];
+        $stripe->failNext('POST /v1/checkout/sessions/{id}/expire', 403);
+
+        billingCancel(new CancelStripeSubscription('cus_a', false, null, 'ws_ulid'));
+
+        expect($stripe->subscriptions[$id]['status'])->toBe('canceled');
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'could not be expired') && $context['session'] === 'cs_open' && $context['status'] === 403)->once();
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->eventType === 'cancellation_failed' && $mail->objectId === 'cus_a' && $mail->workspaceUlid === 'ws_ulid');
+    });
+
+    it('are none for a customer Stripe does not know: the list of its subscriptions says so', function (): void {
+        $stripe = billingOn();
+        $stripe->failNext('GET /v1/checkout/sessions', 404);
+        $stripe->failNext('GET /v1/subscriptions', 404);
+
+        billingCancel(new CancelStripeSubscription('cus_gone'));
+
+        expect($stripe->count('POST /v1/checkout/sessions/{id}/expire'))->toBe(0)->and($stripe->count('DELETE /v1/subscriptions/{id}'))->toBe(0);
+    });
+});
+
+describe('what it tells the administrators', function (): void {
+    beforeEach(function (): void {
+        Mail::fake();
+        $this->administrator = User::factory()->admin()->create(['email' => 'admin@example.test', 'locale' => 'en']);
+        User::factory()->create(['email' => 'member@example.test']);
+    });
+
+    it('is mailed when the last try failed, with the customer and the workspace', function (): void {
+        (new CancelStripeSubscription('cus_open', true, null, '01jworkspace'))->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, function (BillingAlertMail $mail): bool {
+            $html = $mail->render();
+
+            return $mail->hasTo('admin@example.test')
+                && $mail->eventType === 'cancellation_failed'
+                && $mail->objectId === 'cus_open'
+                && $mail->workspaceUlid === '01jworkspace'
+                && str_contains($html, 'cus_open')
+                && str_contains($html, '01jworkspace')
+                && str_contains($html, 'https://dashboard.stripe.com/customers/cus_open');
+        });
+    });
+
+    it('links to the test side of the dashboard when the key of the instance is a test key', function (): void {
+        billingOn();
+
+        expect(Billing::livemode())->toBeFalse();
+
+        (new CancelStripeSubscription('cus_open'))->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->dashboardUrl() === 'https://dashboard.stripe.com/test/customers/cus_open' && str_contains($mail->render(), 'test mode'));
+    });
+
+    it('is mailed without a workspace when none is known', function (): void {
+        (new CancelStripeSubscription('cus_open'))->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->objectId === 'cus_open' && $mail->workspaceUlid === null && ! str_contains($mail->render(), 'Workspace:'));
+    });
+
+    it('is mailed when Stripe refuses the cancellation for good, or the list of the subscriptions, or there is no Stripe any more', function (string $case): void {
+        $stripe = billingOn();
+        $stripe->subscribe('cus_a');
+
+        match ($case) {
+            'a cancellation refused' => $stripe->failNext('DELETE /v1/subscriptions/{id}', 403),
+            'the list refused' => $stripe->failNext('GET /v1/subscriptions', 403),
+            default => billingOff(),
+        };
+
+        billingCancel(new CancelStripeSubscription('cus_a', false, null, '01jworkspace'));
+
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->eventType === 'cancellation_failed' && $mail->objectId === 'cus_a' && $mail->workspaceUlid === '01jworkspace');
+    })->with(['a cancellation refused', 'the list refused', 'no Stripe any more']);
+
+    it('is not mailed when everything was cancelled, nor for a failure worth another try (the queue comes back)', function (): void {
+        $stripe = billingOn();
+        $stripe->subscribe('cus_a');
+        $stripe->subscribe('cus_b');
+        $stripe->failNext('DELETE /v1/subscriptions/{id}', 500);
+
+        expect(fn () => billingCancel(new CancelStripeSubscription('cus_a')))->toThrow(StripeException::class);
+        billingCancel(new CancelStripeSubscription('cus_b'));
+
+        Mail::assertNothingQueued();
+    });
+
+    it('is mailed once a day for a customer, however many jobs give up', function (): void {
+        $job = new CancelStripeSubscription('cus_open');
+        $job->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+        $job->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+
+        $this->travel(25)->hours();
+        $job->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+    });
+
+    it('does not make the job fail when the mail cannot be queued: it is written in the log', function (): void {
+        Log::spy();
+        Mail::shouldReceive('to')->andThrow(new RuntimeException('The queue is down.'));
+
+        (new CancelStripeSubscription('cus_open'))->failed(StripeException::unreachable(new RuntimeException('Stripe is down.')));
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'administrators could not be told') && $context['customer'] === 'cus_open')->once();
     });
 });

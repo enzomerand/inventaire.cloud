@@ -38,23 +38,27 @@ function billingAsked(FakeStripe $stripe): array
 }
 
 /**
- * An account synchronised a number of hours ago (never when null). A synchronisation writes the row, so `updated_at` is the same moment:
- * it is what the command orders the accounts by.
+ * An account synchronised a number of hours (and five minutes) ago (never when null). A synchronisation writes the row, so `updated_at` is
+ * the same moment: it is what the command orders the accounts by, and the row holds the status the synchronisation read, which decides
+ * how soon the account is due again (a subscription in play: six hours; none, or one that is over: a day).
+ *
+ * @param  string|null  $status  The status of the subscription Stripe has for the customer; none when null.
+ * @param  string|null  $stored  The status the row remembers of it, when it was synchronised; as Stripe has it when not given.
  */
-function billingAccountSyncedAgo(FakeStripe $stripe, ?int $hours, ?string $status = 'active'): BillingAccount
+function billingAccountSyncedAgo(FakeStripe $stripe, ?int $hours, ?string $status = 'active', ?string $stored = null, int $minutes = 5): BillingAccount
 {
     $account = billingAccountAt($stripe, $status);
 
     if ($hours !== null) {
-        $moment = now()->subHours($hours)->subMinutes(5);
-        BillingAccount::query()->whereKey($account->id)->update(['synced_at' => $moment, 'updated_at' => $moment]);
+        $moment = now()->subHours($hours)->subMinutes($minutes);
+        BillingAccount::query()->whereKey($account->id)->update(['synced_at' => $moment, 'updated_at' => $moment, 'status' => $stored ?? $status]);
     }
 
     return $account->refresh();
 }
 
 describe('which accounts it reads', function (): void {
-    it('reads those never read and those read more than six hours ago, and leaves the others', function (): void {
+    it('reads those never read and, when their subscription is in play, those read more than six hours ago, and leaves the others', function (): void {
         $stripe = billingOn();
         $never = billingAccountSyncedAgo($stripe, null);
         $stale = billingAccountSyncedAgo($stripe, 7);
@@ -67,24 +71,60 @@ describe('which accounts it reads', function (): void {
         expect(billingAsked($stripe))->toEqualCanonicalizing([$never->stripe_customer_id, $stale->stripe_customer_id, $old->stripe_customer_id])
             ->and(BillingAccount::query()->findOrFail($never->id)->status)->toBe('active')
             ->and(BillingAccount::query()->findOrFail($stale->id)->synced_at?->greaterThan(now()->subMinute()))->toBeTrue()
-            ->and(BillingAccount::query()->findOrFail($fresh->id)->synced_at?->equalTo($freshSyncedAt))->toBeTrue()
-            ->and(BillingAccount::query()->findOrFail($fresh->id)->status)->toBeNull();
+            ->and(BillingAccount::query()->findOrFail($fresh->id)->synced_at?->equalTo($freshSyncedAt))->toBeTrue();
     });
 
-    it('does not read an account that was read just under six hours ago', function (): void {
+    it('does not read an account whose subscription is in play that was read just under six hours ago', function (): void {
         $stripe = billingOn();
-        $account = billingAccountAt($stripe, 'active');
-        BillingAccount::query()->whereKey($account->id)->update(['synced_at' => now()->subHours(6)->addMinutes(5)]);
+        billingAccountSyncedAgo($stripe, 5, 'active', null, 55);
 
         $this->artisan('inventaire:sync-billing')->assertSuccessful();
 
         expect($stripe->calls)->toBe([]);
     });
 
+    it('reads every status in play after six hours: they bill, or may bill again', function (string $status): void {
+        $stripe = billingOn();
+        $account = billingAccountSyncedAgo($stripe, 6, $status);
+
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect(billingAsked($stripe))->toBe([$account->stripe_customer_id]);
+    })->with(['active', 'trialing', 'past_due', 'unpaid', 'paused', 'incomplete']);
+
+    it('waits a day for an account with no subscription, or with one that is over: nothing there changes by itself', function (?string $stored): void {
+        $stripe = billingOn();
+        // 7 hours: due for an account whose subscription is in play, not for these. 23 hours 55: not yet. 24 hours 5: due.
+        billingAccountSyncedAgo($stripe, 7, null, $stored);
+        billingAccountSyncedAgo($stripe, 23, null, $stored, 55);
+        $due = billingAccountSyncedAgo($stripe, 24, null, $stored);
+        $never = billingAccountSyncedAgo($stripe, null, null);
+
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect(billingAsked($stripe))->toBe([$never->stripe_customer_id, $due->stripe_customer_id]);
+    })->with([
+        'no subscription at all' => [null],
+        'a subscription that was canceled' => ['canceled'],
+        'a subscription that never completed' => ['incomplete_expired'],
+    ]);
+
+    it('reads an account again after six hours when its status changed to one in play, and after a day when it left it', function (): void {
+        $stripe = billingOn();
+        // The row says the subscription is over, but it was read 7 hours ago: it waits. The one that is in play is due.
+        $over = billingAccountSyncedAgo($stripe, 7, 'active', 'canceled');
+        $live = billingAccountSyncedAgo($stripe, 7, 'canceled', 'past_due');
+
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect(billingAsked($stripe))->toBe([$live->stripe_customer_id])
+            ->and($over->fresh()->status)->toBe('canceled');
+    });
+
     it('reads the accounts never read first, then the others from the longest ago, whatever the order they were made in', function (): void {
         $stripe = billingOn();
         $recent = billingAccountSyncedAgo($stripe, 8);
-        $oldest = billingAccountSyncedAgo($stripe, 40);
+        $oldest = billingAccountSyncedAgo($stripe, 40, null);
         $never = billingAccountSyncedAgo($stripe, null);
         $middle = billingAccountSyncedAgo($stripe, 20);
 
@@ -106,6 +146,7 @@ describe('which accounts it reads', function (): void {
             $rows[] = [
                 'workspace_id' => $workspace->id,
                 'stripe_customer_id' => $customer,
+                'status' => $syncedAt === null ? null : 'active',
                 'synced_at' => $syncedAt,
                 'created_at' => now()->toDateTimeString(),
                 'updated_at' => $syncedAt ?? now()->toDateTimeString(),

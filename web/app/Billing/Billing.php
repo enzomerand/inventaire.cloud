@@ -55,6 +55,15 @@ final class Billing
     }
 
     /**
+     * Whether the secret key is one of the live mode of Stripe, and not of its test mode (`sk_test_…`, `rk_test_…`): which side of the
+     * dashboard a link to an object of Stripe opens.
+     */
+    public static function livemode(): bool
+    {
+        return ! str_contains(self::secret(), '_test_');
+    }
+
+    /**
      * The version of the Stripe API the code is written for, sent in the `Stripe-Version` header of every call.
      */
     public static function apiVersion(): string

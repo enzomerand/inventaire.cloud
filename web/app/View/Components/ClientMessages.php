@@ -485,6 +485,8 @@ class ClientMessages extends Component
             'billing.confirming' => __('Payment being confirmed…'),
             'billing.still_pending' => __('Your payment is still being confirmed. The plan changes as soon as it is: reload this page in a moment.'),
             'billing.unsettled' => __('A subscription of this workspace is waiting to be settled. Open the subscription management to settle it.'),
+            'billing.previous_owner' => __('The subscription of the previous owner of this workspace is still running. You can subscribe once it has ended.'),
+            'billing.previous_owner_until' => __('The subscription of the previous owner of this workspace runs until :date. You can subscribe once it has ended.'),
             'billing.plan.free' => __('Free'),
             'billing.plan.pro' => __('Pro'),
             'billing.price.month' => __(':amount per month'),
@@ -510,6 +512,7 @@ class ClientMessages extends Component
             'billing.error.disabled' => __('This service is not offered on this instance.'),
             'billing.error.already_subscribed' => __('This workspace already has a subscription.'),
             'billing.error.subscription_pending' => __('This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.'),
+            'billing.error.checkout_in_progress' => __('A payment page is already being opened for this workspace. Try again in a moment.'),
             'billing.error.no_account' => __('This workspace has no subscription to manage yet.'),
             'billing.error.interval' => __('This billing period is not offered.'),
         ] + $this->tokenAbilityLabels();

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Billing\EnvironmentSetting;
+
 /*
 |--------------------------------------------------------------------------
 | Billing (Stripe subscriptions, one per workspace)
@@ -18,6 +20,10 @@ declare(strict_types=1);
 | (`App\Billing\WorkspaceLimits`). The per-user limits (exports, imports,
 | tokens, photo analyses per day) stay global.
 |
+| A variable left blank (`BILLING_PRO_ITEMS=`) is a variable that is not set:
+| the default below applies (`App\Billing\EnvironmentSetting`). To allow
+| nothing, write `0`.
+|
 */
 
 return [
@@ -26,7 +32,7 @@ return [
     | Sends `automatic_tax[enabled]` to Stripe Checkout (Stripe Tax must be set
     | up in the Stripe account, with the tax registrations that apply).
     */
-    'automatic_tax' => filter_var(env('STRIPE_AUTOMATIC_TAX', false), FILTER_VALIDATE_BOOLEAN),
+    'automatic_tax' => EnvironmentSetting::boolean(env('STRIPE_AUTOMATIC_TAX'), false),
 
     /*
     | The identifier this integration gives Stripe Checkout
@@ -40,11 +46,11 @@ return [
     | Stripe Price (`STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_YEARLY`), keep
     | the two in step. The yearly amount is shown only when a yearly Price is set.
     */
-    'currency' => strtolower((string) env('BILLING_CURRENCY', 'eur')),
+    'currency' => strtolower(EnvironmentSetting::text(env('BILLING_CURRENCY'), 'eur')),
 
     'amounts' => [
-        'month' => (int) env('BILLING_PRO_MONTHLY_AMOUNT', 600),
-        'year' => (int) env('BILLING_PRO_YEARLY_AMOUNT', 6000),
+        'month' => EnvironmentSetting::integer(env('BILLING_PRO_MONTHLY_AMOUNT'), 600),
+        'year' => EnvironmentSetting::integer(env('BILLING_PRO_YEARLY_AMOUNT'), 6000),
     ],
 
     /*
@@ -63,27 +69,27 @@ return [
     'plans' => [
         'free' => [
             'limits' => [
-                'inventories' => (int) env('BILLING_FREE_INVENTORIES', 3),
-                'items' => (int) env('BILLING_FREE_ITEMS', 500),
-                'storage_bytes' => (int) round((float) env('BILLING_FREE_STORAGE_MB', 200) * 1048576),
-                'members' => (int) env('BILLING_FREE_MEMBERS', 3),
-                'share_links' => (int) env('BILLING_FREE_SHARE_LINKS', 2),
+                'inventories' => EnvironmentSetting::integer(env('BILLING_FREE_INVENTORIES'), 3),
+                'items' => EnvironmentSetting::integer(env('BILLING_FREE_ITEMS'), 500),
+                'storage_bytes' => (int) round(EnvironmentSetting::number(env('BILLING_FREE_STORAGE_MB'), 200) * 1048576),
+                'members' => EnvironmentSetting::integer(env('BILLING_FREE_MEMBERS'), 3),
+                'share_links' => EnvironmentSetting::integer(env('BILLING_FREE_SHARE_LINKS'), 2),
             ],
             'features' => [
-                'photo_entry' => filter_var(env('BILLING_FREE_PHOTO_ENTRY', false), FILTER_VALIDATE_BOOLEAN),
+                'photo_entry' => EnvironmentSetting::boolean(env('BILLING_FREE_PHOTO_ENTRY'), false),
             ],
         ],
 
         'pro' => [
             'limits' => [
-                'inventories' => (int) env('BILLING_PRO_INVENTORIES', 100),
-                'items' => (int) env('BILLING_PRO_ITEMS', 10000),
-                'storage_bytes' => (int) round((float) env('BILLING_PRO_STORAGE_MB', 10240) * 1048576),
-                'members' => (int) env('BILLING_PRO_MEMBERS', 50),
-                'share_links' => (int) env('BILLING_PRO_SHARE_LINKS', 20),
+                'inventories' => EnvironmentSetting::integer(env('BILLING_PRO_INVENTORIES'), 100),
+                'items' => EnvironmentSetting::integer(env('BILLING_PRO_ITEMS'), 10000),
+                'storage_bytes' => (int) round(EnvironmentSetting::number(env('BILLING_PRO_STORAGE_MB'), 10240) * 1048576),
+                'members' => EnvironmentSetting::integer(env('BILLING_PRO_MEMBERS'), 50),
+                'share_links' => EnvironmentSetting::integer(env('BILLING_PRO_SHARE_LINKS'), 20),
             ],
             'features' => [
-                'photo_entry' => filter_var(env('BILLING_PRO_PHOTO_ENTRY', true), FILTER_VALIDATE_BOOLEAN),
+                'photo_entry' => EnvironmentSetting::boolean(env('BILLING_PRO_PHOTO_ENTRY'), true),
             ],
         ],
     ],

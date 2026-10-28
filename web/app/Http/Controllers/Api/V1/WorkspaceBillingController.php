@@ -9,6 +9,7 @@ use App\Billing\BillingCustomers;
 use App\Billing\BillingOverview;
 use App\Billing\BillingSync;
 use App\Billing\CheckoutParameters;
+use App\Billing\PreviousOwnerSubscriptionException;
 use App\Billing\StripeClient;
 use App\Billing\StripeException;
 use App\Billing\SubscriptionStatus;
@@ -18,10 +19,13 @@ use App\Http\Requests\Billing\ManageBillingRequest;
 use App\Http\Requests\Billing\StartCheckoutRequest;
 use App\Http\Responses\ApiError;
 use App\Models\BillingAccount;
+use App\Models\User;
 use App\Models\Workspace;
+use App\Support\DisplayTime;
 use App\Support\PublicUrls;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
@@ -34,11 +38,16 @@ use Illuminate\Support\Facades\Log;
  * synchronisation reads the subscription ({@see BillingSync}), and `refresh` is how the page asks for that to be done now.
  *
  * Every answer that is not a success carries a `code` the page switches on: `billing_disabled` (the instance sells no plan),
- * `already_subscribed`, `subscription_pending`, `no_billing_account` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could
- * not be reached or refused the call).
+ * `already_subscribed`, `subscription_pending`, `previous_owner_subscription` (the workspace changed hands and the subscription of the
+ * owner before is still running), `checkout_in_progress` (another request is opening a payment page for the workspace),
+ * `no_billing_account` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could not be reached or refused
+ * the call).
  */
 final class WorkspaceBillingController extends Controller
 {
+    /** The seconds a checkout holds the lock of its workspace: longer than the Stripe calls it makes (20 seconds each at the most). */
+    private const CHECKOUT_LOCK_SECONDS = 60;
+
     /**
      * Gets what the endpoints are made of.
      */
@@ -65,14 +74,21 @@ final class WorkspaceBillingController extends Controller
      * Opens a Stripe Checkout session that sells Pro to the workspace for the interval asked for, and answers `{data: {url}}`, the page of
      * Stripe to send the person to (the request checks that they are an owner).
      *
-     * A workspace is never sold a second subscription. When it has a customer, the subscriptions of that customer are read at Stripe first
-     * (not taken from the row, which a payment whose webhook is on its way has not changed yet): `409` `already_subscribed` when one gives
-     * Pro, `subscription_pending` when one is still in play without giving it (incomplete, unpaid, paused: it is settled in the portal, not
-     * bought again). The Checkout sessions of the customer that are still open are then expired, so that two tabs cannot both end in a
-     * subscription. The route paces the calls per person.
+     * **One checkout at a time for a workspace**: an atomic lock of the cache (not a transaction, which would be held while Stripe
+     * answers) serialises the requests for the same workspace; one that finds it taken is refused with `409` `checkout_in_progress`
+     * (nothing was done: the page says to try again). Inside it, in this order:
      *
-     * `409` `billing_disabled` when the instance sells no plan; `422` (`interval_not_offered`) for a yearly plan when no yearly Price is
-     * set; `503` (`billing_unavailable`) when Stripe fails.
+     * 1. the Checkout sessions of the customer that are still open are **expired**, so that two tabs cannot both end in a subscription,
+     *    and nothing can be paid from here on. A session that cannot be expired because it is not open any more (`400`: it was paid, or
+     *    ended by itself) is not a failure;
+     * 2. the subscriptions of the customer are **read at Stripe** (not taken from the row, which a payment whose webhook is on its way has
+     *    not changed yet), which also sees what a session paid meanwhile started: `409` `already_subscribed` when one gives Pro,
+     *    `subscription_pending` when one is still in play without giving it (incomplete, unpaid, paused: it is settled in the portal, not
+     *    bought again), `previous_owner_subscription` when the owner is not the payer and the subscription of the payer is in play;
+     * 3. the customer is made ready ({@see BillingCustomers::ensure()}) and the session is created.
+     *
+     * The route paces the calls per person. `409` `billing_disabled` when the instance sells no plan; `422` (`interval_not_offered`) for a
+     * yearly plan when no yearly Price is set; `503` (`billing_unavailable`) when Stripe fails.
      */
     public function checkout(StartCheckoutRequest $request, Workspace $workspace): JsonResponse
     {
@@ -87,23 +103,39 @@ final class WorkspaceBillingController extends Controller
             return ApiError::invalid(__('This billing period is not offered.'), 'interval', 'interval_not_offered');
         }
 
+        $lock = Cache::lock('billing-checkout:'.$workspace->ulid, self::CHECKOUT_LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            return ApiError::conflict(__('A payment page is already being opened for this workspace. Try again in a moment.'), 'checkout_in_progress');
+        }
+
+        try {
+            return $this->openCheckout($workspace, $this->user($request), $price);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Opens the session, with the checkout of the workspace held by this request (see {@see self::checkout()}).
+     */
+    private function openCheckout(Workspace $workspace, User $owner, string $price): JsonResponse
+    {
         try {
             $account = $this->customers->find($workspace);
 
             if ($account !== null) {
                 // Outside any transaction, as every call to Stripe.
-                $refusal = $this->refusalFor($this->sync->sync($account));
+                $this->expireOpenSessionsOf($account);
+
+                $refusal = $this->refusalFor($this->sync->sync($account), $owner);
 
                 if ($refusal !== null) {
                     return $refusal;
                 }
             }
 
-            $account = $this->customers->ensure($workspace, $this->user($request), App::getLocale());
-
-            foreach ($this->stripe->openCheckoutSessionsOf($account->stripe_customer_id) as $open) {
-                $this->stripe->expireCheckoutSession($open);
-            }
+            $account = $this->customers->ensure($workspace, $owner, App::getLocale());
 
             $session = $this->stripe->createCheckoutSession(CheckoutParameters::make(
                 $account->stripe_customer_id,
@@ -113,6 +145,8 @@ final class WorkspaceBillingController extends Controller
                 PublicUrls::to($this->pagePath($workspace)),
                 App::getLocale(),
             ));
+        } catch (PreviousOwnerSubscriptionException $previous) {
+            return $this->previousOwnerSubscription($previous->account);
         } catch (StripeException $exception) {
             return $this->unavailable($exception, $workspace);
         }
@@ -122,7 +156,10 @@ final class WorkspaceBillingController extends Controller
 
     /**
      * Opens a session of the Stripe customer portal for the workspace and answers `{data: {url}}` (the request checks that the person is an
-     * owner). `409` `billing_disabled`, or `no_billing_account` when the workspace never went to Checkout; `503` when Stripe fails.
+     * owner). `409` `billing_disabled`, or `no_billing_account` when the workspace never went to Checkout; `409`
+     * `previous_owner_subscription` for an owner who is not the payer while the subscription of the payer is in play (they are not handed
+     * the customer of somebody else: once that subscription is over they get a customer of their own, see {@see BillingCustomers}); `503`
+     * when Stripe fails.
      */
     public function portal(ManageBillingRequest $request, Workspace $workspace): JsonResponse
     {
@@ -136,9 +173,25 @@ final class WorkspaceBillingController extends Controller
             return $this->noAccount();
         }
 
+        $owner = $this->user($request);
+
         try {
-            $this->customers->follow($account, $this->user($request));
+            if ($this->customers->isPayer($account, $owner)) {
+                $this->customers->follow($account, $owner);
+            } else {
+                // Read now: the row may be hours old, and a subscription in play must not be forgotten.
+                $account = $this->sync->sync($account);
+
+                if (in_array($account->status, SubscriptionStatus::CURRENT, true)) {
+                    return $this->previousOwnerSubscription($account);
+                }
+
+                $account = $this->customers->startFresh($workspace, $account, $owner, App::getLocale());
+            }
+
             $url = $this->stripe->createPortalSession($account->stripe_customer_id, PublicUrls::to($this->pagePath($workspace)), App::getLocale());
+        } catch (PreviousOwnerSubscriptionException $previous) {
+            return $this->previousOwnerSubscription($previous->account);
         } catch (StripeException $exception) {
             return $this->unavailable($exception, $workspace);
         }
@@ -173,15 +226,39 @@ final class WorkspaceBillingController extends Controller
     }
 
     /**
-     * Why the workspace may not be sold a subscription, from the account as the synchronisation just wrote it (the subscription it keeps
-     * is the one that ranks first: Pro, else one still in play, else the newest that is over); null when it may.
+     * Expires the Checkout sessions of the customer of an account that are still open. One that is not open any more (Stripe answers
+     * `400`: it was paid, or it ended by itself) is left: the subscriptions are read right after, and see what a payment started.
+     *
+     * @throws StripeException When the sessions cannot be listed, or one cannot be expired for another reason.
      */
-    private function refusalFor(BillingAccount $account): ?JsonResponse
+    private function expireOpenSessionsOf(BillingAccount $account): void
+    {
+        foreach ($this->stripe->openCheckoutSessionsOf($account->stripe_customer_id) as $open) {
+            try {
+                $this->stripe->expireCheckoutSession($open);
+            } catch (StripeException $exception) {
+                if ($exception->status() !== 400) {
+                    throw $exception;
+                }
+            }
+        }
+    }
+
+    /**
+     * Why the person may not buy a subscription for the workspace, from the account as the synchronisation just wrote it (the subscription
+     * it keeps is the one that ranks first: Pro, else one still in play, else the newest that is over); null when they may.
+     */
+    private function refusalFor(BillingAccount $account, User $owner): ?JsonResponse
     {
         $status = $account->status;
 
         if ($status === null) {
             return null;
+        }
+
+        // Before the other refusals: a subscription somebody else pays for is not one this person can settle or manage.
+        if (in_array($status, SubscriptionStatus::CURRENT, true) && ! $this->customers->isPayer($account, $owner)) {
+            return $this->previousOwnerSubscription($account);
         }
 
         if (in_array($status, WorkspacePlan::PRO_STATUSES, true)) {
@@ -193,6 +270,24 @@ final class WorkspaceBillingController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * The answer when the workspace changed hands and the subscription of the owner before is still in play: `409`
+     * `previous_owner_subscription`, with `ends_at` (the end of the period that is paid for, in UTC) when the subscription is set to end
+     * there, null otherwise. The message says the date when there is one.
+     */
+    private function previousOwnerSubscription(BillingAccount $account): JsonResponse
+    {
+        $end = $account->cancel_at_period_end ? $account->current_period_end : null;
+
+        $message = $end === null
+            ? __('The subscription of the previous owner of this workspace is still running. You can subscribe once it has ended.')
+            : __('The subscription of the previous owner of this workspace runs until :date. You can subscribe once it has ended.', [
+                'date' => DisplayTime::of($end)->locale(App::getLocale())->isoFormat('LL'),
+            ]);
+
+        return ApiError::conflict($message, 'previous_owner_subscription', ['ends_at' => $end?->toIso8601String()]);
     }
 
     /**

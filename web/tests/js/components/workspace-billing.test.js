@@ -519,6 +519,118 @@ describe('the subscription page of a workspace', () => {
         });
     });
 
+    describe('a workspace whose previous owner still pays', () => {
+        /** The API refusing the new owner, as it does when the owner before has a subscription in play. */
+        function refusal(endsAt = '2026-12-15T12:00:00+00:00') {
+            return new HttpError(409, 'Conflict', {
+                code: 'previous_owner_subscription',
+                body: { code: 'previous_owner_subscription', message: 'a message of the server', ends_at: endsAt },
+            });
+        }
+
+        it('tells the owner when the subscription ends, and offers neither button, once Checkout is refused', async () => {
+            await open(overview());
+            http.post.mockRejectedValue(refusal());
+
+            expect(component.upgradeShown).toBe(true);
+
+            await component.upgrade();
+
+            expect(notify).toHaveBeenCalledWith(
+                'danger',
+                'The subscription of the previous owner of this workspace runs until December 15, 2026. You can subscribe once it has ended.',
+            );
+            expect(component.blockedByPreviousOwner).toBe(true);
+            expect(component.canUpgrade).toBe(false);
+            expect(component.upgradeShown).toBe(false);
+            expect(component.canOpenPortal).toBe(false);
+            expect(component.actionsShown).toBe(false);
+            expect(component.hasNotice).toBe(true);
+            expect(component.notice).toBe(
+                'The subscription of the previous owner of this workspace runs until December 15, 2026. You can subscribe once it has ended.',
+            );
+            expect(redirectTo).not.toHaveBeenCalled();
+            expect(component.busy).toBe(false);
+        });
+
+        it('says it without a date when the subscription is not set to end', async () => {
+            await open(overview());
+            http.post.mockRejectedValue(refusal(null));
+
+            await component.upgrade();
+
+            const expected =
+                'The subscription of the previous owner of this workspace is still running. You can subscribe once it has ended.';
+            expect(notify).toHaveBeenCalledWith('danger', expected);
+            expect(component.notice).toBe(expected);
+            expect(component.previousOwnerEndsAt).toBe('');
+        });
+
+        it('takes the portal of a Pro workspace away too, once it is refused there', async () => {
+            await open(pro({ cancel_at_period_end: true }));
+            http.post.mockRejectedValue(refusal());
+
+            expect(component.canOpenPortal).toBe(true);
+            expect(component.actionsShown).toBe(true);
+
+            await component.manage();
+
+            expect(component.canOpenPortal).toBe(false);
+            expect(component.upgradeShown).toBe(false);
+            expect(component.actionsShown).toBe(false);
+            expect(notify).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps what it knows when the overview is read again', async () => {
+            await open(overview());
+            http.post.mockRejectedValue(refusal());
+
+            await component.upgrade();
+            await component.load();
+
+            expect(component.blockedByPreviousOwner).toBe(true);
+            expect(component.canUpgrade).toBe(false);
+        });
+
+        it('is not there until the API says so', async () => {
+            await open(overview());
+
+            expect(component.blockedByPreviousOwner).toBe(false);
+            expect(component.previousOwnerText).toBe('');
+            expect(component.canUpgrade).toBe(true);
+            expect(component.actionsShown).toBe(true);
+        });
+
+        it('does not repeat a message the helper already showed', async () => {
+            await open(overview());
+            const error = refusal();
+            error.reported = true;
+            http.post.mockRejectedValue(error);
+
+            await component.upgrade();
+
+            expect(notify).not.toHaveBeenCalled();
+            expect(component.blockedByPreviousOwner).toBe(true);
+        });
+    });
+
+    describe('another checkout in progress', () => {
+        it('tells the owner to try again in a moment, and leaves the buttons', async () => {
+            await open(overview());
+            http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'checkout_in_progress' }));
+
+            await component.upgrade();
+
+            expect(notify).toHaveBeenCalledWith(
+                'danger',
+                'A payment page is already being opened for this workspace. Try again in a moment.',
+            );
+            expect(component.busy).toBe(false);
+            expect(component.canUpgrade).toBe(true);
+            expect(redirectTo).not.toHaveBeenCalled();
+        });
+    });
+
     describe('coming back from Stripe', () => {
         /** Puts the address the way Stripe brings the person back. */
         function returnFromCheckout(suffix = '') {
@@ -696,7 +808,7 @@ describe('the subscription page of a workspace', () => {
             );
         });
 
-        it('waits for nothing when the overview could not be read', async () => {
+        it('waits for nothing when the overview could not be read, and keeps the parameter for the reload that tries again', async () => {
             returnFromCheckout();
             http.get.mockRejectedValue(new HttpError(500, 'Server error'));
 
@@ -704,7 +816,39 @@ describe('the subscription page of a workspace', () => {
 
             expect(http.post).not.toHaveBeenCalled();
             expect(component.loadFailed).toBe(true);
-            // Nothing to come back to: a reload must not start it again.
+            expect(component.billing).toBeNull();
+            // Still there: the person is brought back from a payment, and the page they reload must know it.
+            expect(window.location.search).toBe('?checkout=done');
+
+            // The reload: the overview is read this time, the payment is waited for, and the parameter goes.
+            mount();
+            http.get.mockResolvedValue({ data: overview() });
+            http.post.mockResolvedValue({ data: pro() });
+
+            await component.init();
+
+            expect(http.post).toHaveBeenCalledWith(REFRESH_URL, {}, { silent: true });
+            expect(component.isPro).toBe(true);
+            expect(window.location.search).toBe('');
+        });
+
+        it('takes the parameter off as soon as the overview was read, whatever came of the wait', async () => {
+            returnFromCheckout();
+            http.get.mockResolvedValueOnce({ data: overview() }).mockRejectedValue(new HttpError(500, 'Server error'));
+            http.post.mockRejectedValue(new HttpError(500, 'Server error'));
+
+            await component.init();
+
+            expect(component.billing).not.toBeNull();
+            expect(window.location.search).toBe('');
+        });
+
+        it('takes the parameter off for somebody who waits for nothing: not an owner, or no plan sold', async () => {
+            returnFromCheckout();
+
+            await open(overview({ can_manage: false }));
+
+            expect(http.post).not.toHaveBeenCalled();
             expect(window.location.search).toBe('');
         });
 

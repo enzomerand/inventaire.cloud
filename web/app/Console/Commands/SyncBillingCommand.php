@@ -7,8 +7,10 @@ namespace App\Console\Commands;
 use App\Billing\Billing;
 use App\Billing\BillingSync;
 use App\Billing\StripeException;
+use App\Billing\SubscriptionStatus;
 use App\Models\BillingAccount;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -17,8 +19,11 @@ use Throwable;
  * Reads again, at Stripe, the subscription of the workspaces that have not been looked at for a while: the safety net of the webhook, and
  * the only way an instance that has no webhook (a local one, or one behind a NAT) ever learns that a subscription changed.
  *
- * It takes the accounts that were never synchronised first, then the ones synchronised more than {@see self::STALE_AFTER_HOURS} hours ago,
- * the one that was looked at (or created) longest ago first, at most {@see self::PER_RUN} per run (the rest waits for the next one). Each
+ * It takes the accounts that were never synchronised first, then the ones that are due: an account whose subscription is in play
+ * ({@see SubscriptionStatus::CURRENT}: it bills, or may bill again) is read again {@see self::STALE_AFTER_HOURS} hours after it was last
+ * read, because a missed webhook costs a wrong plan; an account with no subscription or with one that is over only
+ * {@see self::QUIET_AFTER_HOURS} hours after (nothing there changes by itself; the webhook, the page and the checkout read it when something
+ * does). The one that was looked at (or created) longest ago comes first, at most {@see self::PER_RUN} per run (the rest waits for the next one). Each
  * is synchronised in the command itself, one after the other, so that a hundred accounts do not make a hundred jobs; one that fails is
  * written in the log and the others go on. An account that fails is marked as looked at (its `updated_at`), so that one that fails every
  * time, for a reason that will not go away, does not take a place at the head of every run and starve the others.
@@ -36,8 +41,11 @@ final class SyncBillingCommand extends Command
     /** The accounts looked at in one run. */
     public const PER_RUN = 200;
 
-    /** The hours after which an account is read again. */
+    /** The hours after which an account whose subscription is in play is read again. */
     public const STALE_AFTER_HOURS = 6;
+
+    /** The hours after which an account with no subscription, or a subscription that is over, is read again. */
+    public const QUIET_AFTER_HOURS = 24;
 
     /** The failures worth trying again, in a row, after which the run gives up: Stripe is down, not the account. */
     public const OUTAGE_AFTER = 3;
@@ -133,7 +141,7 @@ final class SyncBillingCommand extends Command
     }
 
     /**
-     * The accounts to read: those never read first, then the stale ones, each group by the moment the account was last written (created,
+     * The accounts to read: those never read first, then the due ones (see the class), each group by the moment the account was last written (created,
      * read, or marked after a failure), the longest ago first, at most {@see self::PER_RUN} in all. Two queries rather than one with an
      * ordering on a column that may be null, which each engine sorts its own way.
      *
@@ -149,7 +157,14 @@ final class SyncBillingCommand extends Command
         }
 
         $stale = BillingAccount::query()
-            ->where('synced_at', '<', now()->subHours(self::STALE_AFTER_HOURS))
+            ->where(fn (Builder $due) => $due
+                ->where(fn (Builder $live) => $live
+                    ->whereIn('status', SubscriptionStatus::CURRENT)
+                    ->where('synced_at', '<', now()->subHours(self::STALE_AFTER_HOURS)))
+                // No status at all is not in `NOT IN (...)`: the engines answer "unknown" for a null.
+                ->orWhere(fn (Builder $quiet) => $quiet
+                    ->where(fn (Builder $over) => $over->whereNull('status')->orWhereNotIn('status', SubscriptionStatus::CURRENT))
+                    ->where('synced_at', '<', now()->subHours(self::QUIET_AFTER_HOURS))))
             ->orderBy('updated_at')
             ->orderBy('id')
             ->limit($room)

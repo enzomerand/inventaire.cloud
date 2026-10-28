@@ -6,10 +6,12 @@ use App\Billing\BillingSync;
 use App\Billing\Plan;
 use App\Billing\WorkspacePlan;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Jobs\CancelStripeSubscription;
 use App\Jobs\SyncBillingAccount;
 use App\Mail\BillingAlertMail;
 use App\Models\BillingAccount;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -21,6 +23,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\FakeStripe;
 
@@ -321,15 +324,13 @@ describe('what it does with an event', function (): void {
         'an id too long' => [str_repeat('c', 300)],
     ]);
 
-    it('is a call to a queue that is down, answered all the same, and written in the log', function (): void {
-        Log::spy();
+    it('is answered with a failure when the queue is down, so that Stripe sends the event again', function (): void {
         billingOn();
         $account = BillingAccount::factory()->create();
-        $this->mock(Dispatcher::class, fn ($mock) => $mock->shouldReceive('dispatch')->andThrow(new RuntimeException('The queue is down.')));
+        $event = billingEventFor('invoice.paid', $account->stripe_customer_id);
+        $this->mock(Dispatcher::class, fn ($mock) => $mock->shouldReceive('dispatch')->once()->andThrow(new RuntimeException('The queue is down.')));
 
-        billingWebhook($this, billingEventFor('invoice.paid', $account->stripe_customer_id))->assertOk()->assertExactJson(['received' => true]);
-
-        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'could not be followed'))->once();
+        billingWebhook($this, $event)->assertStatus(500);
     });
 });
 
@@ -656,5 +657,186 @@ describe('the route', function (): void {
         $source = (string) file_get_contents((new ReflectionClass(StripeWebhookController::class))->getFileName());
 
         expect($source)->toContain('WebhookSignature::verify($body,')->toContain('Billing::webhookSecret()');
+    });
+});
+
+/**
+ * The ULID of a workspace that does not exist.
+ */
+function billingGoneWorkspace(): string
+{
+    return strtolower((string) Str::ulid());
+}
+
+/**
+ * The jobs that cancel subscriptions, as `[customer, at period end, billing account, workspace]`.
+ *
+ * @return list<array{0: string, 1: bool, 2: int|null, 3: string|null}>
+ */
+function billingCancellationsQueued(): array
+{
+    return Queue::pushed(CancelStripeSubscription::class)
+        ->map(fn (CancelStripeSubscription $job): array => [$job->customerId, $job->atPeriodEnd, $job->billingAccountId, $job->workspaceUlid])
+        ->values()
+        ->all();
+}
+
+describe('a payment for a workspace that no longer exists', function (): void {
+    // The Checkout page was left open, and paid after the workspace was deleted: Stripe tells of a customer nobody knows, and the
+    // session and the subscription still carry the ULID of the workspace they were opened for.
+
+    beforeEach(function (): void {
+        Mail::fake();
+        billingOn();
+        $this->administrator = billingAdmin();
+    });
+
+    it('is cancelled at once, written in the log as an error and told to the administrators', function (string $type, string $where): void {
+        Log::spy();
+        $ulid = billingGoneWorkspace();
+        $object = $where === 'session' ? ['client_reference_id' => $ulid] : ['metadata' => ['workspace' => $ulid]];
+
+        billingWebhook($this, billingEventFor($type, 'cus_orphan', $object))->assertOk()->assertExactJson(['received' => true]);
+
+        expect(billingCancellationsQueued())->toBe([['cus_orphan', false, null, $ulid]]);
+        expect(billingQueued())->toBe([]);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'payment for a workspace that no longer exists')
+            && $context === ['type' => $type, 'customer' => 'cus_orphan', 'workspace' => $ulid])->once();
+        Log::shouldNotHaveReceived('info');
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        Mail::assertQueued(BillingAlertMail::class, function (BillingAlertMail $mail) use ($ulid): bool {
+            $html = $mail->render();
+
+            return $mail->hasTo('admin@example.test')
+                && $mail->eventType === 'checkout_orphaned'
+                && $mail->objectId === 'cus_orphan'
+                && $mail->workspaceUlid === $ulid
+                // The event was a test one (see FakeStripe::event()).
+                && $mail->livemode === false
+                && $mail->dashboardUrl() === 'https://dashboard.stripe.com/test/customers/cus_orphan'
+                && str_contains($html, 'cus_orphan')
+                && str_contains($html, $ulid)
+                && str_contains($html, 'refund');
+        });
+    })->with([
+        'a session completed' => ['checkout.session.completed', 'session'],
+        'a subscription created' => ['customer.subscription.created', 'subscription'],
+        'a subscription updated' => ['customer.subscription.updated', 'subscription'],
+    ]);
+
+    it('reads the ULID in whatever case Stripe gives it back', function (): void {
+        $ulid = billingGoneWorkspace();
+
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => strtoupper($ulid)]))->assertOk();
+
+        expect(billingCancellationsQueued())->toBe([['cus_orphan', false, null, $ulid]]);
+    });
+
+    it('is told for the live mode of Stripe when the event comes from it', function (): void {
+        $event = billingEventFor('customer.subscription.created', 'cus_orphan', ['metadata' => ['workspace' => billingGoneWorkspace()]]);
+        $event['livemode'] = true;
+
+        billingWebhook($this, $event)->assertOk();
+
+        Mail::assertQueued(BillingAlertMail::class, fn (BillingAlertMail $mail): bool => $mail->livemode && $mail->dashboardUrl() === 'https://dashboard.stripe.com/customers/cus_orphan');
+    });
+
+    it('is told once a day for a customer, however many events Stripe sends for the same payment, and cancelled each time', function (): void {
+        $ulid = billingGoneWorkspace();
+
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => $ulid]))->assertOk();
+        billingWebhook($this, billingEventFor('customer.subscription.created', 'cus_orphan', ['metadata' => ['workspace' => $ulid]]))->assertOk();
+        billingWebhook($this, billingEventFor('customer.subscription.updated', 'cus_orphan', ['metadata' => ['workspace' => $ulid]]))->assertOk();
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
+        expect(billingCancellationsQueued())->toHaveCount(3);
+
+        $this->travel(25)->hours();
+        billingWebhook($this, billingEventFor('customer.subscription.updated', 'cus_orphan', ['metadata' => ['workspace' => $ulid]]))->assertOk();
+
+        Mail::assertQueued(BillingAlertMail::class, 2);
+    });
+
+    it('is ignored as any customer nobody knows when it names no workspace, or something that is not a ULID', function (string $type, array $object): void {
+        Log::spy();
+
+        billingWebhook($this, billingEventFor($type, 'cus_stranger', $object))->assertOk()->assertExactJson(['received' => true]);
+
+        Queue::assertNothingPushed();
+        Mail::assertNothingQueued();
+        Log::shouldNotHaveReceived('error');
+        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'customer this instance does not know') && $context === ['type' => $type])->once();
+    })->with([
+        'a session with no reference' => ['checkout.session.completed', []],
+        'a session with a reference that is not a ULID' => ['checkout.session.completed', ['client_reference_id' => 'order-12']],
+        'a session with a reference that is a number' => ['checkout.session.completed', ['client_reference_id' => 12]],
+        'a subscription with no metadata' => ['customer.subscription.created', []],
+        'a subscription with empty metadata' => ['customer.subscription.updated', ['metadata' => []]],
+        'a subscription whose metadata is not a ULID' => ['customer.subscription.updated', ['metadata' => ['workspace' => 'not-a-ulid']]],
+        'a session whose workspace is written in the metadata of a subscription' => ['checkout.session.completed', ['metadata' => ['workspace' => '01hzzzzzzzzzzzzzzzzzzzzzzz']]],
+        'a subscription whose workspace is written as a reference' => ['customer.subscription.created', ['client_reference_id' => '01hzzzzzzzzzzzzzzzzzzzzzzz']],
+    ]);
+
+    it('is ignored when the workspace it names exists: the ULID is a trace, not a way to find an account', function (string $type, string $where, bool $capitals): void {
+        Log::spy();
+        $ulid = Workspace::factory()->create()->ulid;
+        $named = $capitals ? strtoupper($ulid) : $ulid;
+        $object = $where === 'session' ? ['client_reference_id' => $named] : ['metadata' => ['workspace' => $named]];
+
+        billingWebhook($this, billingEventFor($type, 'cus_stranger', $object))->assertOk()->assertExactJson(['received' => true]);
+
+        Queue::assertNothingPushed();
+        Mail::assertNothingQueued();
+        Log::shouldNotHaveReceived('error');
+        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'customer this instance does not know'))->once();
+    })->with([
+        'a session' => ['checkout.session.completed', 'session', false],
+        'a session, in capitals' => ['checkout.session.completed', 'session', true],
+        'a subscription' => ['customer.subscription.created', 'subscription', false],
+        'a subscription, in capitals' => ['customer.subscription.updated', 'subscription', true],
+    ]);
+
+    it('is only looked for in the events of a payment', function (string $type): void {
+        billingWebhook($this, billingEventFor($type, 'cus_orphan', ['client_reference_id' => billingGoneWorkspace(), 'metadata' => ['workspace' => billingGoneWorkspace()]]))->assertOk();
+
+        Queue::assertNothingPushed();
+        Mail::assertNothingQueued();
+    })->with(['customer.subscription.deleted', 'customer.subscription.paused', 'invoice.paid', 'invoice.payment_failed', 'charge.refunded']);
+
+    it('leaves a customer the instance follows to the synchronisation, whatever workspace the event names', function (): void {
+        $account = BillingAccount::factory()->create();
+
+        billingWebhook($this, billingEventFor('customer.subscription.created', $account->stripe_customer_id, ['metadata' => ['workspace' => billingGoneWorkspace()]]))->assertOk();
+
+        expect(billingQueued())->toBe([$account->id]);
+        Queue::assertNotPushed(CancelStripeSubscription::class);
+        Mail::assertNothingQueued();
+    });
+
+    it('is answered with a failure when the cancellation cannot be queued, so that Stripe sends the event again', function (): void {
+        $this->mock(Dispatcher::class, fn ($mock) => $mock->shouldReceive('dispatch')->once()->andThrow(new RuntimeException('The queue is down.')));
+
+        billingWebhook($this, billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => billingGoneWorkspace()]))->assertStatus(500);
+
+        Mail::assertNothingQueued();
+    });
+
+    it('is answered with a failure when the mail cannot be queued, and is told on the next delivery', function (): void {
+        $ulid = billingGoneWorkspace();
+        $event = billingEventFor('checkout.session.completed', 'cus_orphan', ['client_reference_id' => $ulid]);
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('The queue is down.'));
+
+        billingWebhook($this, $event)->assertStatus(500);
+
+        // The cancellation was queued; the alert is not marked as told.
+        expect(billingCancellationsQueued())->toHaveCount(1);
+        expect(Cache::has('billing-alert:checkout_orphaned:cus_orphan'))->toBeFalse();
+
+        app()->forgetInstance('mail.manager');
+        Mail::clearResolvedInstance('mail.manager');
+        Mail::fake();
+        billingWebhook($this, $event)->assertOk();
+
+        Mail::assertQueued(BillingAlertMail::class, 1);
     });
 });
