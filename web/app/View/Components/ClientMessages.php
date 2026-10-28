@@ -515,6 +515,7 @@ class ClientMessages extends Component
             'billing.error.checkout_in_progress' => __('A payment page is already being opened for this workspace. Try again in a moment.'),
             'billing.error.no_account' => __('This workspace has no subscription to manage yet.'),
             'billing.error.interval' => __('This billing period is not offered.'),
+            'billing.error.unavailable' => __('The payment service is unavailable right now. Please try again in a moment.'),
         ] + $this->tokenAbilityLabels();
     }
 

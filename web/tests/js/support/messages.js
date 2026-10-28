@@ -429,6 +429,7 @@ export const MESSAGES = {
         'A payment page is already being opened for this workspace. Try again in a moment.',
     'billing.error.no_account': 'This workspace has no subscription to manage yet.',
     'billing.error.interval': 'This billing period is not offered.',
+    'billing.error.unavailable': 'The payment service is unavailable right now. Please try again in a moment.',
 };
 
 /**

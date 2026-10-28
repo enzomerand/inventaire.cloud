@@ -58,6 +58,7 @@ const MESSAGE_KEYS = {
     checkout_in_progress: 'billing.error.checkout_in_progress',
     no_billing_account: 'billing.error.no_account',
     interval_not_offered: 'billing.error.interval',
+    billing_unavailable: 'billing.error.unavailable',
 };
 
 /**
@@ -268,7 +269,7 @@ export default function workspaceBilling() {
 
         /** The classes of the badge of the plan. */
         get planClass() {
-            return this.isPro ? 'bg-primary' : 'bg-secondary-lt';
+            return this.isPro ? 'bg-primary-lt' : 'bg-secondary-lt';
         },
 
         /** What the subscription is doing, in a word ("" for a status the page has no word for). */
@@ -280,7 +281,7 @@ export default function workspaceBilling() {
 
         /** The classes of the badge of the status: a payment that failed is a warning. */
         get statusClass() {
-            return this.billing?.status === 'past_due' ? 'bg-warning' : 'bg-success';
+            return this.billing?.status === 'past_due' ? 'bg-yellow-lt' : 'bg-green-lt';
         },
 
         /** How often the subscription is paid ("" when unknown). */
@@ -479,12 +480,17 @@ export default function workspaceBilling() {
             this.busy = true;
 
             try {
-                const answer = await http.post(url, body);
+                // Silent: a 503 from Stripe has words of its own, which the central "server error" toast would hide.
+                const answer = await http.post(url, body, { silent: true });
 
                 redirectTo(answer.data.url);
             } catch (error) {
                 this.busy = false;
                 this.fail(error);
+
+                if (error instanceof HttpError) {
+                    leaveStalePage(error);
+                }
             }
         },
 

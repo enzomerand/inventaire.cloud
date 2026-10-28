@@ -271,7 +271,11 @@ describe('the subscription page under the real Alpine CSP build', () => {
             buttons('Upgrade to Pro')[0].click();
             await flush();
 
-            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/billing/checkout', { interval: 'year' });
+            expect(http.post).toHaveBeenCalledWith(
+                '/api/v1/workspaces/shop/billing/checkout',
+                { interval: 'year' },
+                { silent: true },
+            );
             expect(redirectTo).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_1');
             expect(buttons('Upgrade to Pro')[0].disabled).toBe(true);
         });
@@ -361,7 +365,7 @@ describe('the subscription page under the real Alpine CSP build', () => {
             buttons('Manage the subscription')[0].click();
             await flush();
 
-            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/billing/portal', {});
+            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/billing/portal', {}, { silent: true });
             expect(redirectTo).toHaveBeenCalledWith('https://billing.stripe.com/session/bps_1');
         });
 

@@ -249,9 +249,9 @@ describe('the subscription page of a workspace', () => {
 
             expect(component.isPro).toBe(true);
             expect(component.planLabel).toBe('Pro');
-            expect(component.planClass).toBe('bg-primary');
+            expect(component.planClass).toBe('bg-primary-lt');
             expect(component.statusLabel).toBe('Active');
-            expect(component.statusClass).toBe('bg-success');
+            expect(component.statusClass).toBe('bg-green-lt');
             expect(component.intervalLabel).toBe('Monthly');
             expect(component.periodText).toBe('Renews on December 15, 2026.');
             expect(component.pastDue).toBe(false);
@@ -274,7 +274,7 @@ describe('the subscription page of a workspace', () => {
             expect(component.isPro).toBe(true);
             expect(component.pastDue).toBe(true);
             expect(component.statusLabel).toBe('Payment overdue');
-            expect(component.statusClass).toBe('bg-warning');
+            expect(component.statusClass).toBe('bg-yellow-lt');
         });
 
         it('has a word for a trial', async () => {
@@ -381,7 +381,7 @@ describe('the subscription page of a workspace', () => {
 
             await component.upgrade();
 
-            expect(http.post).toHaveBeenCalledWith(CHECKOUT_URL, { interval: 'month' });
+            expect(http.post).toHaveBeenCalledWith(CHECKOUT_URL, { interval: 'month' }, { silent: true });
             expect(redirectTo).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_1');
             // The browser is leaving: the buttons stay off.
             expect(component.busy).toBe(true);
@@ -394,7 +394,7 @@ describe('the subscription page of a workspace', () => {
 
             await component.upgrade();
 
-            expect(http.post).toHaveBeenCalledWith(CHECKOUT_URL, { interval: 'year' });
+            expect(http.post).toHaveBeenCalledWith(CHECKOUT_URL, { interval: 'year' }, { silent: true });
         });
 
         it('does nothing twice, nor for somebody who may not buy, nor for a workspace that is on Pro', async () => {
@@ -494,7 +494,7 @@ describe('the subscription page of a workspace', () => {
 
             await component.manage();
 
-            expect(http.post).toHaveBeenCalledWith(PORTAL_URL, {});
+            expect(http.post).toHaveBeenCalledWith(PORTAL_URL, {}, { silent: true });
             expect(redirectTo).toHaveBeenCalledWith('https://billing.stripe.com/session/bps_1');
             expect(component.busy).toBe(true);
         });
@@ -627,6 +627,22 @@ describe('the subscription page of a workspace', () => {
             );
             expect(component.busy).toBe(false);
             expect(component.canUpgrade).toBe(true);
+            expect(redirectTo).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('payment service unavailable', () => {
+        it('says the payment service is unavailable rather than a server error', async () => {
+            await open(overview());
+            http.post.mockRejectedValue(new HttpError(503, 'Service Unavailable', { code: 'billing_unavailable' }));
+
+            await component.upgrade();
+
+            expect(notify).toHaveBeenCalledWith(
+                'danger',
+                'The payment service is unavailable right now. Please try again in a moment.',
+            );
+            expect(component.busy).toBe(false);
             expect(redirectTo).not.toHaveBeenCalled();
         });
     });
