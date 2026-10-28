@@ -224,7 +224,7 @@ describe('creating a Checkout session', function (): void {
         $session = $this->client->createCheckoutSession($parameters);
 
         $request = $this->stripe->requests[0];
-        expect($session)->toBe(['id' => 'cs_test_1', 'url' => 'https://checkout.stripe.test/c/pay/cs_test_1'])
+        expect($session)->toBe(['id' => 'cs_test_1', 'url' => 'https://checkout.stripe.com/c/pay/cs_test_1'])
             ->and($request->method())->toBe('POST')
             ->and($request->url())->toBe('https://api.stripe.com/v1/checkout/sessions')
             ->and($request->body())->toContain('line_items%5B0%5D%5Bprice%5D=price_monthly_test')
@@ -255,12 +255,48 @@ describe('creating a Checkout session', function (): void {
         expect($this->stripe->requests[0]->data())->toBe(['mode' => 'subscription', 'customer' => 'cus_1', 'metadata' => ['b' => 'x']]);
     });
 
-    it('refuses a page that is not an https address', function (mixed $url): void {
+    it('refuses a page that is not an https address on a host of Stripe', function (mixed $url): void {
         $this->stripe->answerWith(Http::response(['id' => 'cs_1', 'url' => $url]));
 
         expect(fn () => $this->client->createCheckoutSession(['mode' => 'subscription']))
             ->toThrow(fn (StripeException $e) => expect($e->code())->toBe('invalid_response'));
-    })->with([null, '', 'http://checkout.stripe.test/x', 'javascript:alert(1)', 12]);
+    })->with([
+        'nothing' => [null],
+        'empty' => [''],
+        'a number' => [12],
+        'not https' => ['http://checkout.stripe.com/x'],
+        'a script' => ['javascript:alert(1)'],
+        'no scheme' => ['//checkout.stripe.com/x'],
+        'another host' => ['https://evil.example/c/pay/cs_1'],
+        'a host that ends like Stripe' => ['https://checkout.notstripe.com/x'],
+        'Stripe as a subdomain of another host' => ['https://checkout.stripe.com.evil.example/x'],
+        'Stripe in the path' => ['https://evil.example/checkout.stripe.com/x'],
+        'credentials of another host' => ['https://checkout.stripe.com@evil.example/x'],
+        'a backslash that a browser reads as a slash' => ['https://evil.example\\@checkout.stripe.com/x'],
+        'a port' => ['https://checkout.stripe.com:8443/x'],
+        'a space' => ['https://checkout.stripe.com /x'],
+        'a line break' => ["https://checkout.stripe.com/x\r\nSet-Cookie: a=b"],
+        'the old test host' => ['https://checkout.stripe.test/x'],
+    ]);
+
+    it('accepts the pages Stripe hosts, on stripe.com or one of its subdomains', function (string $url): void {
+        $this->stripe->answerWith(Http::response(['id' => 'cs_1', 'url' => $url]));
+
+        expect($this->client->createCheckoutSession(['mode' => 'subscription'])['url'])->toBe($url);
+    })->with([
+        'Checkout' => ['https://checkout.stripe.com/c/pay/cs_test_a1b2#fid=abc'],
+        'the portal' => ['https://billing.stripe.com/p/session/test_abc'],
+        'another subdomain' => ['https://pay.stripe.com/x?y=1'],
+        'the domain itself' => ['https://stripe.com/x'],
+        'in capitals' => ['HTTPS://Checkout.Stripe.COM/x'],
+    ]);
+
+    it('refuses an id that ends with a line break, which a dollar would let through', function (): void {
+        $this->stripe->answerWith(Http::response(['id' => "cs_1\n", 'url' => 'https://checkout.stripe.com/x']));
+
+        expect(fn () => $this->client->createCheckoutSession(['mode' => 'subscription']))
+            ->toThrow(fn (StripeException $e) => expect($e->code())->toBe('invalid_response'));
+    });
 
     it('says when the customer is not at Stripe', function (): void {
         expect(fn () => $this->client->createCheckoutSession(['mode' => 'subscription', 'customer' => 'cus_gone']))
@@ -275,7 +311,7 @@ describe('creating a portal session', function (): void {
         $url = $this->client->createPortalSession('cus_1', 'https://inventaire.test/app/w/01j/billing', 'en');
 
         $request = $this->stripe->requests[0];
-        expect($url)->toStartWith('https://billing.stripe.test/session/bps_test_')
+        expect($url)->toStartWith('https://billing.stripe.com/session/bps_test_')
             ->and($request->url())->toBe('https://api.stripe.com/v1/billing_portal/sessions')
             ->and($request->data())->toBe(['customer' => 'cus_1', 'return_url' => 'https://inventaire.test/app/w/01j/billing', 'locale' => 'en']);
     });
@@ -409,7 +445,22 @@ describe('a call that fails', function (): void {
         $this->stripe->failNext('GET /v1/subscriptions', null);
 
         expect(fn () => $this->client->subscriptionsOf('cus_1'))
-            ->toThrow(fn (StripeException $e) => expect($e->retryable())->toBeTrue()->and($e->code())->toBe('unreachable')->and($e->status())->toBeNull()->and($e->getPrevious())->not->toBeNull());
+            ->toThrow(fn (StripeException $e) => expect($e->retryable())->toBeTrue()->and($e->code())->toBe('unreachable')->and($e->status())->toBeNull());
+    });
+
+    it('keeps nothing of the failure of the connection but its class: the message of the client names the address, which holds the id of the customer', function (): void {
+        $this->stripe->failNext('GET /v1/subscriptions', null);
+
+        try {
+            $this->client->subscriptionsOf('cus_secretcustomer');
+            $thrown = null;
+        } catch (StripeException $e) {
+            $thrown = $e;
+        }
+
+        expect($thrown)->not->toBeNull()
+            ->and($thrown->getPrevious())->toBeNull()
+            ->and($thrown->getMessage())->toBe('Stripe could not be reached (ConnectionException).');
     });
 
     it('cannot be tried again when Stripe refuses it', function (int $status): void {

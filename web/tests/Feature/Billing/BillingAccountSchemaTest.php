@@ -41,6 +41,41 @@ describe('the table of billing accounts', function (): void {
             ->and(Schema::hasIndex('billing_accounts', ['stripe_subscription_id']))->toBeTrue();
     });
 
+    it('compares the identifiers of Stripe exactly, case included, in a lookup and in a unique index', function (): void {
+        $first = Workspace::factory()->create();
+        $second = Workspace::factory()->create();
+        rawBillingAccount($first->id, ['stripe_customer_id' => 'cus_AbC', 'stripe_subscription_id' => 'sub_AbC', 'price_id' => 'price_AbC']);
+        // Not the same customer: Stripe's ids are case-sensitive, and the unique index agrees on every engine.
+        rawBillingAccount($second->id, ['stripe_customer_id' => 'cus_abc', 'stripe_subscription_id' => 'sub_abc', 'price_id' => 'price_abc']);
+
+        expect(BillingAccount::query()->where('stripe_customer_id', 'cus_ABC')->exists())->toBeFalse()
+            ->and(BillingAccount::query()->where('stripe_customer_id', 'cus_AbC')->value('workspace_id'))->toBe($first->id)
+            ->and(BillingAccount::query()->where('stripe_customer_id', 'cus_abc')->value('workspace_id'))->toBe($second->id)
+            ->and(BillingAccount::query()->where('stripe_subscription_id', 'sub_ABC')->exists())->toBeFalse()
+            ->and(BillingAccount::query()->where('stripe_subscription_id', 'sub_abc')->value('workspace_id'))->toBe($second->id)
+            ->and(BillingAccount::query()->where('price_id', 'PRICE_ABC')->exists())->toBeFalse()
+            ->and(BillingAccount::query()->where('price_id', 'price_AbC')->value('workspace_id'))->toBe($first->id);
+    });
+
+    it('refuses the same customer twice, in the same case', function (): void {
+        rawBillingAccount(Workspace::factory()->create()->id, ['stripe_customer_id' => 'cus_Same']);
+
+        expect(fn () => rawBillingAccount(Workspace::factory()->create()->id, ['stripe_customer_id' => 'cus_Same']))->toThrow(UniqueConstraintViolationException::class);
+    });
+
+    it('gives the identifiers of Stripe a binary collation where the engine would otherwise ignore the case', function (): void {
+        $collations = collect(Schema::getColumns('billing_accounts'))
+            ->whereIn('name', ['stripe_customer_id', 'stripe_subscription_id', 'price_id'])
+            ->mapWithKeys(fn (array $column): array => [$column['name'] => $column['collation'] ?? null]);
+
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            expect($collations->all())->toBe(['stripe_customer_id' => 'utf8mb4_bin', 'stripe_subscription_id' => 'utf8mb4_bin', 'price_id' => 'utf8mb4_bin']);
+        } else {
+            // PostgreSQL compares byte for byte already: the column keeps the default of the database.
+            expect($collations->filter(fn (?string $collation): bool => $collation === 'utf8mb4_bin'))->toHaveCount(0);
+        }
+    });
+
     it('refuses a second account for a workspace', function (): void {
         $workspace = Workspace::factory()->create();
         rawBillingAccount($workspace->id);

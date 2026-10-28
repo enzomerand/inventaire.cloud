@@ -14,6 +14,7 @@ use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -170,7 +171,18 @@ describe('who may call it', function (): void {
 
         $response->assertStatus(400)->assertExactJson(['message' => 'The body is not valid JSON.', 'code' => 'invalid_body']);
         Queue::assertNothingPushed();
-    })->with(['text' => ['not json'], 'empty' => [''], 'a number' => ['12'], 'a string' => ['"invoice.paid"'], 'null' => ['null'], 'cut short' => ['{"type": "invoice.paid", ']]);
+    })->with([
+        'text' => ['not json'],
+        'empty' => [''],
+        'a number' => ['12'],
+        'a string' => ['"invoice.paid"'],
+        'null' => ['null'],
+        'cut short' => ['{"type": "invoice.paid", '],
+        'an empty list' => ['[]'],
+        'a list of numbers' => ['[1, 2, 3]'],
+        'a list of events' => ['[{"type": "invoice.paid", "data": {"object": {"customer": "cus_x"}}}]'],
+        'an empty object' => ['{}'],
+    ]);
 
     it('answers in the language the call asks for', function (): void {
         billingOn();
@@ -287,8 +299,6 @@ describe('what it does with an event', function (): void {
         'no data' => [['type' => 'invoice.paid']],
         'data that is not an object' => [['type' => 'invoice.paid', 'data' => 'cus_x']],
         'an object that is not an object' => [['type' => 'invoice.paid', 'data' => ['object' => 'cus_x']]],
-        'an empty list' => [[]],
-        'a list' => [[1, 2, 3]],
     ]);
 
     it('ignores a customer nobody knows, a missing one, and one that is not an id, writing the first in the log', function (mixed $customer): void {
@@ -493,6 +503,12 @@ describe('a risk event', function (): void {
         expect($mail->render())->toContain('5 000 JPY');
     });
 
+    it('shows an amount in a currency with three decimals as it is', function (): void {
+        expect((new BillingAlertMail('charge.dispute.created', 'du_1', 12500, 'kwd', true))->render())->toContain('12.500 KWD')
+            ->and((new BillingAlertMail('charge.dispute.created', 'du_1', 1250, 'eur', true))->render())->toContain('12.50 EUR')
+            ->and((new BillingAlertMail('charge.dispute.created', 'du_1', 1234567, 'usd', true))->render())->toContain('12 345.67 USD');
+    });
+
     it('does not follow it as a subscription event, and needs no administrator to answer', function (): void {
         $account = BillingAccount::factory()->create();
 
@@ -502,14 +518,26 @@ describe('a risk event', function (): void {
         Mail::assertNothingQueued();
     });
 
-    it('is answered all the same when the mail cannot be queued, and written in the log', function (): void {
-        Log::spy();
+    it('is answered with a failure when the mail cannot be queued, so that Stripe sends the event again, and the alert is not lost', function (): void {
         billingAdmin();
-        Mail::shouldReceive('to')->andThrow(new RuntimeException('The queue is down.'));
+        $event = billingRisk('charge.dispute.created', ['id' => 'du_1']);
+        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('The queue is down.'));
 
-        billingWebhook($this, billingRisk('charge.dispute.created', ['id' => 'du_1']))->assertOk()->assertExactJson(['received' => true]);
+        billingWebhook($this, $event)->assertStatus(500);
 
-        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'could not be followed'))->once();
+        // The event is not marked as told: it was not.
+        expect(Cache::has('stripe-webhook-alert:'.$event['id']))->toBeFalse();
+
+        // The queue is back, and Stripe sends the event again.
+        app()->forgetInstance('mail.manager');
+        Mail::clearResolvedInstance('mail.manager');
+        Mail::fake();
+        billingWebhook($this, $event)->assertOk()->assertExactJson(['received' => true]);
+        Mail::assertQueued(BillingAlertMail::class, 1);
+
+        // And a third delivery tells nobody twice.
+        billingWebhook($this, $event)->assertOk();
+        Mail::assertQueued(BillingAlertMail::class, 1);
     });
 
     it('does not lock the accounts to find the administrators', function (): void {

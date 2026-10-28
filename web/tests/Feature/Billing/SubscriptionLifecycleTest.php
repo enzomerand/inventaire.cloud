@@ -21,31 +21,39 @@ require_once __DIR__.'/../../Support/billing.php';
 require_once __DIR__.'/../../Support/inventories.php';
 
 /*
- * What becomes of a subscription at Stripe when its workspace is deleted (it is cancelled at once) or changes owner (it ends with the period
- * that is paid for): in the background, once the change is committed, and only for a subscription that is not over.
+ * What becomes of the subscriptions of a workspace at Stripe when it is deleted (they are cancelled at once) or changes owner (they end with
+ * the period that is paid for): in the background, once the change is committed, for the customer of its billing account whatever the
+ * account recorded of the subscription (the job lists the subscriptions at Stripe and ends those that are not over).
  */
 
 uses(RefreshDatabase::class);
 
 /**
- * Gives a workspace a billing account with a subscription in a status (the subscription id is returned).
+ * Gives a workspace a billing account with a subscription in a status (the id of its Stripe customer is returned).
  */
 function billingSubscribe(Workspace $workspace, string $status = 'active'): string
 {
-    $account = BillingAccount::factory()->for($workspace)->subscribed($status)->create();
-
-    return (string) $account->stripe_subscription_id;
+    return BillingAccount::factory()->for($workspace)->subscribed($status)->create()->stripe_customer_id;
 }
 
 /**
- * The cancellations the queue holds, as `[subscription, at period end, account]`, sorted.
+ * Gives a workspace a billing account that records no subscription (the checkout was paid, and nothing was synchronised yet): the id of
+ * its Stripe customer is returned.
+ */
+function billingCustomerOnly(Workspace $workspace): string
+{
+    return BillingAccount::factory()->for($workspace)->create()->stripe_customer_id;
+}
+
+/**
+ * The cancellations the queue holds, as `[customer, at period end, account]`, sorted.
  *
  * @return list<array{0: string, 1: bool, 2: int|null}>
  */
 function billingCancellations(): array
 {
     $found = Queue::pushed(CancelStripeSubscription::class)
-        ->map(fn (CancelStripeSubscription $job): array => [$job->subscriptionId, $job->atPeriodEnd, $job->billingAccountId])
+        ->map(fn (CancelStripeSubscription $job): array => [$job->customerId, $job->atPeriodEnd, $job->billingAccountId])
         ->values()
         ->all();
     sort($found);
@@ -56,10 +64,10 @@ function billingCancellations(): array
 describe('deleting a workspace', function (): void {
     beforeEach(fn () => Queue::fake());
 
-    it('cancels its subscription at once, whichever way it is deleted', function (string $how): void {
+    it('cancels the subscriptions of its customer at once, whichever way it is deleted', function (string $how): void {
         $owner = inventoryPerson();
         $workspace = app(Workspaces::class)->create($owner, 'Shop');
-        $subscription = billingSubscribe($workspace);
+        $customer = billingSubscribe($workspace);
 
         match ($how) {
             'the model' => $workspace->delete(),
@@ -69,39 +77,37 @@ describe('deleting a workspace', function (): void {
         };
 
         expect(Workspace::query()->whereKey($workspace->id)->exists())->toBeFalse()
-            ->and(billingCancellations())->toBe([[$subscription, false, null]]);
+            ->and(billingCancellations())->toBe([[$customer, false, null]]);
     })->with(['the model', 'the owner', 'the account', 'an administrator']);
 
-    it('cancels a subscription whatever its status, but those that are over', function (string $status, bool $cancels): void {
+    it('queues it whatever the account recorded of the subscription: the job asks Stripe which are not over', function (?string $status): void {
         $workspace = app(Workspaces::class)->create(inventoryPerson(), 'Shop');
-        $subscription = billingSubscribe($workspace, $status);
+        $customer = $status === null ? billingCustomerOnly($workspace) : billingSubscribe($workspace, $status);
 
         $workspace->delete();
 
-        expect(billingCancellations())->toBe($cancels ? [[$subscription, false, null]] : []);
+        expect(billingCancellations())->toBe([[$customer, false, null]]);
     })->with([
-        'active' => ['active', true],
-        'trialing' => ['trialing', true],
-        'past due' => ['past_due', true],
-        'unpaid' => ['unpaid', true],
-        'paused' => ['paused', true],
-        'incomplete' => ['incomplete', true],
-        'canceled' => ['canceled', false],
-        'incomplete expired' => ['incomplete_expired', false],
+        'a checkout paid and not synchronised yet' => [null],
+        'active' => ['active'],
+        'trialing' => ['trialing'],
+        'past due' => ['past_due'],
+        'unpaid' => ['unpaid'],
+        'paused' => ['paused'],
+        'incomplete' => ['incomplete'],
+        'canceled' => ['canceled'],
+        'incomplete expired' => ['incomplete_expired'],
     ]);
 
-    it('has nothing to cancel without a billing account, or with a customer who has no subscription', function (): void {
+    it('has nothing to cancel without a billing account: no checkout was ever started', function (): void {
         $bare = app(Workspaces::class)->create(inventoryPerson(), 'Bare');
-        $customer = app(Workspaces::class)->create(inventoryPerson(), 'Customer');
-        BillingAccount::factory()->for($customer)->create();
 
         $bare->delete();
-        $customer->delete();
 
-        expect(billingCancellations())->toBe([])->and(BillingAccount::query()->count())->toBe(0);
+        expect(billingCancellations())->toBe([]);
     });
 
-    it('cancels the subscription of each workspace an account deletes with it, and only those', function (): void {
+    it('cancels the subscriptions of each workspace an account deletes with it, and only those', function (): void {
         $owner = inventoryPerson();
         $first = app(Workspaces::class)->create($owner, 'First');
         $second = app(Workspaces::class)->create($owner, 'Second');
@@ -121,7 +127,7 @@ describe('deleting a workspace', function (): void {
 
     it('queues once the deletion is committed, not before, and not at all when it is rolled back', function (): void {
         $workspace = app(Workspaces::class)->create(inventoryPerson(), 'Shop');
-        $subscription = billingSubscribe($workspace);
+        $customer = billingSubscribe($workspace);
 
         try {
             DB::transaction(function () use ($workspace): void {
@@ -144,7 +150,7 @@ describe('deleting a workspace', function (): void {
             Queue::assertNotPushed(CancelStripeSubscription::class);
         });
 
-        expect(billingCancellations())->toBe([[$subscription, false, null]]);
+        expect(billingCancellations())->toBe([[$customer, false, null]]);
     });
 
     it('writes in the log a queue that cannot be reached, for somebody to cancel in Stripe', function (): void {
@@ -169,38 +175,36 @@ describe('deleting a workspace', function (): void {
 describe('changing the owner of a workspace', function (): void {
     beforeEach(fn () => Queue::fake());
 
-    it('has the subscription end with the period that is paid for, once the change is committed', function (): void {
+    it('has the subscriptions of the customer end with the period that is paid for, once the change is committed', function (): void {
         $team = inventoryTeam();
-        $subscription = billingSubscribe($team['workspace']);
+        $customer = billingSubscribe($team['workspace']);
         $accountId = BillingAccount::query()->where('workspace_id', $team['workspace']->id)->value('id');
 
         app(Members::class)->transferOwnership($team['owner'], $team['workspace'], $team['editor']);
 
-        expect(billingCancellations())->toBe([[$subscription, true, $accountId]]);
+        expect(billingCancellations())->toBe([[$customer, true, $accountId]]);
     });
 
-    it('cancels what is in play and nothing else', function (string $status, bool $cancels): void {
+    it('queues it whatever the account recorded of the subscription: the job asks Stripe which are not over', function (?string $status): void {
         $team = inventoryTeam();
-        $subscription = billingSubscribe($team['workspace'], $status);
+        $customer = $status === null ? billingCustomerOnly($team['workspace']) : billingSubscribe($team['workspace'], $status);
 
         app(Members::class)->transferOwnership($team['owner'], $team['workspace'], $team['viewer']);
 
-        expect(Queue::pushed(CancelStripeSubscription::class)->map(fn (CancelStripeSubscription $job): string => $job->subscriptionId)->all())->toBe($cancels ? [$subscription] : []);
+        expect(array_column(billingCancellations(), 0))->toBe([$customer]);
     })->with([
-        'active' => ['active', true],
-        'past due' => ['past_due', true],
-        'paused' => ['paused', true],
-        'canceled' => ['canceled', false],
-        'incomplete expired' => ['incomplete_expired', false],
+        'a checkout paid and not synchronised yet' => [null],
+        'active' => ['active'],
+        'past due' => ['past_due'],
+        'paused' => ['paused'],
+        'canceled' => ['canceled'],
+        'incomplete expired' => ['incomplete_expired'],
     ]);
 
-    it('has nothing to end for a workspace that was never paid for, or whose customer has no subscription', function (): void {
+    it('has nothing to end for a workspace that never started a checkout', function (): void {
         $bare = inventoryTeam();
-        $customer = inventoryTeam();
-        BillingAccount::factory()->for($customer['workspace'])->create();
 
         app(Members::class)->transferOwnership($bare['owner'], $bare['workspace'], $bare['editor']);
-        app(Members::class)->transferOwnership($customer['owner'], $customer['workspace'], $customer['editor']);
 
         Queue::assertNotPushed(CancelStripeSubscription::class);
     });
@@ -266,7 +270,7 @@ describe('changing the owner of a workspace', function (): void {
 describe('an administrator deleting the account of an owner', function (): void {
     beforeEach(fn () => Queue::fake());
 
-    it('has the subscription of a workspace handed over to somebody else end with the period, and cancels the one of a workspace that goes', function (): void {
+    it('has the subscriptions of a workspace handed over to somebody else end with the period, and cancels those of a workspace that goes', function (): void {
         $admin = User::factory()->admin()->withPersonalWorkspace()->create();
         $team = inventoryTeam();
         $alone = app(Workspaces::class)->create($team['owner'], 'Alone');
@@ -329,18 +333,44 @@ describe('billing off', function (): void {
         Queue::assertNotPushed(CancelStripeSubscription::class);
     });
 
-    it('still queues the cancellation of a subscription recorded before billing was turned off: the job says what it cannot do', function (): void {
+    it('still queues the cancellation for a customer recorded before billing was turned off: the job says what it cannot do', function (): void {
         billingOff();
         $workspace = app(Workspaces::class)->create(inventoryPerson(), 'Shop');
-        $subscription = billingSubscribe($workspace);
+        $customer = billingSubscribe($workspace);
 
         $workspace->delete();
 
-        expect(billingCancellations())->toBe([[$subscription, false, null]]);
+        expect(billingCancellations())->toBe([[$customer, false, null]]);
     });
 });
 
 describe('the calls to Stripe', function (): void {
+    it('cancels what was subscribed after the last synchronisation: the workspace deleted between the checkout and the sync', function (): void {
+        $stripe = billingOn();
+        config(['queue.default' => 'sync']);
+        $workspace = app(Workspaces::class)->create(inventoryPerson(), 'Shop');
+        $account = BillingAccount::factory()->for($workspace)->create();
+        $id = $stripe->subscribe($account->stripe_customer_id, 'active');
+
+        $workspace->delete();
+
+        expect($stripe->subscriptions[$id]['status'])->toBe('canceled')->and(BillingAccount::query()->count())->toBe(0);
+    });
+
+    it('ends what was subscribed after the last synchronisation: the owner changes between the checkout and the sync', function (): void {
+        $stripe = billingOn();
+        config(['queue.default' => 'sync']);
+        $team = inventoryTeam();
+        $account = BillingAccount::factory()->for($team['workspace'])->create();
+        $id = $stripe->subscribe($account->stripe_customer_id, 'active');
+
+        app(Members::class)->transferOwnership($team['owner'], $team['workspace'], $team['editor']);
+
+        expect($stripe->subscriptions[$id]['cancel_at_period_end'])->toBeTrue()
+            ->and($stripe->subscriptions[$id]['status'])->toBe('active')
+            ->and(BillingAccount::query()->where('workspace_id', $team['workspace']->id)->first()?->stripe_subscription_id)->toBe($id);
+    });
+
     it('are made after the commit and never inside a transaction', function (): void {
         $stripe = billingOn();
         config(['queue.default' => 'sync']);

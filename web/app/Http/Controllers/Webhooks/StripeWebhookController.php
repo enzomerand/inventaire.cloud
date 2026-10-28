@@ -46,8 +46,10 @@ use Throwable;
  * - `429` when an address that does authenticate makes more than {@see self::CALLS_PER_MINUTE} calls in a minute: a pace nothing but a
  *   loop reaches;
  * - `400` with the code `invalid_body` when the signed body is not a JSON object;
- * - `200 {"received": true}` otherwise, always, and quickly: for an event that is not one of those followed, a customer nobody
- *   knows, even a queue that is down (logged; the schedule catches up). Stripe sends the event again for any other answer, for days.
+ * - `200 {"received": true}` otherwise, and quickly: for an event that is not one of those followed, a customer nobody knows, even a queue
+ *   that is down when a synchronisation was to be queued (logged; the schedule catches up). The one exception is the alert of a risk
+ *   that could not be queued: it is answered with a `500`, so that Stripe sends the event again, since nothing else would tell the
+ *   administrators. Stripe sends the event again for any answer that is not a success, for days.
  *
  * Stripe may send an event twice; the synchronisation is unique per account while it waits in the queue, and the mail of an alert is sent
  * once per event (the id of the event is remembered for a day).
@@ -80,7 +82,7 @@ final class StripeWebhookController extends Controller
     ];
 
     /** The shape of an id at Stripe (`cus_…`, `du_…`, `evt_…`): letters, digits and underscores. */
-    private const ID_PATTERN = '/^[A-Za-z0-9_]{1,255}$/';
+    private const ID_PATTERN = '/^[A-Za-z0-9_]{1,255}\z/';
 
     /**
      * Receives an event.
@@ -119,16 +121,12 @@ final class StripeWebhookController extends Controller
 
         $event = json_decode($body, true);
 
-        if (! is_array($event)) {
+        // An event is a JSON object: a list (`[]`, `[1]`) is not one, and `{}` has nothing in it.
+        if (! is_array($event) || array_is_list($event)) {
             return new JsonResponse(['message' => __('The body is not valid JSON.'), 'code' => 'invalid_body'], 400);
         }
 
-        try {
-            $this->follow($event);
-        } catch (Throwable $exception) {
-            // The answer does not depend on it: Stripe would only send it again, and the schedule reads the subscriptions anyway.
-            Log::error('A webhook of Stripe could not be followed.', ['exception' => $exception]);
-        }
+        $this->follow($event);
 
         return new JsonResponse(['received' => true]);
     }
@@ -181,8 +179,15 @@ final class StripeWebhookController extends Controller
         }
 
         if (in_array($type, self::SYNC_EVENTS, true)) {
-            $this->synchronise($type, $object);
+            try {
+                $this->synchronise($type, $object);
+            } catch (Throwable $exception) {
+                // The answer does not depend on it: Stripe would only send the event again, and the schedule reads the subscriptions anyway.
+                Log::error('A webhook of Stripe could not be followed.', ['exception' => $exception]);
+            }
         } elseif (BillingAlertMail::handles($type)) {
+            // Not caught: an alert that could not be queued is answered with a failure, and Stripe sends the event again (nothing else would
+            // tell the administrators).
             $this->alert($type, $event, $object);
         }
     }
@@ -195,31 +200,39 @@ final class StripeWebhookController extends Controller
     private function synchronise(string $type, array $object): void
     {
         $customer = $this->shaped($object['customer'] ?? null);
-        $account = $customer === null ? null : BillingAccount::query()->where('stripe_customer_id', $customer)->first(['id', 'stripe_customer_id']);
+        // The ids of Stripe are case-sensitive: the column has a binary collation on MySQL and MariaDB, so the match is exact there too.
+        $account = $customer === null ? null : BillingAccount::query()->where('stripe_customer_id', $customer)->value('id');
 
-        // The ids of Stripe are case-sensitive and the collation of MySQL and MariaDB is not: the match is made exact here.
-        if ($account === null || $account->stripe_customer_id !== $customer) {
+        if ($account === null) {
             // A customer of the same Stripe account that is not a workspace of this instance (a test, another site): nothing to read.
             Log::info('An event of Stripe is about a customer this instance does not know: ignored.', ['type' => $type]);
 
             return;
         }
 
-        SyncBillingAccount::dispatch((int) $account->getKey());
+        SyncBillingAccount::dispatch((int) $account);
     }
 
     /**
      * Tells every administrator of the instance that Stripe reported a risk, once per event.
      *
+     * The event is marked as told before the mails are queued, so that two deliveries at the same moment tell once, and the mark is taken
+     * back if queueing fails: the failure goes up (the answer is a `500`, Stripe sends the event again) and the next delivery must not find
+     * the alert already told.
+     *
      * @param  array<array-key, mixed>  $event
      * @param  array<array-key, mixed>  $object  The dispute or the early fraud warning.
+     *
+     * @throws Throwable When a mail could not be queued.
      */
     private function alert(string $type, array $event, array $object): void
     {
         $id = $this->shaped($event['id'] ?? null);
 
+        $told = $id === null ? null : 'stripe-webhook-alert:'.$id;
+
         // Stripe may send an event twice: the administrators are told once.
-        if ($id !== null && ! Cache::add('stripe-webhook-alert:'.$id, true, now()->addDay())) {
+        if ($told !== null && ! Cache::add($told, true, now()->addDay())) {
             return;
         }
 
@@ -227,15 +240,23 @@ final class StripeWebhookController extends Controller
         $currency = $object['currency'] ?? null;
         $objectId = $this->shaped($object['id'] ?? null, 64);
         $amount = is_int($amount) && $amount >= 0 ? $amount : null;
-        $currency = is_string($currency) && preg_match('/^[a-z]{3}$/', $currency) === 1 ? $currency : null;
+        $currency = is_string($currency) && preg_match('/^[a-z]{3}\z/', $currency) === 1 ? $currency : null;
         $livemode = ($event['livemode'] ?? true) !== false;
 
-        // A plain read: an administrator who is promoted or demoted at this very moment is not a reason to lock the accounts.
-        foreach (User::query()->where('is_admin', true)->orderBy('id')->get(['id', 'email', 'locale']) as $administrator) {
-            // One mail for each, in their language: a mailable keeps the recipients it was sent to.
-            Mail::to($administrator->email)
-                ->locale($administrator->locale ?? config()->string('app.default_locale'))
-                ->queue(new BillingAlertMail($type, $objectId, $amount, $currency, $livemode));
+        try {
+            // A plain read: an administrator who is promoted or demoted at this very moment is not a reason to lock the accounts.
+            foreach (User::query()->where('is_admin', true)->orderBy('id')->get(['id', 'email', 'locale']) as $administrator) {
+                // One mail for each, in their language: a mailable keeps the recipients it was sent to.
+                Mail::to($administrator->email)
+                    ->locale($administrator->locale ?? config()->string('app.default_locale'))
+                    ->queue(new BillingAlertMail($type, $objectId, $amount, $currency, $livemode));
+            }
+        } catch (Throwable $exception) {
+            if ($told !== null) {
+                Cache::forget($told);
+            }
+
+            throw $exception;
         }
     }
 

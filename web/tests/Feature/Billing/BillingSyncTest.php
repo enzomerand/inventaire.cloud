@@ -195,6 +195,30 @@ describe('which subscription is the workspace\'s', function (): void {
         expect(billingSync($account)->stripe_subscription_id)->toBe($new)->and($old)->not->toBe($new);
     });
 
+    it('prefers one that gives the Pro plan to a newer one that is in play without giving it: an abandoned checkout hides nothing', function (string $older, string $newer, string $chosen): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $first = $stripe->subscribe($account->stripe_customer_id, $older);
+        $second = $stripe->subscribe($account->stripe_customer_id, $newer);
+
+        $synced = billingSync($account);
+
+        $status = $chosen === 'older' ? $older : $newer;
+
+        expect($synced->stripe_subscription_id)->toBe($chosen === 'older' ? $first : $second)
+            ->and($synced->status)->toBe($status)
+            ->and(WorkspacePlan::for($account->workspace))->toBe(in_array($status, WorkspacePlan::PRO_STATUSES, true) ? Plan::Pro : Plan::Free);
+    })->with([
+        'a newer incomplete next to an older active' => ['active', 'incomplete', 'older'],
+        'a newer incomplete next to an older trialing' => ['trialing', 'incomplete', 'older'],
+        'a newer incomplete next to an older past due' => ['past_due', 'incomplete', 'older'],
+        'a newer unpaid next to an older active' => ['active', 'unpaid', 'older'],
+        'a newer paused next to an older past due' => ['past_due', 'paused', 'older'],
+        'an older incomplete under a newer active' => ['incomplete', 'active', 'newer'],
+        'the newer of two that give Pro' => ['active', 'trialing', 'newer'],
+        'the newer of two that do not' => ['unpaid', 'incomplete', 'newer'],
+    ]);
+
     it('prefers one in play to a newer one that is over', function (): void {
         $stripe = billingOn();
         $account = billingAccountAt($stripe);
@@ -292,6 +316,38 @@ describe('when Stripe does not give a subscription', function (): void {
             ->and($synced->stripe_customer_id)->toBe($account->stripe_customer_id)
             ->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'customer of a workspace is gone'))->once();
+    });
+
+    it('clears the subscription for a customer Stripe says is missing, whatever the status of its answer', function (int $status): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        billingSync($account);
+        $stripe->answerWith(Http::response(['error' => ['type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'No such customer', 'param' => 'customer']], $status));
+
+        $synced = billingSync($account);
+
+        expect($synced->status)->toBeNull()->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
+    })->with([400, 404]);
+
+    it('does not take a 404 that is not the answer of Stripe for a deleted customer: nothing turns the workspace Free', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        billingSync($account);
+        // A proxy, a wrong address, a page of an outage: a 404 that does not say `resource_missing`.
+        $stripe->answerWith(Http::response('<html>Not Found</html>', 404));
+
+        try {
+            billingSync($account);
+            $thrown = null;
+        } catch (StripeException $exception) {
+            $thrown = $exception;
+        }
+
+        expect($thrown)->not->toBeNull()
+            ->and($thrown->status())->toBe(404)
+            ->and($thrown->retryable())->toBeFalse()
+            ->and(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active')
+            ->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Pro);
     });
 
     it('throws what is worth trying again and leaves the account as it was', function (?int $status): void {

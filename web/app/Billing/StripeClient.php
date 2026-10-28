@@ -229,7 +229,7 @@ final class StripeClient
     {
         $id = $response->json('id');
 
-        if (! is_string($id) || preg_match('/^[A-Za-z0-9_]{1,255}$/', $id) !== 1) {
+        if (! is_string($id) || preg_match('/^[A-Za-z0-9_]{1,255}\z/', $id) !== 1) {
             throw StripeException::invalidResponse($call, 'no usable id');
         }
 
@@ -239,17 +239,40 @@ final class StripeClient
     /**
      * The `url` of the page Stripe hosts (a Checkout or portal session), which the person is sent to.
      *
-     * @throws StripeException When there is none, or it is not an https address.
+     * @throws StripeException When there is none, or it is not an https address on a host of Stripe (`stripe.com` or one of its
+     *                         subdomains, `checkout.stripe.com` and `billing.stripe.com` in practice): the person is redirected to
+     *                         whatever is returned, and the answer is not to be trusted with sending them anywhere else.
      */
     private function address(string $call, Response $response): string
     {
         $url = $response->json('url');
 
-        if (! is_string($url) || ! str_starts_with($url, 'https://')) {
+        if (! is_string($url) || ! self::isStripePage($url)) {
             throw StripeException::invalidResponse($call, 'no usable url');
         }
 
         return $url;
+    }
+
+    /**
+     * Whether an address is an `https` page on `stripe.com` or one of its subdomains, with no credentials and no port, and nothing in it
+     * that a browser could read differently from this check (control characters, spaces, backslashes).
+     */
+    private static function isStripePage(string $url): bool
+    {
+        if (preg_match('/[\x00-\x20\x7f\\\\]/', $url) === 1) {
+            return false;
+        }
+
+        $parts = parse_url($url);
+
+        if ($parts === false || isset($parts['user']) || isset($parts['pass']) || isset($parts['port'])) {
+            return false;
+        }
+
+        $host = strtolower($parts['host'] ?? '');
+
+        return strtolower($parts['scheme'] ?? '') === 'https' && preg_match('/^([a-z0-9-]+\.)*stripe\.com\z/', $host) === 1;
     }
 
     /**

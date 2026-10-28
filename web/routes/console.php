@@ -39,5 +39,6 @@ Schedule::command('inventaire:sync-versions')->everyTenMinutes()->withoutOverlap
 
 // The subscriptions of the workspaces are read again at Stripe, those not looked at for six hours first: the safety net of the webhook, and
 // the only way an instance without one learns that a subscription changed. Nothing to do (and said so) when the instance sells no plan.
-// The lock of a run that was killed is forgotten after 55 minutes, before the next hour (the default is 24 hours).
-Schedule::command('inventaire:sync-billing')->hourly()->withoutOverlapping(55);
+// The lock of a run that was killed is forgotten after 55 minutes, before the next hour (the default is 24 hours). In the background: a run
+// that waits on Stripe must not hold up the other scheduled commands of the minute.
+Schedule::command('inventaire:sync-billing')->hourly()->withoutOverlapping(55)->runInBackground();

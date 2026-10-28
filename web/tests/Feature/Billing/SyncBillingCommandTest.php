@@ -8,6 +8,7 @@ use App\Models\Workspace;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Tests\Support\FakeStripe;
@@ -37,17 +38,19 @@ function billingAsked(FakeStripe $stripe): array
 }
 
 /**
- * An account synchronised a number of hours ago (never when null).
+ * An account synchronised a number of hours ago (never when null). A synchronisation writes the row, so `updated_at` is the same moment:
+ * it is what the command orders the accounts by.
  */
 function billingAccountSyncedAgo(FakeStripe $stripe, ?int $hours, ?string $status = 'active'): BillingAccount
 {
     $account = billingAccountAt($stripe, $status);
 
     if ($hours !== null) {
-        $account->forceFill(['synced_at' => now()->subHours($hours)->subMinutes(5)])->save();
+        $moment = now()->subHours($hours)->subMinutes(5);
+        BillingAccount::query()->whereKey($account->id)->update(['synced_at' => $moment, 'updated_at' => $moment]);
     }
 
-    return $account;
+    return $account->refresh();
 }
 
 describe('which accounts it reads', function (): void {
@@ -71,7 +74,7 @@ describe('which accounts it reads', function (): void {
     it('does not read an account that was read just under six hours ago', function (): void {
         $stripe = billingOn();
         $account = billingAccountAt($stripe, 'active');
-        $account->forceFill(['synced_at' => now()->subHours(6)->addMinutes(5)])->save();
+        BillingAccount::query()->whereKey($account->id)->update(['synced_at' => now()->subHours(6)->addMinutes(5)]);
 
         $this->artisan('inventaire:sync-billing')->assertSuccessful();
 
@@ -98,13 +101,14 @@ describe('which accounts it reads', function (): void {
         foreach ($workspaces as $index => $workspace) {
             $customer = 'cus_bulk'.$index;
             $stripe->addCustomer($customer);
+            // 150 never read, then 100 read 7 to 106 hours ago: the stale ones from the longest ago go first.
+            $syncedAt = $index < 150 ? null : now()->subHours(7 + ($index - 150))->toDateTimeString();
             $rows[] = [
                 'workspace_id' => $workspace->id,
                 'stripe_customer_id' => $customer,
-                // 150 never read, then 100 read 7 to 106 hours ago: the stale ones from the longest ago go first.
-                'synced_at' => $index < 150 ? null : now()->subHours(7 + ($index - 150))->toDateTimeString(),
+                'synced_at' => $syncedAt,
                 'created_at' => now()->toDateTimeString(),
-                'updated_at' => now()->toDateTimeString(),
+                'updated_at' => $syncedAt ?? now()->toDateTimeString(),
             ];
         }
 
@@ -183,6 +187,113 @@ describe('what it does with them', function (): void {
         expect($stripe->count('GET /v1/subscriptions'))->toBe(2)->and(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active');
     });
 
+    it('marks an account that fails as looked at, so that it goes behind the others the next time, whatever its place in the table', function (): void {
+        $stripe = billingOn();
+        $first = billingAccountAt($stripe, 'active');
+        $second = billingAccountAt($stripe, 'active');
+        BillingAccount::query()->whereKey($first->id)->update(['created_at' => now()->subHours(3), 'updated_at' => now()->subHours(3)]);
+        BillingAccount::query()->whereKey($second->id)->update(['created_at' => now()->subHours(2), 'updated_at' => now()->subHours(2)]);
+        $stripe->failNext('GET /v1/subscriptions', 400);
+
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('1 account(s) synchronised, 1 failed.')->assertSuccessful();
+
+        expect(BillingAccount::query()->findOrFail($first->id)->updated_at?->greaterThan(now()->subMinute()))->toBeTrue()
+            ->and(BillingAccount::query()->findOrFail($first->id)->synced_at)->toBeNull();
+
+        // The second is due again; the first, which fails every time, no longer comes before it.
+        BillingAccount::query()->whereKey($second->id)->update(['synced_at' => null, 'updated_at' => now()->subHour()]);
+        $stripe->calls = [];
+        $stripe->requests = [];
+
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect(billingAsked($stripe))->toBe([$second->stripe_customer_id, $first->stripe_customer_id]);
+    });
+
+    it('gives up after three failures in a row of the kind worth trying again, and leaves the rest to the next run', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+        $accounts = [billingAccountAt($stripe, 'active'), billingAccountAt($stripe, 'active'), billingAccountAt($stripe, 'active'), billingAccountAt($stripe, 'active'), billingAccountAt($stripe, 'active')];
+        // Made an hour ago: the three that fail are marked as looked at now, behind the two that were not tried.
+        BillingAccount::query()->update(['updated_at' => now()->subHour()]);
+        $stripe->failNext('GET /v1/subscriptions', 503, 3);
+
+        $this->artisan('inventaire:sync-billing')
+            ->expectsOutputToContain('Stopped early (Stripe fails to answer)')
+            ->expectsOutputToContain('0 account(s) synchronised, 3 failed.')
+            ->assertSuccessful();
+
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(3)
+            ->and(BillingAccount::query()->findOrFail($accounts[3]->id)->synced_at)->toBeNull();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'stopped early') && $context['reason'] === 'Stripe fails to answer')->once();
+
+        // The next run, with Stripe back, reads them all: the two that were not tried first, as they come before those that failed.
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('5 account(s) synchronised, 0 failed.')->assertSuccessful();
+
+        expect(array_slice(billingAsked($stripe), 3, 2))->toBe([$accounts[3]->stripe_customer_id, $accounts[4]->stripe_customer_id]);
+    });
+
+    it('does not give up on failures that are not in a row, or that are not worth trying again', function (): void {
+        $stripe = billingOn();
+
+        foreach (range(1, 6) as $ignored) {
+            billingAccountAt($stripe, 'active');
+        }
+
+        // Two failures, a success, two failures, a success: four failures, never three in a row.
+        $calls = 0;
+        $stripe->failNext('GET /v1/subscriptions', 500, 2);
+        $stripe->onCall('GET /v1/subscriptions', function () use (&$calls, $stripe): void {
+            if (++$calls === 4 || $calls === 5) {
+                $stripe->failNext('GET /v1/subscriptions', 500);
+            }
+        });
+
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('2 account(s) synchronised, 4 failed.')->assertSuccessful();
+
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(6);
+    });
+
+    it('does not take a refusal for an outage: it is the account that is wrong, not Stripe', function (): void {
+        $stripe = billingOn();
+
+        foreach (range(1, 5) as $ignored) {
+            billingAccountAt($stripe, 'active');
+        }
+
+        $stripe->failNext('GET /v1/subscriptions', 400, 4);
+
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('1 account(s) synchronised, 4 failed.')->assertSuccessful();
+
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(5);
+    });
+
+    it('starts no new account once its time budget of 45 seconds is used up', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+
+        foreach (range(1, 4) as $ignored) {
+            billingAccountAt($stripe, 'active');
+        }
+
+        $first = true;
+        $stripe->onCall('GET /v1/subscriptions', function () use (&$first): void {
+            if ($first) {
+                $first = false;
+                // The first call is slow.
+                Carbon::setTestNow(now()->addSeconds(SyncBillingCommand::TIME_BUDGET + 5));
+            }
+        });
+
+        $this->artisan('inventaire:sync-billing')
+            ->expectsOutputToContain('Stopped early (the time budget is used up)')
+            ->expectsOutputToContain('1 account(s) synchronised, 0 failed.')
+            ->assertSuccessful();
+
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(1);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $context['reason'] === 'the time budget is used up' && $context['synchronised'] === 1)->once();
+    });
+
     it('fails, and stops, when Stripe refuses the key: the same answer would come for every account', function (): void {
         Log::spy();
         $stripe = billingOn();
@@ -220,7 +331,7 @@ describe('on an instance that sells no plan', function (): void {
 });
 
 describe('the schedule', function (): void {
-    it('runs it every hour, one run at a time, and forgets the lock of a run that was killed before the next hour', function (): void {
+    it('runs it every hour, one run at a time, in the background, and forgets the lock of a run that was killed before the next hour', function (): void {
         $events = collect(app(Schedule::class)->events())->filter(fn (Event $event): bool => str_contains((string) $event->command, 'inventaire:sync-billing'));
 
         expect($events)->toHaveCount(1);
@@ -230,6 +341,7 @@ describe('the schedule', function (): void {
         expect($event->expression)->toBe('0 * * * *')
             ->and($event->withoutOverlapping)->toBeTrue()
             ->and($event->expiresAt)->toBeLessThan(60)
+            ->and($event->runInBackground)->toBeTrue()
             ->and(SyncBillingCommand::PER_RUN)->toBe(200)
             ->and(SyncBillingCommand::STALE_AFTER_HOURS)->toBe(6);
     });

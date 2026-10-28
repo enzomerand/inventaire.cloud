@@ -32,18 +32,19 @@ final class StripeException extends RuntimeException
         private readonly ?int $httpStatus,
         private readonly bool $transient,
         private readonly ?string $request = null,
-        ?Throwable $previous = null,
     ) {
-        parent::__construct($message, 0, $previous);
+        parent::__construct($message);
     }
 
     /**
      * Stripe could not be reached (the connection failed, or timed out): worth trying again.
+     *
+     * @param  Throwable  $cause  What the HTTP client threw. It is not kept, only its class is named: its message holds the address that was
+     *                            called, which carries the id of the customer (`/v1/customers/cus_…`), and a trace written in a log would carry it too.
      */
-    public static function unreachable(Throwable $previous): self
+    public static function unreachable(Throwable $cause): self
     {
-        // The message of the exception of the HTTP client names the address and the cURL error, never the key (it is a header).
-        return new self('Stripe could not be reached.', 'unreachable', null, true, null, $previous);
+        return new self('Stripe could not be reached ('.class_basename($cause).').', 'unreachable', null, true);
     }
 
     /**
@@ -64,7 +65,7 @@ final class StripeException extends RuntimeException
         $status = $response->status();
         $reason = self::reasonOf($response) ?? 'http_'.$status;
         $request = $response->header('Request-Id');
-        $request = preg_match('/^req_[A-Za-z0-9]{1,64}$/', $request) === 1 ? $request : null;
+        $request = preg_match('/^req_[A-Za-z0-9]{1,64}\z/', $request) === 1 ? $request : null;
 
         return new self(
             "Stripe answered {$status} to {$call} ({$reason})".($request === null ? '' : ", request {$request}").'.',
@@ -145,7 +146,7 @@ final class StripeException extends RuntimeException
         foreach (['error.code', 'error.type'] as $path) {
             $word = $response->json($path);
 
-            if (is_string($word) && preg_match('/^[a-z][a-z0-9_]{2,63}$/', $word) === 1) {
+            if (is_string($word) && preg_match('/^[a-z][a-z0-9_]{2,63}\z/', $word) === 1) {
                 return $word;
             }
         }

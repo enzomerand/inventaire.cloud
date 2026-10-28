@@ -34,6 +34,7 @@ final class WebhookSignature
         }
 
         $timestamp = null;
+        $signed = null;
         $signatures = [];
 
         foreach (explode(',', $header) as $part) {
@@ -50,16 +51,18 @@ final class WebhookSignature
                 }
 
                 $timestamp = (int) $pair[1];
+                // What is signed is the text Stripe wrote, not the number it stands for (`0001492774577` is not `1492774577`).
+                $signed = $pair[1];
             } elseif ($pair[0] === 'v1') {
                 $signatures[] = $pair[1];
             }
         }
 
-        if ($timestamp === null || $signatures === [] || abs(($now ?? time()) - $timestamp) > $tolerance) {
+        if ($timestamp === null || $signed === null || $signatures === [] || abs(($now ?? time()) - $timestamp) > $tolerance) {
             return false;
         }
 
-        $expected = hash_hmac('sha256', $timestamp.'.'.$payload, $secret);
+        $expected = hash_hmac('sha256', $signed.'.'.$payload, $secret);
 
         foreach ($signatures as $signature) {
             if (hash_equals($expected, $signature)) {

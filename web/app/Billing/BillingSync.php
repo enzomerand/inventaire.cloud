@@ -19,9 +19,10 @@ use Illuminate\Support\Facades\Log;
  * **What Stripe sends to the webhook is never believed.** An event only says that something happened to a customer; the state is always
  * read again from the API, and it is the only thing that writes the subscription columns of the account.
  *
- * The subscription the workspace has is the most recent one (by `created`) among those that are still in play ({@see SubscriptionStatus::CURRENT}),
+ * The subscription the workspace has is the most recent one (by `created`) among those that give the Pro plan
+ * ({@see WorkspacePlan::PRO_STATUSES}), otherwise the most recent among the others that are still in play ({@see SubscriptionStatus::CURRENT}),
  * otherwise the most recent one of any status (a canceled one is worth remembering: the page shows that the plan ended), otherwise
- * none. A customer that went through the checkout twice has two current subscriptions, which is written in the log as a warning: the
+ * none. A newer subscription that is only `incomplete` (a checkout that was abandoned) does not hide an older one that is `active`. A customer that went through the checkout twice has two current subscriptions, which is written in the log as a warning: the
  * one chosen is the newest, and somebody has to refund the other. A customer that was deleted at Stripe has none (the answer is a
  * `404`): the columns are cleared, and the workspace is Free.
  *
@@ -80,11 +81,13 @@ final class BillingSync
     }
 
     /**
-     * Whether Stripe answered that the customer is not there (a deleted customer has no subscriptions to list).
+     * Whether Stripe answered that the customer is not there (a deleted customer has no subscriptions to list): it says `resource_missing`.
+     * A `404` without it is not Stripe talking about the customer (a proxy, a wrong address), and must never turn every workspace Free: it
+     * is an error like any other.
      */
     private static function customerIsGone(StripeException $exception): bool
     {
-        return $exception->notFound() || $exception->code() === 'resource_missing';
+        return $exception->code() === 'resource_missing';
     }
 
     /**
@@ -101,14 +104,29 @@ final class BillingSync
         ));
 
         // The newest first; the sort is stable, so subscriptions created in the same second stay in the order Stripe lists them in.
-        usort($usable, static fn (array $a, array $b): int => (int) ($b['created'] ?? 0) <=> (int) ($a['created'] ?? 0));
+        usort($usable, static fn (array $a, array $b): int => [self::rank($a), (int) ($b['created'] ?? 0)] <=> [self::rank($b), (int) ($a['created'] ?? 0)]);
 
-        $current = array_values(array_filter(
+        $current = array_filter(
             $usable,
             static fn (array $subscription): bool => in_array($subscription['status'], SubscriptionStatus::CURRENT, true),
-        ));
+        );
 
-        return [$current[0] ?? $usable[0] ?? null, count($current)];
+        return [$usable[0] ?? null, count($current)];
+    }
+
+    /**
+     * How a subscription ranks among those of a customer, the lowest first: one that gives the Pro plan, then another that is still in
+     * play, then one that is over. A newer `incomplete` subscription (a checkout that was abandoned) must not hide an older `active` one.
+     *
+     * @param  array<string, mixed>  $subscription
+     */
+    private static function rank(array $subscription): int
+    {
+        return match (true) {
+            in_array($subscription['status'], WorkspacePlan::PRO_STATUSES, true) => 0,
+            in_array($subscription['status'], SubscriptionStatus::CURRENT, true) => 1,
+            default => 2,
+        };
     }
 
     /**
@@ -153,27 +171,32 @@ final class BillingSync
      */
     private function write(BillingAccount $account, array $columns, CarbonImmutable $readAt): BillingAccount
     {
-        return DeadlockRetries::run(fn (): BillingAccount => $this->db->transaction(function () use ($account, $columns, $readAt): BillingAccount {
-            // The workspace first, as everything that writes to what hangs from it: the account of a workspace that is being deleted is
-            // not worth writing, and what it was is returned.
-            if ($this->locks->workspaces([$account->workspace_id])->isEmpty()) {
-                return $account;
-            }
+        try {
+            return DeadlockRetries::run(fn (): BillingAccount => $this->db->transaction(function () use ($account, $columns, $readAt): BillingAccount {
+                // The workspace first, as everything that writes to what hangs from it: the account of a workspace that is being deleted is
+                // not worth writing, and what it was is returned.
+                if ($this->locks->workspaces([$account->workspace_id])->isEmpty()) {
+                    return $account;
+                }
 
-            $stored = BillingAccount::query()->whereKey($account->getKey())->first();
+                $stored = BillingAccount::query()->whereKey($account->getKey())->first();
 
-            if ($stored === null) {
-                return $account;
-            }
+                if ($stored === null) {
+                    return $account;
+                }
 
-            // A read that began after this one has been written already: it saw what happened since.
-            if ($stored->synced_at !== null && $stored->synced_at->greaterThan($readAt)) {
+                // A read that began after this one has been written already: it saw what happened since.
+                if ($stored->synced_at !== null && $stored->synced_at->greaterThan($readAt)) {
+                    return $stored;
+                }
+
+                $stored->forceFill($columns + ['synced_at' => $readAt])->save();
+
                 return $stored;
-            }
-
-            $stored->forceFill($columns + ['synced_at' => $readAt])->save();
-
-            return $stored;
-        }));
+            }));
+        } finally {
+            // Whatever the plans were read as before, in this process, is out of date now (or was read from a row that did not commit).
+            WorkspacePlan::forget();
+        }
     }
 }

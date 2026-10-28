@@ -34,6 +34,17 @@ describe('a signature', function (): void {
             ->and(WebhookSignature::verify($payload, $header, 'whsec_y'))->toBeFalse();
     });
 
+    it('is signed over the timestamp as written, not over the number it stands for', function (): void {
+        $payload = '{"id":"evt_1"}';
+        $written = '0'.BILLING_NOW;
+        $signed = fn (string $timestamp): string => "t={$written},v1=".hash_hmac('sha256', "{$timestamp}.{$payload}", BILLING_SIGNING_SECRET);
+
+        // What Stripe signed is the text it wrote in the header, leading zero included.
+        expect(WebhookSignature::verify($payload, $signed($written), BILLING_SIGNING_SECRET, 300, BILLING_NOW))->toBeTrue()
+            // A signature of the number alone is not what Stripe sends for that header.
+            ->and(WebhookSignature::verify($payload, $signed((string) BILLING_NOW), BILLING_SIGNING_SECRET, 300, BILLING_NOW))->toBeFalse();
+    });
+
     it('is refused for another secret', function (): void {
         $payload = '{"id":"evt_1"}';
 

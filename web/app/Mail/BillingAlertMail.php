@@ -19,6 +19,7 @@ use Illuminate\Mail\Mailables\Envelope;
  * simple HTML version with no external image, font or tracking.
  *
  * The caller hands it what it checked: a reference of the shape of an id, an amount in whole minor units, a currency code of three letters.
+ * The amount is shown with the decimals of its currency: none for the yen or the won, three for the Kuwaiti dinar.
  */
 final class BillingAlertMail extends Mailable
 {
@@ -28,8 +29,11 @@ final class BillingAlertMail extends Mailable
         'radar.early_fraud_warning.created' => 'radar/early-fraud-warnings',
     ];
 
-    /** The currencies whose amount is not counted in hundredths (Stripe gives it in whole units). */
+    /** The currencies whose amount is not counted in hundredths but in whole units (Stripe gives it as such). */
     private const WHOLE_UNIT_CURRENCIES = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
+
+    /** The currencies whose amount is counted in thousandths. */
+    private const THOUSANDTH_CURRENCIES = ['bhd', 'jod', 'kwd', 'omr', 'tnd'];
 
     /**
      * @param  string  $eventType  A key of {@see self::PAGES}.
@@ -111,8 +115,12 @@ final class BillingAlertMail extends Mailable
             return null;
         }
 
-        $whole = in_array($this->currency, self::WHOLE_UNIT_CURRENCIES, true);
+        $decimals = match (true) {
+            in_array($this->currency, self::WHOLE_UNIT_CURRENCIES, true) => 0,
+            in_array($this->currency, self::THOUSANDTH_CURRENCIES, true) => 3,
+            default => 2,
+        };
 
-        return number_format($whole ? $this->amount : $this->amount / 100, $whole ? 0 : 2, '.', ' ').' '.strtoupper($this->currency);
+        return number_format($this->amount / 10 ** $decimals, $decimals, '.', ' ').' '.strtoupper($this->currency);
     }
 }

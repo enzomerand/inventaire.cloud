@@ -26,7 +26,7 @@ return [
     | Sends `automatic_tax[enabled]` to Stripe Checkout (Stripe Tax must be set
     | up in the Stripe account, with the tax registrations that apply).
     */
-    'automatic_tax' => (bool) env('STRIPE_AUTOMATIC_TAX', false),
+    'automatic_tax' => filter_var(env('STRIPE_AUTOMATIC_TAX', false), FILTER_VALIDATE_BOOLEAN),
 
     /*
     | The identifier this integration gives Stripe Checkout

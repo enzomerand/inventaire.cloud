@@ -459,7 +459,7 @@ final class FakeStripe
         $id = 'cs_test_'.++$this->counter;
         $this->sessions[$id] = $data + ['id' => $id];
 
-        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'checkout.session', 'url' => "https://checkout.stripe.test/c/pay/{$id}", 'customer' => $customer, 'mode' => 'subscription']];
+        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'checkout.session', 'url' => "https://checkout.stripe.com/c/pay/{$id}", 'customer' => $customer, 'mode' => 'subscription']];
     }
 
     /**
@@ -479,7 +479,7 @@ final class FakeStripe
         $id = 'bps_test_'.++$this->counter;
         $this->portals[$id] = $data + ['id' => $id];
 
-        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'billing_portal.session', 'url' => "https://billing.stripe.test/session/{$id}", 'customer' => $customer]];
+        return ['status' => 200, 'body' => ['id' => $id, 'object' => 'billing_portal.session', 'url' => "https://billing.stripe.com/session/{$id}", 'customer' => $customer]];
     }
 
     /**
