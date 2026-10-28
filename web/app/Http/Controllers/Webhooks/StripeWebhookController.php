@@ -1,0 +1,249 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Webhooks;
+
+use App\Billing\Billing;
+use App\Billing\BillingSync;
+use App\Billing\WebhookSignature;
+use App\Http\Controllers\Controller;
+use App\Http\Responses\TooManyRequests;
+use App\Jobs\SyncBillingAccount;
+use App\Mail\BillingAlertMail;
+use App\Models\BillingAccount;
+use App\Models\User;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
+use Throwable;
+
+/**
+ * `POST /webhooks/stripe`: Stripe telling the application that something happened to a customer, a subscription, an invoice or a payment.
+ *
+ * **What it says is never believed.** The call only wakes up a synchronisation: the customer an event is about is looked up among the
+ * accounts, and a {@see SyncBillingAccount} job reads the subscriptions of that customer again through the API ({@see BillingSync}),
+ * which is where the plan of a workspace comes from. So the worst a forged call (it needs the signing secret) can do is make the server
+ * read a customer it already follows. The two events that warn of a risk (a dispute, an early fraud warning) are told to the
+ * administrators of the instance by mail, with a link to the dashboard of Stripe where they are answered; nothing else is done with them.
+ * The mode of the event (`livemode`) is not looked at: a test event on a live instance changes nothing, since the API is read again.
+ *
+ * The call is authenticated by the signature Stripe puts in the `Stripe-Signature` header, made with the signing secret of the endpoint
+ * (`STRIPE_WEBHOOK_SECRET`) over the exact body and a timestamp ({@see WebhookSignature}). The route has no session and no CSRF check.
+ * The answers (the messages are in the language the call asks for, the application's by default):
+ *
+ * - `404` when billing is off or the instance has no signing secret: the webhook does not exist (the schedule resynchronises the
+ *   subscriptions anyway, `inventaire:sync-billing`);
+ * - `429` when the network address has failed {@see self::FAILURES_PER_MINUTE} times in the last minute, whatever it sends next (the
+ *   check comes first, so that nobody can go on guessing): only the calls that are refused (a body that is too large, a signature that
+ *   is wrong) are counted, so that the many calls of a busy shop never use up what is allowed to the calls that fail;
+ * - `413` when the body is larger than {@see self::MAX_BYTES} (an event is a few kilobytes); it is not read beyond that;
+ * - `400` with the code `invalid_signature` when the signature is missing, wrong or too old (counted);
+ * - `429` when an address that does authenticate makes more than {@see self::CALLS_PER_MINUTE} calls in a minute: a pace nothing but a
+ *   loop reaches;
+ * - `400` with the code `invalid_body` when the signed body is not a JSON object;
+ * - `200 {"received": true}` otherwise, always, and quickly: for an event that is not one of those followed, a customer nobody
+ *   knows, even a queue that is down (logged; the schedule catches up). Stripe sends the event again for any other answer, for days.
+ *
+ * Stripe may send an event twice; the synchronisation is unique per account while it waits in the queue, and the mail of an alert is sent
+ * once per event (the id of the event is remembered for a day).
+ *
+ * The answers carry a `message` for people; the refusals have a `code` like those of the API, the success none: this is not part of the
+ * API clients use.
+ */
+final class StripeWebhookController extends Controller
+{
+    /** The largest body that is read, in bytes. */
+    public const MAX_BYTES = 1_048_576;
+
+    /** The calls that may be refused in a minute, per network address, before the address is refused for the rest of it. */
+    public const FAILURES_PER_MINUTE = 120;
+
+    /** The calls that do authenticate that an address may make in a minute: generous, for what is a loop and not Stripe. */
+    public const CALLS_PER_MINUTE = 1200;
+
+    /** The events that mean "read the subscriptions of that customer again". */
+    private const SYNC_EVENTS = [
+        'checkout.session.completed',
+        'customer.subscription.created',
+        'customer.subscription.updated',
+        'customer.subscription.deleted',
+        'customer.subscription.paused',
+        'customer.subscription.resumed',
+        'invoice.paid',
+        'invoice.payment_failed',
+        'charge.refunded',
+    ];
+
+    /** The shape of an id at Stripe (`cus_…`, `du_…`, `evt_…`): letters, digits and underscores. */
+    private const ID_PATTERN = '/^[A-Za-z0-9_]{1,255}$/';
+
+    /**
+     * Receives an event.
+     */
+    public function __invoke(Request $request): JsonResponse
+    {
+        if (! Billing::webhookEnabled()) {
+            return new JsonResponse(['message' => __('Not found.')], 404);
+        }
+
+        $failures = 'stripe-webhook-failures:'.$request->ip();
+
+        // Before the signature is looked at: an address that has failed too often is not told whether its next guess was right.
+        $this->refuseBeyond($failures, self::FAILURES_PER_MINUTE);
+
+        $body = $this->body($request);
+
+        if ($body === null) {
+            RateLimiter::hit($failures, 60);
+
+            return new JsonResponse(['message' => __('The body is too large.')], 413);
+        }
+
+        $signature = $request->header('Stripe-Signature');
+
+        if (! WebhookSignature::verify($body, is_string($signature) ? $signature : null, Billing::webhookSecret())) {
+            RateLimiter::hit($failures, 60);
+
+            return new JsonResponse(['message' => __('The signature is missing or wrong.'), 'code' => 'invalid_signature'], 400);
+        }
+
+        $calls = 'stripe-webhook-calls:'.$request->ip();
+
+        $this->refuseBeyond($calls, self::CALLS_PER_MINUTE);
+        RateLimiter::hit($calls, 60);
+
+        $event = json_decode($body, true);
+
+        if (! is_array($event)) {
+            return new JsonResponse(['message' => __('The body is not valid JSON.'), 'code' => 'invalid_body'], 400);
+        }
+
+        try {
+            $this->follow($event);
+        } catch (Throwable $exception) {
+            // The answer does not depend on it: Stripe would only send it again, and the schedule reads the subscriptions anyway.
+            Log::error('A webhook of Stripe could not be followed.', ['exception' => $exception]);
+        }
+
+        return new JsonResponse(['received' => true]);
+    }
+
+    /**
+     * Refuses the call, as every other pace of the application does (the exception is rendered as a `429` in JSON with `Retry-After`),
+     * when the address has used up what it is allowed in the minute. Nothing is counted here.
+     *
+     * @throws ThrottleRequestsException
+     */
+    private function refuseBeyond(string $key, int $limit): void
+    {
+        if (! RateLimiter::tooManyAttempts($key, $limit)) {
+            return;
+        }
+
+        $retryAfter = RateLimiter::availableIn($key);
+
+        throw TooManyRequests::exception('Too many calls to the webhook.', $limit, $retryAfter);
+    }
+
+    /**
+     * The body of the request, read up to {@see self::MAX_BYTES}; null when it is larger.
+     */
+    private function body(Request $request): ?string
+    {
+        if ((int) $request->header('Content-Length', '0') > self::MAX_BYTES) {
+            return null;
+        }
+
+        $stream = $request->getContent(true);
+        $body = stream_get_contents($stream, self::MAX_BYTES + 1);
+
+        return $body === false || strlen($body) > self::MAX_BYTES ? null : $body;
+    }
+
+    /**
+     * Does what an event asks for: queues the synchronisation of the customer it is about, or tells the administrators of a risk. Any
+     * other event is ignored.
+     *
+     * @param  array<array-key, mixed>  $event
+     */
+    private function follow(array $event): void
+    {
+        $type = $event['type'] ?? null;
+        $object = data_get($event, 'data.object');
+
+        if (! is_string($type) || ! is_array($object)) {
+            return;
+        }
+
+        if (in_array($type, self::SYNC_EVENTS, true)) {
+            $this->synchronise($type, $object);
+        } elseif (BillingAlertMail::handles($type)) {
+            $this->alert($type, $event, $object);
+        }
+    }
+
+    /**
+     * Queues the synchronisation of the account of the customer an event is about, if the instance has one.
+     *
+     * @param  array<array-key, mixed>  $object  The object the event is about (a subscription, an invoice, a charge, a session).
+     */
+    private function synchronise(string $type, array $object): void
+    {
+        $customer = $this->shaped($object['customer'] ?? null);
+        $account = $customer === null ? null : BillingAccount::query()->where('stripe_customer_id', $customer)->first(['id', 'stripe_customer_id']);
+
+        // The ids of Stripe are case-sensitive and the collation of MySQL and MariaDB is not: the match is made exact here.
+        if ($account === null || $account->stripe_customer_id !== $customer) {
+            // A customer of the same Stripe account that is not a workspace of this instance (a test, another site): nothing to read.
+            Log::info('An event of Stripe is about a customer this instance does not know: ignored.', ['type' => $type]);
+
+            return;
+        }
+
+        SyncBillingAccount::dispatch((int) $account->getKey());
+    }
+
+    /**
+     * Tells every administrator of the instance that Stripe reported a risk, once per event.
+     *
+     * @param  array<array-key, mixed>  $event
+     * @param  array<array-key, mixed>  $object  The dispute or the early fraud warning.
+     */
+    private function alert(string $type, array $event, array $object): void
+    {
+        $id = $this->shaped($event['id'] ?? null);
+
+        // Stripe may send an event twice: the administrators are told once.
+        if ($id !== null && ! Cache::add('stripe-webhook-alert:'.$id, true, now()->addDay())) {
+            return;
+        }
+
+        $amount = $object['amount'] ?? null;
+        $currency = $object['currency'] ?? null;
+        $objectId = $this->shaped($object['id'] ?? null, 64);
+        $amount = is_int($amount) && $amount >= 0 ? $amount : null;
+        $currency = is_string($currency) && preg_match('/^[a-z]{3}$/', $currency) === 1 ? $currency : null;
+        $livemode = ($event['livemode'] ?? true) !== false;
+
+        // A plain read: an administrator who is promoted or demoted at this very moment is not a reason to lock the accounts.
+        foreach (User::query()->where('is_admin', true)->orderBy('id')->get(['id', 'email', 'locale']) as $administrator) {
+            // One mail for each, in their language: a mailable keeps the recipients it was sent to.
+            Mail::to($administrator->email)
+                ->locale($administrator->locale ?? config()->string('app.default_locale'))
+                ->queue(new BillingAlertMail($type, $objectId, $amount, $currency, $livemode));
+        }
+    }
+
+    /**
+     * A value of the payload that is the id of an object at Stripe; null otherwise.
+     */
+    private function shaped(mixed $value, int $max = 255): ?string
+    {
+        return is_string($value) && strlen($value) <= $max && preg_match(self::ID_PATTERN, $value) === 1 ? $value : null;
+    }
+}

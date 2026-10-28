@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Billing\SubscriptionStatus;
 use App\Billing\WorkspacePlan;
 use Carbon\CarbonImmutable;
 use Database\Factories\BillingAccountFactory;
@@ -73,6 +74,16 @@ final class BillingAccount extends Model
             'cancel_at_period_end' => 'boolean',
             'synced_at' => 'immutable_datetime',
         ];
+    }
+
+    /**
+     * Whether the subscription the columns describe is not over yet, so that it is still to be cancelled at Stripe when the workspace is
+     * deleted or changes hands: there is one, and it is neither `canceled` nor `incomplete_expired` ({@see SubscriptionStatus::ENDED}).
+     * It answers from the last synchronisation, like everything else of the row.
+     */
+    public function hasLiveSubscription(): bool
+    {
+        return $this->stripe_subscription_id !== null && ! in_array($this->status, SubscriptionStatus::ENDED, true);
     }
 
     /**

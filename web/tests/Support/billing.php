@@ -56,3 +56,36 @@ function billingWorkspace(?string $status = null, string $interval = 'month'): W
 
     return $workspace;
 }
+
+/**
+ * The account of a workspace whose customer Stripe knows, as it is before anything was synchronised: no subscription is recorded, and
+ * `$subscribed` gives the customer one at Stripe (the account does not know it until it is synchronised).
+ *
+ * @param  string|null  $status  The status of the subscription Stripe has for the customer; none when null.
+ * @param  array<string, mixed>  $attributes  Columns to put over the account's defaults.
+ */
+function billingAccountAt(FakeStripe $stripe, ?string $status = null, string $interval = 'month', array $attributes = []): BillingAccount
+{
+    $account = BillingAccount::factory()->for(Workspace::factory())->create($attributes);
+    $stripe->addCustomer($account->stripe_customer_id);
+
+    if ($status !== null) {
+        $stripe->subscribe($account->stripe_customer_id, $status, $interval);
+    }
+
+    return $account;
+}
+
+/**
+ * The `Stripe-Signature` header of a raw body, signed with the signing secret of the endpoint (see {@see FakeStripe::signedEvent()}, which
+ * does it for an event).
+ *
+ * @param  string|null  $secret  The signing secret; the right one when null, a wrong one is how a forgery is made.
+ * @param  int|null  $timestamp  When it was signed, as a Unix timestamp; now when null.
+ */
+function billingSign(string $payload, ?string $secret = null, ?int $timestamp = null): string
+{
+    $timestamp ??= time();
+
+    return "t={$timestamp},v1=".hash_hmac('sha256', "{$timestamp}.{$payload}", $secret ?? FakeStripe::WEBHOOK_SECRET);
+}

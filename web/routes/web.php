@@ -29,6 +29,7 @@ use App\Http\Controllers\Web\WorkspaceListPageController;
 use App\Http\Controllers\Web\WorkspaceMembersPageController;
 use App\Http\Controllers\Web\WorkspacePageController;
 use App\Http\Controllers\Webhooks\DocumensoWebhookController;
+use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\WebManifestController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AuthenticateSession;
@@ -92,6 +93,14 @@ Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, Pr
 // see the controller.
 Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
     Route::post('/webhooks/documenso', DocumensoWebhookController::class)->name('webhooks.documenso');
+});
+
+// What Stripe (payments) calls when something happens to a customer, a subscription or a payment: the same kind of caller as above, that
+// proves who it is by the signature of its body (the `Stripe-Signature` header, made with the signing secret of the endpoint). Paced by
+// the controller too, which counts the calls it refuses only. It only wakes up a synchronisation of the subscriptions, or warns the
+// administrators of a risk: see the controller. It does not exist (404) while billing is off or the instance has no signing secret.
+Route::withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class])->group(function (): void {
+    Route::post('/webhooks/stripe', StripeWebhookController::class)->name('webhooks.stripe');
 });
 
 // The public page of a share link and the photos and files it shows: an inventory read-only for anybody who holds the secret address

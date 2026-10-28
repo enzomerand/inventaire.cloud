@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Workspaces;
 
+use App\Billing\SubscriptionLifecycle;
 use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\Workspace;
@@ -39,6 +40,7 @@ final class Members
         private readonly Locks $locks,
         private readonly Workspaces $workspaces,
         private readonly PhotoEntry $photoEntry,
+        private readonly SubscriptionLifecycle $subscriptions,
     ) {}
 
     /**
@@ -167,6 +169,8 @@ final class Members
     /**
      * Hands the ownership over to another member: they become the owner, and the actor becomes an editor. Both happen together. The
      * consent of the workspace to the photo entry is withdrawn: the new owner has to give their own ({@see PhotoEntry::withdrawConsent()}).
+     * The subscription of the workspace, if it has one, is set to end with the period that is paid for, once the change is committed: the
+     * old owner, who pays, stops paying ({@see SubscriptionLifecycle::ownerChanged()}).
      *
      * @throws AuthorizationException With status 404 when the actor does not belong to the workspace.
      * @throws MembershipRefused With `not_owner` when the actor is not the owner, and `already_owner` when the member is the owner already.
@@ -187,6 +191,8 @@ final class Members
             $this->setRole($mine, WorkspaceRole::Editor);
             // What the previous owner consented to is not the new owner's decision.
             $this->photoEntry->withdrawConsent($workspace);
+            // Whoever paid for the workspace is not its owner any more.
+            $this->subscriptions->ownerChanged($workspace);
         }));
     }
 

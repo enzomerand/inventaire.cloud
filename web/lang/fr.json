@@ -1500,5 +1500,16 @@
     "You can send :count photo at a time.|You can send :count photos at a time.": "Vous pouvez envoyer :count photo à la fois.|Vous pouvez envoyer :count photos à la fois.",
     "Each photo must not be larger than :size.": "Chaque photo ne doit pas dépasser :size.",
     "The instance reached its daily number of photo analyses; try again tomorrow.": "L'instance a atteint son nombre quotidien d'analyses de photos ; réessayez demain.",
-    "The photos could not be sent for analysis right now. Try again in a moment.": "Les photos n'ont pas pu être envoyées pour analyse pour le moment. Réessayez dans un instant."
+    "The photos could not be sent for analysis right now. Try again in a moment.": "Les photos n'ont pas pu être envoyées pour analyse pour le moment. Réessayez dans un instant.",
+    "The signature is missing or wrong.": "La signature est absente ou erronée.",
+    "The body is not valid JSON.": "Le corps de la requête n'est pas du JSON valide.",
+    "Stripe alert on :app: :event": "Alerte Stripe sur :app : :event",
+    "A customer disputed a payment": "Un client a contesté un paiement",
+    "Stripe received an early fraud warning": "Stripe a reçu une alerte précoce de fraude",
+    "Stripe reported something that needs your attention on :app:": "Stripe a signalé quelque chose qui demande votre attention sur :app :",
+    "Stripe event: :value": "Événement Stripe : :value",
+    "Stripe reference: :value": "Référence Stripe : :value",
+    "Amount: :value": "Montant : :value",
+    "This alert comes from the test mode of Stripe.": "Cette alerte vient du mode test de Stripe.",
+    "Look at it in the Stripe dashboard:": "Consultez-la dans le tableau de bord Stripe :"
 }

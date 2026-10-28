@@ -1,0 +1,421 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Billing\BillingSync;
+use App\Billing\Plan;
+use App\Billing\StripeException;
+use App\Billing\WorkspacePlan;
+use App\Models\BillingAccount;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+require_once __DIR__.'/../../Support/billing.php';
+
+/*
+ * Bringing the subscription of a workspace up to date with what Stripe says of its customer: which subscription is the workspace's, what is
+ * written of it and how the plan follows. Stripe is the only source; nothing here reads a webhook.
+ */
+
+uses(RefreshDatabase::class);
+
+/**
+ * Synchronises an account.
+ */
+function billingSync(BillingAccount $account): BillingAccount
+{
+    return app(BillingSync::class)->sync($account);
+}
+
+/**
+ * A subscription object as the API lists it, written by hand for the shapes the fake does not make.
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function billingSubscriptionObject(string $id, array $overrides = []): array
+{
+    return $overrides + [
+        'id' => $id,
+        'object' => 'subscription',
+        'status' => 'active',
+        'created' => 1_800_000_000,
+        'cancel_at_period_end' => false,
+        'items' => ['data' => [[
+            'id' => 'si_x',
+            'price' => ['id' => 'price_x', 'recurring' => ['interval' => 'month']],
+            'current_period_end' => 1_802_592_000,
+        ]]],
+    ];
+}
+
+describe('which plan the subscription gives', function (): void {
+    it('turns the status Stripe reports into the plan: Pro while active, trialing or past due, Free otherwise', function (string $status, Plan $plan): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, $status);
+
+        $synced = billingSync($account);
+
+        expect($synced->status)->toBe($status)
+            ->and(WorkspacePlan::for($account->workspace))->toBe($plan);
+    })->with([
+        'active' => ['active', Plan::Pro],
+        'trialing' => ['trialing', Plan::Pro],
+        'past due' => ['past_due', Plan::Pro],
+        'unpaid' => ['unpaid', Plan::Free],
+        'paused' => ['paused', Plan::Free],
+        'incomplete' => ['incomplete', Plan::Free],
+        'canceled' => ['canceled', Plan::Free],
+        'incomplete expired' => ['incomplete_expired', Plan::Free],
+    ]);
+
+    it('follows the subscription when it changes at Stripe, both ways', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+
+        billingSync($account);
+        expect(WorkspacePlan::for($account->workspace))->toBe(Plan::Pro);
+
+        $stripe->setStatus(array_key_first($stripe->subscriptions), 'canceled');
+        billingSync($account);
+        expect(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
+
+        $stripe->setStatus(array_key_first($stripe->subscriptions), 'active');
+        billingSync($account);
+        expect(WorkspacePlan::for($account->workspace))->toBe(Plan::Pro);
+    });
+});
+
+describe('what is written of the subscription', function (): void {
+    it('records the subscription, its price, its interval, the end of the period (in UTC) and when it was read', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $periodEnd = 1_802_592_000;
+        $id = $stripe->subscribe($account->stripe_customer_id, 'active', 'year', $periodEnd);
+        $this->travelTo(now()->startOfSecond());
+        $before = now();
+
+        $synced = billingSync($account);
+        $stored = BillingAccount::query()->findOrFail($account->id);
+
+        foreach ([$synced, $stored] as $row) {
+            expect($row->stripe_subscription_id)->toBe($id)
+                ->and($row->status)->toBe('active')
+                ->and($row->price_id)->toBe('price_yearly_test')
+                ->and($row->interval)->toBe('year')
+                ->and($row->current_period_end?->getTimestamp())->toBe($periodEnd)
+                ->and($row->current_period_end?->getTimezone()->getName())->toBe('UTC')
+                ->and($row->cancel_at_period_end)->toBeFalse()
+                ->and($row->synced_at?->equalTo($before))->toBeTrue();
+        }
+
+        // The column holds the same moment whatever the zone of the application.
+        expect(DB::table('billing_accounts')->where('id', $account->id)->value('current_period_end'))->toStartWith(gmdate('Y-m-d H:i:s', $periodEnd));
+    });
+
+    it('records that the subscription ends with the period', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'active', 'month', null, true);
+
+        expect(billingSync($account)->cancel_at_period_end)->toBeTrue();
+    });
+
+    it('takes a cancellation at a date for one that ends the subscription all the same', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->answerWith(Http::response(['data' => [billingSubscriptionObject('sub_dated', ['cancel_at' => 1_805_000_000])]]));
+
+        $synced = billingSync($account);
+
+        expect($synced->cancel_at_period_end)->toBeTrue()->and($synced->stripe_subscription_id)->toBe('sub_dated');
+    });
+
+    it('forgets a cancellation the customer took back', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $id = $stripe->subscribe($account->stripe_customer_id, 'active', 'month', null, true);
+        billingSync($account);
+
+        $stripe->change($id, ['cancel_at_period_end' => false]);
+
+        expect(billingSync($account)->cancel_at_period_end)->toBeFalse();
+    });
+
+    it('follows a change of interval and of period', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active', 'month');
+        $id = array_key_first($stripe->subscriptions);
+        billingSync($account);
+
+        $stripe->setInterval($id, 'year')->setPeriodEnd($id, 1_900_000_000);
+        $synced = billingSync($account);
+
+        expect($synced->interval)->toBe('year')->and($synced->price_id)->toBe('price_yearly_test')->and($synced->current_period_end?->getTimestamp())->toBe(1_900_000_000);
+    });
+
+    it('writes nothing it cannot hold: an interval that is not a month or a year, a missing period, a price that is not a text', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->answerWith(Http::response(['data' => [[
+            'id' => 'sub_odd', 'status' => 'active', 'created' => 1,
+            'items' => ['data' => [['price' => ['id' => 12, 'recurring' => ['interval' => 'week']]]]],
+        ]]]));
+
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBe('sub_odd')
+            ->and($synced->interval)->toBeNull()
+            ->and($synced->price_id)->toBeNull()
+            ->and($synced->current_period_end)->toBeNull();
+    });
+
+    it('ignores what is listed without an id or a status', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->answerWith(Http::response(['data' => [
+            billingSubscriptionObject('', ['created' => 1_800_000_900]),
+            ['status' => 'active', 'created' => 1_800_000_800],
+            billingSubscriptionObject('sub_real', ['created' => 1_800_000_100, 'status' => 'trialing']),
+        ]]));
+
+        expect(billingSync($account)->stripe_subscription_id)->toBe('sub_real');
+    });
+});
+
+describe('which subscription is the workspace\'s', function (): void {
+    it('prefers the newest of the subscriptions in play', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $old = $stripe->subscribe($account->stripe_customer_id, 'active');
+        $new = $stripe->subscribe($account->stripe_customer_id, 'trialing');
+
+        expect(billingSync($account)->stripe_subscription_id)->toBe($new)->and($old)->not->toBe($new);
+    });
+
+    it('prefers one in play to a newer one that is over', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $running = $stripe->subscribe($account->stripe_customer_id, 'past_due');
+        $stripe->subscribe($account->stripe_customer_id, 'canceled');
+        $stripe->subscribe($account->stripe_customer_id, 'incomplete_expired');
+
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBe($running)->and($synced->status)->toBe('past_due');
+    });
+
+    it('counts every status in play: unpaid, paused and incomplete are not over', function (string $status): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'canceled');
+        $current = $stripe->subscribe($account->stripe_customer_id, $status);
+        $stripe->subscribe($account->stripe_customer_id, 'canceled');
+
+        expect(billingSync($account)->stripe_subscription_id)->toBe($current);
+    })->with(['unpaid', 'paused', 'incomplete']);
+
+    it('remembers the newest of the subscriptions that are over when none is in play', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'incomplete_expired');
+        $latest = $stripe->subscribe($account->stripe_customer_id, 'canceled');
+
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBe($latest)->and($synced->status)->toBe('canceled');
+    });
+
+    it('writes a customer without any subscription as it is: nothing, read just now', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        billingSync($account);
+        $stripe->subscriptions = [];
+
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBeNull()
+            ->and($synced->status)->toBeNull()
+            ->and($synced->price_id)->toBeNull()
+            ->and($synced->interval)->toBeNull()
+            ->and($synced->current_period_end)->toBeNull()
+            ->and($synced->cancel_at_period_end)->toBeFalse()
+            ->and($synced->synced_at)->not->toBeNull()
+            ->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
+    });
+
+    it('follows the newest and warns when two subscriptions are in play: a double checkout', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'active');
+        $newest = $stripe->subscribe($account->stripe_customer_id, 'active', 'year');
+
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBe($newest)->and($synced->interval)->toBe('year');
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => str_contains($message, 'more than one subscription') && $context['subscriptions'] === 2)->once();
+    });
+
+    it('does not warn for one subscription in play next to some that are over', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe);
+        $stripe->subscribe($account->stripe_customer_id, 'canceled');
+        $stripe->subscribe($account->stripe_customer_id, 'canceled');
+        $stripe->subscribe($account->stripe_customer_id, 'active');
+
+        billingSync($account);
+
+        Log::shouldNotHaveReceived('warning');
+    });
+});
+
+describe('when Stripe does not give a subscription', function (): void {
+    it('clears the subscription of a customer that was deleted at Stripe, and says so in the log', function (): void {
+        Log::spy();
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        billingSync($account);
+        expect(WorkspacePlan::for($account->workspace))->toBe(Plan::Pro);
+
+        $stripe->failNext('GET /v1/subscriptions', 404);
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBeNull()
+            ->and($synced->status)->toBeNull()
+            ->and($synced->current_period_end)->toBeNull()
+            ->and($synced->cancel_at_period_end)->toBeFalse()
+            ->and($synced->synced_at)->not->toBeNull()
+            ->and($synced->stripe_customer_id)->toBe($account->stripe_customer_id)
+            ->and(WorkspacePlan::for($account->workspace))->toBe(Plan::Free);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'customer of a workspace is gone'))->once();
+    });
+
+    it('throws what is worth trying again and leaves the account as it was', function (?int $status): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $before = billingSync($account);
+        $stripe->setStatus(array_key_first($stripe->subscriptions), 'canceled')->failNext('GET /v1/subscriptions', $status);
+
+        try {
+            billingSync($account);
+            $thrown = null;
+        } catch (StripeException $exception) {
+            $thrown = $exception;
+        }
+
+        expect($thrown?->retryable())->toBeTrue()
+            ->and(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active')
+            ->and(BillingAccount::query()->findOrFail($account->id)->synced_at?->equalTo($before->synced_at))->toBeTrue();
+    })->with(['an error of Stripe' => [500], 'too many calls' => [429], 'a lost connection' => [null]]);
+
+    it('throws a refusal, which is not worth trying again, and keeps the account', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        billingSync($account);
+        $stripe->failNext('GET /v1/subscriptions', 403);
+
+        try {
+            billingSync($account);
+            $thrown = null;
+        } catch (StripeException $exception) {
+            $thrown = $exception;
+        }
+
+        expect($thrown?->retryable())->toBeFalse()->and(BillingAccount::query()->findOrFail($account->id)->status)->toBe('active');
+    });
+});
+
+describe('how it is written', function (): void {
+    it('asks Stripe for the customer, all the statuses, outside any transaction', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $levels = [];
+        $stripe->onCall('GET /v1/subscriptions', function () use (&$levels): void {
+            $levels[] = DB::transactionLevel();
+        });
+        $base = DB::transactionLevel();
+
+        billingSync($account);
+
+        $query = [];
+        parse_str((string) parse_url($stripe->requestsOf('GET /v1/subscriptions')[0]->url(), PHP_URL_QUERY), $query);
+        expect($levels)->toBe([$base])
+            ->and($query['customer'])->toBe($account->stripe_customer_id)
+            ->and($query['status'])->toBe('all');
+    });
+
+    it('locks the workspace before it writes', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $queries = [];
+        DB::listen(function ($query) use (&$queries): void {
+            $queries[] = strtolower($query->sql);
+        });
+
+        billingSync($account);
+
+        $lock = array_keys(array_filter($queries, fn (string $sql): bool => str_contains($sql, 'workspaces') && str_contains($sql, 'for update')));
+        $write = array_keys(array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'update') && str_contains($sql, 'billing_accounts')));
+
+        expect($lock)->not->toBe([])->and($write)->not->toBe([])->and($lock[0])->toBeLessThan($write[0]);
+    });
+
+    it('does not let a read that began before another one overwrite it', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'canceled');
+        // A read that began later was written first: it saw the customer subscribe again.
+        $later = now()->addMinutes(5)->startOfSecond();
+        $account->forceFill(['stripe_subscription_id' => 'sub_newer', 'status' => 'active', 'synced_at' => $later])->save();
+
+        $returned = billingSync($account);
+        $stored = BillingAccount::query()->findOrFail($account->id);
+
+        expect($stored->status)->toBe('active')
+            ->and($stored->stripe_subscription_id)->toBe('sub_newer')
+            ->and($stored->synced_at?->equalTo($later))->toBeTrue()
+            ->and($returned->status)->toBe('active');
+    });
+
+    it('writes over a read made a moment ago', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'canceled');
+        $account->forceFill(['status' => 'active', 'stripe_subscription_id' => 'sub_old', 'synced_at' => now()->subMinutes(5)])->save();
+
+        expect(billingSync($account)->status)->toBe('canceled');
+    });
+
+    it('does nothing when the workspace is deleted while Stripe is being asked, and does not fail', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $stripe->onCall('GET /v1/subscriptions', fn () => $account->workspace->delete());
+
+        $returned = billingSync($account);
+
+        expect(BillingAccount::query()->count())->toBe(0)->and($returned->stripe_customer_id)->toBe($account->stripe_customer_id);
+    });
+
+    it('does nothing when the account is deleted while Stripe is being asked', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $stripe->onCall('GET /v1/subscriptions', fn () => DB::table('billing_accounts')->delete());
+
+        billingSync($account);
+
+        expect(BillingAccount::query()->count())->toBe(0);
+    });
+
+    it('only touches the account it is given', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $other = billingAccountAt($stripe, 'canceled');
+
+        billingSync($account);
+
+        expect(BillingAccount::query()->findOrFail($other->id)->synced_at)->toBeNull()
+            ->and(BillingAccount::query()->findOrFail($other->id)->status)->toBeNull();
+    });
+});
