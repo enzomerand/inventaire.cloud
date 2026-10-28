@@ -45,7 +45,7 @@ final class PhotoAnalysisController extends Controller
      *
      * `422` for a mistake in the request (`photos`, `photos.<n>`) and for a photo that cannot be read (on `photos.<n>`, with a `code`:
      * `unsupported_type`, `unreadable_photo`, `photo_too_large`); `409` when the workspace may not use the photo entry
-     * (`photo_entry_disabled`: the administrator turned it off, there is no key, or the owner did not turn it on) and when no field of
+     * (`photo_entry_disabled`: the administrator turned it off, there is no key, the owner did not turn it on, or the plan of the workspace does not include it) and when no field of
      * the inventory can be filled from a photo (`no_fields_to_fill`); `503` (`photo_analysis_unavailable`) when the photos could not be written or the job queued; `429` beyond the pace of requests, beyond the analyses of the day of the
      * person and beyond those of the instance (the latter with its own message and `code`: `photo_analyses_instance_limit`).
      */

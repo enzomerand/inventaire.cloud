@@ -6,6 +6,7 @@ namespace App\Providers;
 
 use App\Auth\EmailAddress;
 use App\Auth\StoreSessionFingerprint;
+use App\Billing\PlanMemory;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Http\Middleware\PaceApiTokens;
@@ -44,6 +45,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Read once per request and no longer (see the class), so a worker that serves many requests starts afresh.
         $this->app->scoped(InstanceSettings::class);
+
+        // The plans read for the workspaces, kept for the length of a request or of a queued job and no longer (see the class).
+        $this->app->scoped(PlanMemory::class);
 
         // The field types are stateless objects: one registry for the whole process.
         $this->app->singleton(FieldTypes::class, fn (): FieldTypes => FieldTypes::standard());

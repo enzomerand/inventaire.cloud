@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Billing\SubscriptionLifecycle;
 use App\Billing\SubscriptionStatus;
 use App\Billing\WorkspacePlan;
 use Carbon\CarbonImmutable;
@@ -37,6 +38,20 @@ final class BillingAccount extends Model
 {
     /** @use HasFactory<BillingAccountFactory> */
     use HasFactory;
+
+    /**
+     * Has {@see WorkspacePlan} read the plans again once a subscription is written or removed, whichever way the model is saved (the
+     * synchronisation, a factory, a console command): what it remembered of the workspaces for the request or job is out of date.
+     */
+    protected static function booted(): void
+    {
+        $forget = static function (): void {
+            WorkspacePlan::forget();
+        };
+
+        self::saved($forget);
+        self::deleted($forget);
+    }
 
     /**
      * The attributes that can be filled in bulk: everything but the key.
@@ -77,9 +92,9 @@ final class BillingAccount extends Model
     }
 
     /**
-     * Whether the subscription the columns describe is not over yet, so that it is still to be cancelled at Stripe when the workspace is
-     * deleted or changes hands: there is one, and it is neither `canceled` nor `incomplete_expired` ({@see SubscriptionStatus::ENDED}).
-     * It answers from the last synchronisation, like everything else of the row.
+     * Whether the subscription the columns describe is not over yet: there is one, and it is neither `canceled` nor `incomplete_expired`
+     * ({@see SubscriptionStatus::ENDED}). It answers from the last synchronisation, like everything else of the row (what is cancelled at
+     * Stripe when the workspace is deleted or changes hands does not depend on it, see {@see SubscriptionLifecycle}).
      */
     public function hasLiveSubscription(): bool
     {

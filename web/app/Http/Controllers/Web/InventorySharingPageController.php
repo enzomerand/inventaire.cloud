@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Web;
 
+use App\Billing\WorkspaceLimits;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EntersWorkspace;
 use App\Models\Inventory;
@@ -45,7 +46,7 @@ final class InventorySharingPageController extends Controller
             'workspace' => $workspace,
             'inventory' => $inventory,
             'enabled' => $this->settings->shareLinksEnabled(),
-            'limit' => config()->integer('inventories.max_share_links'),
+            'limit' => WorkspaceLimits::shareLinksPerInventory($workspace),
             'activeWorkspace' => $workspace->ulid,
         ]);
     }

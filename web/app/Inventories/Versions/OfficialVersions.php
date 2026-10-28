@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Inventories\Versions;
 
 use App\Auth\EmailAddress;
+use App\Billing\WorkspaceLimits;
 use App\Database\DeadlockRetries;
 use App\Inventories\Attachments\AttachmentStorage;
 use App\Inventories\Attachments\WorkspaceStorage;
@@ -235,7 +236,7 @@ final class OfficialVersions
             throw new ExportRefusedException(ExportRefusedException::PDF_TOO_LARGE, $limit);
         }
 
-        $quota = config()->integer('inventories.storage_per_workspace');
+        $quota = WorkspaceLimits::storageBytes($inventory->workspace_id);
 
         if ((int) Workspace::query()->whereKey($inventory->workspace_id)->value('storage_used') >= $quota) {
             throw new StorageLimitReachedException($quota);

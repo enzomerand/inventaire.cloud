@@ -9,7 +9,7 @@ use RuntimeException;
 
 /**
  * Photos were sent for an inventory of a workspace that may not use the photo entry: the administrator has it off, the instance has no
- * API key, or the owner of the workspace did not turn it on (see {@see PhotoEntry::enabledFor()}). The API answers it with a 409.
+ * API key, the owner of the workspace did not turn it on, or its plan does not include it (see {@see PhotoEntry::enabledFor()}). The API answers it with a 409.
  */
 final class PhotoEntryDisabledException extends RuntimeException
 {

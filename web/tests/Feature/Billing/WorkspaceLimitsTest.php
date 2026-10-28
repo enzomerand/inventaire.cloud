@@ -108,7 +108,8 @@ describe('with billing on', function (): void {
         $workspace = billingWorkspace('active');
         expect(WorkspaceLimits::inventories($workspace))->toBe(100);
 
-        $workspace->billingAccount()->update(['status' => 'canceled']);
+        // Through the model: the plan read is remembered for the length of the request, and the events of the model make it forget.
+        $workspace->billingAccount()->firstOrFail()->update(['status' => 'canceled']);
 
         expect(WorkspaceLimits::inventories($workspace))->toBe(3)
             ->and(WorkspaceLimits::photoEntry($workspace))->toBeFalse();
