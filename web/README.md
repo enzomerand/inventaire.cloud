@@ -387,6 +387,40 @@ The mails that carry a code (sign-in, account deletion) and the welcome mail are
 - **The web server decides whether "after the response" is true.** FrankenPHP (the Docker image, in its default mode), PHP-FPM and LiteSpeed finish the response before the work runs (Symfony's `Response::send()` calls `fastcgi_finish_request()` or its LiteSpeed twin). PHP's built-in server and so `php artisan serve` (and `composer dev`) cannot: the connection stays open until the script ends, so the visitor does wait for the mail, as they would have before. They are development servers, but note that, with registration closed, the time the connection takes to close then shows whether a mail was sent, that is whether the address has an account. In production the answer is complete before the lookup and the sending begin. In tests, the deferred work runs as the request terminates, inside the call; `holdDeferred()` in `tests/Pest.php` holds it back to look at what happens between the answer and the mail.
 - The install wizard's mail check (`SetupCodeMail`) is not concerned: it exists to tell the person at once whether mail works, so it is sent and its failure shown on the spot.
 
+### Billing (Stripe)
+
+The hosted service sells a **Pro** plan; a self-hosted instance does not have to. Every workspace is **Free** or **Pro**, only its **owner** buys and manages the subscription (every member sees the plan, the limits and the usage on `/app/w/{workspace}/billing`), and the limits below replace the instance-wide quotas for that workspace. **Billing is off by default**: it is on only when both `STRIPE_SECRET` and `STRIPE_PRICE_PRO_MONTHLY` are set, and an instance without them keeps exactly the quotas of `config/inventories.php` and `config/workspaces.php`, makes no Stripe call, and its billing page says that no plan is offered. The per-user limits (exports, imports, API tokens, photo analyses a day) stay global.
+
+| Per workspace                         | Free (`BILLING_FREE_*`)    | Pro (`BILLING_PRO_*`)       |
+|---------------------------------------|----------------------------|-----------------------------|
+| Inventories (`..._INVENTORIES`)       | 3                          | 100                         |
+| Items per inventory (`..._ITEMS`)     | 500                        | 10 000                      |
+| Storage (`..._STORAGE_MB`)            | 200 MB                     | 10 240 MB                   |
+| Members, invitations waiting included (`..._MEMBERS`) | 3  | 50                          |
+| Share links per inventory (`..._SHARE_LINKS`) | 2                  | 20                          |
+| Photo entry (`..._PHOTO_ENTRY`)       | no                         | yes                         |
+
+The photo entry in Pro still needs the administrator's switch, the API key and the owner's consent (see [Photo entry (AI)](#photo-entry-ai)). The price the page shows is display only (`BILLING_CURRENCY` `eur`, `BILLING_PRO_MONTHLY_AMOUNT` `600`, `BILLING_PRO_YEARLY_AMOUNT` `6000`, in cents): the amount charged is the one of the Stripe Price, keep the two in step.
+
+**Setting it up in Stripe** (test mode first; the same steps in live mode):
+
+1. **Product.** Create one Product "Pro" with a **monthly** recurring Price, and optionally a **yearly** one. Put their ids in `STRIPE_PRICE_PRO_MONTHLY` (required) and `STRIPE_PRICE_PRO_YEARLY` (without it, only the monthly plan is offered).
+2. **API key.** Create a **restricted key** (`rk_...`) with these permissions and put it in `STRIPE_SECRET`: *Customers* write, *Checkout Sessions* write, *Customer portal* write, *Subscriptions* write. Nothing else is needed. The key stays in the environment, never in the database, an answer or a log. The code is written for the Stripe API version `2026-09-30.endive` and sends it with every call, whatever the default version of your account.
+3. **Webhook.** Add the endpoint `https://<APP_URL>/webhooks/stripe` (the public address of the instance, `APP_URL`) listening to exactly these events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.paused`, `customer.subscription.resumed`, `invoice.paid`, `invoice.payment_failed`, `charge.refunded`, `charge.dispute.created` and `radar.early_fraud_warning.created`. Put its signing secret (`whsec_...`) in `STRIPE_WEBHOOK_SECRET`. It is optional: without it `/webhooks/stripe` answers `404` and the subscriptions are only read by the schedule (see below), which is what a local instance or one behind a NAT does.
+4. **Customer portal.** In the Stripe dashboard, *Settings > Billing > Customer portal*, choose what customers may do (update the payment method, see invoices, cancel) and **save** it: until a configuration is saved, Stripe refuses to open the portal and "Manage the subscription" fails.
+5. **Tax.** Checkout asks for a billing address and a tax id, and `STRIPE_AUTOMATIC_TAX` (default `false`) has Stripe Tax compute the tax. Turn it on **only once Stripe Tax is set up with an active registration** for the places you sell to: with it on and no registration, or off, no tax is collected.
+6. **Try it.** With the test keys, upgrade a workspace and pay with the card `4242 4242 4242 4242` (any future date, any CVC). Back on the page, the plan turns Pro as soon as the subscription is read. To receive webhooks locally, forward them with the Stripe CLI (`stripe listen --forward-to http://localhost:8000/webhooks/stripe`, which prints the `whsec_...` to use).
+
+**How it behaves.**
+
+- **What the webhook does.** Nothing it says is believed. The event only tells the application which customer to look at: the subscriptions of that customer are read again through the API (`App\Billing\BillingSync`), and the plan comes from there. A workspace is Pro while its subscription is `active`, `trialing` or `past_due` (a failed payment is retried for a while), Free in any other case. The signature is checked (HMAC-SHA256 of the timestamp and the exact body, five minutes of tolerance), and the answer is `200` for any verified event, even one that is ignored. If the alert mail of a dispute fails to queue for the N-th administrator the answer is `500` and Stripe sends the event again, so administrators 1 to N-1 get that alert twice: a repeated alert is better than none.
+- **`inventaire:sync-billing`** (scheduled hourly, safe to run any time) reads again the accounts never synchronised or synchronised more than 6 hours ago, 200 at most per run. It is the safety net of the webhook and the **only** way an instance without one learns that a subscription changed (a plan can then lag by up to seven hours; the page that Stripe brings the buyer back to reads the subscription at once, so buying is not delayed). In Docker the `scheduler` service runs it; run it by hand with `docker compose exec app php artisan inventaire:sync-billing`.
+- **Buying.** Checkout is hosted by Stripe. A workspace is never sold a second subscription: the subscriptions of its customer are read at Stripe first (`409` `already_subscribed`, or `subscription_pending` for one that is incomplete, unpaid or paused and is settled in the portal), and the customer's Checkout sessions that are still open are expired, so two tabs cannot both end in a subscription. Opening Checkout and the portal is paced to 10 a minute per person. If the stored Stripe customer no longer exists (the keys were switched from test to live), a new customer replaces it at the next purchase.
+- **Downgrading deletes nothing.** When a subscription ends, the workspace goes back to the Free limits: what is above them stays, readable and editable, and only **new** creations above the limits are refused (`inventory_limit_reached`, `item_limit_reached`, `storage_limit_reached`, `member_limit_reached`, `share_link_limit_reached`, with the limit of the plan in `limit`). The owner's choice for the photo entry is kept and comes back with the plan.
+- **Deleting or handing over a workspace.** Deleting a workspace (or an account that owned it alone) cancels its subscription **immediately**, in a queued job after the deletion is committed: keep a worker running. Changing the owner (transfer, or an administrator deleting the owner's account) sets the subscription to **end at the end of the paid period**: the workspace stays Pro until then, nobody is charged again, and the new owner subscribes on their own. What cannot be cancelled (Stripe refuses or is down for good) is written in the log with the customer id, to cancel by hand in the dashboard.
+- **Disputes and fraud warnings** (`charge.dispute.created`, `radar.early_fraud_warning.created`) are mailed to every administrator of the instance (queued, no code in the mail) with the link to the Stripe dashboard where they are answered; nothing else is done automatically.
+- **The API.** The billing endpoints (`/api/v1/workspaces/{workspace}/billing`, `/checkout`, `/portal`, `/refresh`) are for the web front only: an API token never reaches them, and they are not in the OpenAPI document.
+
 ## Your account: sessions, data and deletion
 
 `/app/account` ("My account") holds the profile (name, language), the security of the sessions, the download of the data, and the deletion of the account.
@@ -498,6 +532,7 @@ HTTPS is also what makes the application installable and the camera usable: brow
 ```bash
 docker compose exec app php artisan inventaire:install-token
 docker compose exec app php artisan inventaire:make-admin jane@example.com --name="Jane Doe"
+docker compose exec app php artisan inventaire:sync-billing   # read the Stripe subscriptions again (hourly by the scheduler; billing only)
 docker compose run --rm app php artisan tinker           # any other command, in a throw-away container
 docker compose logs -f app                               # application errors go to stderr
 ```
@@ -544,6 +579,7 @@ Safety net: `tests/TestCase.php` refuses to boot (before any migration) unless t
 ```text
 app/
   Admin/            UserAdministration (what administrators do with accounts: search, create, promote, delete with the hand-over of shared workspaces) and its refusals
+  Billing/          Free and Pro plans per workspace on Stripe (see "Billing (Stripe)"): Billing (is it on?), WorkspacePlan and WorkspaceLimits (the plan of a workspace and the limit every quota asks for), StripeClient (the REST API without a library), BillingSync, BillingCustomers, SubscriptionLifecycle, WebhookSignature
   Auth/             Sign-in codes (LoginCodes), account creation (Accounts), session fingerprint check (SessionFingerprint), account deletion (AccountDeletion, AccountDeletionCodes) and export (AccountExport)
   Console/Commands/ inventaire:install (console wizard), inventaire:install-token, inventaire:install-status, inventaire:upgrade, inventaire:make-admin
   Docs/             OpenApi (reads and caches resources/openapi/v1.yaml), ApiReference, SchemaDescriber and CurlExample (what /docs/api draws from it)
