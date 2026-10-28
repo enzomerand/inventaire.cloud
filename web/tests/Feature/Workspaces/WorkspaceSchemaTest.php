@@ -82,6 +82,9 @@ describe('the migrations', function (): void {
         $photoAnalyses = require database_path('migrations/2026_12_01_000000_create_photo_analyses_table.php');
         // The consent to the photo entry is a column of workspaces: it goes before them and comes back after them.
         $photoEntry = require database_path('migrations/2026_12_01_000100_add_photo_entry_enabled_to_workspaces_table.php');
+        // The billing account of a workspace hangs from it.
+        $billingAccounts = require database_path('migrations/2026_12_02_000000_create_billing_accounts_table.php');
+        $billingAccounts->down();
         $photoEntry->down();
         $photoAnalyses->down();
         $shareLinks->down();
@@ -115,6 +118,7 @@ describe('the migrations', function (): void {
             $shareLinks->up();
             $photoAnalyses->up();
             $photoEntry->up();
+            $billingAccounts->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

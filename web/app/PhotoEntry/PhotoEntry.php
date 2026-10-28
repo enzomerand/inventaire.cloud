@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\PhotoEntry;
 
+use App\Billing\WorkspaceLimits;
 use App\Models\Workspace;
 use App\PhotoEntry\Exceptions\PhotoEntryUnavailableException;
 use App\Settings\InstanceSettings;
@@ -15,6 +16,7 @@ use App\Settings\InstanceSettings;
  * Three conditions, all needed, because the photos leave for a third party (Anthropic) and every analysis is paid for by the instance:
  * the administrator turned the feature on ({@see InstanceSettings::photoEntryEnabled()}), the instance has an API key
  * (`ANTHROPIC_API_KEY`, `config('services.anthropic.key')`), and the owner of the workspace consented (`workspaces.photo_entry_enabled`).
+ * On an instance that sells plans, a fourth: the plan of the workspace includes it ({@see WorkspaceLimits::photoEntry()}).
  */
 final class PhotoEntry
 {
@@ -32,11 +34,26 @@ final class PhotoEntry
     }
 
     /**
-     * Whether the editors of this workspace may use it: the instance offers it and the owner of the workspace turned it on.
+     * Whether the editors of this workspace may use it: the instance offers it, the owner of the workspace turned it on, and the plan of
+     * the workspace allows it (see {@see WorkspaceLimits::photoEntry()}: always, on an instance that sells no plan).
+     *
+     * The consent is the owner's own and is kept as it was whatever the plan: a workspace that goes back to the Free plan keeps it, and the
+     * photo entry is back as soon as the plan allows it again. Everything that offers the photo entry or runs it asks this.
      */
     public function enabledFor(Workspace $workspace): bool
     {
-        return $workspace->photo_entry_enabled && $this->availableOnInstance();
+        return $workspace->photo_entry_enabled && $this->availableOnInstance() && WorkspaceLimits::photoEntry($workspace);
+    }
+
+    /**
+     * Whether the plan of the workspace is what keeps it from the photo entry: the instance offers the feature, and the plan, which only
+     * exists where billing is on, does not include it. The one refusal that subscribing mends, so it is told apart from the others
+     * (the switch of the administrator, the API key), which no workspace can mend. The consent of the owner is not looked at: the plan
+     * comes first, since turning the consent on would not be enough.
+     */
+    public function refusedByPlan(Workspace $workspace): bool
+    {
+        return $this->availableOnInstance() && ! WorkspaceLimits::photoEntry($workspace);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Workspaces;
 
 use App\Auth\EmailAddress;
+use App\Billing\WorkspaceLimits;
 use App\Database\DeadlockRetries;
 use App\Models\User;
 use App\Models\Workspace;
@@ -34,7 +35,7 @@ use Illuminate\Validation\ValidationException;
  * While registration is closed, a waiting invitation is also what lets an address without an account sign up, as long as the person
  * who sent it still has an account and the administrator has left that on ({@see self::hasTicketFor()}).
  *
- * The workspace holds at most `workspaces.max_members` places, taken by its members and by the invitations that wait; an account
+ * The workspace holds at most `workspaces.max_members` places (or the members of the plan of the workspace when billing is on: {@see WorkspaceLimits}), taken by its members and by the invitations that wait; an account
  * cannot belong to more than `workspaces.max_per_user` workspaces, the ones it was invited to included (the limit of creating them).
  *
  * Whatever changes the members runs in one transaction under the row locks of {@see Locks}, in their order (the accounts, the workspace,
@@ -89,7 +90,7 @@ final class Invitations
                 throw new MembershipRefused(MembershipRefused::ALREADY_INVITED);
             }
 
-            $limit = config()->integer('workspaces.max_members');
+            $limit = WorkspaceLimits::members($roster->workspace);
             $waiting = WorkspaceInvitation::query()->where('workspace_id', $roster->workspace->getKey())->pending()->count();
 
             if ($roster->members->count() + $waiting >= $limit) {
@@ -273,7 +274,7 @@ final class Invitations
             }
 
             // The invitation being spent is one of the places counted when it was sent: the places taken by members are what is left to check.
-            $limit = config()->integer('workspaces.max_members');
+            $limit = WorkspaceLimits::members($workspace);
 
             if ($members->count() >= $limit) {
                 throw new MembershipRefused(MembershipRefused::MEMBER_LIMIT_REACHED, limit: $limit);

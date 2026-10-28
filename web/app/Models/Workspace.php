@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Billing\SubscriptionLifecycle;
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Attachments\WorkspaceStorage;
 use App\Models\Concerns\HasUlidRouteKey;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -32,6 +34,7 @@ use Illuminate\Support\Carbon;
  * @property bool $photo_entry_enabled Whether the owner let the editors add items from photos analysed by Claude (App\PhotoEntry).
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
+ * @property-read BillingAccount|null $billingAccount
  */
 #[Fillable(['name'])]
 final class Workspace extends Model
@@ -43,16 +46,19 @@ final class Workspace extends Model
      * Has the files of the workspace deleted from the disk once its deletion is committed, whichever way the model is
      * deleted (the owner deleting it, an account that owned it alone being deleted, an administrator deleting that
      * account): the database cascades the rows, and fires no event for them (see {@see AttachmentCleanup}). What to delete is
-     * worked out before the row goes and queued only after it has: a deletion that fails purges nothing.
+     * worked out before the row goes and queued only after it has: a deletion that fails purges nothing. The subscription of the
+     * workspace at Stripe, if it has one that is not over, is cancelled the same way ({@see SubscriptionLifecycle}).
      */
     protected static function booted(): void
     {
         self::deleting(function (self $workspace): void {
             app(AttachmentCleanup::class)->collectForWorkspace($workspace);
+            app(SubscriptionLifecycle::class)->collectForWorkspace($workspace);
         });
 
         self::deleted(function (self $workspace): void {
             app(AttachmentCleanup::class)->purgeCollected($workspace);
+            app(SubscriptionLifecycle::class)->dispatchCollected($workspace);
         });
     }
 
@@ -108,5 +114,16 @@ final class Workspace extends Model
     public function inventories(): HasMany
     {
         return $this->hasMany(Inventory::class);
+    }
+
+    /**
+     * The Stripe customer of the workspace and its subscription, once the workspace started a checkout. It goes with the workspace when
+     * it is deleted (the foreign key cascades).
+     *
+     * @return HasOne<BillingAccount, $this>
+     */
+    public function billingAccount(): HasOne
+    {
+        return $this->hasOne(BillingAccount::class);
     }
 }

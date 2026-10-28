@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories;
 
+use App\Billing\WorkspaceLimits;
 use App\Database\DeadlockRetries;
 use App\Http\Resources\ItemResource;
 use App\Inventories\Attachments\AttachmentCleanup;
@@ -27,7 +28,7 @@ use stdClass;
  * Every write that depends on the fields starts by locking the inventory, then reads the fields while it holds that lock
  * (a plain read: the fields have no locks of their own, see {@see Locks}), so that:
  *
- * - the quota (`inventories.max_items`) is judged with nobody else adding an item: two requests for the last place
+ * - the quota (`inventories.max_items`, or the limit of the plan of the workspace when billing is on: {@see WorkspaceLimits}) is judged with nobody else adding an item: two requests for the last place
  *   cannot both get it. The number of items is the counter kept on the inventory row (`items_count`), which the lock
  *   protects and which this class alone moves, in the transaction of the item it adds or deletes;
  * - the values are validated against the fields as they are *now*, and rebuilt from them: a field deleted at the same
@@ -96,7 +97,7 @@ final class Items
             $locked = $this->locks->inventory($inventory->getKey());
             $fields = $locked->fields()->get();
 
-            $limit = config()->integer('inventories.max_items');
+            $limit = WorkspaceLimits::itemsPerInventory($locked->workspace_id);
 
             if ($locked->items_count >= $limit) {
                 throw new ItemLimitReachedException($limit);
@@ -118,7 +119,7 @@ final class Items
     }
 
     /**
-     * Adds many items to an inventory the caller holds, inside the caller's transaction: the quota (`inventories.max_items`) judged for
+     * Adds many items to an inventory the caller holds, inside the caller's transaction: the quota (`inventories.max_items`, or the limit of the plan: {@see WorkspaceLimits}) judged for
      * all of them at once, then the items, their search text and their first revision written in bulk, a statement for every
      * {@see self::BULK_CHUNK} items or {@see self::BULK_BYTES} bytes, whichever comes first, and the counter of the inventory moved
      * once. That is what lets an import be one transaction with one lock, where a loop of {@see self::create()} would take the locks
@@ -147,7 +148,7 @@ final class Items
             return 0;
         }
 
-        $limit = config()->integer('inventories.max_items');
+        $limit = WorkspaceLimits::itemsPerInventory($locked->workspace_id);
 
         if ($locked->items_count + $count > $limit) {
             throw new ItemLimitReachedException($limit);

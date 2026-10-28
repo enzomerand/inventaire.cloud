@@ -8,6 +8,7 @@ use App\Admin\Exceptions\UserAdministrationRefused;
 use App\Auth\Accounts;
 use App\Auth\EmailAddress;
 use App\Auth\Exceptions\AccountDeletionRefused;
+use App\Billing\SubscriptionLifecycle;
 use App\Database\CaseInsensitiveSearch;
 use App\Database\DeadlockRetries;
 use App\Models\User;
@@ -51,6 +52,7 @@ final class UserAdministration
         private readonly Locks $locks,
         private readonly LocaleResolver $locales,
         private readonly PhotoEntry $photoEntry,
+        private readonly SubscriptionLifecycle $subscriptions,
     ) {}
 
     /**
@@ -270,6 +272,9 @@ final class UserAdministration
 
             // The consent of the owner who is going is not the one of their successor, who gives their own.
             $this->photoEntry->withdrawConsent($workspace);
+
+            // The subscription is paid by the owner who is going: it ends with the period that is paid for, once the deletion is committed.
+            $this->subscriptions->ownerChanged($workspace);
         }
     }
 

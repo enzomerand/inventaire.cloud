@@ -6,6 +6,7 @@ namespace App\Providers;
 
 use App\Auth\EmailAddress;
 use App\Auth\StoreSessionFingerprint;
+use App\Billing\PlanMemory;
 use App\Console\ArtisanRunner;
 use App\Console\ProcessArtisanRunner;
 use App\Http\Middleware\PaceApiTokens;
@@ -44,6 +45,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Read once per request and no longer (see the class), so a worker that serves many requests starts afresh.
         $this->app->scoped(InstanceSettings::class);
+
+        // The plans read for the workspaces, kept for the length of a request or of a queued job and no longer (see the class).
+        $this->app->scoped(PlanMemory::class);
 
         // The field types are stateless objects: one registry for the whole process.
         $this->app->singleton(FieldTypes::class, fn (): FieldTypes => FieldTypes::standard());
@@ -125,6 +129,19 @@ class AppServiceProvider extends ServiceProvider
         // App\PhotoEntry\PhotoAnalysisQuota, `photo_analyses_per_day`).
         RateLimiter::for('photo-analyses', fn (Request $request): Limit => Limit::perMinute(5)
             ->by('photo-analyses:'.$this->signedInKey($request)));
+
+        // Reading the subscription of a workspace at Stripe, asked by the page when somebody comes back from Checkout: six a minute per person
+        // (each one is a call to Stripe that waits for its answer).
+        RateLimiter::for('billing-refresh', fn (Request $request): Limit => Limit::perMinute(6)
+            ->by('billing-refresh:'.$this->signedInKey($request)));
+
+        // Opening a Checkout session or a portal session at Stripe makes several calls that each wait for the answer (the customer, its open
+        // sessions, the session), and every Checkout session is a page of Stripe that stays open for a day: ten a minute per person, each
+        // kind with its own count.
+        RateLimiter::for('billing-checkout', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('billing-checkout:'.$this->signedInKey($request)));
+        RateLimiter::for('billing-portal', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('billing-portal:'.$this->signedInKey($request)));
 
         // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
         RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))

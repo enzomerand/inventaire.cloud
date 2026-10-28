@@ -15,6 +15,7 @@ use App\PhotoEntry\Exceptions\AnalysisNotStartedException;
 use App\PhotoEntry\Exceptions\InstanceQuotaReachedException;
 use App\PhotoEntry\Exceptions\NoFieldsToFillException;
 use App\PhotoEntry\Exceptions\PhotoEntryDisabledException;
+use App\PhotoEntry\Exceptions\PhotoEntryNotInPlanException;
 use App\PhotoEntry\PhotoAnalyses;
 use App\PhotoEntry\PhotoAnalysisStatus;
 use App\PhotoEntry\UnreadablePhotoException;
@@ -45,7 +46,8 @@ final class PhotoAnalysisController extends Controller
      *
      * `422` for a mistake in the request (`photos`, `photos.<n>`) and for a photo that cannot be read (on `photos.<n>`, with a `code`:
      * `unsupported_type`, `unreadable_photo`, `photo_too_large`); `409` when the workspace may not use the photo entry
-     * (`photo_entry_disabled`: the administrator turned it off, there is no key, or the owner did not turn it on) and when no field of
+     * (`photo_entry_disabled`: the administrator turned it off, there is no key, or the owner did not turn it on; `photo_entry_not_in_plan`:
+     * the plan of the workspace does not include it) and when no field of
      * the inventory can be filled from a photo (`no_fields_to_fill`); `503` (`photo_analysis_unavailable`) when the photos could not be written or the job queued; `429` beyond the pace of requests, beyond the analyses of the day of the
      * person and beyond those of the instance (the latter with its own message and `code`: `photo_analyses_instance_limit`).
      */
@@ -53,6 +55,8 @@ final class PhotoAnalysisController extends Controller
     {
         try {
             $analysis = $this->analyses->request($inventory, $this->user($request), $request->photos(), app()->getLocale());
+        } catch (PhotoEntryNotInPlanException) {
+            return ApiError::conflict(__('The plan of this workspace does not include the photo entry.'), PhotoEntryNotInPlanException::CODE);
         } catch (PhotoEntryDisabledException) {
             return ApiError::conflict(__('The photo entry is not turned on for this workspace.'), PhotoEntryDisabledException::CODE);
         } catch (NoFieldsToFillException) {

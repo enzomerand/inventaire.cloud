@@ -1,5 +1,5 @@
 {{--
-    The page of a workspace: its inventories as cards, the dialog that adds one (editors and owners) and the link to its members.
+    The page of a workspace: its inventories as cards, the dialog that adds one (editors and owners) and the links to its members and, when the instance sells plans, to its subscription.
 
     Alpine runs in its CSP build: the "workspaceInventories" component (resources/js/components/workspace-inventories.js)
     is referenced by name and gets its endpoint, the link of a card (__id__ stands for the ULID of the inventory) and
@@ -44,6 +44,12 @@
                 <x-tabler-users aria-hidden="true" />
                 {{ __('Members') }}
             </a>
+            @if ($billingOffered)
+                <a class="btn" href="{{ route('app.workspace.billing', ['workspace' => $workspace->ulid], absolute: false) }}">
+                    <x-tabler-credit-card aria-hidden="true" />
+                    {{ __('Subscription') }}
+                </a>
+            @endif
             <button type="button" class="btn btn-primary" x-ref="newInventory" x-show="canCreate" @click="startCreate">
                 <x-tabler-plus aria-hidden="true" />
                 {{ __('New inventory') }}

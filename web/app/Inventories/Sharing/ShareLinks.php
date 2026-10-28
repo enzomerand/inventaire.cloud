@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Sharing;
 
+use App\Billing\WorkspaceLimits;
 use App\Database\DeadlockRetries;
 use App\Inventories\Exceptions\ShareLinkLimitReachedException;
 use App\Inventories\Exceptions\ShareLinksDisabledException;
@@ -31,7 +32,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
  * up ({@see self::resolve()}), and the token encrypted with the application key, so that the owner can copy the address again
  * ({@see self::urlOf()}). When the key was changed and the token cannot be read back, the address is null and the owner makes a new link.
  *
- * An inventory may have `inventories.max_share_links` links that still work: the ones that expired do not count, they only wait to be
+ * An inventory may have `inventories.max_share_links` links (or the share links of the plan of its workspace when billing is on: {@see WorkspaceLimits}) that still work: the ones that expired do not count, they only wait to be
  * deleted. The count is made under the lock of the inventory's row, so that requests made at the same moment cannot cross it together. A link past its expiry is
  * refused by {@see self::resolve()}, as are all the links while the administrator has sharing turned off
  * ({@see InstanceSettings::shareLinksEnabled()}); unknown, malformed, expired and disabled all answer null, so a visitor cannot tell
@@ -147,12 +148,11 @@ final class ShareLinks
             throw new ShareLinksDisabledException;
         }
 
-        $limit = config()->integer('inventories.max_share_links');
-
-        return DeadlockRetries::run(fn (): array => $this->db->transaction(function () use ($author, $inventory, $label, $includeFiles, $expiresInDays, $limit): array {
+        return DeadlockRetries::run(fn (): array => $this->db->transaction(function () use ($author, $inventory, $label, $includeFiles, $expiresInDays): array {
             // The link names its author (a foreign key, which locks that row when the link is saved): the account comes first.
             $this->locks->author($author);
             $locked = $this->locks->inventory($inventory->getKey());
+            $limit = WorkspaceLimits::shareLinksPerInventory($locked->workspace_id);
 
             if (ShareLink::query()->where('inventory_id', $locked->getKey())->active()->count() >= $limit) {
                 throw new ShareLinkLimitReachedException($limit);

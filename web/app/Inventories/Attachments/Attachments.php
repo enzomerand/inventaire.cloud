@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories\Attachments;
 
+use App\Billing\WorkspaceLimits;
 use App\Database\DeadlockRetries;
 use App\Inventories\Exceptions\AttachmentLimitReachedException;
 use App\Inventories\Exceptions\FieldFileLimitReachedException;
@@ -201,7 +202,7 @@ final class Attachments
             throw new AttachmentLimitReachedException($perItem);
         }
 
-        $quota = config()->integer('inventories.storage_per_workspace');
+        $quota = WorkspaceLimits::storageBytes($workspace);
 
         if ($workspace->storage_used + $attachment->size > $quota) {
             throw new StorageLimitReachedException($quota);

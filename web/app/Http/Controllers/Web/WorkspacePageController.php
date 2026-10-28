@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Web;
 
+use App\Billing\Billing;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\EntersWorkspace;
 use App\Models\Workspace;
@@ -17,7 +18,8 @@ use Illuminate\Support\Facades\Gate;
  * `/app/w/{workspace}`: the inventories of a workspace.
  *
  * The page only frames them: the list is read from the API by the script, which also offers to add one when the role
- * of the person allows it (the abilities are handed over in the markup). Somebody who does not belong to the
+ * of the person allows it (the abilities are handed over in the markup), and links to the members and, on an instance that sells
+ * plans, to the subscription. Somebody who does not belong to the
  * workspace is answered as if it did not exist (404). Opening the page makes the workspace the current one of the account
  * ({@see EntersWorkspace}).
  */
@@ -39,6 +41,7 @@ final class WorkspacePageController extends Controller
         return view('app.workspace', [
             'workspace' => $workspace,
             'abilities' => InventoryPolicy::abilities($role),
+            'billingOffered' => Billing::enabled(),
             'activeWorkspace' => $workspace->ulid,
         ]);
     }

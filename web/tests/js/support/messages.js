@@ -171,6 +171,7 @@ export const MESSAGES = {
     'photoEntry.error.turned_off':
         'Adding items from photos was turned off before the analysis could start. The photos were deleted without being sent.',
     'photoEntry.error.disabled': 'Adding items from photos is turned off.',
+    'photoEntry.error.not_in_plan': 'Adding items from photos is not included in the plan of this workspace.',
     'photoEntry.error.instance_limit': 'The instance reached its daily number of photo analyses; try again tomorrow.',
     'photoEntry.error.no_fields': 'This inventory has no field the photos could fill in.',
     'photoEntry.error.gone': 'This analysis is no longer available. Send the photos again.',
@@ -389,6 +390,46 @@ export const MESSAGES = {
         'You already belong to as many workspaces as an account can (:count): leave one, then accept.',
     'invitations.waiting.one': ':count invitation waiting',
     'invitations.waiting.other': ':count invitations waiting',
+    'billing.confirming': 'Payment being confirmed…',
+    'billing.still_pending':
+        'Your payment is still being confirmed. The plan changes as soon as it is: reload this page in a moment.',
+    'billing.unsettled':
+        'A subscription of this workspace is waiting to be settled. Open the subscription management to settle it.',
+    'billing.previous_owner':
+        'The subscription of the previous owner of this workspace is still running. You can subscribe once it has ended.',
+    'billing.previous_owner_until':
+        'The subscription of the previous owner of this workspace runs until :date. You can subscribe once it has ended.',
+    'billing.plan.free': 'Free',
+    'billing.plan.pro': 'Pro',
+    'billing.price.month': ':amount per month',
+    'billing.price.year': ':amount per year',
+    'billing.interval.month': 'Monthly',
+    'billing.interval.year': 'Yearly',
+    'billing.status.active': 'Active',
+    'billing.status.trialing': 'Trial period',
+    'billing.status.past_due': 'Payment overdue',
+    'billing.renews': 'Renews on :date.',
+    'billing.ends': 'The subscription ends on :date. Pro stays available until then.',
+    'billing.ended': 'The Pro subscription ended on :date.',
+    'billing.usage.inventories': 'Inventories',
+    'billing.usage.storage': 'Storage',
+    'billing.usage.members': 'Members and invitations',
+    'billing.usage.of': ':used of :limit',
+    'billing.limit.items': 'Items per inventory',
+    'billing.limit.share_links': 'Share links per inventory',
+    'billing.limit.photo_entry': 'Photo entry (AI)',
+    'billing.limit.included': 'Included',
+    'billing.limit.not_included': 'Not included',
+    'billing.notice.pro_active': 'The Pro plan is active.',
+    'billing.error.disabled': 'This service is not offered on this instance.',
+    'billing.error.already_subscribed': 'This workspace already has a subscription.',
+    'billing.error.subscription_pending':
+        'This workspace has a subscription that is not settled yet. Wait for its payment to be confirmed, or settle it from the subscription management.',
+    'billing.error.checkout_in_progress':
+        'A payment page is already being opened for this workspace. Try again in a moment.',
+    'billing.error.no_account': 'This workspace has no subscription to manage yet.',
+    'billing.error.interval': 'This billing period is not offered.',
+    'billing.error.unavailable': 'The payment service is unavailable right now. Please try again in a moment.',
 };
 
 /**

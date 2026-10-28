@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Inventories;
 
+use App\Billing\WorkspaceLimits;
 use App\Database\DeadlockRetries;
 use App\Inventories\Attachments\AttachmentCleanup;
 use App\Inventories\Exceptions\FieldLimitReachedException;
@@ -24,7 +25,7 @@ use Illuminate\Support\Collection as SupportCollection;
  *
  * Who may do it is decided by `App\Policies\InventoryPolicy` before this is called. What is decided here is what has
  * to be judged under a lock: the number of inventories a workspace holds is counted with the row of the workspace
- * locked (`inventories.max_per_workspace`), so requests made at the same moment cannot cross it together, and a
+ * locked (`inventories.max_per_workspace`, or the limit of the plan of the workspace when billing is on: {@see WorkspaceLimits}), so requests made at the same moment cannot cross it together, and a
  * change or a deletion works on the inventory as it is now, locked, not on the copy the request read. Every write
  * is one transaction, retried when the database picks it as the loser of a deadlock, and takes its locks in the order
  * of {@see Locks}.
@@ -164,7 +165,7 @@ final class Inventories
             throw (new ModelNotFoundException)->setModel(Workspace::class, [$workspace->getKey()]);
         }
 
-        $limit = config()->integer('inventories.max_per_workspace');
+        $limit = WorkspaceLimits::inventories($workspace);
 
         if (Inventory::query()->where('workspace_id', $workspace->getKey())->count() >= $limit) {
             throw new InventoryLimitReachedException($limit);
