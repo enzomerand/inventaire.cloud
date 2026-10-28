@@ -44,6 +44,7 @@ final class ApplicationTables
         'workspace_invitations',
         'share_links',
         'photo_analyses',
+        'billing_accounts',
     ];
 
     /**

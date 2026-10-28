@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -32,6 +33,7 @@ use Illuminate\Support\Carbon;
  * @property bool $photo_entry_enabled Whether the owner let the editors add items from photos analysed by Claude (App\PhotoEntry).
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
+ * @property-read BillingAccount|null $billingAccount
  */
 #[Fillable(['name'])]
 final class Workspace extends Model
@@ -108,5 +110,16 @@ final class Workspace extends Model
     public function inventories(): HasMany
     {
         return $this->hasMany(Inventory::class);
+    }
+
+    /**
+     * The Stripe customer of the workspace and its subscription, once the workspace started a checkout. It goes with the workspace when
+     * it is deleted (the foreign key cascades).
+     *
+     * @return HasOne<BillingAccount, $this>
+     */
+    public function billingAccount(): HasOne
+    {
+        return $this->hasOne(BillingAccount::class);
     }
 }

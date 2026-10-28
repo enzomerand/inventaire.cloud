@@ -45,6 +45,26 @@ return [
         'webhook_secret' => env('DOCUMENSO_WEBHOOK_SECRET'),
     ],
 
+    /*
+    | Stripe, which sells the Pro plan of a workspace (App\Billing). Billing is on
+    | only when the secret key and the Price of the monthly plan are both set; the
+    | yearly Price is optional. The webhook secret is the signing secret (`whsec_…`)
+    | of the endpoint `/webhooks/stripe`; without it the webhook answers 404 and the
+    | subscriptions are only synchronised by the schedule. The secret key stays in the
+    | environment, never in the database nor in a log. `api_version` is the version
+    | of the Stripe API the code is written for, sent in the `Stripe-Version` header.
+    */
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'prices' => [
+            'monthly' => env('STRIPE_PRICE_PRO_MONTHLY'),
+            'yearly' => env('STRIPE_PRICE_PRO_YEARLY'),
+        ],
+        'api_version' => '2026-09-30.endive',
+        'base_url' => 'https://api.stripe.com',
+    ],
+
     // The photo entry (App\PhotoEntry): Claude reads the photos of an object and proposes the values of its fields. The key stays in
     // the environment, never in the database nor in a log; without it the feature is unavailable whatever the admin switch says.
     'anthropic' => [
