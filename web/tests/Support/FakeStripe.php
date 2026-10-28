@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Http;
  *
  * A test drives it: it gives a customer a subscription in a status, changes that status, price or period end the way the customer would in
  * the portal, makes the next calls of a kind fail (with a status, or as a connection that is lost), hooks what happens while a call is
- * being answered, and signs the events it posts to the webhook ({@see self::signedEvent()}).
+ * being answered, and builds the events Stripe posts to the webhook ({@see self::event()}).
  *
  * A request that repeats an `Idempotency-Key` gets the answer of the first one without doing anything again, and one that changes
  * the parameters under the same key is refused (`400`, `idempotency_error`), as Stripe does.
@@ -99,23 +99,6 @@ final class FakeStripe
         self::$installed = $fake;
 
         return $fake;
-    }
-
-    /**
-     * Signs an event the way Stripe does when it posts it to the webhook: the payload is the JSON of the event, the header is
-     * `t=<timestamp>,v1=<HMAC-SHA256 of "<timestamp>.<payload>">`.
-     *
-     * @param  array<string, mixed>  $event  See {@see self::event()}.
-     * @param  string  $secret  The signing secret of the endpoint; a wrong one gives a signature the application must refuse.
-     * @param  int|null  $timestamp  When it was signed, as a Unix timestamp; now when null.
-     * @return array{0: string, 1: string} The raw body and the value of the `Stripe-Signature` header.
-     */
-    public static function signedEvent(array $event, string $secret = self::WEBHOOK_SECRET, ?int $timestamp = null): array
-    {
-        $payload = json_encode($event, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        $timestamp ??= time();
-
-        return [$payload, "t={$timestamp},v1=".hash_hmac('sha256', "{$timestamp}.{$payload}", $secret)];
     }
 
     /**

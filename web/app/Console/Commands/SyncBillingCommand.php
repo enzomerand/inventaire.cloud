@@ -110,7 +110,7 @@ final class SyncBillingCommand extends Command
                 ]);
 
                 $inARow = $exception->retryable() ? $inARow + 1 : 0;
-                $lostInARow = $exception->code() === 'resource_missing' ? $lostInARow + 1 : 0;
+                $lostInARow = $exception->missing() ? $lostInARow + 1 : 0;
 
                 if ($inARow >= self::OUTAGE_AFTER) {
                     $stopped = 'Stripe fails to answer';

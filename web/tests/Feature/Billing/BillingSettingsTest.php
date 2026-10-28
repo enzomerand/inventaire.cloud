@@ -16,8 +16,7 @@ describe('whether billing is on', function (): void {
         billingOff();
 
         expect(Billing::enabled())->toBeFalse()
-            ->and(Billing::webhookEnabled())->toBeFalse()
-            ->and(Billing::intervals())->toBe([]);
+            ->and(Billing::webhookEnabled())->toBeFalse();
     });
 
     it('needs the secret key and the monthly Price, both', function (): void {
@@ -58,14 +57,12 @@ describe('the Prices', function (): void {
     it('offers the month, and the year only when a yearly Price is set', function (): void {
         billingOn(['services.stripe.prices.yearly' => null]);
 
-        expect(Billing::intervals())->toBe(['month'])
-            ->and(Billing::priceFor('month'))->toBe('price_monthly_test')
+        expect(Billing::priceFor('month'))->toBe('price_monthly_test')
             ->and(Billing::priceFor('year'))->toBeNull();
 
         config(['services.stripe.prices.yearly' => 'price_y']);
 
-        expect(Billing::intervals())->toBe(['month', 'year'])
-            ->and(Billing::priceFor('year'))->toBe('price_y');
+        expect(Billing::priceFor('year'))->toBe('price_y');
     });
 
     it('knows no other interval', function (): void {

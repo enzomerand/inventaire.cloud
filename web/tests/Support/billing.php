@@ -77,8 +77,7 @@ function billingAccountAt(FakeStripe $stripe, ?string $status = null, string $in
 }
 
 /**
- * The `Stripe-Signature` header of a raw body, signed with the signing secret of the endpoint (see {@see FakeStripe::signedEvent()}, which
- * does it for an event).
+ * The `Stripe-Signature` header of a raw body, signed with the signing secret of the endpoint.
  *
  * @param  string|null  $secret  The signing secret; the right one when null, a wrong one is how a forgery is made.
  * @param  int|null  $timestamp  When it was signed, as a Unix timestamp; now when null.
@@ -88,4 +87,70 @@ function billingSign(string $payload, ?string $secret = null, ?int $timestamp = 
     $timestamp ??= time();
 
     return "t={$timestamp},v1=".hash_hmac('sha256', "{$timestamp}.{$payload}", $secret ?? FakeStripe::WEBHOOK_SECRET);
+}
+
+/**
+ * The billing configuration as the environment gives it, evaluated again with the variables swapped for the duration of the call (the
+ * application read its own when it booted).
+ *
+ * @param  array<string, string|null>  $variables  The variables to set; null removes one.
+ * @return array<string, mixed>
+ */
+function billingConfigRead(array $variables): array
+{
+    $previous = [];
+
+    foreach ($variables as $name => $value) {
+        $previous[$name] = [$_ENV[$name] ?? null, $_SERVER[$name] ?? null, getenv($name)];
+        unset($_ENV[$name], $_SERVER[$name]);
+        putenv($name);
+
+        if ($value !== null) {
+            $_ENV[$name] = $_SERVER[$name] = $value;
+            putenv("{$name}={$value}");
+        }
+    }
+
+    try {
+        /** @var array<string, mixed> $config */
+        $config = require config_path('billing.php');
+
+        return $config;
+    } finally {
+        foreach ($previous as $name => [$env, $server, $process]) {
+            unset($_ENV[$name], $_SERVER[$name]);
+            putenv($name);
+
+            if ($env !== null) {
+                $_ENV[$name] = $env;
+            }
+
+            if ($server !== null) {
+                $_SERVER[$name] = $server;
+            }
+
+            if ($process !== false) {
+                putenv("{$name}={$process}");
+            }
+        }
+    }
+}
+
+/**
+ * Has a worker of the database queue take the next job that is due and give it one try.
+ */
+function billingWorkOnce(object $test): void
+{
+    // The memory of the worker is the one of the whole test run: the default limit of the command (128 MB) would stop it.
+    $test->artisan('queue:work', ['--once' => true, '--memory' => 8192])->assertSuccessful();
+}
+
+/**
+ * The address of an endpoint of the subscription of a workspace.
+ *
+ * @param  string  $endpoint  `''` for the overview, or `checkout`, `portal`, `refresh`.
+ */
+function billingApiUri(Workspace $workspace, string $endpoint = ''): string
+{
+    return "/api/v1/workspaces/{$workspace->ulid}/billing".($endpoint === '' ? '' : "/{$endpoint}");
 }

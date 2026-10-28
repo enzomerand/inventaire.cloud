@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Billing\WebhookSignature;
-use Tests\Support\FakeStripe;
 
 /*
  * The signature Stripe puts on a webhook: `t=<timestamp>,v1=<HMAC-SHA256 of "<timestamp>.<body>" keyed with the signing secret>`.
@@ -25,13 +24,6 @@ describe('a signature', function (): void {
         $payload = '{"id":"evt_1","type":"invoice.paid"}';
 
         expect(WebhookSignature::verify($payload, billingSignature($payload), BILLING_SIGNING_SECRET, 300, BILLING_NOW))->toBeTrue();
-    });
-
-    it('is valid as Stripe signs it, which is how the fake of the tests signs it too', function (): void {
-        [$payload, $header] = FakeStripe::signedEvent(FakeStripe::event('invoice.paid', ['customer' => 'cus_1']), 'whsec_x');
-
-        expect(WebhookSignature::verify($payload, $header, 'whsec_x'))->toBeTrue()
-            ->and(WebhookSignature::verify($payload, $header, 'whsec_y'))->toBeFalse();
     });
 
     it('is signed over the timestamp as written, not over the number it stands for', function (): void {

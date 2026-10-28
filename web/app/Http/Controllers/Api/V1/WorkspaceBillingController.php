@@ -189,13 +189,8 @@ final class WorkspaceBillingController extends Controller
             if ($this->customers->isPayer($account, $owner)) {
                 $this->follow($account, $owner);
             } else {
-                // Read now: the row may be hours old, and a subscription in play must not be forgotten.
+                // Read now: the row may be hours old, and a subscription in play must not be forgotten (`startFresh()` refuses it).
                 $account = $this->sync->sync($account);
-
-                if (in_array($account->status, SubscriptionStatus::CURRENT, true)) {
-                    return $this->previousOwnerSubscription($account);
-                }
-
                 $account = $this->customers->startFresh($workspace, $account, $owner, App::getLocale());
             }
 
@@ -223,7 +218,7 @@ final class WorkspaceBillingController extends Controller
         try {
             $this->customers->follow($account, $owner);
         } catch (StripeException $exception) {
-            if ($exception->code() === 'resource_missing' && in_array($account->status, SubscriptionStatus::CURRENT, true)) {
+            if ($exception->missing() && in_array($account->status, SubscriptionStatus::CURRENT, true)) {
                 $this->sync->reportLostCustomer($account);
             }
 
@@ -272,7 +267,7 @@ final class WorkspaceBillingController extends Controller
         try {
             $sessions = $this->stripe->openCheckoutSessionsOf($account->stripe_customer_id);
         } catch (StripeException $exception) {
-            if ($exception->code() !== 'resource_missing') {
+            if (! $exception->missing()) {
                 throw $exception;
             }
 
@@ -297,10 +292,6 @@ final class WorkspaceBillingController extends Controller
     private function refusalFor(BillingAccount $account, User $owner): ?JsonResponse
     {
         $status = $account->status;
-
-        if ($status === null) {
-            return null;
-        }
 
         // Before the other refusals: a subscription somebody else pays for is not one this person can settle or manage.
         if (in_array($status, SubscriptionStatus::CURRENT, true) && ! $this->customers->isPayer($account, $owner)) {

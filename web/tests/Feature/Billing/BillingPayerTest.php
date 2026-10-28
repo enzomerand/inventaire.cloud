@@ -53,19 +53,11 @@ function billingPayerHandedOver(?string $status = 'active', bool $cancelAtPeriod
     return ['owner' => $owner, 'previous' => $previous, 'workspace' => $workspace, 'stripe' => $stripe, 'account' => $account, 'customer' => 'cus_previous'];
 }
 
-/**
- * The URI of an endpoint of the subscription of a workspace.
- */
-function billingPayerUri(Workspace $workspace, string $endpoint): string
-{
-    return "/api/v1/workspaces/{$workspace->ulid}/billing/{$endpoint}";
-}
-
 describe('Checkout by an owner who is not the payer', function (): void {
     it('is refused while the subscription of the payer is in play, whatever its status, and touches nothing', function (string $status): void {
         $world = billingPayerHandedOver($status);
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
 
@@ -83,7 +75,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver('active', true);
         $periodEnd = now()->addDays(20)->startOfSecond();
 
-        $answer = inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertStatus(409);
+        $answer = inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertStatus(409);
 
         $date = $periodEnd->copy()->setTimezone(config('app.display_timezone'))->locale('en')->isoFormat('LL');
         expect($answer->json('message'))->toBe("The subscription of the previous owner of this workspace runs until {$date}. You can subscribe once it has ended.")
@@ -94,7 +86,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver('active', true);
         $this->useLanguage('fr');
 
-        $answer = inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'], ['Accept-Language' => 'fr'])->assertStatus(409);
+        $answer = inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'], ['Accept-Language' => 'fr'])->assertStatus(409);
 
         expect($answer->json('message'))->toStartWith("L'abonnement du précédent propriétaire de cet espace de travail court jusqu'au ")
             ->and($answer->json('message'))->toEndWith("Vous pourrez vous abonner lorsqu'il sera terminé.");
@@ -103,7 +95,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
     it('does not give a date for a subscription that is not set to end', function (): void {
         $world = billingPayerHandedOver('active', false);
 
-        $answer = inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertStatus(409);
+        $answer = inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertStatus(409);
 
         expect($answer->json('message'))->toBe('The subscription of the previous owner of this workspace is still running. You can subscribe once it has ended.')
             ->and($answer->json('ends_at'))->toBeNull();
@@ -114,7 +106,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         // The row remembers a subscription that is over; Stripe has a live one.
         $world['account']->forceFill(['status' => 'canceled', 'stripe_subscription_id' => 'sub_old', 'synced_at' => now()->subDay()])->save();
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
     });
@@ -124,7 +116,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver($status, false);
         $world['stripe']->sessions['cs_old'] = ['id' => 'cs_old', 'customer' => 'cus_previous', 'status' => 'open'];
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'year'])->assertOk();
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'year'])->assertOk();
 
         $account = BillingAccount::query()->where('workspace_id', $world['workspace']->id)->sole();
         $session = array_values(array_filter($world['stripe']->sessions, fn (array $session): bool => $session['id'] !== 'cs_old'))[0];
@@ -153,7 +145,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
     it('gets a customer of their own when the workspace had a customer and never a subscription', function (): void {
         $world = billingPayerHandedOver(null);
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
 
         expect($world['account']->fresh()->payer_id)->toBe($world['owner']->id)
             ->and($world['account']->fresh()->stripe_customer_id)->not->toBe('cus_previous');
@@ -161,7 +153,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
 
     it('is a payer like any other afterwards: the customer is kept, its email follows, and the owner before is the one who is refused', function (): void {
         $world = billingPayerHandedOver('canceled', false);
-        $uri = billingPayerUri($world['workspace'], 'checkout');
+        $uri = billingApiUri($world['workspace'], 'checkout');
         inventoryCall($this, $world['owner'], 'POST', $uri, ['interval' => 'month'])->assertOk();
         $customer = $world['account']->fresh()->stripe_customer_id;
         $world['stripe']->customers[$customer]['email'] = 'changed@example.test';
@@ -190,7 +182,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
 
         expect($world['account']->fresh()->payer_id)->toBeNull();
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
     });
@@ -200,7 +192,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         // A webhook wrote a live subscription after the read of the checkout and before the new customer is stored.
         $world['stripe']->onCall('POST /v1/customers', fn () => $world['account']->forceFill(['status' => 'active', 'stripe_subscription_id' => 'sub_late'])->save());
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
 
@@ -214,7 +206,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
     it('makes the new customer with a key made of the workspace, of the customer it replaces and of what is sent, and no email', function (): void {
         $world = billingPayerHandedOver('canceled', false);
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
 
         $key = $world['stripe']->requestsOf('POST /v1/customers')[0]->header('Idempotency-Key')[0];
         $sent = substr(hash('sha256', implode("\n", [$world['owner']->email, $world['workspace']->name, 'en'])), 0, 16);
@@ -227,7 +219,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver('canceled', false);
         $world['stripe']->onCall('POST /v1/customers', fn () => DB::table('users')->where('id', $world['owner']->id)->delete());
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertNotFound();
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertNotFound();
 
         expect($world['account']->fresh()->stripe_customer_id)->toBe('cus_previous')
             ->and($world['account']->fresh()->payer_id)->toBe($world['previous']->id);
@@ -244,7 +236,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
             $world['account']->forceFill(['stripe_customer_id' => 'cus_swapped_first', 'payer_id' => $second->id])->save();
         });
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'checkout_in_progress');
 
@@ -267,7 +259,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
             $world['account']->forceFill(['stripe_customer_id' => 'cus_swapped_first', 'payer_id' => $second->id, 'status' => 'active', 'stripe_subscription_id' => 'sub_second'])->save();
         });
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
     });
@@ -276,7 +268,7 @@ describe('Checkout by an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver('canceled', false);
         $world['stripe']->onCall('POST /v1/customers', fn () => DB::table('workspaces')->where('id', $world['workspace']->id)->delete());
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertNotFound();
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertNotFound();
     });
 });
 
@@ -284,7 +276,7 @@ describe('the portal for an owner who is not the payer', function (): void {
     it('is refused while the subscription of the payer is in play: the invoices of somebody else are not shown', function (string $status): void {
         $world = billingPayerHandedOver($status);
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'portal'))
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'portal'))
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
 
@@ -294,11 +286,22 @@ describe('the portal for an owner who is not the payer', function (): void {
             ->and($world['account']->fresh()->payer_id)->toBe($world['previous']->id);
     })->with(['active', 'past_due', 'trialing']);
 
+    it('answers exactly what the checkout answers for the same refusal: the message and the end of the period, byte for byte', function (): void {
+        $world = billingPayerHandedOver('active');
+
+        $portal = inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'portal'))->assertStatus(409);
+        $checkout = inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'checkout'), ['interval' => 'month'])->assertStatus(409);
+
+        expect($portal->json('ends_at'))->not->toBeNull()
+            ->and($portal->json('message'))->toContain('runs until')
+            ->and($portal->getContent())->toBe($checkout->getContent());
+    });
+
     it('reads the subscription now: the row may be hours old', function (): void {
         $world = billingPayerHandedOver('active');
         $world['account']->forceFill(['status' => 'canceled', 'synced_at' => now()->subHours(5)])->save();
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'portal'))
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'portal'))
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
     });
@@ -306,7 +309,7 @@ describe('the portal for an owner who is not the payer', function (): void {
     it('opens the portal of a customer of their own once the subscription is over', function (): void {
         $world = billingPayerHandedOver('canceled', false);
 
-        $answer = inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'portal'))->assertOk();
+        $answer = inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'portal'))->assertOk();
 
         $account = $world['account']->fresh();
         $portal = array_values($world['stripe']->portals)[0];
@@ -323,7 +326,7 @@ describe('the portal for an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver('canceled', false);
         $world['stripe']->onCall('POST /v1/customers', fn () => $world['account']->forceFill(['status' => 'active', 'stripe_subscription_id' => 'sub_late'])->save());
 
-        inventoryCall($this, $world['owner'], 'POST', billingPayerUri($world['workspace'], 'portal'))
+        inventoryCall($this, $world['owner'], 'POST', billingApiUri($world['workspace'], 'portal'))
             ->assertStatus(409)
             ->assertJsonPath('code', 'previous_owner_subscription');
 
@@ -335,7 +338,7 @@ describe('the portal for an owner who is not the payer', function (): void {
         $world = billingPayerHandedOver('active');
         $world['workspace']->members()->attach($world['previous']->id, ['role' => 'owner']);
 
-        inventoryCall($this, $world['previous'], 'POST', billingPayerUri($world['workspace'], 'portal'))->assertOk();
+        inventoryCall($this, $world['previous'], 'POST', billingApiUri($world['workspace'], 'portal'))->assertOk();
 
         expect($world['stripe']->calls)->toBe(['POST /v1/customers/{id}', 'POST /v1/billing_portal/sessions'])
             ->and($world['account']->fresh()->stripe_customer_id)->toBe('cus_previous');
@@ -347,7 +350,7 @@ describe('who is the payer', function (): void {
         billingOn();
         $team = inventoryTeam();
 
-        inventoryCall($this, $team['owner'], 'POST', billingPayerUri($team['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
+        inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])->assertOk();
 
         expect(BillingAccount::query()->sole()->payer_id)->toBe($team['owner']->id);
     });
@@ -365,7 +368,7 @@ describe('who is the payer', function (): void {
         });
 
         // The customer that was stored is the second owner's: the first is not handed it, and may try again.
-        inventoryCall($this, $team['owner'], 'POST', billingPayerUri($team['workspace'], 'checkout'), ['interval' => 'month'])
+        inventoryCall($this, $team['owner'], 'POST', billingApiUri($team['workspace'], 'checkout'), ['interval' => 'month'])
             ->assertStatus(409)
             ->assertJsonPath('code', 'checkout_in_progress');
 

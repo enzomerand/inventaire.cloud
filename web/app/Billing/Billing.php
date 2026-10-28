@@ -98,20 +98,6 @@ final class Billing
     }
 
     /**
-     * The intervals a workspace can buy Pro for: the month when billing is on, and the year when a yearly Price is set too; none when
-     * billing is off.
-     *
-     * @return list<string>
-     */
-    public static function intervals(): array
-    {
-        return array_values(array_filter(
-            self::INTERVALS,
-            fn (string $interval): bool => self::enabled() && self::priceFor($interval) !== null,
-        ));
-    }
-
-    /**
      * What Pro is shown to cost: the currency (lowercase ISO code) and the amount of each interval in the smallest unit of the currency
      * (cents); the year is null when no yearly Price is set. Display only, the amount charged is the one of the Stripe Price.
      *

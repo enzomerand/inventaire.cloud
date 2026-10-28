@@ -26,15 +26,6 @@ require_once __DIR__.'/../../Support/billing.php';
 
 uses(RefreshDatabase::class);
 
-/**
- * Has a worker of the database queue take the next job that is due and give it one try.
- */
-function billingWorkOnce(object $test): void
-{
-    // The memory of the worker is the one of the whole test run: the default limit of the command (128 MB) would stop it.
-    $test->artisan('queue:work', ['--once' => true, '--memory' => 8192])->assertSuccessful();
-}
-
 describe('what it does', function (): void {
     it('brings the account up to date with Stripe', function (): void {
         $stripe = billingOn();

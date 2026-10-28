@@ -35,15 +35,6 @@ function billingCancel(CancelStripeSubscription $job): void
     $job->handle(app(StripeClient::class));
 }
 
-/**
- * Has a worker take the next job that is due and give it one try.
- */
-function billingCancelWorkOnce(object $test): void
-{
-    // The memory of the worker is the one of the whole test run: the default limit of the command (128 MB) would stop it.
-    $test->artisan('queue:work', ['--once' => true, '--memory' => 8192])->assertSuccessful();
-}
-
 describe('cancelling now', function (): void {
     it('cancels the subscription of the customer at Stripe', function (): void {
         $stripe = billingOn();
@@ -426,19 +417,19 @@ describe('on a real queue', function (): void {
         $stripe->failNext('DELETE /v1/subscriptions/{id}', 503, 2);
         CancelStripeSubscription::dispatch('cus_a');
 
-        billingCancelWorkOnce($this);
+        billingWorkOnce($this);
         expect(DB::table('jobs')->count())->toBe(1)->and(DB::table('failed_jobs')->count())->toBe(0);
 
         // Not due before the pause.
-        billingCancelWorkOnce($this);
+        billingWorkOnce($this);
         expect($stripe->count('DELETE /v1/subscriptions/{id}'))->toBe(1);
 
         $this->travel(61)->seconds();
-        billingCancelWorkOnce($this);
+        billingWorkOnce($this);
         expect(DB::table('jobs')->count())->toBe(1)->and($stripe->count('DELETE /v1/subscriptions/{id}'))->toBe(2);
 
         $this->travel(301)->seconds();
-        billingCancelWorkOnce($this);
+        billingWorkOnce($this);
 
         expect(DB::table('jobs')->count())->toBe(0)->and(DB::table('failed_jobs')->count())->toBe(0)
             ->and($stripe->subscriptions[$id]['status'])->toBe('canceled');
@@ -452,7 +443,7 @@ describe('on a real queue', function (): void {
         CancelStripeSubscription::dispatch('cus_a');
 
         foreach (range(1, 5) as $ignored) {
-            billingCancelWorkOnce($this);
+            billingWorkOnce($this);
             $this->travel(31)->minutes();
         }
 

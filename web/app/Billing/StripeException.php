@@ -106,6 +106,16 @@ final class StripeException extends RuntimeException
     }
 
     /**
+     * Whether Stripe answered that what was asked for is not there: its error says `resource_missing`. A `404` without it is not an answer
+     * of Stripe about the object (a proxy, a wrong address), and proves nothing: it is an error like any other, and must never, say, turn
+     * every workspace Free.
+     */
+    public function missing(): bool
+    {
+        return $this->reason === 'resource_missing';
+    }
+
+    /**
      * The HTTP status Stripe answered with; null when it did not answer.
      */
     public function status(): ?int

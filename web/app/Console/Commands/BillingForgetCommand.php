@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Billing\BillingSync;
-use App\Billing\WorkspacePlan;
 use App\Database\DeadlockRetries;
 use App\Models\BillingAccount;
 use App\Models\Workspace;
@@ -58,7 +57,7 @@ final class BillingForgetCommand extends Command
             return self::FAILURE;
         }
 
-        $account = BillingAccount::query()->where('workspace_id', $workspace->getKey())->first();
+        $account = $workspace->billingAccount()->first();
 
         if ($account === null) {
             $this->components->info("The workspace {$ulid} has no Stripe customer: nothing to forget.");
@@ -97,31 +96,28 @@ final class BillingForgetCommand extends Command
      */
     private function forget(DatabaseManager $db, Locks $locks, Workspace $workspace, BillingAccount $shown): bool
     {
-        try {
-            return DeadlockRetries::run(fn (): bool => $db->transaction(function () use ($locks, $workspace, $shown): bool {
-                if ($locks->workspaces([$workspace->getKey()])->isEmpty()) {
-                    return false;
-                }
+        return DeadlockRetries::run(fn (): bool => $db->transaction(function () use ($locks, $workspace, $shown): bool {
+            if ($locks->workspaces([$workspace->getKey()])->isEmpty()) {
+                return false;
+            }
 
-                $stored = BillingAccount::query()->where('workspace_id', $workspace->getKey())->first();
+            $stored = $workspace->billingAccount()->first();
 
-                if ($stored === null || $stored->stripe_customer_id !== $shown->stripe_customer_id) {
-                    return false;
-                }
+            if ($stored === null || $stored->stripe_customer_id !== $shown->stripe_customer_id) {
+                return false;
+            }
 
-                $stored->delete();
+            // The plans remembered in this process are forgotten by the `deleted` event of the model.
+            $stored->delete();
 
-                Log::warning('The Stripe customer of a workspace was forgotten by an administrator.', [
-                    'workspace' => $workspace->ulid,
-                    'customer' => $stored->stripe_customer_id,
-                    'subscription' => $stored->stripe_subscription_id,
-                    'status' => $stored->status,
-                ]);
+            Log::warning('The Stripe customer of a workspace was forgotten by an administrator.', [
+                'workspace' => $workspace->ulid,
+                'customer' => $stored->stripe_customer_id,
+                'subscription' => $stored->stripe_subscription_id,
+                'status' => $stored->status,
+            ]);
 
-                return true;
-            }));
-        } finally {
-            WorkspacePlan::forget();
-        }
+            return true;
+        }));
     }
 }

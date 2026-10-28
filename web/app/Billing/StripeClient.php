@@ -29,7 +29,7 @@ final class StripeClient
     private const CONNECT_TIMEOUT = 5;
 
     /** How many subscriptions a page of the list holds (the most Stripe gives). */
-    public const PAGE_SIZE = 100;
+    private const PAGE_SIZE = 100;
 
     /** How many pages of subscriptions are read at most: a customer with more than that is not a workspace, and is refused rather than cut short. */
     public const MAX_PAGES = 10;
@@ -64,9 +64,9 @@ final class StripeClient
      *
      * @throws StripeException
      */
-    public function updateCustomer(string $customerId, string $email, ?string $idempotencyKey = null): void
+    public function updateCustomer(string $customerId, string $email): void
     {
-        $this->post('POST /v1/customers/{id}', '/v1/customers/'.rawurlencode($customerId), ['email' => $email], $idempotencyKey);
+        $this->post('POST /v1/customers/{id}', '/v1/customers/'.rawurlencode($customerId), ['email' => $email]);
     }
 
     /**
@@ -77,10 +77,10 @@ final class StripeClient
      *
      * @throws StripeException
      */
-    public function createCheckoutSession(array $parameters, ?string $idempotencyKey = null): array
+    public function createCheckoutSession(array $parameters): array
     {
         $call = 'POST /v1/checkout/sessions';
-        $response = $this->post($call, '/v1/checkout/sessions', $parameters, $idempotencyKey);
+        $response = $this->post($call, '/v1/checkout/sessions', $parameters);
 
         return ['id' => $this->identifier($call, $response), 'url' => $this->address($call, $response)];
     }
@@ -94,14 +94,14 @@ final class StripeClient
      *
      * @throws StripeException
      */
-    public function createPortalSession(string $customerId, string $returnUrl, string $locale, ?string $idempotencyKey = null): string
+    public function createPortalSession(string $customerId, string $returnUrl, string $locale): string
     {
         $call = 'POST /v1/billing_portal/sessions';
         $response = $this->post($call, '/v1/billing_portal/sessions', [
             'customer' => $customerId,
             'return_url' => $returnUrl,
             'locale' => CheckoutParameters::locale($locale),
-        ], $idempotencyKey);
+        ]);
 
         return $this->address($call, $response);
     }
@@ -155,9 +155,9 @@ final class StripeClient
      *
      * @throws StripeException
      */
-    public function expireCheckoutSession(string $sessionId, ?string $idempotencyKey = null): void
+    public function expireCheckoutSession(string $sessionId): void
     {
-        $this->post('POST /v1/checkout/sessions/{id}/expire', '/v1/checkout/sessions/'.rawurlencode($sessionId).'/expire', [], $idempotencyKey);
+        $this->post('POST /v1/checkout/sessions/{id}/expire', '/v1/checkout/sessions/'.rawurlencode($sessionId).'/expire', []);
     }
 
     /**
@@ -232,10 +232,11 @@ final class StripeClient
      * @param  string  $call  What is asked, `METHOD /path` with the ids written `{id}`, for the messages.
      * @param  string  $path  The path of the endpoint.
      * @param  array<string, mixed>  $parameters
+     * @param  string|null  $idempotencyKey  A random one when null.
      *
      * @throws StripeException
      */
-    private function post(string $call, string $path, array $parameters, ?string $idempotencyKey): Response
+    private function post(string $call, string $path, array $parameters, ?string $idempotencyKey = null): Response
     {
         return $this->send($call, fn (PendingRequest $request): Response => $request
             ->asForm()

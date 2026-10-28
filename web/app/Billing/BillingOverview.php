@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Billing;
 
-use App\Models\BillingAccount;
 use App\Models\Inventory;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -44,7 +43,7 @@ final class BillingOverview
     public function payload(Workspace $workspace, bool $canManage): array
     {
         $enabled = Billing::enabled();
-        $account = $enabled ? BillingAccount::query()->where('workspace_id', $workspace->getKey())->first() : null;
+        $account = $enabled ? $workspace->billingAccount()->first() : null;
 
         return [
             'enabled' => $enabled,

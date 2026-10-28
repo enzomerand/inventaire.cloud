@@ -183,7 +183,7 @@ describe('updating a customer', function (): void {
 
     it('says when the customer is gone', function (): void {
         expect(fn () => $this->client->updateCustomer('cus_gone', 'new@example.test'))
-            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(404)->and($e->code())->toBe('resource_missing')->and($e->retryable())->toBeFalse());
+            ->toThrow(fn (StripeException $e) => expect($e->status())->toBe(404)->and($e->code())->toBe('resource_missing')->and($e->missing())->toBeTrue()->and($e->retryable())->toBeFalse());
     });
 });
 

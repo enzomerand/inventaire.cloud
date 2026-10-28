@@ -71,11 +71,13 @@ final class BillingSync
         try {
             $subscriptions = $this->client->subscriptionsOf($account->stripe_customer_id);
         } catch (StripeException $exception) {
-            if (! self::customerIsGone($exception)) {
+            if (! $exception->missing()) {
                 throw $exception;
             }
 
-            [$cleared, $wrote] = $this->clearLost($account, $readAt);
+            // Cleared unless the stored row says the workspace has a subscription in play: the row is read again under the lock, a
+            // synchronisation that wrote one meanwhile (or a stale copy of the account in the caller's hands) must not be believed.
+            [$cleared, $wrote] = $this->store($account, self::columns(null), $readAt, true);
 
             if ($cleared === null) {
                 $this->reportLostCustomer($account);
@@ -105,7 +107,8 @@ final class BillingSync
             );
         }
 
-        return $this->write($account, self::columns($chosen), $readAt);
+        // Never null: the stored subscription is only spared when the caller asks for it.
+        return $this->store($account, self::columns($chosen), $readAt, false)[0] ?? $account;
     }
 
     /**
@@ -122,16 +125,6 @@ final class BillingSync
             'workspace' => $workspace,
         ]);
         $this->alerts->reportProblem('customer_lost', $account->stripe_customer_id, is_string($workspace) ? $workspace : null);
-    }
-
-    /**
-     * Whether Stripe answered that the customer is not there (a deleted customer has no subscriptions to list): it says `resource_missing`.
-     * A `404` without it is not Stripe talking about the customer (a proxy, a wrong address), and must never turn every workspace Free: it
-     * is an error like any other.
-     */
-    private static function customerIsGone(StripeException $exception): bool
-    {
-        return $exception->code() === 'resource_missing';
     }
 
     /**
@@ -205,31 +198,6 @@ final class BillingSync
     private static function text(mixed $value, int $max = 255): ?string
     {
         return is_string($value) && $value !== '' && strlen($value) <= $max ? $value : null;
-    }
-
-    /**
-     * Writes the columns, with the workspace locked.
-     *
-     * @param  array<string, mixed>  $columns
-     * @param  CarbonImmutable  $readAt  When the read they come from began.
-     */
-    private function write(BillingAccount $account, array $columns, CarbonImmutable $readAt): BillingAccount
-    {
-        // Never null: the stored subscription is only spared when the caller asks for it.
-        return $this->store($account, $columns, $readAt, false)[0] ?? $account;
-    }
-
-    /**
-     * Clears the subscription columns of an account whose customer Stripe does not know, with the workspace locked, unless the stored row
-     * says the workspace has a subscription in play: the row is read again under the lock, a synchronisation that wrote one meanwhile (or a
-     * stale copy of the account in the caller's hands) must not be believed.
-     *
-     * @return array{0: BillingAccount|null, 1: bool} The account as stored (null when it has a subscription in play: nothing was written)
-     *                                                and whether the cleared state was written.
-     */
-    private function clearLost(BillingAccount $account, CarbonImmutable $readAt): array
-    {
-        return $this->store($account, self::columns(null), $readAt, true);
     }
 
     /**

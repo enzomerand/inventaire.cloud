@@ -16,27 +16,6 @@ require_once __DIR__.'/../../Support/billing.php';
 
 uses(RefreshDatabase::class);
 
-/**
- * The configuration file of billing as a fresh process would read it with some environment variables set.
- *
- * @param  array<string, string>  $environment
- * @return array<string, mixed>
- */
-function billingConfigWith(array $environment): array
-{
-    foreach ($environment as $name => $value) {
-        putenv("{$name}={$value}");
-    }
-
-    try {
-        return require config_path('billing.php');
-    } finally {
-        foreach (array_keys($environment) as $name) {
-            putenv($name);
-        }
-    }
-}
-
 describe('the limits of a plan', function (): void {
     it('are the ones of the specification by default', function (): void {
         expect(Plan::Free->limit('inventories'))->toBe(3)
@@ -67,7 +46,7 @@ describe('the limits of a plan', function (): void {
     });
 
     it('are set by environment variables, the storage in megabytes', function (): void {
-        $config = billingConfigWith([
+        $config = billingConfigRead([
             'BILLING_FREE_INVENTORIES' => '9',
             'BILLING_FREE_STORAGE_MB' => '1.5',
             'BILLING_FREE_PHOTO_ENTRY' => 'true',

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Billing;
 
 use App\Jobs\CancelStripeSubscription;
-use App\Models\BillingAccount;
 use App\Models\Workspace;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
@@ -61,7 +60,7 @@ final class SubscriptionLifecycle
         // Replaces what an earlier try of the deletion collected.
         unset($collected[$workspace]);
 
-        $account = $this->accountOf($workspace);
+        $account = $workspace->billingAccount()->first();
 
         if ($account !== null) {
             $collected[$workspace] = $account->stripe_customer_id;
@@ -90,19 +89,11 @@ final class SubscriptionLifecycle
      */
     public function ownerChanged(Workspace $workspace): void
     {
-        $account = $this->accountOf($workspace);
+        $account = $workspace->billingAccount()->first();
 
         if ($account !== null) {
             $this->cancelAfterCommit($account->stripe_customer_id, true, (int) $account->getKey(), $workspace->ulid);
         }
-    }
-
-    /**
-     * The billing account of a workspace, if it has one.
-     */
-    private function accountOf(Workspace $workspace): ?BillingAccount
-    {
-        return BillingAccount::query()->where('workspace_id', $workspace->getKey())->first();
     }
 
     /**

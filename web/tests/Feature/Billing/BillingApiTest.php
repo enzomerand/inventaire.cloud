@@ -52,16 +52,6 @@ function billingApiRoot(): string
 }
 
 /**
- * The address of an endpoint of the subscription of a workspace.
- *
- * @param  string  $endpoint  `''` for the overview, or `checkout`, `portal`, `refresh`.
- */
-function billingApiUri(Workspace $workspace, string $endpoint = ''): string
-{
-    return "/api/v1/workspaces/{$workspace->ulid}/billing".($endpoint === '' ? '' : "/{$endpoint}");
-}
-
-/**
  * A team whose workspace has a billing account for a subscription in a status (none: the workspace never went to Checkout), and a Stripe
  * that knows its customer and subscription.
  *

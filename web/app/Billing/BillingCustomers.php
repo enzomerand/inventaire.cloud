@@ -54,7 +54,7 @@ final class BillingCustomers
      */
     public function find(Workspace $workspace): ?BillingAccount
     {
-        return BillingAccount::query()->where('workspace_id', $workspace->getKey())->first();
+        return $workspace->billingAccount()->first();
     }
 
     /**
@@ -96,7 +96,7 @@ final class BillingCustomers
         try {
             $this->follow($account, $owner);
         } catch (StripeException $exception) {
-            if ($exception->code() !== 'resource_missing') {
+            if (! $exception->missing()) {
                 throw $exception;
             }
 

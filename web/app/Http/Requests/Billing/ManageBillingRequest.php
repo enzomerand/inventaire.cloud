@@ -28,14 +28,4 @@ class ManageBillingRequest extends FormRequest
 
         return $workspace instanceof Workspace ? Gate::inspect('manage', $workspace) : Response::denyAsNotFound();
     }
-
-    /**
-     * Nothing is asked of the body.
-     *
-     * @return array<string, list<mixed>>
-     */
-    public function rules(): array
-    {
-        return [];
-    }
 }

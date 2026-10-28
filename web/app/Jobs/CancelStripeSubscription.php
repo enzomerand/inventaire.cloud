@@ -109,7 +109,7 @@ final class CancelStripeSubscription implements ShouldQueue
                 throw $exception;
             }
 
-            if (! self::isMissing($exception)) {
+            if (! $exception->missing()) {
                 Log::error('The subscriptions of a customer could not be listed at Stripe: cancel them in the dashboard of Stripe.', [
                     'customer' => $this->customerId,
                     'status' => $exception->status(),
@@ -150,7 +150,7 @@ final class CancelStripeSubscription implements ShouldQueue
                     continue;
                 }
 
-                if (self::isMissing($exception)) {
+                if ($exception->missing()) {
                     Log::info('A subscription to cancel was not at Stripe any more.', ['customer' => $this->customerId, 'subscription' => $id]);
 
                     continue;
@@ -214,7 +214,7 @@ final class CancelStripeSubscription implements ShouldQueue
             }
 
             // A customer that Stripe does not know has no sessions, and its subscriptions are listed next (and say so).
-            if (self::isMissing($exception)) {
+            if ($exception->missing()) {
                 return [null, false];
             }
 
@@ -236,7 +236,7 @@ final class CancelStripeSubscription implements ShouldQueue
             } catch (StripeException $exception) {
                 if ($exception->retryable()) {
                     $retry ??= $exception;
-                } elseif ($exception->status() !== 400 && ! self::isMissing($exception)) {
+                } elseif ($exception->status() !== 400 && ! $exception->missing()) {
                     $refused = true;
                     Log::error('An open Checkout session of a customer could not be expired at Stripe.', [
                         'customer' => $this->customerId,
@@ -291,15 +291,6 @@ final class CancelStripeSubscription implements ShouldQueue
         }
 
         return false;
-    }
-
-    /**
-     * Whether Stripe answered that what was asked for is not there: its error says `resource_missing`. A `404` without it is not an answer
-     * of Stripe about the object (a proxy, a wrong address), and proves nothing.
-     */
-    private static function isMissing(StripeException $exception): bool
-    {
-        return $exception->code() === 'resource_missing';
     }
 
     /**
