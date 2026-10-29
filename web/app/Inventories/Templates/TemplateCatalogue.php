@@ -149,6 +149,18 @@ final class TemplateCatalogue
     }
 
     /**
+     * A key for what the catalogue is made of now: the key of the verdict on the files as they are (the name and the content of every file, the
+     * rules that judge them, the languages). What is drawn from the templates and kept in the cache (the use cases of the home page) puts it in
+     * its own key, so that an edited file, a new one or a new version of the rules needs no invalidation. It reads the folder, never the cache.
+     */
+    public function fingerprint(): string
+    {
+        $files = $this->readFolder(config()->string('inventories.templates_path'));
+
+        return $files === null ? self::CACHE_KEY_PREFIX.'unreadable' : $this->cacheKey($files);
+    }
+
+    /**
      * Reads the folder and asks the cache for the verdict, unless the folder was read already.
      */
     private function load(): void

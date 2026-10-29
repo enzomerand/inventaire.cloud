@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace App\Support\Seo;
 
 use App\Inventories\Templates\Template;
+use App\Landing\Faq;
+use App\Landing\Pitch;
+use App\Landing\PricingPlans;
 use App\Services\LocaleResolver;
 use App\Support\PublicUrls;
 
 /**
- * Builds the {@see PageMeta} of the public pages: the home page, the documentation of the API, the gallery of templates and the page of each template.
+ * Builds the {@see PageMeta} of the public pages: the home page, the pricing page, the documentation of the API, the gallery of templates and the
+ * page of each template.
  *
  * A template is offered in the languages it is written in: the other languages of the application show it with the
  * texts of the default language (the language switcher links to them), but they are not listed as alternates, which
@@ -25,15 +29,59 @@ final class PublicPageMeta
     public function __construct(private readonly LocaleResolver $locales) {}
 
     /**
-     * The home page (it exists in the language of the request only: the language switcher stores the choice).
+     * The home page (it exists in the language of the request only: the language switcher stores the choice), with the application and
+     * its questions as structured data.
+     *
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none, and then nothing about plans or prices is said.
+     * @param  list<array{question: string, answer: string}>  $faq  The questions the page shows ({@see Faq::home()}), which the structured data repeats.
      */
-    public function home(string $locale): PageMeta
+    public function home(string $locale, ?PricingPlans $plans, array $faq): PageMeta
     {
         return new PageMeta(
-            title: __('Inventories, simple and free'),
-            description: __('A free inventory tool for professionals and individuals.'),
+            title: __('Free online inventory software'),
+            description: Pitch::description($plans),
             canonical: PublicUrls::home(),
             locale: $locale,
+            jsonLd: [$this->site(), $this->application($plans, $locale), $this->faqPage($faq)],
+        );
+    }
+
+    /**
+     * The pricing page in a language: the plans, the billing questions and the breadcrumb as structured data. It exists only on an
+     * instance that sells a plan.
+     */
+    public function pricing(PricingPlans $plans, string $locale): PageMeta
+    {
+        $canonical = PublicUrls::pricing($locale);
+        $title = __('Pricing: Free and Pro plans');
+        $description = __('Compare the Free and Pro plans: inventories, items, storage, members and share links. Pro from :price a month, cancel anytime.', ['price' => $plans->monthlyPrice()]);
+
+        return new PageMeta(
+            title: $title,
+            description: $description,
+            canonical: $canonical,
+            locale: $locale,
+            alternates: PublicUrls::alternates(PublicUrls::pricing(...)),
+            default: PublicUrls::pricing(config()->string('app.default_locale')),
+            jsonLd: [
+                [
+                    '@type' => 'WebPage',
+                    'name' => $title,
+                    'description' => $description,
+                    'url' => $canonical,
+                    'inLanguage' => $locale,
+                    'isPartOf' => $this->site(),
+                ],
+                [
+                    '@type' => 'BreadcrumbList',
+                    'itemListElement' => [
+                        ['@type' => 'ListItem', 'position' => 1, 'name' => __('Home'), 'item' => PublicUrls::home()],
+                        ['@type' => 'ListItem', 'position' => 2, 'name' => __('Pricing'), 'item' => $canonical],
+                    ],
+                ],
+                $this->application($plans, $locale),
+                $this->faqPage(Faq::billing($plans)),
+            ],
         );
     }
 
@@ -158,6 +206,73 @@ final class PublicPageMeta
             ],
             noindex: $pageLocale !== $locale,
         );
+    }
+
+    /**
+     * The application, as structured data: free to use and open source and, on an instance that sells a plan only, what each plan costs. An
+     * instance that sells nothing has no offer at all: an offer needs a currency, and the currency is part of the billing configuration
+     * that such an instance says nothing about.
+     *
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
+     * @return array<string, mixed>
+     */
+    private function application(?PricingPlans $plans, string $locale): array
+    {
+        $offers = [];
+
+        if ($plans !== null) {
+            $currency = strtoupper($plans->currency);
+            $offers[] = ['@type' => 'Offer', 'name' => __('Free'), 'price' => '0', 'priceCurrency' => $currency];
+
+            foreach (['P1M' => $plans->month, 'P1Y' => $plans->year] as $duration => $cents) {
+                if ($cents === null) {
+                    continue;
+                }
+
+                $offers[] = [
+                    '@type' => 'Offer',
+                    'name' => __('Pro'),
+                    'price' => PricingPlans::decimal($cents),
+                    'priceCurrency' => $currency,
+                    'priceSpecification' => [
+                        '@type' => 'UnitPriceSpecification',
+                        'price' => PricingPlans::decimal($cents),
+                        'priceCurrency' => $currency,
+                        'billingDuration' => $duration,
+                    ],
+                ];
+            }
+        }
+
+        return [
+            '@type' => 'SoftwareApplication',
+            'name' => config()->string('app.name'),
+            'url' => PublicUrls::home(),
+            'applicationCategory' => 'BusinessApplication',
+            'operatingSystem' => 'Web',
+            'inLanguage' => $locale,
+            'isAccessibleForFree' => true,
+            'license' => 'https://www.gnu.org/licenses/agpl-3.0.html',
+            'sameAs' => [rtrim(config()->string('app.repository_url'), '/')],
+        ] + ($offers === [] ? [] : ['offers' => $offers]);
+    }
+
+    /**
+     * The questions of a page as structured data, the very texts the page shows.
+     *
+     * @param  list<array{question: string, answer: string}>  $questions
+     * @return array<string, mixed>
+     */
+    private function faqPage(array $questions): array
+    {
+        return [
+            '@type' => 'FAQPage',
+            'mainEntity' => array_map(fn (array $entry): array => [
+                '@type' => 'Question',
+                'name' => $entry['question'],
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => $entry['answer']],
+            ], $questions),
+        ];
     }
 
     /**

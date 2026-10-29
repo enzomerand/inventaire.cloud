@@ -258,12 +258,13 @@ describe('with indexing on', function (): void {
     it('describes the home page, which exists once', function (): void {
         $page = templateDom($this->get('/', ['Accept-Language' => 'fr'])->assertOk());
 
-        expect(templateTexts($page, '//title'))->toBe(['Des inventaires simples et gratuits · '.config('app.name')])
-            ->and(seoMeta($page, 'name', 'description'))->toBe(["Un outil d'inventaire gratuit pour les professionnels et les particuliers."])
+        expect(templateTexts($page, '//title'))->toBe(["Logiciel d'inventaire en ligne gratuit · ".config('app.name')])
+            ->and(seoMeta($page, 'name', 'description'))->toBe(["Suivez stock, collections et matériel avec des champs typés, le scan de codes-barres, l'import de tableurs et des exports PDF. Gratuit et open source."])
             ->and(templateAttributes($page, '//head/link[@rel="canonical"]', 'href'))->toBe(['http://localhost/'])
             ->and($page->query('//head/link[@rel="alternate"]')->length)->toBe(0)
             ->and(seoMeta($page, 'property', 'og:url'))->toBe(['http://localhost/'])
-            ->and(seoJsonLd($page))->toBe([]);
+            // The site, the application (free: one offer) and its questions.
+            ->and(array_column(seoJsonLd($page), '@type'))->toBe(['WebSite', 'SoftwareApplication', 'FAQPage']);
     });
 
     it('builds the addresses from APP_URL, whatever the Host header says', function (): void {

@@ -8,12 +8,13 @@ use App\Services\LocaleResolver;
 use Closure;
 
 /**
- * The addresses of the public pages (the home page, the documentation of the API and the gallery of templates) and of the endpoint other
+ * The addresses of the public pages (the home page, the documentation of the API, the gallery of templates and the pricing page) and of the endpoint other
  * services call (the webhook of Documenso), as search engines and other sites must see them: absolute, and built from `APP_URL`, never from the request. A `Host` header is written by whoever calls, so an
  * address made from it could be made to point anywhere (the same rule as the welcome mail's link to the sign-in page).
  *
- * The pages of the gallery exist in every supported language: the one of the instance (`app.default_locale`) has no prefix
- * in its path, the others have their code (`/en/templates`). The routes that serve these paths are in `routes/web.php`.
+ * The pages of the gallery and the pricing page exist in every supported language: the one of the instance (`app.default_locale`)
+ * has no prefix in its path, the others have their code (`/en/templates`, `/en/pricing`). The routes that serve these paths are in
+ * `routes/web.php`.
  */
 final class PublicUrls
 {
@@ -96,6 +97,22 @@ final class PublicUrls
     public static function templatePath(string $slug, string $locale): string
     {
         return self::templatesPath($locale).'/'.rawurlencode($slug);
+    }
+
+    /**
+     * The pricing page in a language.
+     */
+    public static function pricing(string $locale): string
+    {
+        return self::to(self::pricingPath($locale));
+    }
+
+    /**
+     * The path of the pricing page in a language, for a link that stays on the host the visitor came by.
+     */
+    public static function pricingPath(string $locale): string
+    {
+        return self::prefix($locale).'/pricing';
     }
 
     /**

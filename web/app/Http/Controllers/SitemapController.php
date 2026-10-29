@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Inventories\Templates\TemplateCatalogue;
+use App\Landing\PricingPlans;
 use App\Support\PublicUrls;
 use App\Support\Seo\PublicPageMeta;
 use Illuminate\Http\Response;
@@ -14,7 +15,8 @@ use XMLWriter;
  * `/sitemap.xml`: the public pages, for the instances that let search engines index them (`app.indexable`); a 404 for
  * the others.
  *
- * It lists the home page, the gallery in every language, each template in every language it is written in and the documentation of the API. Each address
+ * It lists the home page, the gallery in every language, each template in every language it is written in, the documentation of the API
+ * and, on an instance that sells a plan only, the pricing page in every language. Each address
  * of a page that exists in several languages carries the `xhtml:link` alternates of all of them, itself included, and an
  * `x-default`. There is no `lastmod`: the pages are drawn from files whose date says nothing about the content.
  */
@@ -69,6 +71,16 @@ final class SitemapController extends Controller
 
         // The documentation of the API exists once, so it has no alternates.
         $this->entry($xml, PublicUrls::apiDocs(), []);
+
+        // The pricing page exists where a plan is sold; anywhere else it is a 404 and must not be announced.
+        if (PricingPlans::selling()) {
+            $pricing = PublicUrls::alternates(PublicUrls::pricing(...));
+            $default = PublicUrls::pricing($locale);
+
+            foreach ($pricing as $address) {
+                $this->entry($xml, $address, $pricing, $default);
+            }
+        }
 
         $xml->endElement();
         $xml->endDocument();

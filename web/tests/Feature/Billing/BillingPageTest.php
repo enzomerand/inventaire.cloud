@@ -109,9 +109,12 @@ describe('the subscription page of a workspace', function (): void {
         billingOff();
         $team = inventoryTeam();
 
-        $this->actingAs($team['owner'])->get(billingPageUri($team['workspace']))
+        $page = $this->actingAs($team['owner'])->get(billingPageUri($team['workspace']))
             ->assertOk()
             ->assertSee('This service is not offered on this instance.');
+
+        // The page says so from its markup: the strings of the subscription are not handed to the scripts of an instance that sells nothing.
+        expect(array_filter(array_keys(billingPageMessages($page)), fn (string $key): bool => str_starts_with($key, 'billing.')))->toBe([]);
     });
 
     it('is not open to somebody who does not belong to the workspace', function (): void {
@@ -172,6 +175,17 @@ describe('/app/billing', function (): void {
         app(Workspaces::class)->makeCurrent($team['owner'], $garage);
 
         $this->actingAs($team['owner']->fresh())->get('/app/billing')->assertRedirect(billingPageUri($garage));
+    });
+
+    it('hands the period the pricing page links with on to the page, and drops anything else in the query', function (): void {
+        $team = inventoryTeam();
+        $page = billingPageUri($team['workspace']);
+        app(Workspaces::class)->makeCurrent($team['owner'], $team['workspace']);
+
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval=year')->assertRedirect($page.'?interval=year');
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval=month')->assertRedirect($page.'?interval=month');
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval=decade&x=1')->assertRedirect($page);
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval[]=year')->assertRedirect($page);
     });
 
     it('leads a member who works in a workspace they do not own to its page all the same', function (): void {

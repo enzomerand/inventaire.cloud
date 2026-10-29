@@ -7,6 +7,7 @@ use App\Console\ProcessArtisanRunner;
 use App\Installer\PostMigrationHook;
 use App\Inventories\SearchText;
 use App\Inventories\Templates\TemplateCatalogue;
+use App\Landing\UseCases;
 use App\Settings\InstanceSettings;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
@@ -202,6 +203,24 @@ it('forgets the verdict on the inventory templates, and only that', function ():
     Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'not valid JSON'))->twice();
     expect(cache()->get('upgrade-test'))->toBe('kept')
         ->and($catalogue->find('sample-shop'))->not->toBeNull();
+});
+
+it('forgets the use cases of the home page drawn from the templates, and only those', function (): void {
+    cache()->put('upgrade-test', 'kept', 60);
+    app()->setLocale('en');
+
+    foreach (['en', 'fr'] as $locale) {
+        app(UseCases::class)->panels($locale);
+    }
+
+    $keys = [app(UseCases::class)->cacheKey('en'), app(UseCases::class)->cacheKey('fr')];
+    expect(cache()->has($keys[0]))->toBeTrue()->and(cache()->has($keys[1]))->toBeTrue();
+
+    $this->artisan('inventaire:upgrade')->assertExitCode(0);
+
+    expect(cache()->has($keys[0]))->toBeFalse()
+        ->and(cache()->has($keys[1]))->toBeFalse()
+        ->and(cache()->get('upgrade-test'))->toBe('kept');
 });
 
 it('forgets the verdict on the inventory templates even when a cache cannot be cleared, so that no stale verdict is kept', function (): void {

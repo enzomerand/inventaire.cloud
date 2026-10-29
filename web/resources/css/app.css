@@ -7,6 +7,7 @@
  */
 @import '@fontsource-variable/inter/wght.css';
 @import '@tabler/core/dist/css/tabler.css';
+@import './landing.css';
 
 /*
  * Project tokens. Everything the application customises on top of Tabler goes

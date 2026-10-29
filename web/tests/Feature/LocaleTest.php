@@ -71,8 +71,8 @@ describe('locale detection', function (): void {
     });
 
     it('translates the interface according to the locale', function (): void {
-        $this->get(route('home'), ['Accept-Language' => 'en'])->assertSee('Inventories, simple and free');
-        $this->get(route('home'), ['Accept-Language' => 'fr'])->assertSee('Des inventaires simples et gratuits');
+        $this->get(route('home'), ['Accept-Language' => 'en'])->assertSee('Your inventory, in the cloud.');
+        $this->get(route('home'), ['Accept-Language' => 'fr'])->assertSee('Votre inventaire, dans le cloud.');
     });
 });
 
@@ -124,6 +124,9 @@ describe('locale configuration', function (): void {
     });
 
     it('translates every message handed to the scripts', function (): void {
+        // The strings of the subscription page are handed over by an instance that sells a plan only.
+        config(['services.stripe.secret' => 'sk_test_locale', 'services.stripe.prices.monthly' => 'price_test_locale']);
+
         $messages = new ClientMessages;
 
         app()->setLocale('en');

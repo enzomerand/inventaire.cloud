@@ -23,6 +23,7 @@ use App\Http\Controllers\Web\InventoryFieldsPageController;
 use App\Http\Controllers\Web\InventoryPageController;
 use App\Http\Controllers\Web\InventorySharingPageController;
 use App\Http\Controllers\Web\InventoryVersionsPageController;
+use App\Http\Controllers\Web\PricingPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
@@ -34,6 +35,7 @@ use App\Http\Controllers\Webhooks\DocumensoWebhookController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\WebManifestController;
 use App\Http\Middleware\AbortIfInstalled;
+use App\Http\Middleware\AbortUnlessSelling;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
@@ -62,6 +64,18 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
         ->name('templates.localized.')->group(function (): void {
             Route::get('/templates', TemplateGalleryController::class)->name('index');
             Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
+        });
+});
+
+// The pricing page works the same way (one address per language, the language from the address). It exists on an instance that sells a
+// plan only: anywhere else it is a 404, and the guard comes before the language of the address so that the prefixed address of the
+// default language is a 404 too, not a redirect to one.
+Route::middleware(['throttle:public-pages', AbortUnlessSelling::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
+    Route::get('/pricing', PricingPageController::class)->name('pricing.index');
+
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])
+        ->name('pricing.localized.')->group(function (): void {
+            Route::get('/pricing', PricingPageController::class)->name('index');
         });
 });
 
