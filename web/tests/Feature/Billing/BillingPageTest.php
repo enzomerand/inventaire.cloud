@@ -174,6 +174,17 @@ describe('/app/billing', function (): void {
         $this->actingAs($team['owner']->fresh())->get('/app/billing')->assertRedirect(billingPageUri($garage));
     });
 
+    it('hands the period the pricing page links with on to the page, and drops anything else in the query', function (): void {
+        $team = inventoryTeam();
+        $page = billingPageUri($team['workspace']);
+        app(Workspaces::class)->makeCurrent($team['owner'], $team['workspace']);
+
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval=year')->assertRedirect($page.'?interval=year');
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval=month')->assertRedirect($page.'?interval=month');
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval=decade&x=1')->assertRedirect($page);
+        $this->actingAs($team['owner']->fresh())->get('/app/billing?interval[]=year')->assertRedirect($page);
+    });
+
     it('leads a member who works in a workspace they do not own to its page all the same', function (): void {
         $team = inventoryTeam();
         app(Workspaces::class)->makeCurrent($team['editor'], $team['workspace']);

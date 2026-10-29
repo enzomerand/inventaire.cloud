@@ -401,6 +401,7 @@ export default function workspaceBilling() {
 
             try {
                 await this.load();
+                this.selectRequestedInterval();
 
                 // Only an owner of a workspace on an instance that sells plans has a payment to wait for.
                 if (this.offered && this.canManage && this.returnedFromCheckout()) {
@@ -413,6 +414,18 @@ export default function workspaceBilling() {
                 if (this.billing !== null) {
                     this.dropCheckoutParameter();
                 }
+            }
+        },
+
+        /**
+         * Selects the yearly plan when the address asks for it (`?interval=year`, which the pricing page links to) and the instance has a
+         * yearly Price. The monthly plan is the default, and anything else in the address is ignored.
+         *
+         * @returns {void}
+         */
+        selectRequestedInterval() {
+            if (this.hasYearly && new URLSearchParams(window.location.search).get('interval') === 'year') {
+                this.interval = 'year';
             }
         },
 

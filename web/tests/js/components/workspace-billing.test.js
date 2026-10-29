@@ -397,6 +397,23 @@ describe('the subscription page of a workspace', () => {
             expect(http.post).toHaveBeenCalledWith(CHECKOUT_URL, { interval: 'year' }, { silent: true });
         });
 
+        it('selects the yearly plan when the address asks for it, as the pricing page does', async () => {
+            window.history.replaceState(null, '', `${PAGE}?interval=year`);
+            await open(overview());
+
+            expect(component.interval).toBe('year');
+        });
+
+        it('keeps the monthly plan when the address asks for a period the instance does not sell, or for none', async () => {
+            window.history.replaceState(null, '', `${PAGE}?interval=year`);
+            await open(overview({ prices: { currency: 'eur', month: 600, year: null } }));
+            expect(component.interval).toBe('month');
+
+            window.history.replaceState(null, '', `${PAGE}?interval=decade`);
+            await open(overview());
+            expect(component.interval).toBe('month');
+        });
+
         it('does nothing twice, nor for somebody who may not buy, nor for a workspace that is on Pro', async () => {
             http.post.mockResolvedValue({ data: { url: 'https://checkout.stripe.com/c/pay/cs_1' } });
 
