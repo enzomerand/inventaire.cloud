@@ -25,6 +25,8 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
+    @php($selling = \App\Landing\PricingPlans::selling())
+
     <a class="skip-link visually-hidden-focusable" href="#main-content">{{ __('Skip to content') }}</a>
 
     <div class="page">
@@ -33,6 +35,24 @@
                 <a class="navbar-brand navbar-brand-autodark fw-bold" href="{{ route('home') }}">
                     {{ config('app.name') }}
                 </a>
+
+                {{-- The links of the public pages (those that describe themselves with `$seo`): from the width where the header expands. The
+                     pricing page exists only where the instance sells a plan. --}}
+                @isset($seo)
+                    <ul class="navbar-nav flex-row d-none d-md-flex me-auto gap-3 ms-3">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ \App\Support\PublicUrls::templatesPath(app()->getLocale()) }}">{{ __('Templates') }}</a>
+                        </li>
+                        @if ($selling)
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ \App\Support\PublicUrls::pricingPath(app()->getLocale()) }}">{{ __('Pricing') }}</a>
+                            </li>
+                        @endif
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ rtrim(config()->string('app.repository_url'), '/') }}" target="_blank" rel="noopener">{{ __('Source code') }}</a>
+                        </li>
+                    </ul>
+                @endisset
 
                 <div class="navbar-nav flex-row order-md-last align-items-center gap-2">
                     {{-- A page that exists once per language, with an address each, links to its other languages. --}}
@@ -71,10 +91,16 @@
                 </div>
             @endif
 
-            <main class="page-body" id="main-content" tabindex="-1">
-                <div class="container-xl">
-                    @yield('content')
-                </div>
+            {{-- A page that sets the `bleed` section draws its own sections edge to edge (the home page and the pricing page); the others
+                 sit in the container. --}}
+            <main class="page-body @hasSection('bleed') landing-body @endif" id="main-content" tabindex="-1">
+                @hasSection('bleed')
+                    @yield('bleed')
+                @else
+                    <div class="container-xl">
+                        @yield('content')
+                    </div>
+                @endif
             </main>
 
             @php($repository = rtrim(config()->string('app.repository_url'), '/'))
@@ -90,6 +116,14 @@
                                         {{ __('Inventory templates') }}
                                     </a>
                                 </li>
+                                @if ($selling)
+                                    <li class="list-inline-item">
+                                        <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::pricingPath(app()->getLocale()) }}">
+                                            <x-tabler-tag aria-hidden="true" />
+                                            {{ __('Pricing') }}
+                                        </a>
+                                    </li>
+                                @endif
                                 <li class="list-inline-item">
                                     <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::apiDocsPath() }}">
                                         <x-tabler-api aria-hidden="true" />

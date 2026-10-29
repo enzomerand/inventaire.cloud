@@ -23,6 +23,7 @@ use App\Http\Controllers\Web\InventoryFieldsPageController;
 use App\Http\Controllers\Web\InventoryPageController;
 use App\Http\Controllers\Web\InventorySharingPageController;
 use App\Http\Controllers\Web\InventoryVersionsPageController;
+use App\Http\Controllers\Web\PricingPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
@@ -47,7 +48,7 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('/', HomePageController::class)->name('home');
 
-// The public pages of the templates (the gallery and one page for each template), rendered by the server so that search
+// The public pages of the templates (the gallery and one page for each template) and the pricing page, rendered by the server so that search
 // engines read them. They exist once per language, each with an address of its own: the language of the instance has no
 // prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
 // permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale). They are public and
@@ -62,6 +63,15 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
         ->name('templates.localized.')->group(function (): void {
             Route::get('/templates', TemplateGalleryController::class)->name('index');
             Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
+        });
+
+    // The pricing page works the same way (one address per language, the language from the address). It exists on an instance that sells
+    // a plan only: anywhere else the controller answers 404.
+    Route::get('/pricing', PricingPageController::class)->name('pricing.index');
+
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])
+        ->name('pricing.localized.')->group(function (): void {
+            Route::get('/pricing', PricingPageController::class)->name('index');
         });
 });
 

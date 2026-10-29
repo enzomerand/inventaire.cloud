@@ -71,8 +71,8 @@ describe('locale detection', function (): void {
     });
 
     it('translates the interface according to the locale', function (): void {
-        $this->get(route('home'), ['Accept-Language' => 'en'])->assertSee('Inventories, simple and free');
-        $this->get(route('home'), ['Accept-Language' => 'fr'])->assertSee('Des inventaires simples et gratuits');
+        $this->get(route('home'), ['Accept-Language' => 'en'])->assertSee('Your inventory, in the cloud.');
+        $this->get(route('home'), ['Accept-Language' => 'fr'])->assertSee('Votre inventaire, dans le cloud.');
     });
 });
 

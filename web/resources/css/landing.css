@@ -1,0 +1,896 @@
+/*
+ * The sales pages: the home page and the pricing page (resources/views/home.blade.php, pricing.blade.php, landing/*).
+ *
+ * Everything is scoped under `.landing` (or is a class that only those views use). Colors are Tabler's tokens, never a color written
+ * here, so a theme change (the attribute `data-bs-theme="dark"` on the page) reaches the whole page: the ground is the body, a "step" is
+ * `--tblr-bg-surface-secondary`, a "field" is the primary color with `--tblr-primary-fg` for its text, a "tint" is `--tblr-primary-lt`.
+ * Muted text is `--tblr-secondary-color` at full strength (never an opacity). The pages are made of flat fields: no card, no shadow.
+ *
+ * The one motif is the cloud of barcode bars of the logo (components/cloud-bars.blade.php): the hero, the stage of the use cases, the
+ * bullets and the closing mark. It is a picture: assistive technologies skip it.
+ */
+
+/* The main landmark of a sales page draws its sections edge to edge: the container is the sections', not the page's. */
+.page-body.landing-body {
+    margin-block: 0;
+}
+
+.landing {
+    --landing-gap: clamp(5rem, 11vw, 9rem);
+    --landing-field-padding: clamp(1.5rem, 4vw, 3rem);
+
+    overflow-x: clip;
+    /* The ground is the surface (white in the light theme): the steps below it (secondary, tertiary) are then told apart from it. */
+    background: var(--tblr-bg-surface);
+    font-size: 1.0625rem;
+    line-height: 1.55;
+}
+
+/* A heading takes the color of the field it is in (Tabler gives headings a color of their own, which is not readable on a primary field). */
+.landing h1,
+.landing h2,
+.landing h3 {
+    color: inherit;
+}
+
+/* The symbol the pictures refer to: of no size, but not `display: none` (a clip path in a hidden element is not applied by some browsers). */
+.landing-defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+/* ----- Type. Five steps: display, h2, statement, body, small. ----- */
+.landing-display {
+    margin: 0 0 1.5rem;
+    font-size: clamp(2rem, 11cqi, 5.5rem);
+    font-weight: 700;
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+}
+
+.landing-h2 {
+    margin: 0 0 1.5rem;
+    font-size: clamp(1.75rem, 4vw, 3.25rem);
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+}
+
+.landing-statement {
+    max-width: 60rem;
+    margin: 0 0 2rem;
+    font-size: clamp(1.5rem, 2.6vw, 2.25rem);
+    font-weight: 500;
+    line-height: 1.2;
+    text-wrap: pretty;
+}
+
+.landing-lead,
+.landing-text {
+    max-width: 38rem;
+    margin: 0 0 2rem;
+    font-size: 1.0625rem;
+    line-height: 1.55;
+}
+
+.landing-lead {
+    font-size: clamp(1.0625rem, 1.6vw, 1.375rem);
+}
+
+.landing-link {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.25em;
+}
+
+.landing-link:hover {
+    color: var(--tblr-primary);
+}
+
+.landing-field-dark .landing-link:hover {
+    color: inherit;
+    text-decoration-color: var(--tblr-primary);
+}
+
+.landing .btn:active {
+    transform: translateY(1px);
+}
+
+.landing-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem 1.5rem;
+    margin-bottom: 2rem;
+}
+
+/* ----- Frame. A section is a container; a field bleeds. ----- */
+.landing-section {
+    padding-block: var(--landing-gap);
+}
+
+.landing-section-flush {
+    padding-block: var(--landing-gap) 0;
+}
+
+.landing-section-tight {
+    padding-block: 0;
+}
+
+.landing-section-intro {
+    padding-block: clamp(3rem, 7vw, 6rem) clamp(2rem, 4vw, 3rem);
+}
+
+.landing-section-head {
+    padding-block: var(--landing-gap) 2rem;
+}
+
+.landing-field {
+    padding-block: var(--landing-gap);
+}
+
+.landing-field-secondary {
+    background: var(--tblr-bg-surface-secondary);
+}
+
+/*
+ * The open source field is dark on any theme. Tabler resolves its tokens (`light-dark()`) where they are declared, at the root: an
+ * element that only says data-bs-theme="dark" gets the dark color scheme but keeps the tokens it inherited. The few the field uses
+ * are declared here again, from Tabler's own grays.
+ */
+.landing-field-dark {
+    color-scheme: dark;
+    --tblr-body-bg: var(--tblr-gray-900);
+    --tblr-body-color: var(--tblr-gray-200);
+    --tblr-secondary-color: color-mix(in oklab, var(--tblr-body-color) 75%, transparent);
+    background: var(--tblr-body-bg);
+    color: var(--tblr-body-color);
+}
+
+.landing-field-dark h2 {
+    color: var(--tblr-white);
+}
+
+.landing-bullet {
+    display: inline-flex;
+    vertical-align: -0.2em;
+    margin-inline-end: 0.35em;
+    color: var(--tblr-primary);
+}
+
+.landing-bullet svg {
+    width: 1.25em;
+    height: 1.25em;
+}
+
+/* ----- 1. Hero. ----- */
+.landing-hero {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: min(calc(100svh - 3.5rem), 52rem);
+    padding-block: clamp(2.5rem, 6vw, 5rem) 0;
+    overflow: clip;
+}
+
+/* The column the display type is sized by (cqi): the longest French line always fits, so the title is two lines at every width. */
+.landing-hero-text {
+    position: relative;
+    z-index: 1;
+    container-type: inline-size;
+    width: min(100%, 44rem);
+}
+
+.landing-facts {
+    margin: 0;
+    color: var(--tblr-secondary-color);
+    font-size: 0.875rem;
+}
+
+/* On a phone the facts are a short list, not a sentence the dots of which could land at the start of a line. */
+@media (max-width: 575.98px) {
+    .landing-facts.list-inline-dots .list-inline-item {
+        display: block;
+        margin: 0;
+    }
+
+    .landing-facts.list-inline-dots .list-inline-item + .list-inline-item::before {
+        content: none;
+    }
+}
+
+.landing-cloud {
+    position: relative;
+    z-index: 0;
+    width: 130vw;
+    height: 56svh;
+    margin-top: 2rem;
+    overflow: hidden;
+    color: var(--tblr-primary);
+    pointer-events: none;
+}
+
+.landing-cloud svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+@media (min-width: 992px) {
+    .landing-hero {
+        justify-content: center;
+        padding-block: clamp(2.5rem, 6vw, 5rem);
+    }
+
+    .landing-cloud {
+        position: absolute;
+        inset-block: 0;
+        inset-inline-end: -10vw;
+        display: flex;
+        align-items: center;
+        width: min(58vw, 100svh);
+        height: auto;
+        margin: 0;
+        overflow: visible;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .landing-cloud rect {
+        transform-box: fill-box;
+        transform-origin: 50% 100%;
+        animation: landing-rise 500ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+        animation-delay: calc(var(--i) * 60ms);
+    }
+}
+
+@keyframes landing-rise {
+    from {
+        transform: scaleY(0);
+    }
+
+    to {
+        transform: scaleY(1);
+    }
+}
+
+/* ----- 2. Features. ----- */
+.landing-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 0 0 clamp(3rem, 6vw, 5rem);
+    padding: 0;
+}
+
+.landing-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.8rem;
+    background: var(--tblr-bg-surface-secondary);
+    font-size: 0.875rem;
+}
+
+.landing-chip svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.landing-feature-title {
+    margin-bottom: 0.5rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.landing-features .landing-text {
+    margin-bottom: 0;
+}
+
+/* ----- 3. Use cases. ----- */
+.landing-picker {
+    display: flex;
+    gap: 1.5rem;
+    margin: 0 0 1.5rem;
+    padding: 0;
+    overflow-x: auto;
+}
+
+.landing-picker li {
+    flex: none;
+}
+
+.landing-picker-button {
+    display: block;
+    min-height: 44px;
+    padding: 0.4rem 0;
+    border: 0;
+    background: none;
+    color: var(--tblr-secondary-color);
+    font: inherit;
+    font-size: 1.25rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    text-align: start;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.landing-picker-name {
+    display: block;
+}
+
+.landing-picker-button:hover {
+    color: var(--tblr-body-color);
+}
+
+/* The picked one is told apart by its weight and its ink, not by its color alone. */
+.landing-picker-button[aria-pressed='true'] {
+    color: var(--tblr-body-color);
+    font-weight: 700;
+}
+
+.landing-picker-hook {
+    display: none;
+    max-width: 22rem;
+    margin-top: 0.35rem;
+    font-size: 0.9375rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    line-height: 1.45;
+    white-space: normal;
+}
+
+@media (min-width: 992px) {
+    .landing-picker {
+        flex-direction: column;
+        gap: 0.5rem;
+        overflow: visible;
+    }
+
+    .landing-picker-button {
+        width: 100%;
+        font-size: clamp(1.5rem, 2.6vw, 2.5rem);
+        white-space: normal;
+    }
+
+    .landing-picker-button[aria-pressed='true'] .landing-picker-hook {
+        display: block;
+    }
+}
+
+.landing-stage {
+    position: relative;
+    display: grid;
+    gap: 1rem;
+    min-height: 22rem;
+    padding-block: 1.5rem;
+}
+
+.landing-stage-cloud {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--tblr-primary-lt);
+    pointer-events: none;
+}
+
+.landing-stage-cloud svg {
+    width: 100%;
+    height: 100%;
+}
+
+.landing-grid {
+    position: relative;
+    align-self: center;
+    min-width: 0;
+    background: var(--tblr-bg-surface);
+    font-size: 0.8125rem;
+}
+
+.landing-grid th {
+    white-space: nowrap;
+}
+
+.landing-grid th:first-child,
+.landing-grid td:first-child {
+    min-width: 10rem;
+}
+
+.landing-phone {
+    position: relative;
+    width: 11rem;
+    justify-self: end;
+    padding: 0.5rem;
+    border-radius: 1.25rem;
+    background: var(--tblr-dark);
+    color: var(--tblr-light);
+}
+
+.landing-phone-view {
+    position: relative;
+    display: grid;
+    place-items: center;
+    aspect-ratio: 3 / 4;
+    border-radius: 0.9rem;
+    background: var(--tblr-gray-900);
+}
+
+.landing-phone-bars {
+    display: flex;
+    gap: 3px;
+    height: 38%;
+}
+
+.landing-phone-bars span {
+    width: calc(var(--weight) * 2px);
+    background: var(--tblr-light);
+}
+
+.landing-phone-line {
+    position: absolute;
+    inset-inline: 10%;
+    top: 50%;
+    height: 2px;
+    background: var(--tblr-red);
+}
+
+.landing-phone-chip {
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.5rem;
+    background: var(--tblr-light);
+    color: var(--tblr-dark);
+    font-size: 0.6875rem;
+    font-weight: 600;
+}
+
+@media (min-width: 768px) {
+    .landing-stage {
+        min-height: 26rem;
+        padding-block: 3rem;
+    }
+
+    .landing-grid {
+        width: 84%;
+    }
+
+    .landing-phone {
+        position: absolute;
+        inset-inline-end: 0;
+        bottom: 0.5rem;
+        width: 13rem;
+    }
+}
+
+.landing-caption {
+    margin: 1rem 0 0;
+    color: var(--tblr-secondary-color);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    #use-cases [role='region']:not([hidden]) {
+        animation: landing-fade 200ms ease-out;
+    }
+}
+
+@keyframes landing-fade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* ----- 4. How it works: four fields, each holding the same item card, fuller every time. ----- */
+.landing-steps {
+    display: grid;
+    grid-template-columns: 1fr;
+    margin: 0;
+    padding: 0;
+}
+
+.landing-step {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 2rem;
+    min-height: 44svh;
+    padding: var(--landing-field-padding);
+}
+
+.landing-step-1 {
+    background: var(--tblr-bg-surface-secondary);
+}
+
+.landing-step-2 {
+    background: var(--tblr-primary-lt);
+}
+
+.landing-step-3 {
+    background: var(--tblr-bg-surface-tertiary);
+}
+
+.landing-step-4 {
+    background: var(--tblr-primary);
+    color: var(--tblr-primary-fg);
+}
+
+.landing-step-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.landing-step-text {
+    max-width: 22rem;
+    margin: 0;
+}
+
+.landing-item {
+    width: min(100%, 16.25rem);
+    padding: 1rem;
+    background: var(--tblr-bg-surface);
+    color: var(--tblr-body-color);
+    font-size: 0.875rem;
+}
+
+.landing-item-name {
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.landing-item-fields {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+}
+
+.landing-item-fields div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.landing-item-fields dt {
+    color: var(--tblr-secondary-color);
+    font-weight: 400;
+}
+
+.landing-item-fields dd {
+    margin: 0;
+    text-align: end;
+}
+
+.landing-item-foot {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.landing-item-foot svg {
+    width: 1em;
+    height: 1em;
+}
+
+@media (min-width: 576px) {
+    .landing-steps {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (min-width: 992px) {
+    .landing-steps {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* ----- 5. Pricing: two fields, Free and Pro, the larger one in the color of the brand. ----- */
+.landing-plan {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 2.5rem;
+    height: 100%;
+    min-height: 60svh;
+    padding: var(--landing-field-padding);
+}
+
+.landing-plan-free {
+    background: var(--tblr-bg-surface-secondary);
+}
+
+/* White on the primary color is 5:1: the text stays at 16px and above. */
+.landing-plan-pro {
+    background: var(--tblr-primary);
+    color: var(--tblr-primary-fg);
+}
+
+.landing-plan-name {
+    margin: 0 0 0.5rem;
+    font-size: clamp(2rem, 5vw, 4rem);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.03em;
+}
+
+.landing-plan-sentence {
+    max-width: 26ch;
+    margin: 0 0 1.5rem;
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+.landing-plan-included {
+    max-width: 38rem;
+    margin: 0;
+    font-size: 1rem;
+}
+
+.landing-plan-free .landing-plan-included {
+    color: var(--tblr-secondary-color);
+}
+
+.landing-plan-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.5rem;
+}
+
+.landing-price {
+    margin: 0;
+}
+
+.landing-price-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.75rem;
+    margin: 0;
+}
+
+.landing-price-amount {
+    font-size: clamp(3.5rem, 10vw, 8rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.landing-price-period {
+    font-size: 1.125rem;
+    white-space: nowrap;
+}
+
+.landing-price-note {
+    margin: 0.5rem 0 0;
+    font-size: 1rem;
+}
+
+.landing-plan-foot .btn {
+    flex: none;
+}
+
+@media (max-width: 575.98px) {
+    .landing-plan-foot .btn {
+        width: 100%;
+    }
+}
+
+@media (min-width: 768px) {
+    .landing-plan {
+        min-height: min(90svh, 40rem);
+    }
+}
+
+/* Both prices are in the page: the one of the period that is shown stays. Without the script the monthly one is shown, and the yearly one follows as a line. */
+.landing-plans[data-period='month'] .landing-only-year,
+.landing-plans[data-period='year'] .landing-only-month,
+.landing-plans[data-ready] .landing-price-alt {
+    display: none;
+}
+
+.landing-toggle {
+    display: inline-flex;
+    gap: 0.25rem;
+    margin: 0 0 2rem;
+    padding: 0.25rem;
+    border: 0;
+    background: color-mix(in oklab, var(--tblr-primary-fg) 20%, transparent);
+}
+
+.landing-toggle[hidden] {
+    display: none;
+}
+
+/* The two options are labels of native radios (hidden by .btn-check): their look is our own, so no state of a Tabler button reaches them. */
+.landing-toggle-option {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0.5rem 1rem;
+    color: var(--tblr-primary-fg);
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+}
+
+.landing-toggle .btn-check:checked + .landing-toggle-option {
+    background: var(--tblr-primary-fg);
+    color: var(--tblr-primary);
+}
+
+.landing-toggle .btn-check:focus-visible + .landing-toggle-option {
+    outline: 2px solid var(--tblr-primary-fg);
+    outline-offset: 2px;
+}
+
+.landing-toggle-saving {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.landing-fineprint {
+    margin-block: 1rem 0;
+    color: var(--tblr-secondary-color);
+    font-size: 0.875rem;
+}
+
+.landing-more {
+    padding-block: 1.5rem var(--landing-gap);
+}
+
+/* ----- The comparison of the plans. ----- */
+.landing-table {
+    margin: 0;
+}
+
+.landing-table th,
+.landing-table td {
+    padding-block: 0.9rem;
+    font-size: 1rem;
+}
+
+.landing-table thead th {
+    font-size: 1.125rem;
+    font-weight: 700;
+}
+
+.landing-table-group {
+    background: var(--tblr-bg-surface-secondary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: none;
+}
+
+.landing-table .landing-table-pro {
+    background: var(--tblr-primary-lt);
+}
+
+.landing-table svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+/* ----- 6. Open source. ----- */
+.landing-facts-list {
+    display: grid;
+    gap: 1rem;
+    margin: 0;
+    padding: 0;
+    font-size: clamp(1.125rem, 2vw, 1.5rem);
+    font-weight: 500;
+}
+
+/* ----- 7. Questions: flat tiles, Bootstrap's collapse. ----- */
+.landing-accordion .accordion-item {
+    margin-bottom: 6px;
+    border: 0;
+    border-radius: 0;
+    background: var(--tblr-bg-surface-secondary);
+    color: inherit;
+}
+
+.landing-accordion .accordion-button {
+    padding: 1.25rem 1.5rem;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.landing-accordion .accordion-button:not(.collapsed) {
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+}
+
+.landing-accordion .accordion-button:focus-visible {
+    outline: 2px solid var(--tblr-primary);
+    outline-offset: -2px;
+}
+
+.landing-accordion .accordion-body {
+    max-width: 44rem;
+    padding: 0 1.5rem 1.5rem;
+    color: var(--tblr-body-color);
+}
+
+@media (min-width: 992px) {
+    .landing-sticky {
+        position: sticky;
+        top: 6rem;
+    }
+}
+
+/* ----- 8. The last word, and the mark. ----- */
+.landing-cta {
+    padding-top: var(--landing-gap);
+    background: var(--tblr-primary);
+    color: var(--tblr-primary-fg);
+    overflow: hidden;
+}
+
+.landing-cta-text {
+    container-type: inline-size;
+}
+
+.landing-cta-title {
+    max-width: 14ch;
+    margin: 0 0 2rem;
+    font-size: clamp(2rem, 9cqi, 5rem);
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1;
+    text-wrap: balance;
+}
+
+.landing-cta-note {
+    font-size: 1rem;
+}
+
+.landing-mark {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: clamp(2rem, 5vw, 3.5rem);
+    padding-bottom: clamp(2rem, 5vw, 3.5rem);
+    color: var(--tblr-primary-fg);
+}
+
+.landing-mark svg {
+    display: block;
+    width: auto;
+    height: min(34svh, 22rem);
+    aspect-ratio: 4 / 3;
+}
+
+.landing-wordmark {
+    font-size: clamp(1.75rem, 4vw, 3.25rem);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.05;
+}
