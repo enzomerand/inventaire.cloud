@@ -33,15 +33,16 @@ final class PublicPageMeta
      * its questions as structured data.
      *
      * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none, and then nothing about plans or prices is said.
+     * @param  list<array{question: string, answer: string}>  $faq  The questions the page shows ({@see Faq::home()}), which the structured data repeats.
      */
-    public function home(string $locale, ?PricingPlans $plans = null): PageMeta
+    public function home(string $locale, ?PricingPlans $plans, array $faq): PageMeta
     {
         return new PageMeta(
             title: __('Free online inventory software'),
             description: Pitch::description($plans),
             canonical: PublicUrls::home(),
             locale: $locale,
-            jsonLd: [$this->site(), $this->application($plans, $locale), $this->faqPage(Faq::home($plans))],
+            jsonLd: [$this->site(), $this->application($plans, $locale), $this->faqPage($faq)],
         );
     }
 
@@ -208,17 +209,20 @@ final class PublicPageMeta
     }
 
     /**
-     * The application, as structured data: free to use and open source, and, on an instance that sells a plan, what each plan costs.
+     * The application, as structured data: free to use and open source and, on an instance that sells a plan only, what each plan costs. An
+     * instance that sells nothing has no offer at all: an offer needs a currency, and the currency is part of the billing configuration
+     * that such an instance says nothing about.
      *
-     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none: the one offer is then the free one.
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
      * @return array<string, mixed>
      */
     private function application(?PricingPlans $plans, string $locale): array
     {
-        $currency = strtoupper($plans->currency ?? config()->string('billing.currency'));
-        $offers = [['@type' => 'Offer', 'price' => '0', 'priceCurrency' => $currency] + ($plans === null ? [] : ['name' => __('Free')])];
+        $offers = [];
 
         if ($plans !== null) {
+            $currency = strtoupper($plans->currency);
+            $offers[] = ['@type' => 'Offer', 'name' => __('Free'), 'price' => '0', 'priceCurrency' => $currency];
             $periods = ['P1M' => $plans->month, 'P1Y' => $plans->year];
 
             foreach ($periods as $duration => $cents) {
@@ -251,8 +255,7 @@ final class PublicPageMeta
             'isAccessibleForFree' => true,
             'license' => 'https://www.gnu.org/licenses/agpl-3.0.html',
             'sameAs' => [rtrim(config()->string('app.repository_url'), '/')],
-            'offers' => count($offers) === 1 ? $offers[0] : $offers,
-        ];
+        ] + ($offers === [] ? [] : ['offers' => $offers]);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\View\Components;
 
 use App\Auth\TokenAbility;
+use App\Billing\Billing;
 use Illuminate\Contracts\View\View;
 use Illuminate\View\Component;
 
@@ -482,6 +483,19 @@ class ClientMessages extends Component
             'invitations.error.membership_limit' => __('You already belong to as many workspaces as an account can (:count): leave one, then accept.'),
             'invitations.waiting.one' => __(':count invitation waiting'),
             'invitations.waiting.other' => __(':count invitations waiting'),
+        ] + $this->tokenAbilityLabels() + (Billing::enabled() ? $this->billingMessages() : []);
+    }
+
+    /**
+     * The strings of the subscription page (`billing.*`), which only an instance that sells a plan hands to its pages: the page of an
+     * instance that sells nothing says so from the markup the server writes, and none of these is needed there. Keeping them out means no
+     * page of such an instance carries a word about plans, prices or payment.
+     *
+     * @return array<string, string>
+     */
+    private function billingMessages(): array
+    {
+        return [
             'billing.confirming' => __('Payment being confirmed…'),
             'billing.still_pending' => __('Your payment is still being confirmed. The plan changes as soon as it is: reload this page in a moment.'),
             'billing.unsettled' => __('A subscription of this workspace is waiting to be settled. Open the subscription management to settle it.'),
@@ -516,7 +530,7 @@ class ClientMessages extends Component
             'billing.error.no_account' => __('This workspace has no subscription to manage yet.'),
             'billing.error.interval' => __('This billing period is not offered.'),
             'billing.error.unavailable' => __('The payment service is unavailable right now. Please try again in a moment.'),
-        ] + $this->tokenAbilityLabels();
+        ];
     }
 
     /**

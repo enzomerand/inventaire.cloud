@@ -74,10 +74,11 @@ final class SitemapController extends Controller
 
         // The pricing page exists where a plan is sold; anywhere else it is a 404 and must not be announced.
         if (PricingPlans::selling()) {
-            $pricing = $this->meta->pricing(PricingPlans::current(), $locale);
+            $pricing = PublicUrls::alternates(PublicUrls::pricing(...));
+            $default = PublicUrls::pricing($locale);
 
-            foreach ($pricing->alternates as $address) {
-                $this->entry($xml, $address, $pricing->alternates, $pricing->default);
+            foreach ($pricing as $address) {
+                $this->entry($xml, $address, $pricing, $default);
             }
         }
 

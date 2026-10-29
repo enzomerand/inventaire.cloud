@@ -25,6 +25,7 @@
                                 id="use-case-{{ $index }}"
                                 class="landing-picker-button"
                                 data-index="{{ $index }}"
+                                aria-controls="use-case-panel-{{ $index }}"
                                 aria-pressed="{{ $loop->first ? 'true' : 'false' }}"
                                 :aria-pressed="isCurrent($el)"
                                 @click="select"
@@ -42,6 +43,7 @@
             <div class="col-lg-8">
                 @foreach ($useCases as $index => $case)
                     <div
+                        id="use-case-panel-{{ $index }}"
                         role="region"
                         aria-labelledby="use-case-{{ $index }}"
                         data-index="{{ $index }}"

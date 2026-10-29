@@ -35,6 +35,7 @@ use App\Http\Controllers\Webhooks\DocumensoWebhookController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\WebManifestController;
 use App\Http\Middleware\AbortIfInstalled;
+use App\Http\Middleware\AbortUnlessSelling;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
@@ -48,7 +49,7 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('/', HomePageController::class)->name('home');
 
-// The public pages of the templates (the gallery and one page for each template) and the pricing page, rendered by the server so that search
+// The public pages of the templates (the gallery and one page for each template), rendered by the server so that search
 // engines read them. They exist once per language, each with an address of its own: the language of the instance has no
 // prefix, the others have their code (`/en/templates`), and the prefixed address of the language of the instance is a
 // permanent redirect to the other one. The language comes from the address alone (see UseUrlLocale). They are public and
@@ -64,9 +65,12 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
             Route::get('/templates', TemplateGalleryController::class)->name('index');
             Route::get('/templates/{slug}', TemplatePageController::class)->name('show');
         });
+});
 
-    // The pricing page works the same way (one address per language, the language from the address). It exists on an instance that sells
-    // a plan only: anywhere else the controller answers 404.
+// The pricing page works the same way (one address per language, the language from the address). It exists on an instance that sells a
+// plan only: anywhere else it is a 404, and the guard comes before the language of the address so that the prefixed address of the
+// default language is a 404 too, not a redirect to one.
+Route::middleware(['throttle:public-pages', AbortUnlessSelling::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
     Route::get('/pricing', PricingPageController::class)->name('pricing.index');
 
     Route::prefix('{locale}')->where(['locale' => $localeCodes])

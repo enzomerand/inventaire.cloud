@@ -8,7 +8,11 @@ use App\Inventories\Templates\Template;
 use App\Inventories\Templates\TemplateCatalogue;
 use App\Inventories\Templates\TemplateField;
 use App\Inventories\Templates\TemplatePresenter;
+use App\Services\LocaleResolver;
 use App\Support\PublicUrls;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * The use cases the home page lets a visitor pick from: a few of the templates of the catalogue, each with the grid its inventory would
@@ -16,6 +20,12 @@ use App\Support\PublicUrls;
  *
  * Nothing is invented: the names, the columns and the rows are those of the template files, in the language of the page, so what the
  * page shows is what "use this template" creates. A template the catalogue does not have is left out.
+ *
+ * Drawing the panels costs more than a request should pay (every template is rebuilt from the verdict on the files, then its example rows
+ * are written out), so they are kept in the application cache for a day, one entry for each language. The key carries
+ * {@see TemplateCatalogue::fingerprint()} (the files, the rules that judge them, the languages) and the language of the instance, so an edited
+ * template needs no invalidation; only `inventaire:upgrade` forgets the entries ({@see self::forget()}), for what the key cannot see (the
+ * lines under the names, the way a grid is drawn). A cache that fails does not fail the page: the panels are drawn again by each request.
  */
 final class UseCases
 {
@@ -28,22 +38,72 @@ final class UseCases
     /** The most example rows of a grid. */
     private const MAX_ROWS = 4;
 
+    /** How long the panels are kept, in seconds. */
+    private const CACHE_TTL = 86400;
+
+    /** The start of the key of a cache entry, with the form of what is kept: change it with the form. */
+    private const CACHE_KEY_PREFIX = 'landing-use-cases:v1:';
+
     /**
-     * Gets the catalogue and the presenter that turns the example rows of a template into cells.
+     * Gets the catalogue, the presenter that turns the example rows of a template into cells, and the resolver that knows the languages.
      */
     public function __construct(
         private readonly TemplateCatalogue $catalogue,
         private readonly TemplatePresenter $presenter,
+        private readonly LocaleResolver $locales,
     ) {}
 
     /**
      * The use cases that can be shown, in the language: for each, the template (`slug`, `name`, `fields`, `url`), the line that says what
      * it is for (`hook`), its grid (`columns`, `rows` of cells as {@see TemplatePresenter::examples()} writes them) and the barcode a
-     * scan would read (`scan`: the row that has it and its value, or null when the grid has no barcode).
+     * scan would read (`scan`: the row that has it and its value, or null when the grid has no barcode). `$locale` is the language of the
+     * application: the lines under the names are translated with it.
      *
      * @return list<array{slug: string, name: string, hook: string, fields: int, url: string, columns: list<string>, rows: list<list<array<string, mixed>>>, scan: array{row: int, value: string}|null}>
      */
     public function panels(string $locale): array
+    {
+        $drawn = null;
+
+        try {
+            /** @var list<array{slug: string, name: string, hook: string, fields: int, url: string, columns: list<string>, rows: list<list<array<string, mixed>>>, scan: array{row: int, value: string}|null}> */
+            return Cache::remember($this->cacheKey($locale), self::CACHE_TTL, function () use ($locale, &$drawn): array {
+                $drawn = $this->draw($locale);
+
+                return $drawn;
+            });
+        } catch (Throwable $exception) {
+            Log::warning('The cache of the use cases of the home page cannot be used: they are drawn again by each request until it can.', ['exception' => $exception]);
+
+            return $drawn ?? $this->draw($locale);
+        }
+    }
+
+    /**
+     * The key of the cache entry of the panels in a language.
+     */
+    public function cacheKey(string $locale): string
+    {
+        return self::CACHE_KEY_PREFIX.$locale.':'.config()->string('app.default_locale').':'.$this->catalogue->fingerprint();
+    }
+
+    /**
+     * Forgets the panels kept in the cache, in every language, for the templates as they are now: the next request draws them again.
+     * `inventaire:upgrade` does it, because the new version of the code may draw them differently without the key having told.
+     */
+    public function forget(): void
+    {
+        foreach ($this->locales->supported() as $locale) {
+            Cache::forget($this->cacheKey($locale));
+        }
+    }
+
+    /**
+     * Draws the panels from the templates of the catalogue.
+     *
+     * @return list<array{slug: string, name: string, hook: string, fields: int, url: string, columns: list<string>, rows: list<list<array<string, mixed>>>, scan: array{row: int, value: string}|null}>
+     */
+    private function draw(string $locale): array
     {
         $panels = [];
 

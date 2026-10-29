@@ -41,9 +41,9 @@ function pricingRows(DOMXPath $page): array
 describe('on an instance that sells nothing', function (): void {
     beforeEach(fn () => billingOff());
 
-    it('does not exist, in any language', function (string $path): void {
+    it('does not exist, in any language, and the prefixed address of the default language is a 404 as well, not a redirect to one', function (string $path): void {
         $this->get($path)->assertNotFound();
-    })->with(['/pricing', '/en/pricing']);
+    })->with(['/pricing', '/en/pricing', '/fr/pricing']);
 
     it('is not announced: no link in the header, the footer or the sitemap', function (): void {
         config(['app.indexable' => true]);
@@ -236,7 +236,8 @@ describe('the limits', function (): void {
             ->and($rows['Share links per inventory'])->toBe(['2', '20']);
 
         expect(templateTexts($page, '//table/caption'))->toBe(['Compare the plans'])
-            ->and(templateTexts($page, '//table/thead/tr/th[@scope="col"]'))->toBe(['Free', 'Pro'])
+            ->and(templateTexts($page, '//table/thead/tr/th[@scope="col"]'))->toBe(['Feature', 'Free', 'Pro'])
+            ->and(templateTexts($page, '//table/thead/tr/th[1]/span[contains(@class, "visually-hidden")]'))->toBe(['Feature'])
             ->and(templateAttributes($page, '//div[contains(@class, "table-responsive")]', 'tabindex'))->toBe(['0'])
             ->and($page->query('//table//svg[@aria-hidden="true"]')->length)->toBeGreaterThan(5);
     });

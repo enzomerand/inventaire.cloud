@@ -7,6 +7,8 @@ use App\Landing\UseCases;
 use App\Models\User;
 use App\Support\PublicUrls;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 require_once __DIR__.'/../Support/billing.php';
 require_once __DIR__.'/../Support/landing.php';
@@ -58,7 +60,7 @@ describe('on an instance that sells nothing', function (): void {
         expect(landingText($response))->not->toMatch('/\bPro\b|Stripe|€/');
     })->with(LANDING_LANGUAGES);
 
-    it('describes itself as free and open source to search engines, with one free offer', function (): void {
+    it('describes itself as free and open source to search engines, with no offer to price', function (): void {
         $response = $this->get(route('home'), ['Accept-Language' => 'en'])->assertOk();
         $application = landingJsonLdOf($response, 'SoftwareApplication');
 
@@ -71,8 +73,9 @@ describe('on an instance that sells nothing', function (): void {
             'isAccessibleForFree' => true,
             'license' => 'https://www.gnu.org/licenses/agpl-3.0.html',
         ]);
-        expect($application['offers'])->toMatchArray(['@type' => 'Offer', 'price' => '0']);
-        expect($application['offers'])->not->toHaveKey('priceSpecification');
+        // An offer needs a currency, which is billing configuration: an instance that sells nothing has none to tell.
+        expect($application)->not->toHaveKey('offers');
+        expect(json_encode(landingJsonLd($response)))->not->toContain('priceCurrency');
 
         $description = templateAttributes(templateDom($response), '//head/meta[@name="description"]', 'content')[0];
         expect($description)->toEndWith('Free and open source.')->not->toContain('Pro');
@@ -154,6 +157,9 @@ describe('the use cases', function (): void {
 
         foreach ($panels as $index => $panel) {
             expect($page->query('//div[@role="region"][@data-index="'.$index.'"][@hidden]')->length)->toBe($index === 0 ? 0 : 1);
+            // The button names the panel it controls, and the panel is named by the button.
+            expect($page->query('//button[@data-index="'.$index.'"][@aria-controls="use-case-panel-'.$index.'"]')->length)->toBe(1)
+                ->and($page->query('//div[@id="use-case-panel-'.$index.'"][@role="region"][@aria-labelledby="'.($page->query('//button[@data-index="'.$index.'"]')->item(0)?->getAttribute('id')).'"]')->length)->toBe(1);
             expect(landingText($response))->toContain($panel['name'])->toContain($panel['hook']);
         }
 
@@ -169,6 +175,55 @@ describe('the use cases', function (): void {
 
         expect($english)->toContain('Shop stock')->toContain('Wine cellar');
         expect($french)->toContain('Stock de boutique')->toContain('Cave à vin');
+    });
+
+    it('are kept in the cache, in each language, and the page shows what the cache holds', function (): void {
+        billingOff();
+        app()->setLocale('en');
+
+        $useCases = app(UseCases::class);
+        $key = $useCases->cacheKey('en');
+
+        expect(cache()->has($key))->toBeFalse();
+
+        $panels = $useCases->panels('en');
+
+        expect(cache()->get($key))->toBe($panels)
+            ->and($useCases->cacheKey('fr'))->not->toBe($key);
+
+        // A request finds the entry: the page is made of it, not of the templates.
+        $panels[0]['name'] = 'Kept in the cache';
+        cache()->put($key, $panels, 60);
+
+        expect(landingText($this->get(route('home'), ['Accept-Language' => 'en'])->assertOk()))->toContain('Kept in the cache');
+    });
+
+    it('are drawn again when a template file changes, without anything being forgotten', function (): void {
+        $folder = templateFolder();
+        copy(base_path('tests/Fixtures/templates/sample-shop.json'), $folder.'/sample-shop.json');
+        templateCatalogueFrom($folder);
+
+        try {
+            $before = app(UseCases::class)->cacheKey('en');
+            file_put_contents($folder.'/sample-shop.json', "\n", FILE_APPEND);
+            $after = app(UseCases::class)->cacheKey('en');
+        } finally {
+            templateRemoveFolder($folder);
+        }
+
+        expect($after)->not->toBe($before);
+    });
+
+    it('are drawn again by each request when the cache cannot be used, and the page is still served', function (): void {
+        billingOff();
+        Cache::shouldReceive('remember')->andThrow(new RuntimeException('cache down'));
+        Cache::makePartial();
+        Log::spy();
+
+        $response = $this->get(route('home'), ['Accept-Language' => 'en'])->assertOk();
+
+        expect(landingText($response))->toContain('Shop stock');
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'use cases of the home page'))->once();
     });
 
     it('leave out a template the catalogue does not have, and the whole part when none is left', function (): void {

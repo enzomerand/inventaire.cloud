@@ -11,10 +11,9 @@ use Illuminate\Testing\TestResponse;
 require_once __DIR__.'/templates.php';
 
 /**
- * The markup of a page without what is not its own copy: the pictures (`data-ui`: the example rows of the templates, which are made of
- * whatever the template files say, a "MacBook Pro" included) and the messages the layout hands to the scripts of every page of the
- * application (`#client-messages`, which holds the strings of the billing page whether the instance sells a plan or not). What is left is
- * the markup, the links and the structured data the sales pages write.
+ * The markup of a page without the pictures (`data-ui`: the example rows of the templates, which are made of whatever the template files
+ * say, a "MacBook Pro" included). What is left is the whole page: the markup, the links, the messages the layout hands to the scripts and
+ * the structured data.
  */
 function landingMarkup(TestResponse $response): string
 {
@@ -25,7 +24,7 @@ function landingMarkup(TestResponse $response): string
 
     $remove = [];
 
-    foreach ((new DOMXPath($dom))->query('//*[@data-ui] | //script[@id="client-messages"]') ?: [] as $node) {
+    foreach ((new DOMXPath($dom))->query('//*[@data-ui]') ?: [] as $node) {
         $remove[] = $node;
     }
 

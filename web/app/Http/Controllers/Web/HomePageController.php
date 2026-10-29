@@ -34,11 +34,12 @@ final class HomePageController extends Controller
     {
         $locale = app()->getLocale();
         $plans = PricingPlans::selling() ? PricingPlans::current() : null;
+        $faq = Faq::home($plans);
 
         return view('home', [
-            'seo' => $this->meta->home($locale, $plans),
+            'seo' => $this->meta->home($locale, $plans, $faq),
             'plans' => $plans,
-            'faq' => Faq::home($plans),
+            'faq' => $faq,
             'useCases' => $this->useCases->panels($locale),
         ]);
     }

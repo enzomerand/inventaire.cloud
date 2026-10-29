@@ -40,7 +40,7 @@
         <caption class="visually-hidden">{{ __('Compare the plans') }}</caption>
         <thead>
             <tr>
-                <td></td>
+                <th scope="col"><span class="visually-hidden">{{ __('Feature') }}</span></th>
                 <th scope="col">{{ __('Free') }}</th>
                 <th scope="col" class="landing-table-pro">{{ __('Pro') }}</th>
             </tr>

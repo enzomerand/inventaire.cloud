@@ -109,9 +109,12 @@ describe('the subscription page of a workspace', function (): void {
         billingOff();
         $team = inventoryTeam();
 
-        $this->actingAs($team['owner'])->get(billingPageUri($team['workspace']))
+        $page = $this->actingAs($team['owner'])->get(billingPageUri($team['workspace']))
             ->assertOk()
             ->assertSee('This service is not offered on this instance.');
+
+        // The page says so from its markup: the strings of the subscription are not handed to the scripts of an instance that sells nothing.
+        expect(array_filter(array_keys(billingPageMessages($page)), fn (string $key): bool => str_starts_with($key, 'billing.')))->toBe([]);
     });
 
     it('is not open to somebody who does not belong to the workspace', function (): void {
