@@ -10,7 +10,7 @@
             <p class="landing-lead">{{ \App\Landing\Pitch::lead($plans) }}</p>
 
             <div class="landing-actions">
-                <x-landing.start class="btn btn-primary btn-lg" />
+                <x-landing.start />
                 <a class="landing-link" href="{{ \App\Support\PublicUrls::templatesPath(app()->getLocale()) }}">{{ __('Browse the templates') }}</a>
             </div>
 

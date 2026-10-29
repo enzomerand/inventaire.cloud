@@ -14,21 +14,15 @@ use App\Signatures\Documenso;
 final class Pitch
 {
     /**
-     * The exports the instance offers, as a phrase for a sentence about its features: signed ones only where signatures can be asked for.
-     */
-    public static function exports(): string
-    {
-        return Documenso::configured() ? __('signed exports') : __('exports');
-    }
-
-    /**
-     * The sentence under the title of the home page.
+     * The sentence under the title of the home page: signed exports only where signatures can be asked for.
      *
      * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
      */
     public static function lead(?PricingPlans $plans): string
     {
-        return __('Typed fields, barcode scanning, spreadsheet import and :exports.', ['exports' => self::exports()]).' '
+        $exports = Documenso::configured() ? __('signed exports') : __('exports');
+
+        return __('Typed fields, barcode scanning, spreadsheet import and :exports.', ['exports' => $exports]).' '
             .($plans === null ? __('Free and open source.') : __('Free to start, Pro when you outgrow it.'));
     }
 

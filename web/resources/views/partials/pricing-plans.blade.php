@@ -19,7 +19,7 @@
     $summary = fn (string $plan): string => __('Up to :inventories of :items each, :storage of files, :members, and :links per inventory.', [
         'inventories' => $plans->inventories($plan),
         'items' => $plans->items($plan),
-        'storage' => $plans->storage($plans->limit($plan, 'storage_bytes')),
+        'storage' => \App\Support\FileSize::format($plans->limit($plan, 'storage_bytes')),
         'members' => $plans->members($plan),
         'links' => $plans->shareLinks($plan),
     ]);
@@ -52,7 +52,7 @@
 
                 <div class="landing-plan-foot">
                     <p class="landing-price"><span class="landing-price-amount">{{ $plans->price(0) }}</span></p>
-                    <x-landing.start class="btn btn-primary btn-lg" />
+                    <x-landing.start />
                 </div>
             </article>
         </div>

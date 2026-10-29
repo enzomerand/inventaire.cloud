@@ -48,7 +48,7 @@
                         aria-labelledby="use-case-{{ $index }}"
                         data-index="{{ $index }}"
                         @unless ($loop->first) hidden @endunless
-                        :hidden="isOther($el)"
+                        :hidden="!isCurrent($el)"
                     >
                         <div class="landing-stage">
                             <div class="landing-stage-cloud" aria-hidden="true"><x-cloud-bars /></div>

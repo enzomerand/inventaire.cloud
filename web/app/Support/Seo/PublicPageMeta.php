@@ -223,9 +223,8 @@ final class PublicPageMeta
         if ($plans !== null) {
             $currency = strtoupper($plans->currency);
             $offers[] = ['@type' => 'Offer', 'name' => __('Free'), 'price' => '0', 'priceCurrency' => $currency];
-            $periods = ['P1M' => $plans->month, 'P1Y' => $plans->year];
 
-            foreach ($periods as $duration => $cents) {
+            foreach (['P1M' => $plans->month, 'P1Y' => $plans->year] as $duration => $cents) {
                 if ($cents === null) {
                     continue;
                 }

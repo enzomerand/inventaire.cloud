@@ -73,8 +73,6 @@
 .landing-text {
     max-width: 38rem;
     margin: 0 0 2rem;
-    font-size: 1.0625rem;
-    line-height: 1.55;
 }
 
 .landing-lead {
@@ -117,10 +115,6 @@
 
 .landing-section-flush {
     padding-block: var(--landing-gap) 0;
-}
-
-.landing-section-tight {
-    padding-block: 0;
 }
 
 .landing-section-intro {

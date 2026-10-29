@@ -15,7 +15,7 @@ const read = (path) => readFileSync(join(VIEWS, path), 'utf8');
 const PICKER_DIRECTIVES = [
     ':aria-pressed="isCurrent($el)"',
     '@click="select"',
-    ':hidden="isOther($el)"',
+    ':hidden="!isCurrent($el)"',
     'x-data="useCases"',
 ];
 
@@ -76,7 +76,7 @@ describe('the sales pages under the real Alpine CSP build', () => {
                     ${[0, 1, 2]
                         .map(
                             (index) => `<div role="region" data-index="${index}" ${index === 0 ? '' : 'hidden'}
-                                :hidden="isOther($el)"></div>`,
+                                :hidden="!isCurrent($el)"></div>`,
                         )
                         .join('')}
                 </div>`;

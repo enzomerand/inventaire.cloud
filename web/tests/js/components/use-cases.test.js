@@ -21,9 +21,7 @@ describe('the use cases of the home page', () => {
 
         expect(component.index).toBe(0);
         expect(component.isCurrent(element(0))).toBe(true);
-        expect(component.isOther(element(0))).toBe(false);
         expect(component.isCurrent(element(3))).toBe(false);
-        expect(component.isOther(element(3))).toBe(true);
     });
 
     it('shows the one of the button that was clicked, and hides the others', () => {
@@ -33,7 +31,6 @@ describe('the use cases of the home page', () => {
 
         expect(component.index).toBe(4);
         expect([0, 1, 2, 3, 4, 5].filter((index) => component.isCurrent(element(index)))).toEqual([4]);
-        expect([0, 1, 2, 3, 4, 5].filter((index) => component.isOther(element(index)))).toEqual([0, 1, 2, 3, 5]);
     });
 
     it('can go back to the first one', () => {

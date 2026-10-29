@@ -14,7 +14,7 @@
     $limits = [
         [__('Inventories'), $plans->number($plans->limit('free', 'inventories')), $plans->number($plans->limit('pro', 'inventories'))],
         [__('Items per inventory'), $plans->number($plans->limit('free', 'items')), $plans->number($plans->limit('pro', 'items'))],
-        [__('File storage'), $plans->storage($plans->limit('free', 'storage_bytes')), $plans->storage($plans->limit('pro', 'storage_bytes'))],
+        [__('File storage'), \App\Support\FileSize::format($plans->limit('free', 'storage_bytes')), \App\Support\FileSize::format($plans->limit('pro', 'storage_bytes'))],
         [__('Members (pending invitations included)'), $plans->number($plans->limit('free', 'members')), $plans->number($plans->limit('pro', 'members'))],
         [__('Share links per inventory'), $plans->number($plans->limit('free', 'share_links')), $plans->number($plans->limit('pro', 'share_links'))],
     ];

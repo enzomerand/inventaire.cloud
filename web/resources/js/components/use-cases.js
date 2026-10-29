@@ -11,7 +11,6 @@
  * @returns {{
  *   index: number,
  *   isCurrent: (element: HTMLElement) => boolean,
- *   isOther: (element: HTMLElement) => boolean,
  *   select: (event: Event) => void,
  * }}
  */
@@ -28,16 +27,6 @@ export default function useCases() {
          */
         isCurrent(element) {
             return Number(element.dataset.index) === this.index;
-        },
-
-        /**
-         * Whether an element (a panel) belongs to a use case that is not shown, which is what its `hidden` attribute follows.
-         *
-         * @param {HTMLElement} element Carries its rank in `data-index`.
-         * @returns {boolean}
-         */
-        isOther(element) {
-            return !this.isCurrent(element);
         },
 
         /**

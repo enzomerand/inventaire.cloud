@@ -20,7 +20,7 @@
             </div>
         </section>
 
-        <section aria-labelledby="plans-title" class="landing-section-tight">
+        <section aria-labelledby="plans-title">
             <h2 id="plans-title" class="visually-hidden">{{ __('Plans') }}</h2>
             @include('partials.pricing-plans')
         </section>

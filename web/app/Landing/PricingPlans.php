@@ -8,8 +8,6 @@ use App\Billing\Billing;
 use App\Billing\Plan;
 use App\PhotoEntry\PhotoEntry;
 use App\Signatures\Documenso;
-use App\Support\FileSize;
-use App\Support\Money;
 use Illuminate\Support\Number;
 
 /**
@@ -112,11 +110,21 @@ final readonly class PricingPlans
     /**
      * An amount in the currency of the plans, in the language of the page ("6 €", "€6.50").
      *
+     * The amounts of the application are whole numbers in the smallest unit of the currency (cents), the way Stripe and `config/billing.php`
+     * hold them. The page shows them without the cents when there are none ("6 €", "€6") and with two decimals otherwise ("6,50 €",
+     * "€6.50"), written the way the language writes a price: the sign before or after the number, the decimal comma or point, and a
+     * no-break space where the language puts one, so that a price never wraps between its number and its sign.
+     *
      * @param  int  $cents  The amount in the smallest unit of the currency.
      */
     public function price(int $cents): string
     {
-        return Money::display($cents, $this->currency, app()->getLocale());
+        $decimals = $cents % 100 === 0 ? 0 : 2;
+        $currency = strtoupper($this->currency);
+        $formatted = Number::currency($cents / 100, $currency, app()->getLocale(), $decimals);
+
+        // The formatter refuses a currency it does not know: the code and the amount are still a price.
+        return $formatted === false ? number_format($cents / 100, $decimals, '.', '').' '.$currency : $formatted;
     }
 
     /**
@@ -211,14 +219,6 @@ final readonly class PricingPlans
         $formatted = Number::format($count, locale: app()->getLocale());
 
         return $formatted === false ? (string) $count : $formatted;
-    }
-
-    /**
-     * A size of storage in the units of the language ("200 MB", "200 Mo").
-     */
-    public function storage(int $bytes): string
-    {
-        return FileSize::format($bytes);
     }
 
     /**
