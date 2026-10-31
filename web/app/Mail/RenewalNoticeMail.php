@@ -14,8 +14,9 @@ use Throwable;
 
 /**
  * The notice of tacit renewal of a yearly subscription (article L215-1 of the consumer code): sent by a mail of its own, between three
- * months and a month before the end of the period, it tells that the contract renews, and says in a boxed line the last date to refuse
- * the renewal: the end of the period. Queued once for each period by `inventaire:send-renewal-notices` ({@see ContractNotices}).
+ * months and a month before the end of the period, it tells that the contract renews, and says in a boxed line the last moment to refuse
+ * the renewal: the end of the period, **with its time and zone**, because Stripe bills at that very instant and a customer who cancels the
+ * afternoon of that day is charged a year. Queued once for each period by `inventaire:send-renewal-notices` ({@see ContractNotices}).
  */
 final class RenewalNoticeMail extends Mailable
 {
@@ -67,7 +68,9 @@ final class RenewalNoticeMail extends Mailable
             text: 'mail.renewal-notice',
             with: [
                 'workspaceLabel' => PlainText::oneLine($this->workspaceName),
-                'deadlineLabel' => self::day($this->renewsAt),
+                // The subscription is billed at that very instant: a cancellation that afternoon is too late, so the time and its zone are told.
+                'deadlineLabel' => self::moment($this->renewsAt),
+                'renewsLabel' => self::day($this->renewsAt),
                 'priceLabel' => self::priceLabel('year'),
             ],
         );

@@ -7,6 +7,7 @@ namespace App\Landing;
 use App\Billing\Billing;
 use App\Billing\Plan;
 use App\Legal\Seller;
+use App\Models\BillingAccount;
 use App\PhotoEntry\PhotoEntry;
 use App\Signatures\Documenso;
 use Illuminate\Support\Number;
@@ -66,6 +67,17 @@ final readonly class PricingPlans
     public static function shown(): bool
     {
         return self::selling() || (Billing::pricingPreview() && Billing::display()['month'] > 0);
+    }
+
+    /**
+     * Whether the terms of sale can be read: wherever the plans are shown ({@see self::shown()}), and wherever a contract exists, since the
+     * mails of a contract (the confirmation, the notice of renewal) link to them and a customer must be able to read what they signed even
+     * when the instance stopped selling or previewing. A contract is a billing account with a subscription, looked for only while billing
+     * is on: an instance without Stripe reads nothing to answer.
+     */
+    public static function termsAvailable(): bool
+    {
+        return self::shown() || (Billing::enabled() && BillingAccount::query()->whereNotNull('stripe_subscription_id')->exists());
     }
 
     /**

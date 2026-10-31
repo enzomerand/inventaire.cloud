@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Database\ExactColumns;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -22,6 +23,10 @@ use Illuminate\Support\Facades\Schema;
  *   ending, so that a second cancellation is acknowledged too;
  * - `renewal_notice_sent_for`: the end of the period for which the notice of tacit renewal of a yearly subscription was queued, so that
  *   it is sent once for each period.
+ *
+ * An account that already has a subscription when this runs **is taken for confirmed** (and, when its subscription is set to end, for
+ * having had its cancellation acknowledged): its contract began before these mails existed, and the first synchronisation must not send it
+ * a confirmation and a receipt weeks late.
  *
  * **`billing_withdrawals` is the proof of a withdrawal**: who declared it (the name and the address they typed, the account when it
  * still exists), for which subscription, when, what was paid and what is to be refunded. It must outlive what it points to, so both
@@ -44,6 +49,10 @@ return new class extends Migration
             $table->timestamp('renewal_notice_sent_for')->nullable();
         });
 
+        // Standard SQL on both columns, which compare exactly on every engine: no mail for a contract that was running already.
+        DB::table('billing_accounts')->whereNotNull('stripe_subscription_id')->update(['confirmation_sent_for' => DB::raw('stripe_subscription_id')]);
+        DB::table('billing_accounts')->whereNotNull('stripe_subscription_id')->where('cancel_at_period_end', true)->update(['cancel_notice_sent_for' => DB::raw('stripe_subscription_id')]);
+
         Schema::create('billing_withdrawals', function (Blueprint $table) {
             $table->id();
             // The proof outlives the workspace and the account: emptied, never cascaded.
@@ -61,8 +70,10 @@ return new class extends Migration
             $table->string('currency', 3)->nullable();
             // Nullable like every moment of the application's tables; the application sets `submitted_at` when it stores the row.
             $table->timestamp('submitted_at')->nullable();
-            // When the acknowledgement was queued; null while it was not (the administrators were told).
+            // When the acknowledgement was queued; null while it was not (the administrators are told, and the schedule tries again).
             $table->timestamp('acknowledged_at')->nullable();
+            // When the administrators were mailed what to refund; null while they were not (the schedule tries again).
+            $table->timestamp('admin_told_at')->nullable();
             $table->timestamps();
         });
     }

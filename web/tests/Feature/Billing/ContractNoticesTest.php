@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Billing\BillingCustomers;
 use App\Billing\BillingSync;
 use App\Billing\ContractNotices;
 use App\Legal\TermsDocument;
@@ -14,6 +15,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Workspaces\Workspaces;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -117,7 +119,8 @@ describe('the confirmation of a subscription', function (): void {
             ->toContain('At your express request, the service started immediately')
             ->toContain('You acknowledged that you lose your right of withdrawal once the contract has been fully performed.')
             // The right of withdrawal lasts fourteen days from the start, to the second, in the zone of the instance.
-            ->toContain('until November 24, 2026 3:30 PM (UTC+1)')
+            // The right lasts to the end of the fourteenth day after the one the subscription began (10 November 2026 in Paris), in the zone of the instance.
+            ->toContain('until November 24, 2026 11:59 PM (UTC+1)')
             ->toContain('"Withdraw from the contract here"')
             ->toContain('"Cancel your contract"')
             ->toContain('/app/w/'.$team['workspace']->ulid.'/billing')
@@ -498,12 +501,13 @@ describe('the notice of renewal of a yearly subscription', function (): void {
             ->and($mails[0]->getSubject())->toBe('Your yearly '.config('app.name').' Pro subscription renews on January 9, 2027')
             ->and($text)->toContain('Hello Yearly Owner,')
             ->toContain('renews automatically for one year')
-            ->toMatch('/={20,}\nLast date to refuse the renewal: January 9, 2027\n={20,}/')
+            // The subscription is billed at that very instant: the box says the time and its zone, and "before".
+            ->toMatch('/={20,}\nLast date to refuse the renewal: before January 9, 2027 3:30 PM \(UTC\+1\)\n={20,}/')
             ->toContain('If you do nothing, the renewal is charged €60 incl. VAT per year.')
-            ->toContain('free of charge, until that date')
+            ->toContain('free of charge, before that moment')
             ->toContain('/app/w/'.$yearly['workspace']->ulid.'/billing')
             // A box in the HTML as well: a border around the date, and the button that leads to the page.
-            ->and($html)->toContain('border:2px solid')->toContain('Last date to refuse the renewal: January 9, 2027')
+            ->and($html)->toContain('border:2px solid')->toContain('Last date to refuse the renewal: before January 9, 2027 3:30 PM (UTC+1)')
             ->toContain('>Cancel your contract</a>')
             ->and($yearly['account']->fresh()->renewal_notice_sent_for?->toDateTimeString())->toBe('2027-01-09 14:30:00');
     });
@@ -520,21 +524,28 @@ describe('the notice of renewal of a yearly subscription', function (): void {
         expect(noticeMailsTo('yearly@example.test'))->toHaveCount(2);
     });
 
-    it('is due from three months to a month before the end, both days included', function (int|float $daysLeft, int $mails): void {
-        noticeYearly($daysLeft);
+    it('is due from three months to a month before the end, in calendar months of the zone of the instance, both moments included', function (string $now, string $end, int $mails): void {
+        $this->travelTo(CarbonImmutable::parse($now, 'UTC'));
+        noticeYearly(0, ['current_period_end' => CarbonImmutable::parse($end, 'UTC')]);
 
         $this->artisan('inventaire:send-renewal-notices')->assertSuccessful();
 
         expect(noticeMailsTo('yearly@example.test'))->toHaveCount($mails);
     })->with([
-        'a year' => [365, 0],
-        'ninety-one days' => [91, 0],
-        'ninety days' => [90, 1],
-        'sixty days' => [60, 1],
-        'thirty days' => [30, 1],
-        'twenty-nine days' => [29, 0],
-        'a week' => [7, 0],
-        'already over' => [-1, 0],
+        // From 10 November, three months is 92 days and a month is 30: thirty and ninety days would be wrong at both ends.
+        'exactly three months before the end' => ['2026-11-10 14:30:00', '2027-02-10 14:30:00', 1],
+        'a second short of three months' => ['2026-11-10 14:30:00', '2027-02-10 14:30:01', 0],
+        'in between' => ['2026-11-10 14:30:00', '2027-01-09 14:30:00', 1],
+        'exactly a month before the end' => ['2026-11-10 14:30:00', '2026-12-10 14:30:00', 1],
+        'a second short of a month' => ['2026-11-10 14:30:00', '2026-12-10 14:29:59', 0],
+        'a year' => ['2026-11-10 14:30:00', '2027-11-10 14:30:00', 0],
+        'already over' => ['2026-11-10 14:30:00', '2026-11-09 14:30:00', 0],
+        // From 1 February a month is only 28 days.
+        'a month before 1 March is 28 days' => ['2027-02-01 12:00:00', '2027-03-01 12:00:00', 1],
+        'a second short of that' => ['2027-02-01 12:00:00', '2027-03-01 11:59:59', 0],
+        // Three months before 31 May is 28 February (no overflow into March): 92 days.
+        'three months before 31 May are taken back to 28 February' => ['2027-02-28 13:00:00', '2027-05-31 12:00:00', 1],
+        'and not the day before' => ['2027-02-27 13:00:00', '2027-05-31 12:00:00', 0],
     ]);
 
     it('is never mailed for a monthly subscription, nor one that ends by itself, nor one that is not live', function (string $case): void {
@@ -570,7 +581,7 @@ describe('the notice of renewal of a yearly subscription', function (): void {
         $mail = noticeMailsTo('yearly@example.test')[0];
 
         expect($mail->getSubject())->toBe('Votre abonnement annuel Pro à '.config('app.name').' est reconduit le 9 janvier 2027')
-            ->and($mail->getTextBody())->toContain('Date limite de non-reconduction : 9 janvier 2027');
+            ->and($mail->getTextBody())->toContain('Date limite de non-reconduction : avant le 9 janvier 2027 15:30 (UTC+1)');
     });
 
     it('does nothing, and reads nothing, while billing is off', function (): void {
@@ -671,5 +682,84 @@ describe('the acknowledgement of a withdrawal that cannot be delivered', functio
 
         expect($withdrawal->fresh()->acknowledged_at)->toBeNull()
             ->and((string) noticeMailsTo('admin@example.test')[0]->getTextBody())->toContain('A mail about a contract could not be delivered')->toContain($team['account']->stripe_customer_id);
+    });
+});
+
+describe('a confirmation that is late', function (): void {
+    /**
+     * A confirmation whose right of withdrawal ends at a moment.
+     */
+    function noticeLateConfirmation(CarbonInterface $withdrawalUntil): SubscriptionConfirmedMail
+    {
+        return new SubscriptionConfirmedMail('Ada', 'Shop', 'month', now()->subDays(20), now()->addDays(10), $withdrawalUntil, 'https://example.test/billing', 'https://example.test/terms', '2026-10-31', 1, 'sub_1');
+    }
+
+    it('does not offer a right of withdrawal that has run out, and still sends the contract, the terms and the way to cancel', function (): void {
+        $mail = noticeLateConfirmation(now()->subDays(6));
+
+        $mail->assertDontSeeInText('You can withdraw from the contract')->assertDontSeeInHtml('You can withdraw from the contract')
+            ->assertSeeInText('This message is the confirmation of your contract')
+            ->assertSeeInText('At your express request, the service started immediately')
+            ->assertSeeInText('You can cancel your contract at any time');
+    });
+
+    it('offers it while it lasts, up to its last second', function (): void {
+        noticeLateConfirmation(now()->addSecond())->assertSeeInText('You can withdraw from the contract, without giving a reason, until');
+    });
+});
+
+describe('an amount in a mail', function (): void {
+    it('has the decimals of its currency: none for the yen, three for the Kuwaiti dinar, two for the euro', function (string $currency, int $paid, int $refund, string $paidLabel, string $refundLabel): void {
+        $mail = new WithdrawalAcknowledgedMail('Ada', 'ada@example.test', 'Shop', 'month', now()->subDay(), now(), now()->addDays(14), $paid, $refund, $currency, 1, 30, 1);
+
+        $text = html_entity_decode($mail->render(), ENT_QUOTES);
+        $text = str_replace("\u{00A0}", ' ', $text);
+
+        expect($text)->toContain("Amount to be refunded: {$refundLabel}")->toContain("(paid: {$paidLabel};");
+    })->with([
+        'euro cents' => ['eur', 600, 540, '€6', '€5.40'],
+        'yen: no hundredths' => ['jpy', 1500, 1450, '¥1,500', '¥1,450'],
+        'Kuwaiti dinar: thousandths' => ['kwd', 6000, 5400, 'KWD 6', 'KWD 5.400'],
+    ]);
+});
+
+describe('a new customer for a workspace', function (): void {
+    it('forgets the start of the old subscription and the notices sent for it', function (): void {
+        $stripe = billingOn();
+        $owner = User::factory()->withPersonalWorkspace()->create();
+        $workspace = app(Workspaces::class)->create($owner, 'Shop');
+        $next = User::factory()->withPersonalWorkspace()->create();
+        $workspace->members()->attach($next->id, ['role' => 'owner']);
+        $account = BillingAccount::factory()->for($workspace)->paidBy($owner)->subscribed('canceled', 'year')->create([
+            'started_at' => now()->subYear(),
+            'confirmation_sent_for' => 'sub_old',
+            'cancel_notice_sent_for' => 'sub_old',
+            'renewal_notice_sent_for' => now()->subDays(40),
+        ]);
+        $stripe->addCustomer($account->stripe_customer_id);
+
+        $fresh = app(BillingCustomers::class)->startFresh($workspace, $account, $next, 'en');
+
+        expect($fresh->stripe_customer_id)->not->toBe($account->stripe_customer_id)
+            ->and($fresh->payer_id)->toBe($next->id)
+            ->and($fresh->only(['stripe_subscription_id', 'status', 'started_at', 'confirmation_sent_for', 'cancel_notice_sent_for', 'renewal_notice_sent_for']))->toBe([
+                'stripe_subscription_id' => null,
+                'status' => null,
+                'started_at' => null,
+                'confirmation_sent_for' => null,
+                'cancel_notice_sent_for' => null,
+                'renewal_notice_sent_for' => null,
+            ])
+            ->and($account->fresh()->only(['started_at', 'confirmation_sent_for', 'cancel_notice_sent_for', 'renewal_notice_sent_for']))->each->toBeNull();
+    });
+});
+
+describe('the schedule', function (): void {
+    it('prunes the failed jobs after thirty days, daily: a contract mail that failed holds a name and an address', function (): void {
+        $events = collect(app(Schedule::class)->events())->filter(fn (Event $event): bool => str_contains((string) $event->command, 'queue:prune-failed'));
+
+        expect($events)->toHaveCount(1)
+            ->and((string) $events->first()->command)->toContain('--hours=720')
+            ->and($events->first()->expression)->toBe('0 0 * * *');
     });
 });

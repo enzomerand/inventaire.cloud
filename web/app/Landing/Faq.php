@@ -63,15 +63,19 @@ final class Faq
 
     /**
      * The questions about billing, on the pricing page. Where the plans are only previewed (nothing can be bought yet) the page answers
-     * about the VAT and says that Pro is not on sale: it promises neither a payment page, an invoice nor a cancellation.
+     * about the VAT and says that Pro is not on sale: it promises neither a payment page, an invoice nor a cancellation. The answer about
+     * the VAT mentions the reverse charge only where Stripe Tax is on ({@see PricingPlans::$automaticTax}).
      *
      * @return list<array{question: string, answer: string}>
      */
     public static function billing(PricingPlans $plans): array
     {
+        // The reverse charge for a business of another EU country is something Stripe Tax applies at Checkout: without it (`STRIPE_AUTOMATIC_TAX`)
+        // the invoice carries VAT whoever pays, and the page does not promise otherwise.
         $vat = [
             'question' => __('What about VAT?'),
-            'answer' => __('Prices include VAT, and your invoice shows the amount. A business established in another EU country that gives a valid VAT number can be invoiced without VAT (reverse charge).'),
+            'answer' => __('Prices include VAT, and your invoice shows the amount.')
+                .($plans->automaticTax ? ' '.__('A business established in another EU country that gives a valid VAT number can be invoiced without VAT (reverse charge).') : ''),
         ];
 
         if (! $plans->selling) {

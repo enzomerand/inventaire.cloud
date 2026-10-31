@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Billing\BillingAlerts;
 use App\Billing\WithdrawalRefusedException;
 use App\Billing\Withdrawals;
 use App\Jobs\CancelStripeSubscription;
@@ -43,18 +44,18 @@ beforeEach(function (): void {
 });
 
 /**
- * A team whose workspace has a subscription its owner pays, begun `$secondsAgo` seconds ago for a period of 30 days (365 for a yearly
- * one), and a Stripe that knows the customer, the subscription (with the same start) and an invoice of `$paid` cents.
+ * A team whose workspace has a subscription its owner pays, begun `$secondsAgo` seconds ago (or at `$startedAt`) for a period of 30 days (365
+ * for a yearly one), and a Stripe that knows the customer, the subscription (with the same start) and an invoice of `$paid` cents.
  *
  * @return array{owner: User, editor: User, viewer: User, stranger: User, workspace: Workspace, stripe: FakeStripe, account: BillingAccount, subscription: string, startedAt: CarbonImmutable}
  */
-function contractTeam(string $interval = 'month', int $secondsAgo = 3 * 86400, ?int $paid = 600): array
+function contractTeam(string $interval = 'month', int $secondsAgo = 3 * 86400, ?int $paid = 600, ?CarbonImmutable $startedAt = null): array
 {
     $stripe = billingOn();
     $team = inventoryTeam();
     // The owner reads English, and was told of the contract when it began (the confirmation is not what these tests are about).
     $team['owner']->forceFill(['locale' => 'en'])->save();
-    $startedAt = CarbonImmutable::now()->subSeconds($secondsAgo);
+    $startedAt ??= CarbonImmutable::now()->subSeconds($secondsAgo);
     $periodEnd = $startedAt->addDays($interval === 'year' ? 365 : 30);
     $subscriptionId = 'sub_'.Str::random(14);
     $account = BillingAccount::factory()->for($team['workspace'])->paidBy($team['owner'])->subscribed('active', $interval)->create([
@@ -148,8 +149,33 @@ describe('withdrawing from the contract', function (): void {
             ->and($withdrawal->acknowledged_at)->not->toBeNull()
             ->and($team['stripe']->subscriptions[$team['subscription']]['status'])->toBe('canceled')
             ->and($team['account']->refresh()->status)->toBe('canceled')
-            ->and($answer->json('data.withdrawn'))->toBeTrue()
-            ->and($answer->json('data.withdrawal_until'))->toBeNull();
+            // The cancellation went through (the queue is synchronous here): nothing is left to say of the subscription, and the
+            // acknowledgement was queued.
+            ->and($answer->json('data.withdrawn'))->toBeFalse()
+            ->and($answer->json('data.withdrawal_until'))->toBeNull()
+            ->and($answer->json('meta.acknowledged'))->toBeTrue();
+    });
+
+    it('says the withdrawal is recorded while the subscription is still ending, and that the acknowledgement was queued', function (): void {
+        Queue::fake();
+        Mail::fake();
+        $team = contractTeam();
+
+        $answer = contractWithdraw($this, $team)->assertCreated();
+
+        expect($answer->json('data.withdrawn'))->toBeTrue()
+            ->and($answer->json('data.withdrawal_until'))->toBeNull()
+            ->and($answer->json('meta'))->toBe(['acknowledged' => true]);
+    });
+
+    it('says the acknowledgement was not queued when it could not be, so that the page does not promise it', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        billingMailBreaksFor(['ada@example.test']);
+
+        $answer = contractWithdraw($this, $team)->assertCreated();
+
+        expect($answer->json('meta.acknowledged'))->toBeFalse();
     });
 
     it('acknowledges the withdrawal on a durable medium: the declaration, the date and time with their zone, the effects and the refund', function (): void {
@@ -208,10 +234,13 @@ describe('withdrawing from the contract', function (): void {
             ->toContain('Refund to make: 5.40 EUR')
             ->toContain('Refund before: November 24, 2026')
             ->toContain('The acknowledgement was sent to the customer.')
+            // The amount comes from the latest paid invoice alone: the administrators are told to check it against Stripe.
+            ->toContain('Check the amount against Stripe: it is computed from the latest paid invoice only')
             ->toContain('https://dashboard.stripe.com/test/customers/'.$team['account']->stripe_customer_id)
             // The customer is named by their Stripe reference only, never by a name or an address.
             ->not->toContain('Ada Lovelace')->not->toContain('ada@example.test');
-        expect($french)->toContain('Remboursement à effectuer : 5.40 EUR')->toContain('À rembourser avant le : 24 novembre 2026');
+        expect($french)->toContain('Remboursement à effectuer : 5.40 EUR')->toContain('À rembourser avant le : 24 novembre 2026')
+            ->toContain("Vérifiez le montant dans Stripe : il est calculé d'après la dernière facture payée seulement");
     });
 
     it('does not tell of a cancellation: the subscription ended at once, not with the period', function (): void {
@@ -226,10 +255,11 @@ describe('withdrawing from the contract', function (): void {
             ->and($team['account']->refresh()->cancel_notice_sent_for)->toBeNull();
     });
 
-    it('is allowed on the last moment of the fourteenth day and refused a second later', function (int $secondsAgo, int $status): void {
+    it('counts the fourteen days the way the consumer code does: the day of the conclusion is not counted, the last day lasts until midnight', function (string $concluded, string $declared, int $status): void {
+        $this->travelTo(CarbonImmutable::parse($declared, 'UTC'));
         Queue::fake();
         Mail::fake();
-        $team = contractTeam(secondsAgo: $secondsAgo);
+        $team = contractTeam(startedAt: CarbonImmutable::parse($concluded, 'UTC'));
 
         $answer = contractWithdraw($this, $team)->assertStatus($status);
 
@@ -246,10 +276,25 @@ describe('withdrawing from the contract', function (): void {
             Queue::assertPushed(CancelStripeSubscription::class, 1);
         }
     })->with([
-        'day 1' => [86400, 201],
-        'day 14, to the second' => [14 * 86400, 201],
-        'day 15' => [14 * 86400 + 1, 409],
-        'day 20' => [20 * 86400, 409],
+        // Concluded on Tuesday 3 November 2026 at 15:00 in Paris (14:00 UTC): the fourteenth day after it is Tuesday 17 November.
+        'the day after' => ['2026-11-03 14:00:00', '2026-11-04 09:00:00', 201],
+        'the same hour fourteen days later' => ['2026-11-03 14:00:00', '2026-11-17 14:00:00', 201],
+        'on the fourteenth day at 23:59 in Paris' => ['2026-11-03 14:00:00', '2026-11-17 22:59:00', 201],
+        'on the last second of the fourteenth day in Paris' => ['2026-11-03 14:00:00', '2026-11-17 22:59:59', 201],
+        'on the fifteenth day at midnight in Paris' => ['2026-11-03 14:00:00', '2026-11-17 23:00:00', 409],
+        'on the fifteenth day' => ['2026-11-03 14:00:00', '2026-11-18 10:00:00', 409],
+        // Concluded on Saturday 7 November: the fourteenth day is Saturday 21 November, the right runs on to Monday 23 November.
+        'a period ending on a Saturday runs on: the Saturday' => ['2026-11-07 14:00:00', '2026-11-21 12:00:00', 201],
+        'a period ending on a Saturday runs on: the Sunday' => ['2026-11-07 14:00:00', '2026-11-22 12:00:00', 201],
+        'a period ending on a Saturday runs on: the Monday at 23:59' => ['2026-11-07 14:00:00', '2026-11-23 22:59:59', 201],
+        'a period ending on a Saturday runs on: the Tuesday' => ['2026-11-07 14:00:00', '2026-11-23 23:00:00', 409],
+        // Concluded on Wednesday 28 October: the fourteenth day is Wednesday 11 November, a public holiday: the right runs on to Thursday.
+        'a period ending on a holiday runs on: the holiday' => ['2026-10-28 14:00:00', '2026-11-11 12:00:00', 201],
+        'a period ending on a holiday runs on: the Thursday at 23:59' => ['2026-10-28 14:00:00', '2026-11-12 22:59:59', 201],
+        'a period ending on a holiday runs on: the Friday' => ['2026-10-28 14:00:00', '2026-11-12 23:00:00', 409],
+        // A subscription begun at 23:30 UTC began on the next day in Paris (4 November, so the fourteenth day is 18 November).
+        'begun at 23:30 UTC: the day in Paris counts' => ['2026-11-03 23:30:00', '2026-11-18 22:59:59', 201],
+        'begun at 23:30 UTC: and no later' => ['2026-11-03 23:30:00', '2026-11-18 23:00:00', 409],
     ]);
 
     it('counts the fourteen days again for a new subscription', function (): void {
@@ -388,7 +433,7 @@ describe('withdrawing from the contract', function (): void {
             ->toThrow(fn (WithdrawalRefusedException $refused) => expect($refused->reason)->toBe('no_live_subscription'));
 
         // The fourteen days ran out between the judgement and the lock.
-        $team['account']->forceFill(['started_at' => now()->subDays(14)->subSecond()])->save();
+        $team['account']->forceFill(['started_at' => now()->subDays(20)])->save();
 
         expect(fn () => $service->record($team['workspace'], $team['owner'], 'Ada', 'ada@example.test', $team['subscription'], null))
             ->toThrow(fn (WithdrawalRefusedException $refused) => expect($refused->reason)->toBe('withdrawal_period_over'))
@@ -660,19 +705,62 @@ describe('the overview of a contract', function (): void {
     it('tells when the subscription began and until when it can be withdrawn from', function (): void {
         $team = contractTeam();
 
-        inventoryCall($this, $team['editor'], 'GET', billingApiUri($team['workspace']))
+        // Begun on Saturday 7 November: the fourteenth day is Saturday 21 November, so the right runs on to the end of Monday 23 November in
+        // Paris (22:59:59 UTC).
+        inventoryCall($this, $team['owner'], 'GET', billingApiUri($team['workspace']))
             ->assertOk()
             ->assertJsonPath('data.selling', true)
             ->assertJsonPath('data.started_at', '2026-11-07T14:30:00+00:00')
-            ->assertJsonPath('data.withdrawal_until', '2026-11-21T14:30:00+00:00')
+            ->assertJsonPath('data.withdrawal_until', '2026-11-23T22:59:59+00:00')
             ->assertJsonPath('data.withdrawn', false);
+    });
+
+    it('tells the contract to those who manage the subscription only: the keys are there, and empty, for the other members', function (string $who): void {
+        Queue::fake();
+        Mail::fake();
+        $team = contractTeam();
+        contractWithdraw($this, $team)->assertCreated();
+
+        $data = inventoryCall($this, $team[$who], 'GET', billingApiUri($team['workspace']))->assertOk()->json('data');
+
+        expect($data)->toHaveKeys(['started_at', 'withdrawal_until', 'withdrawn'])
+            ->and($data['started_at'])->toBeNull()
+            ->and($data['withdrawal_until'])->toBeNull()
+            ->and($data['withdrawn'])->toBeFalse();
+    })->with(['editor', 'viewer']);
+
+    it('reads nothing of the withdrawals for a member who may not manage the subscription', function (): void {
+        $team = contractTeam();
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        inventoryCall($this, $team['viewer'], 'GET', billingApiUri($team['workspace']))->assertOk();
+
+        $sql = implode("\n", array_column(DB::getQueryLog(), 'query'));
+        DB::disableQueryLog();
+
+        expect($sql)->not->toContain('billing_withdrawals');
+    });
+
+    it('stops saying a withdrawal is recorded once the subscription is over: the workspace is back on Free', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractWithdraw($this, $team)->assertCreated();
+
+        // The subscription went through to `canceled` and the row kept its id: nothing to say of it on the page.
+        $data = inventoryCall($this, $team['owner'], 'GET', billingApiUri($team['workspace']))->assertOk()->json('data');
+
+        expect($team['account']->refresh()->status)->toBe('canceled')
+            ->and(BillingWithdrawal::query()->count())->toBe(1)
+            ->and($data['status'])->toBe('canceled')
+            ->and($data['withdrawn'])->toBeFalse();
     });
 
     it('stops offering the withdrawal after the fourteen days, after it was made, and when nothing is live', function (string $case): void {
         Queue::fake();
         Mail::fake();
         $team = match ($case) {
-            'day 15' => contractTeam(secondsAgo: 14 * 86400 + 1),
+            'day 15' => contractTeam(secondsAgo: 15 * 86400),
             default => contractTeam(),
         };
 
@@ -716,5 +804,254 @@ describe('the overview of a contract', function (): void {
         DB::disableQueryLog();
 
         expect($sql)->not->toContain('billing_withdrawals')->not->toContain('billing_accounts');
+    });
+});
+
+/**
+ * Stores a declaration and does nothing else: what is left of a withdrawal when the process died between storing it and acting on it.
+ */
+function contractRecordedOnly(array $team, string $email = 'ada@example.test'): BillingWithdrawal
+{
+    return app(Withdrawals::class)->record($team['workspace'], $team['owner'], 'Ada Lovelace', $email, $team['subscription'], ['id' => 'in_1', 'amount_paid' => 600, 'currency' => 'eur']);
+}
+
+describe('finishing a withdrawal that did not go through', function (): void {
+    it('cancels the subscription, acknowledges the person and tells the administrators, once, when the process died after storing the declaration', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        $withdrawal = contractRecordedOnly($team);
+
+        // Stored, and nothing else: the subscription goes on billing, nobody wrote to the person, the administrators know nothing.
+        expect($withdrawal->acknowledged_at)->toBeNull()->and($withdrawal->admin_told_at)->toBeNull()
+            ->and($team['stripe']->subscriptions[$team['subscription']]['status'])->toBe('active');
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('1 withdrawal(s) followed up.')->assertSuccessful();
+
+        $withdrawal->refresh();
+
+        expect($team['stripe']->subscriptions[$team['subscription']]['status'])->toBe('canceled')
+            ->and($withdrawal->acknowledged_at)->not->toBeNull()
+            ->and($withdrawal->admin_told_at)->not->toBeNull()
+            ->and(contractMailTo('ada@example.test', 'Acknowledgement of your withdrawal'))->toContain('Declaration received on: November 10, 2026 3:30 PM (UTC+1)')
+            ->and(contractMailTo('admin@example.test', 'A customer withdrew from their contract'))->toContain('The acknowledgement was sent to the customer.');
+
+        // A second run has nothing to finish: nothing is sent twice, and the subscription is not cancelled again.
+        $mails = count(sentMails());
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect(count(sentMails()))->toBe($mails)
+            ->and($team['stripe']->count('DELETE /v1/subscriptions/{id}'))->toBe(1);
+    });
+
+    it('leaves a declaration to the request that stored it for a few minutes, and gives up on one that is old', function (int $minutes, bool $finished): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractRecordedOnly($team);
+
+        $this->travel($minutes)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect(BillingWithdrawal::query()->sole()->admin_told_at !== null)->toBe($finished);
+    })->with([
+        'a minute' => [1, false],
+        'nine minutes' => [9, false],
+        'eleven minutes' => [11, true],
+        'thirteen days' => [13 * 1440, true],
+        'fifteen days' => [15 * 1440, false],
+    ]);
+
+    it('does only what is missing: the administrators, when the person was acknowledged', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        $withdrawal = contractRecordedOnly($team);
+        $withdrawal->forceFill(['acknowledged_at' => now()])->save();
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $subjects = array_map(fn (array $mail): string => $mail[1], contractMails());
+
+        expect(implode("\n", $subjects))->toContain('A customer withdrew from their contract')->not->toContain('Acknowledgement of your withdrawal')
+            ->and($team['stripe']->subscriptions[$team['subscription']]['status'])->toBe('canceled');
+    });
+
+    it('does only what is missing: the acknowledgement, when the administrators were told', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        $withdrawal = contractRecordedOnly($team);
+        $withdrawal->forceFill(['admin_told_at' => now()])->save();
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $subjects = array_map(fn (array $mail): string => $mail[1], contractMails());
+
+        expect(implode("\n", $subjects))->toContain('Acknowledgement of your withdrawal')->not->toContain('A customer withdrew from their contract');
+    });
+
+    it('tells the administrators later when there was nobody to tell, without writing to the person again', function (): void {
+        $team = contractTeam();
+        $withdrawal = contractRecordedOnly($team);
+        Log::spy();
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $first = $withdrawal->refresh();
+
+        expect($first->acknowledged_at)->not->toBeNull()->and($first->admin_told_at)->toBeNull();
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'nobody was told to refund them'))->once();
+
+        contractAdmin();
+        $this->travel(61)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $subjects = implode("\n", array_map(fn (array $mail): string => $mail[1], contractMails()));
+
+        expect($withdrawal->refresh()->admin_told_at)->not->toBeNull()
+            ->and(substr_count($subjects, 'Acknowledgement of your withdrawal'))->toBe(1)
+            ->and(substr_count($subjects, 'A customer withdrew from their contract'))->toBe(1);
+    });
+
+    it('sends the acknowledgement later when the mailer was down, and the administrators are not told twice', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractRecordedOnly($team);
+        billingMailBreaksFor(['ada@example.test']);
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $withdrawal = BillingWithdrawal::query()->sole();
+
+        expect($withdrawal->acknowledged_at)->toBeNull()->and($withdrawal->admin_told_at)->not->toBeNull()
+            ->and(contractMailTo('admin@example.test', 'A customer withdrew from their contract'))->toContain('The acknowledgement could NOT be sent to the customer');
+
+        // The mailer works again: the next run writes to the person, and to nobody else.
+        config(['mail.default' => 'array']);
+        app('mail.manager')->purge();
+        $this->travel(61)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect($withdrawal->refresh()->acknowledged_at)->not->toBeNull()
+            ->and(array_map(fn (array $mail): string => $mail[0], contractMails()))->toBe(['ada@example.test']);
+    });
+
+    it('does not cancel, nor acknowledge, a subscription the person bought after withdrawing: the account no longer describes the contract', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractRecordedOnly($team);
+        $team['stripe']->setStatus($team['subscription'], 'canceled');
+        $new = $team['stripe']->subscribe($team['account']->stripe_customer_id, 'active', 'year', now()->addDays(365)->getTimestamp());
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect($team['stripe']->subscriptions[$new]['status'])->toBe('active')
+            ->and($team['stripe']->count('DELETE /v1/subscriptions/{id}'))->toBe(0)
+            ->and(BillingWithdrawal::query()->sole()->acknowledged_at)->toBeNull()
+            ->and(contractMailTo('admin@example.test', 'A customer withdrew from their contract'))->toContain('The acknowledgement could NOT be sent to the customer');
+    });
+
+    it('still tells the administrators when the workspace is gone', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractRecordedOnly($team);
+        $team['workspace']->delete();
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $withdrawal = BillingWithdrawal::query()->sole();
+
+        expect($withdrawal->workspace_id)->toBeNull()->and($withdrawal->admin_told_at)->not->toBeNull()->and($withdrawal->acknowledged_at)->toBeNull()
+            ->and(contractMailTo('admin@example.test', 'A customer withdrew from their contract'))->toContain('Refund to make: 5.40 EUR')->not->toContain('Workspace:');
+    });
+
+    it('goes back to Stripe by itself when it cannot be read: the stored subscription is judged and the cancellation retried by its job', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractRecordedOnly($team);
+        $team['stripe']->failNext('GET /v1/subscriptions', 503);
+
+        $this->travel(11)->minutes();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        expect($team['stripe']->subscriptions[$team['subscription']]['status'])->toBe('canceled')
+            ->and(BillingWithdrawal::query()->sole()->admin_told_at)->not->toBeNull();
+    });
+
+    it('does nothing for a withdrawal that went through completely', function (): void {
+        contractAdmin();
+        $team = contractTeam();
+        contractWithdraw($this, $team)->assertCreated();
+        $calls = count($team['stripe']->calls);
+        $mails = count(sentMails());
+
+        $this->travel(2)->hours();
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        // Only the reading of the accounts due (the schedule's own business) may have called Stripe: nothing was cancelled, nothing sent.
+        expect($team['stripe']->count('DELETE /v1/subscriptions/{id}'))->toBe(1)
+            ->and(count(sentMails()))->toBe($mails)
+            ->and(BillingWithdrawal::query()->sole()->only(['acknowledged_at', 'admin_told_at']))->each->not->toBeNull()
+            ->and(count($team['stripe']->calls))->toBeGreaterThanOrEqual($calls);
+    });
+
+    it('finishes the oldest first and at most twenty in a run', function (): void {
+        billingOn();
+        contractAdmin();
+
+        foreach (range(1, 25) as $minutes) {
+            BillingWithdrawal::factory()->create(['submitted_at' => now()->subMinutes(10 + $minutes)]);
+        }
+
+        $this->artisan('inventaire:sync-billing')->assertSuccessful();
+
+        $told = BillingWithdrawal::query()->whereNotNull('admin_told_at')->orderBy('submitted_at')->pluck('id');
+
+        // The twenty oldest of the twenty-five (the factory made the first the most recent): the five newest wait for the next run.
+        expect($told)->toHaveCount(20)
+            ->and(app(Withdrawals::class)->unsettled(100))->toHaveCount(5)
+            ->and(BillingWithdrawal::query()->whereNull('admin_told_at')->min('submitted_at'))->toBeGreaterThan(BillingWithdrawal::query()->whereNotNull('admin_told_at')->max('submitted_at'));
+    });
+});
+
+describe('telling the administrators of a withdrawal', function (): void {
+    it('counts the ones that were told when the mail of a later one cannot be queued, and does not say that nobody was', function (): void {
+        User::factory()->admin()->create(['email' => 'a-admin@example.test', 'locale' => 'en']);
+        User::factory()->admin()->create(['email' => 'b-admin@example.test', 'locale' => 'en']);
+        $withdrawal = BillingWithdrawal::factory()->create();
+        billingMailBreaksFor(['b-admin@example.test']);
+        Log::spy();
+
+        $told = app(BillingAlerts::class)->tellWithdrawal($withdrawal, null, true);
+
+        expect($told)->toBe(1);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'could not all be told of a withdrawal'))->once();
+        Log::shouldNotHaveReceived('error', ['A customer withdrew from their contract and nobody was told to refund them: refund them in the dashboard of Stripe.']);
+    });
+
+    it('says nobody was told, and writes everything the mail would have said in the log, when there is no administrator', function (): void {
+        $withdrawal = BillingWithdrawal::factory()->create(['amount_paid_cents' => 600, 'refund_cents' => 540, 'currency' => 'eur']);
+        Log::spy();
+
+        $told = app(BillingAlerts::class)->tellWithdrawal($withdrawal, null, false);
+
+        expect($told)->toBe(0);
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'nobody was told to refund them') && $context['refund_cents'] === 540)->once();
+    });
+
+    it('has a mail that is tried again, and that writes what it said in the log when it cannot be delivered', function (): void {
+        $mail = BillingAlertMail::withdrawal('cus_1', 'sub_1', null, 600, 540, 'eur', now(), true, false);
+        Log::spy();
+
+        expect($mail->tries)->toBe(5)->and($mail->backoff())->toBe([60, 300, 900, 1800]);
+
+        $mail->failed(new RuntimeException('The mail server is down.'));
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'could not be delivered after every try')
+            && $context['event'] === 'withdrawal' && $context['object'] === 'cus_1' && $context['withdrawal']['refund'] === 540 && $context['withdrawal']['subscription'] === 'sub_1')->once();
     });
 });

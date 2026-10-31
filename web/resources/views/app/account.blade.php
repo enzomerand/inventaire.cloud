@@ -305,7 +305,7 @@
                     <div class="card-body">
                         <p>{{ __('Deleting your account erases your profile and the workspaces that only you belong to, with everything in them. You simply leave the workspaces you share with other people. This cannot be undone.') }}</p>
                         @if (\App\Billing\Billing::enabled())
-                            <p>{{ __('If one of those workspaces has a Pro subscription, it ends at once, without a refund of the period in progress.') }}</p>
+                            <p>{{ __('If one of those workspaces has a Pro subscription, it ends at once, and the period in progress is not refunded, subject to your right of withdrawal and the legal guarantee. If you are within the 14 days of withdrawal, withdraw from the contract first from the Subscription page of that workspace: deleting the workspace removes that page.') }}</p>
                         @endif
 
                         <div class="alert alert-danger" role="alert" x-show="error">

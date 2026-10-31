@@ -47,3 +47,8 @@ Schedule::command('inventaire:sync-billing')->hourly()->withoutOverlapping(55)->
 // the consumer code). Nothing to do (and said so) when the instance sells no plan. The lock of a run that was killed is forgotten after
 // 55 minutes (the default is 24 hours: no notice for a day).
 Schedule::command('inventaire:send-renewal-notices')->daily()->withoutOverlapping(55)->runInBackground();
+
+// The jobs that failed are kept for thirty days and then deleted. A failed contract mail (the confirmation, the receipt, the notice, the
+// acknowledgement of a withdrawal) holds the name and the address of the person in `failed_jobs`: that is not to be kept for ever. The lock
+// of a run that was killed is forgotten after 30 minutes, as for the other pruning (the default is 24 hours: no pruning for a day).
+Schedule::command('queue:prune-failed --hours=720')->daily()->withoutOverlapping(30);

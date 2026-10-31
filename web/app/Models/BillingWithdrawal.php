@@ -30,6 +30,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $currency Lowercase ISO code of the two amounts.
  * @property CarbonImmutable|null $submitted_at When the declaration was received.
  * @property CarbonImmutable|null $acknowledged_at When the acknowledgement was queued; null while it was not.
+ * @property CarbonImmutable|null $admin_told_at When the administrators were mailed what to refund; null while they were not.
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Workspace|null $workspace
@@ -57,6 +58,7 @@ final class BillingWithdrawal extends Model
         'currency',
         'submitted_at',
         'acknowledged_at',
+        'admin_told_at',
     ];
 
     /**
@@ -71,6 +73,7 @@ final class BillingWithdrawal extends Model
             'refund_cents' => 'integer',
             'submitted_at' => 'immutable_datetime',
             'acknowledged_at' => 'immutable_datetime',
+            'admin_told_at' => 'immutable_datetime',
         ];
     }
 

@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use App\Models\BillingAccount;
+use App\Models\Workspace;
 use App\Workspaces\Workspaces;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 
 require_once __DIR__.'/../../Support/billing.php';
@@ -84,10 +86,10 @@ describe('the subscription page', function (): void {
 
         expect($messages['billing.withdrawn'])->toBe($withdrawn)
             ->and($messages['billing.withdrawal.contract'])->toBe($contract)
-            ->and($messages)->toHaveKeys(['billing.error.no_live_subscription', 'billing.error.cancellation_scheduled', 'billing.error.withdrawal_period_over', 'billing.error.already_withdrawn', 'billing.notice.withdrawn', 'billing.withdrawal.until']);
+            ->and($messages)->toHaveKeys(['billing.error.no_live_subscription', 'billing.error.cancellation_scheduled', 'billing.error.withdrawal_period_over', 'billing.error.already_withdrawn', 'billing.notice.withdrawn', 'billing.notice.withdrawn_pending', 'billing.withdrawal.until']);
     })->with([
-        'English' => ['en', 'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.', ':plan subscription, :interval, ordered on :date'],
-        'French' => ['fr', "Votre rétractation est enregistrée et votre abonnement prend fin. L'accusé de réception est envoyé à l'adresse que vous avez indiquée.", 'Abonnement :plan, :interval, commandé le :date'],
+        'English' => ['en', 'Your withdrawal is recorded and your subscription is ending. You receive the acknowledgement at the address you gave.', ':plan subscription, :interval, ordered on :date'],
+        'French' => ['fr', "Votre rétractation est enregistrée et votre abonnement prend fin. Vous recevez l'accusé de réception à l'adresse que vous avez indiquée.", 'Abonnement :plan, :interval, commandé le :date'],
     ]);
 
     it('hands the script no word of billing while the instance sells nothing', function (): void {
@@ -185,7 +187,7 @@ describe('the workspaces page', function (): void {
 
         $messages = contractPageMessages($this->actingAs($owner)->get(route('app.workspaces', absolute: false), ['Accept-Language' => 'fr'])->assertOk());
 
-        expect($messages['workspaces.confirm_delete_subscription'])->toBe('Son abonnement Pro prend fin immédiatement, sans remboursement de la période en cours.');
+        expect($messages['workspaces.confirm_delete_subscription'])->toBe("Son abonnement Pro prend fin immédiatement et la période en cours n'est pas remboursée, sous réserve de votre droit de rétractation et de la garantie légale. Si vous êtes dans les 14 jours de rétractation, rétractez-vous d'abord du contrat depuis sa page Abonnement : supprimer l'espace supprime cette page.");
     });
 });
 
@@ -196,11 +198,79 @@ describe('the account page', function (): void {
         $owner = inventoryPerson();
 
         $this->actingAs($owner)->get(route('app.account', absolute: false))->assertOk()
-            ->assertSee('If one of those workspaces has a Pro subscription, it ends at once, without a refund of the period in progress.');
+            ->assertSee('If one of those workspaces has a Pro subscription, it ends at once, and the period in progress is not refunded, subject to your right of withdrawal and the legal guarantee.')
+            ->assertSee('If you are within the 14 days of withdrawal, withdraw from the contract first from the Subscription page of that workspace: deleting the workspace removes that page.');
 
         billingOff();
 
         $this->actingAs($owner)->get(route('app.account', absolute: false))->assertOk()
             ->assertDontSee('Pro subscription, it ends at once');
+    });
+});
+
+describe('the terms of sale', function (): void {
+    it('stay reachable wherever a contract exists, since the mails of a contract link to them, even when nothing is shown or sold', function (): void {
+        // Stripe is set up but the seller is incomplete (nothing is sold) and there is no preview: the plans are not shown.
+        billingOn(['legal.seller.vat_number' => '']);
+        BillingAccount::factory()->for(Workspace::factory())->subscribed('active')->create();
+
+        $this->get('/terms')->assertOk()->assertSee('<meta name="robots" content="noindex, nofollow">', false);
+
+        // Still a working version while the seller is incomplete.
+        $this->get('/en/terms')->assertOk()->assertSee('Working version: information to be completed')->assertSee('<meta name="robots" content="noindex, nofollow">', false);
+        // The pricing page stays a 404 where the plans are not shown.
+        $this->get('/pricing')->assertNotFound();
+        $this->get('/en/pricing')->assertNotFound();
+    });
+
+    it('are complete and indexable once the seller is, wherever a contract exists', function (): void {
+        billingOn();
+        config(['app.indexable' => true]);
+        BillingAccount::factory()->for(Workspace::factory())->subscribed('active')->create();
+
+        $this->get('/en/terms')->assertOk()->assertDontSee('Working version')->assertSee('<meta name="robots" content="index, follow">', false);
+    });
+
+    it('are a 404 where nothing is shown and no subscription exists, even when an account does', function (): void {
+        // Stripe is set up, the seller is incomplete, nothing is previewed; an account started a checkout and never subscribed.
+        billingOn(['legal.seller.vat_number' => '']);
+        BillingAccount::factory()->for(Workspace::factory())->create();
+
+        $this->get('/terms')->assertNotFound();
+        $this->get('/en/terms')->assertNotFound();
+    });
+
+    it('stay reachable for a contract that is over: the account keeps the id of its subscription', function (): void {
+        billingOn(['legal.seller.vat_number' => '']);
+        BillingAccount::factory()->for(Workspace::factory())->subscribed('canceled')->create();
+
+        $this->get('/terms')->assertOk();
+    });
+
+    it('are a 404 while billing is off, whatever the table holds', function (): void {
+        billingOff();
+        BillingAccount::factory()->for(Workspace::factory())->subscribed('active')->create();
+
+        $this->get('/terms')->assertNotFound();
+    });
+
+    it('read nothing while billing is off', function (): void {
+        billingOff();
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->get('/terms')->assertNotFound();
+
+        $sql = implode("\n", array_column(DB::getQueryLog(), 'query'));
+        DB::disableQueryLog();
+
+        expect($sql)->not->toContain('billing_accounts');
+    });
+
+    it('say how the fourteen days are counted, in French and in the translation', function (): void {
+        billingPreview();
+
+        $this->get('/terms')->assertOk()->assertSee("Le jour de la conclusion n'est pas compté ; le délai prend fin à la dernière heure du quatorzième jour et, s'il expire un samedi, un dimanche ou un jour férié ou chômé, il est prorogé jusqu'au premier jour ouvrable suivant.", false);
+        $this->get('/en/terms')->assertOk()->assertSee('The day the contract is concluded is not counted; the period ends at the last hour of the fourteenth day and, if it expires on a Saturday, a Sunday or a public or non-working holiday, it is extended to the next working day.');
     });
 });

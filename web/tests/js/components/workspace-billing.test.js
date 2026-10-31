@@ -783,7 +783,10 @@ describe('the subscription page of a workspace', () => {
             component.openWithdrawal();
             component.withdrawalName = '  Ada Byron ';
             component.withdrawalEmail = ' receipts@example.test ';
-            http.post.mockResolvedValue({ data: fresh({ withdrawn: true, withdrawal_until: null }) });
+            http.post.mockResolvedValue({
+                data: fresh({ withdrawn: true, withdrawal_until: null }),
+                meta: { acknowledged: true },
+            });
 
             await component.submitWithdrawal();
 
@@ -801,8 +804,26 @@ describe('the subscription page of a workspace', () => {
                 'Your withdrawal is recorded. An acknowledgement is on its way to receipts@example.test.',
             );
             expect(component.notice).toBe(
-                'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.',
+                'Your withdrawal is recorded and your subscription is ending. You receive the acknowledgement at the address you gave.',
             );
+        });
+
+        it.each([
+            ['the acknowledgement could not be queued', { acknowledged: false }],
+            ['the server does not say', undefined],
+        ])('does not promise an acknowledgement on its way when %s: it follows', async (_case, meta) => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockResolvedValue({ data: fresh({ withdrawn: true, withdrawal_until: null }), meta });
+
+            await component.submitWithdrawal();
+
+            expect(notify).toHaveBeenCalledWith(
+                'success',
+                'Your withdrawal is recorded. The acknowledgement will follow by email.',
+            );
+            expect(notify).not.toHaveBeenCalledWith('success', expect.stringContaining('on its way'));
+            expect(component.withdrawalOpen).toBe(false);
         });
 
         it('does not send the declaration twice', async () => {
@@ -818,7 +839,7 @@ describe('the subscription page of a workspace', () => {
             expect(http.post).toHaveBeenCalledTimes(1);
         });
 
-        it('tells why the right cannot be exercised any more, keeps the declaration open and reads the overview again', async () => {
+        it('tells why the right cannot be exercised any more, closes the declaration and reads the overview again', async () => {
             await open(fresh());
             component.openWithdrawal();
             http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'withdrawal_period_over' }));
@@ -830,6 +851,34 @@ describe('the subscription page of a workspace', () => {
             expect(http.get).toHaveBeenCalledTimes(2);
             expect(component.withdrawing).toBe(false);
             expect(component.canWithdraw).toBe(false);
+            // The panel went with the right it was for, and its button cannot send what is left in the fields.
+            expect(component.withdrawalOpen).toBe(false);
+            expect(component.canSubmitWithdrawal).toBe(false);
+        });
+
+        it('cannot send the declaration once the right is gone, whatever is in the fields', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+
+            expect(component.canSubmitWithdrawal).toBe(true);
+
+            component.billing = fresh({ withdrawal_until: null });
+
+            expect(component.canSubmitWithdrawal).toBe(false);
+
+            await component.submitWithdrawal();
+
+            expect(http.post).not.toHaveBeenCalled();
+        });
+
+        it('leaves the declaration open when the server fails for another reason than a refusal', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockRejectedValue(new HttpError(503, 'Unavailable', { code: 'billing_unavailable' }));
+
+            await component.submitWithdrawal();
+
+            expect(component.withdrawalOpen).toBe(true);
         });
 
         it.each([
@@ -889,7 +938,7 @@ describe('the subscription page of a workspace', () => {
             await open(fresh({ withdrawn: true, withdrawal_until: null }));
 
             expect(component.notice).toBe(
-                'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.',
+                'Your withdrawal is recorded and your subscription is ending. You receive the acknowledgement at the address you gave.',
             );
 
             await open(fresh({ withdrawn: true, withdrawal_until: null, can_manage: false }));

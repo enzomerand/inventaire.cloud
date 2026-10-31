@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mail;
 
+use App\Billing\Currencies;
 use App\Billing\Withdrawals;
 use App\Support\DisplayTime;
 use Carbon\CarbonImmutable;
@@ -11,6 +12,8 @@ use Carbon\CarbonInterface;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * The notice the administrators of the instance receive when something about the money needs a person in the dashboard of Stripe. Three
@@ -38,6 +41,9 @@ use Illuminate\Mail\Mailables\Envelope;
  */
 final class BillingAlertMail extends Mailable
 {
+    /** How many times the queue sends the mail: the alert of a withdrawal carries a legal deadline for a refund. */
+    public int $tries = 5;
+
     /** The events that are told to the administrators, and the page of the dashboard of Stripe where their object is. */
     public const PAGES = [
         'charge.dispute.created' => 'disputes',
@@ -76,12 +82,6 @@ final class BillingAlertMail extends Mailable
     public const TASKS = [
         'withdrawal' => 'customers',
     ];
-
-    /** The currencies whose amount is not counted in hundredths but in whole units (Stripe gives it as such). */
-    private const WHOLE_UNIT_CURRENCIES = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
-
-    /** The currencies whose amount is counted in thousandths. */
-    private const THOUSANDTH_CURRENCIES = ['bhd', 'jod', 'kwd', 'omr', 'tnd'];
 
     /**
      * @param  string  $eventType  A key of {@see self::PAGES}, or of {@see self::PROBLEMS}.
@@ -137,6 +137,38 @@ final class BillingAlertMail extends Mailable
             'submitted_at' => $submittedAt,
             'deadline' => CarbonImmutable::instance($submittedAt)->addDays(Withdrawals::REFUND_DAYS),
             'acknowledged' => $acknowledged,
+        ]);
+    }
+
+    /**
+     * The seconds to wait before each new try.
+     *
+     * @return list<int>
+     */
+    public function backoff(): array
+    {
+        return [60, 300, 900, 1800];
+    }
+
+    /**
+     * Writes in the log what the mail would have said, once the last try failed, so that nothing the administrators were to do is lost with
+     * it (for a withdrawal: the customer, the subscription, what to refund and by when). Nothing about the person but the Stripe references.
+     */
+    public function failed(Throwable $exception): void
+    {
+        Log::error('A mail to an administrator about a payment could not be delivered after every try.', [
+            'event' => $this->eventType,
+            'object' => $this->objectId,
+            'workspace' => $this->workspaceUlid,
+            'amount' => $this->amount,
+            'currency' => $this->currency,
+            'withdrawal' => $this->withdrawal === null ? null : [
+                'subscription' => $this->withdrawal['subscription'],
+                'paid' => $this->withdrawal['paid'],
+                'refund' => $this->withdrawal['refund'],
+                'refund_before' => $this->withdrawal['deadline']->toIso8601String(),
+            ],
+            'exception' => $exception,
         ]);
     }
 
@@ -267,6 +299,8 @@ final class BillingAlertMail extends Mailable
             $this->withdrawal['acknowledged']
                 ? __('The acknowledgement was sent to the customer.')
                 : __('The acknowledgement could NOT be sent to the customer: write to them.'),
+            // The amount comes from the latest paid invoice alone: a change of plan in the portal, or a refund already made, is not in it.
+            __('Check the amount against Stripe: it is computed from the latest paid invoice only, so a plan change in the portal or an earlier partial refund would make it wrong.'),
         ];
     }
 
@@ -283,12 +317,8 @@ final class BillingAlertMail extends Mailable
      */
     private function moneyLabel(int $amount, string $currency): string
     {
-        $decimals = match (true) {
-            in_array($currency, self::WHOLE_UNIT_CURRENCIES, true) => 0,
-            in_array($currency, self::THOUSANDTH_CURRENCIES, true) => 3,
-            default => 2,
-        };
+        $decimals = Currencies::decimals($currency);
 
-        return number_format($amount / 10 ** $decimals, $decimals, '.', ' ').' '.strtoupper($currency);
+        return number_format(Currencies::major($amount, $currency), $decimals, '.', ' ').' '.strtoupper($currency);
     }
 }

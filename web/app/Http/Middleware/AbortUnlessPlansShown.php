@@ -10,8 +10,8 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Hides the pages about plans (the pricing page, the terms of sale) on an instance that neither sells nor previews its plans
- * ({@see PricingPlans::shown()}).
+ * Hides the pricing page on an instance that neither sells nor previews its plans ({@see PricingPlans::shown()}). The terms of sale
+ * have a guard of their own, which also lets them through where a contract exists ({@see AbortUnlessTermsAvailable}).
  *
  * A 404, as if the page were not there, and an answer of its own: it comes before {@see UseUrlLocale}, whose permanent redirect from the
  * prefixed address of the default language would otherwise lead a visitor to an address that is a 404 as well.

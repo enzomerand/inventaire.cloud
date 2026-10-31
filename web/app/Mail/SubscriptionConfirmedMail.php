@@ -93,7 +93,8 @@ final class SubscriptionConfirmedMail extends Mailable
                 'priceLabel' => self::priceLabel($this->interval),
                 'startedLabel' => $this->startedAt === null ? null : self::day($this->startedAt),
                 'periodEndLabel' => $this->periodEnd === null ? null : self::day($this->periodEnd),
-                'withdrawalUntilLabel' => $this->withdrawalUntil === null ? null : self::moment($this->withdrawalUntil),
+                // A confirmation that is late (the queue was down) does not offer a right that has run out.
+                'withdrawalUntilLabel' => $this->withdrawalUntil === null || $this->withdrawalUntil->isPast() ? null : self::moment($this->withdrawalUntil),
                 'termsDateLabel' => CarbonImmutable::parse($this->termsVersion)->settings(['locale' => app()->getLocale()])->isoFormat('LL'),
             ],
         );

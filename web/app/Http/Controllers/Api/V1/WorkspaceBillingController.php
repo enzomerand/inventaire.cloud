@@ -270,7 +270,7 @@ final class WorkspaceBillingController extends Controller
 
     /**
      * Records the declaration of a withdrawal from the contract of the workspace (the "Withdraw from the contract here" button) and answers
-     * `201` with the overview of the workspace. See {@see Withdrawals} for the order of what happens: the declaration is judged on the
+     * `201` with the overview of the workspace (`data`) and whether the acknowledgement was queued (`meta.acknowledged`). See {@see Withdrawals} for the order of what happens: the declaration is judged on the
      * subscription as Stripe reports it now (and, if Stripe cannot be reached, as it is stored: the right does not wait for Stripe), the
      * paid invoice is read outside any transaction (a failure to read it never blocks the withdrawal), the declaration is stored under the
      * lock of the workspace, and only then the subscription is cancelled (in the background), the acknowledgement queued and the
@@ -326,9 +326,10 @@ final class WorkspaceBillingController extends Controller
             return $this->withdrawalRefusal($refused->reason);
         }
 
-        $this->withdrawals->settle($withdrawal, $account, $workspace);
+        $acknowledged = $this->withdrawals->settle($withdrawal, $account, $workspace);
 
-        return new JsonResponse(['data' => $this->overview->payload($workspace, true)], 201);
+        // `meta.acknowledged` says whether the acknowledgement was queued: when it was not, the page says it will follow (the schedule sends it).
+        return new JsonResponse(['data' => $this->overview->payload($workspace, true), 'meta' => ['acknowledged' => $acknowledged]], 201);
     }
 
     /**

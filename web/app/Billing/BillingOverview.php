@@ -31,7 +31,9 @@ final class BillingOverview
      * `selling` is whether Pro can be bought now (billing is on and the identity of the seller is complete, see {@see PricingPlans::selling()}):
      * an instance that has Stripe but an incomplete seller shows no way to buy. `started_at` is when the subscription began, and
      * `withdrawal_until` the last moment of its right of withdrawal while the subscription is live, inside that window and not withdrawn
-     * from (null otherwise); `withdrawn` says a withdrawal was recorded for the subscription.
+     * from (null otherwise, {@see WithdrawalDeadline}); `withdrawn` says a withdrawal was recorded for the subscription that is still in
+     * play (it ends once the cancellation went through). The three are for those who may manage the subscription: for any other member
+     * the keys are there and empty (`null`, `null`, `false`).
      *
      * @param  bool  $canManage  Whether the person who asks may buy and manage the subscription (the owners).
      * @return array{
@@ -55,9 +57,10 @@ final class BillingOverview
     {
         $enabled = Billing::enabled();
         $account = $enabled ? $workspace->billingAccount()->first() : null;
-        // Nothing is read for a workspace with no subscription, nor while billing is off.
-        $subscription = $account?->stripe_subscription_id;
-        $withdrawn = $subscription !== null && BillingWithdrawal::query()->where('stripe_subscription_id', $subscription)->exists();
+        // The contract is the business of those who may manage it: nothing of it is read for a member, nor for a workspace with no
+        // subscription, nor while billing is off.
+        $subscription = $canManage ? $account?->stripe_subscription_id : null;
+        $recorded = $subscription !== null && BillingWithdrawal::query()->where('stripe_subscription_id', $subscription)->exists();
 
         return [
             'enabled' => $enabled,
@@ -67,11 +70,12 @@ final class BillingOverview
             'interval' => $account?->interval,
             'current_period_end' => $account?->current_period_end?->utc()->toIso8601String(),
             'cancel_at_period_end' => $account->cancel_at_period_end ?? false,
-            'started_at' => $account?->started_at?->utc()->toIso8601String(),
-            'withdrawal_until' => $account !== null && $account->started_at !== null && ! $withdrawn && Withdrawals::isOpen($account, now())
+            'started_at' => $canManage ? $account?->started_at?->utc()->toIso8601String() : null,
+            'withdrawal_until' => $canManage && $account !== null && $account->started_at !== null && ! $recorded && Withdrawals::isOpen($account, now())
                 ? Withdrawals::windowEnd($account->started_at)->utc()->toIso8601String()
                 : null,
-            'withdrawn' => $withdrawn,
+            // Only while the subscription is still in play: once it is over the workspace is back on Free and has nothing to say of it.
+            'withdrawn' => $recorded && in_array($account->status, SubscriptionStatus::CURRENT, true),
             'can_manage' => $canManage,
             'prices' => Billing::display(),
             'limits' => [

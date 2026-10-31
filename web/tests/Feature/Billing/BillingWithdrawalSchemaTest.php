@@ -22,7 +22,7 @@ uses(RefreshDatabase::class);
 describe('the table of withdrawals', function (): void {
     it('has the columns the application relies on, and is one of the tables the installer knows', function (): void {
         expect(Schema::getColumnListing('billing_withdrawals'))
-            ->toEqualCanonicalizing(['id', 'workspace_id', 'user_id', 'stripe_customer_id', 'stripe_subscription_id', 'name', 'email', 'amount_paid_cents', 'refund_cents', 'currency', 'submitted_at', 'acknowledged_at', 'created_at', 'updated_at'])
+            ->toEqualCanonicalizing(['id', 'workspace_id', 'user_id', 'stripe_customer_id', 'stripe_subscription_id', 'name', 'email', 'amount_paid_cents', 'refund_cents', 'currency', 'submitted_at', 'acknowledged_at', 'admin_told_at', 'created_at', 'updated_at'])
             ->and(ApplicationTables::owns('billing_withdrawals'))->toBeTrue();
     });
 
@@ -82,5 +82,40 @@ describe('the columns of the notices on the billing account', function (): void 
 
         expect(BillingAccount::query()->where('confirmation_sent_for', 'sub_abc')->exists())->toBeFalse()
             ->and(BillingAccount::query()->where('confirmation_sent_for', 'sub_AbC')->exists())->toBeTrue();
+    });
+});
+
+describe('the migration', function (): void {
+    it('takes an account that already has a subscription for confirmed, and for acknowledged when the subscription is set to end, so that the first reading sends no late mail', function (): void {
+        $migration = require database_path('migrations/2026_12_03_000000_add_contract_notices_to_billing_accounts_and_create_billing_withdrawals.php');
+        $migration->down();
+
+        try {
+            $running = Workspace::factory()->create();
+            $ending = Workspace::factory()->create();
+            $none = Workspace::factory()->create();
+            DB::table('billing_accounts')->insert([
+                ['workspace_id' => $running->id, 'stripe_customer_id' => 'cus_run', 'stripe_subscription_id' => 'sub_Run', 'cancel_at_period_end' => false, 'created_at' => now(), 'updated_at' => now()],
+                ['workspace_id' => $ending->id, 'stripe_customer_id' => 'cus_end', 'stripe_subscription_id' => 'sub_End', 'cancel_at_period_end' => true, 'created_at' => now(), 'updated_at' => now()],
+                ['workspace_id' => $none->id, 'stripe_customer_id' => 'cus_none', 'stripe_subscription_id' => null, 'cancel_at_period_end' => false, 'created_at' => now(), 'updated_at' => now()],
+            ]);
+
+            $migration->up();
+
+            $rows = DB::table('billing_accounts')->orderBy('id')->get(['stripe_customer_id', 'confirmation_sent_for', 'cancel_notice_sent_for', 'started_at', 'renewal_notice_sent_for'])->keyBy('stripe_customer_id');
+
+            expect($rows['cus_run']->confirmation_sent_for)->toBe('sub_Run')
+                ->and($rows['cus_run']->cancel_notice_sent_for)->toBeNull()
+                ->and($rows['cus_end']->confirmation_sent_for)->toBe('sub_End')
+                ->and($rows['cus_end']->cancel_notice_sent_for)->toBe('sub_End')
+                ->and($rows['cus_none']->confirmation_sent_for)->toBeNull()
+                ->and($rows['cus_none']->cancel_notice_sent_for)->toBeNull()
+                ->and($rows['cus_run']->started_at)->toBeNull()
+                ->and($rows['cus_run']->renewal_notice_sent_for)->toBeNull();
+        } finally {
+            // MySQL and MariaDB commit at each schema change: the rows of this test are deleted by hand.
+            DB::table('billing_accounts')->delete();
+            DB::table('workspaces')->delete();
+        }
     });
 });

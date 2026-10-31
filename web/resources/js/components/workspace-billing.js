@@ -340,9 +340,17 @@ export default function workspaceBilling() {
             });
         },
 
-        /** Whether the declaration can be sent: something is in both fields and it is not being sent already. */
+        /**
+         * Whether the declaration can be sent: the right can still be exercised, something is in both fields and it is not being sent
+         * already.
+         */
         get canSubmitWithdrawal() {
-            return !this.withdrawing && this.withdrawalName.trim() !== '' && this.withdrawalEmail.trim() !== '';
+            return (
+                this.canWithdraw &&
+                !this.withdrawing &&
+                this.withdrawalName.trim() !== '' &&
+                this.withdrawalEmail.trim() !== ''
+            );
         },
 
         /**
@@ -650,7 +658,7 @@ export default function workspaceBilling() {
 
         /**
          * Sends the declaration of a withdrawal. The server stores it, ends the subscription and sends the acknowledgement; it answers with the
-         * overview, which no longer offers the withdrawal.
+         * overview, which no longer offers the withdrawal, and whether the acknowledgement was queued (`meta.acknowledged`).
          *
          * @returns {Promise<void>}
          */
@@ -672,8 +680,20 @@ export default function workspaceBilling() {
 
                 this.billing = answer.data;
                 this.withdrawalOpen = false;
-                notify('success', t('billing.notice.withdrawn', { email }));
+                // Honest about the acknowledgement: it is said to be on its way only when the server queued it (else it follows).
+                notify(
+                    'success',
+                    answer.meta?.acknowledged === true
+                        ? t('billing.notice.withdrawn', { email })
+                        : t('billing.notice.withdrawn_pending'),
+                );
             } catch (error) {
+                // A refusal (the fourteen days ran out, it was made already, nothing is live) ends the declaration: the overview is read
+                // again, and the panel and its button go with the right they were for.
+                if (error instanceof HttpError && error.status === 409) {
+                    this.withdrawalOpen = false;
+                }
+
                 this.fail(error);
 
                 if (error instanceof HttpError) {

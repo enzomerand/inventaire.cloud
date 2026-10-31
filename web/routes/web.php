@@ -37,6 +37,7 @@ use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\WebManifestController;
 use App\Http\Middleware\AbortIfInstalled;
 use App\Http\Middleware\AbortUnlessPlansShown;
+use App\Http\Middleware\AbortUnlessTermsAvailable;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
@@ -68,15 +69,22 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
         });
 });
 
-// The pricing page and the terms of sale work the same way (one address per language, the language from the address). They exist on an
-// instance that sells a plan or previews its plans (BILLING_PRICING_PREVIEW) only: anywhere else they are a 404, and the guard comes before
-// the language of the address so that the prefixed address of the default language is a 404 too, not a redirect to one.
+// The pricing page and the terms of sale work the same way (one address per language, the language from the address). The pricing page
+// exists on an instance that sells a plan or previews its plans (BILLING_PRICING_PREVIEW) only; the terms exist there too, and wherever a
+// subscription exists, since the mails of a contract link to them. Anywhere else they are a 404, and the guard comes before the language
+// of the address so that the prefixed address of the default language is a 404 too, not a redirect to one.
 Route::middleware(['throttle:public-pages', AbortUnlessPlansShown::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
     Route::get('/pricing', PricingPageController::class)->name('pricing.index');
-    Route::get('/terms', TermsPageController::class)->name('terms.index');
 
     Route::prefix('{locale}')->where(['locale' => $localeCodes])->group(function (): void {
         Route::get('/pricing', PricingPageController::class)->name('pricing.localized.index');
+    });
+});
+
+Route::middleware(['throttle:public-pages', AbortUnlessTermsAvailable::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
+    Route::get('/terms', TermsPageController::class)->name('terms.index');
+
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])->group(function (): void {
         Route::get('/terms', TermsPageController::class)->name('terms.localized.index');
     });
 });

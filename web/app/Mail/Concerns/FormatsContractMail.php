@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mail\Concerns;
 
+use App\Billing\Currencies;
 use App\Landing\PricingPlans;
 use App\Support\DisplayTime;
 use Carbon\CarbonInterface;
@@ -58,13 +59,17 @@ trait FormatsContractMail
     }
 
     /**
-     * An amount of cents of a currency as the reader writes it ("12,50 €"); the figure and the code when the currency is not known.
+     * An amount in the smallest unit of a currency as the reader writes it ("12,50 €", "1 250 ¥"): the decimals of the currency are
+     * respected ({@see Currencies}), and the figure and the code are written when the currency is not known to the formatter.
      */
-    protected static function money(int $cents, string $currency): string
+    protected static function money(int $amount, string $currency): string
     {
-        $decimals = $cents % 100 === 0 ? 0 : 2;
-        $formatted = Number::currency($cents / 100, strtoupper($currency), app()->getLocale(), $decimals);
+        $decimals = Currencies::decimals($currency);
+        $major = Currencies::major($amount, $currency);
+        // No decimals for a round amount ("6 €"), all of the currency's otherwise ("5,40 €", "1,250 KD").
+        $shown = $amount % (10 ** $decimals) === 0 ? 0 : $decimals;
+        $formatted = Number::currency($major, strtoupper($currency), app()->getLocale(), $shown);
 
-        return $formatted === false ? number_format($cents / 100, $decimals, '.', '').' '.strtoupper($currency) : $formatted;
+        return $formatted === false ? number_format($major, $shown, '.', '').' '.strtoupper($currency) : $formatted;
     }
 }

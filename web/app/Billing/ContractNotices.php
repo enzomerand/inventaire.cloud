@@ -29,11 +29,14 @@ use Throwable;
  * (with the terms and the form of withdrawal), the receipt of a cancellation, the notice of tacit renewal of a yearly subscription, and
  * the acknowledgement of a withdrawal.
  *
- * **Each is sent once**, and is remembered by a column of the account ({@see BillingAccount}: `confirmation_sent_for`,
+ * **Each is sent at most once**, and is remembered by a column of the account ({@see BillingAccount}: `confirmation_sent_for`,
  * `cancel_notice_sent_for`, `renewal_notice_sent_for`). The column is **claimed first, with one atomic conditional write** (it is set only
  * where it does not hold the value yet), and the mail is queued only by whoever won it: two synchronisations that run at the same moment
- * send one mail. The claim is **given back when the mail could not be queued** (or, later, could not be delivered after every try), so the
- * next synchronisation, or the next run of the command, tries again; the column therefore says "sent" only for a mail that was queued.
+ * send one mail. The claim comes **before** the queue call, so the column does not prove that the mail was queued, still less delivered:
+ * what keeps a mail from being lost is the way back. The claim is **given back when the mail could not be queued** (or, later, could not be
+ * delivered after every try), so the next synchronisation, or the next run of the command, tries again. What is not covered is a process
+ * that dies between the claim and the queue call, or a worker that loses a mail already queued: the mail is then not sent until the
+ * subscription (or the period) changes; the log and the queue are where to look.
  * Nothing here runs inside a transaction (the mails are queued after the account was written), and nothing here lets a failure out of
  * {@see self::afterSync()}: a mail that cannot be queued must not break a synchronisation, a webhook or a page.
  *
@@ -42,11 +45,16 @@ use Throwable;
  */
 final class ContractNotices
 {
-    /** The days before the end of a yearly period from which the notice of renewal is due: not later than a month before. */
-    public const RENEWAL_MIN_DAYS = 30;
+    /**
+     * The months before the end of a yearly period from which the notice of renewal may be sent (article L215-1: "au plus tôt trois mois").
+     */
+    public const RENEWAL_EARLIEST_MONTHS = 3;
 
-    /** The days before the end of a yearly period from which the notice may be sent: not earlier than three months before. */
-    public const RENEWAL_MAX_DAYS = 90;
+    /**
+     * The months before the end of a yearly period by which the notice of renewal must have been sent ("au plus tard un mois"). Months are
+     * calendar months in the zone of the instance, not 30 days: see {@see self::renewalDue()}.
+     */
+    public const RENEWAL_LATEST_MONTHS = 1;
 
     /**
      * Gets the way to tell the administrators.
@@ -171,8 +179,13 @@ final class ContractNotices
     }
 
     /**
-     * Whether the notice of tacit renewal is due for the account: a yearly subscription that gives Pro, that is not set to end, whose
-     * period ends in {@see self::RENEWAL_MIN_DAYS} to {@see self::RENEWAL_MAX_DAYS} days, and that was not noticed for that period yet.
+     * Whether the notice of tacit renewal is due for the account: a yearly subscription that gives Pro, that is not set to end, that is
+     * between three months and one month before the end of its period, and that was not noticed for that period yet.
+     *
+     * The months are **calendar months, in the zone of the instance**, taken back from the end of the period without overflowing into the
+     * next month (the end of a period on 31 May is three months from 28 February): thirty and ninety days are wrong in both directions
+     * (31-day months, and 1 February to 1 May is 89 days). The notice is due from the earliest of those moments to the latest, both
+     * included.
      */
     public function renewalDue(BillingAccount $account): bool
     {
@@ -186,7 +199,9 @@ final class ContractNotices
             return false;
         }
 
-        return $end->betweenIncluded(now()->addDays(self::RENEWAL_MIN_DAYS), now()->addDays(self::RENEWAL_MAX_DAYS));
+        $zoned = $end->setTimezone(DisplayTime::zone());
+
+        return now()->betweenIncluded($zoned->subMonthsNoOverflow(self::RENEWAL_EARLIEST_MONTHS), $zoned->subMonthsNoOverflow(self::RENEWAL_LATEST_MONTHS));
     }
 
     /**

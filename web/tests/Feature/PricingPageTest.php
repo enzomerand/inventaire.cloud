@@ -318,6 +318,30 @@ describe('what the instance can do', function (): void {
         expect(landingText($this->get('/en/pricing')->assertOk()))->toContain('What about VAT?');
         expect(Faq::billing(PricingPlans::current()))->toHaveCount(6);
     });
+
+    it('mentions the reverse charge for a business of another EU country only where Stripe Tax works the tax out, in the page and in its structured data', function (): void {
+        $off = $this->get('/en/pricing')->assertOk();
+
+        // Without Stripe Tax, Checkout applies no reverse charge: the page does not promise one, and says the same to search engines.
+        expect(landingText($off))->toContain('What about VAT?')->not->toContain('reverse charge')
+            ->and($off->getContent())->not->toContain('reverse charge');
+
+        config(['billing.automatic_tax' => true]);
+        $on = $this->get('/en/pricing')->assertOk();
+
+        expect(landingText($on))->toContain('can be invoiced without VAT (reverse charge)')
+            ->and(substr_count($on->getContent(), 'reverse charge'))->toBeGreaterThanOrEqual(2);
+    });
+
+    it('says the same in French', function (): void {
+        $off = $this->get('/pricing')->assertOk();
+
+        expect(landingText($off))->not->toContain('autoliquidation');
+
+        config(['billing.automatic_tax' => true]);
+
+        expect(landingText($this->get('/pricing')->assertOk()))->toContain('facturée hors TVA (autoliquidation)');
+    });
 });
 
 describe('the buttons', function (): void {

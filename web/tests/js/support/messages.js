@@ -435,8 +435,9 @@ export const MESSAGES = {
     'billing.error.withdrawal_period_over': 'The fourteen days of the right of withdrawal are over.',
     'billing.error.already_withdrawn': 'You already withdrew from this contract.',
     'billing.withdrawn':
-        'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.',
+        'Your withdrawal is recorded and your subscription is ending. You receive the acknowledgement at the address you gave.',
     'billing.notice.withdrawn': 'Your withdrawal is recorded. An acknowledgement is on its way to :email.',
+    'billing.notice.withdrawn_pending': 'Your withdrawal is recorded. The acknowledgement will follow by email.',
     'billing.withdrawal.until': 'You can withdraw until :moment.',
     'billing.withdrawal.contract': ':plan subscription, :interval, ordered on :date',
 };

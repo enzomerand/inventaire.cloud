@@ -18,9 +18,11 @@ use Throwable;
  * mail of its own, with the last date to refuse the renewal in a boxed line, between three months and a month before the end of the
  * period.
  *
- * It takes the yearly subscriptions that give Pro and do not end by themselves, whose period ends in {@see ContractNotices::RENEWAL_MIN_DAYS}
- * to {@see ContractNotices::RENEWAL_MAX_DAYS} days and that were not noticed for that period yet, so a notice goes out as soon as one
- * is due and once for each period; monthly subscriptions (indefinite contracts) never get one. {@see ContractNotices::renewal()} claims
+ * It takes the yearly subscriptions that give Pro and do not end by themselves, whose period ends between three months and one month from
+ * now ({@see ContractNotices::renewalDue()}: calendar months in the zone of the instance) and that were not noticed for that period yet,
+ * so a notice goes out as soon as one is due and once for each period; monthly subscriptions (indefinite contracts) never get one. The
+ * query takes the accounts whose period ends in {@see self::FROM_DAYS} to {@see self::UNTIL_DAYS} days, a little wider than any
+ * three months and one month are (a month is 28 to 31 days, three months 89 to 92), and each is judged again exactly. {@see ContractNotices::renewal()} claims
  * the period with one atomic write before it queues the mail, so two runs at the same moment send one.
  *
  * It follows the budget of {@see SyncBillingCommand}: at most {@see self::PER_RUN} accounts in a run, the one looked at longest ago first
@@ -42,6 +44,12 @@ final class SendRenewalNoticesCommand extends Command
 
     /** The seconds after which no new account is started. */
     public const TIME_BUDGET = 45;
+
+    /** The days to the end of the period from which the query looks: under a month of any length (28 days at the least), with a margin for the clocks. */
+    public const FROM_DAYS = 27;
+
+    /** The days to the end of the period up to which the query looks: over three months of any length (92 days at the most). */
+    public const UNTIL_DAYS = 93;
 
     protected $signature = 'inventaire:send-renewal-notices';
 
@@ -111,8 +119,8 @@ final class SendRenewalNoticesCommand extends Command
     }
 
     /**
-     * The accounts to look at: yearly, giving Pro, not ending by themselves, whose period ends in the window and was not noticed for that
-     * end; the one written longest ago first, at most {@see self::PER_RUN}. {@see ContractNotices::renewalDue()} judges each again.
+     * The accounts to look at: yearly, giving Pro, not ending by themselves, whose period ends in the wide window and was not noticed for
+     * that end; the one written longest ago first, at most {@see self::PER_RUN}. {@see ContractNotices::renewalDue()} judges each again.
      *
      * @return Collection<int, BillingAccount>
      */
@@ -122,7 +130,7 @@ final class SendRenewalNoticesCommand extends Command
             ->where('interval', 'year')
             ->whereIn('status', WorkspacePlan::PRO_STATUSES)
             ->where('cancel_at_period_end', false)
-            ->whereBetween('current_period_end', [now()->addDays(ContractNotices::RENEWAL_MIN_DAYS), now()->addDays(ContractNotices::RENEWAL_MAX_DAYS)])
+            ->whereBetween('current_period_end', [now()->addDays(self::FROM_DAYS), now()->addDays(self::UNTIL_DAYS)])
             ->where(fn ($unsent) => $unsent->whereNull('renewal_notice_sent_for')->orWhereColumn('renewal_notice_sent_for', '<>', 'current_period_end'))
             ->orderBy('updated_at')
             ->orderBy('id')

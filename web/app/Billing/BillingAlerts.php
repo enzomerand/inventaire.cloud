@@ -43,11 +43,13 @@ final class BillingAlerts
      * was sent to.
      *
      * @param  Closure(): BillingAlertMail  $make
+     * @param  int  $told  Set to how many administrators were told as the mails are queued, so that a caller that gets the exception
+     *                     below still knows how many were: those before the one that failed.
      * @return int How many administrators were told; 0 when the instance has none.
      *
      * @throws Throwable When a mail could not be queued: administrators before it were told, those after it were not.
      */
-    public function toAdministrators(Closure $make): int
+    public function toAdministrators(Closure $make, int &$told = 0): int
     {
         $told = 0;
 
@@ -122,17 +124,21 @@ final class BillingAlerts
     /**
      * Tells the administrators that a customer withdrew from their contract and what to refund: the amount paid, the refund (the part not
      * used) or that the amount is to be checked, the deadline, and whether the acknowledgement reached the customer. Not once a day: each
-     * withdrawal is told, once, by the request that recorded it. Never throws: the withdrawal is stored, and a mail that cannot be queued
-     * is written in the log with everything the mail would have said, so that the refund is not lost.
+     * withdrawal is told once ({@see BillingWithdrawal::$admin_told_at} remembers it, and the schedule tells the ones that were not). Never
+     * throws: the withdrawal is stored, and a mail that cannot be queued is written in the log with everything the mail would have said,
+     * so that the refund is not lost.
      *
      * @param  bool  $acknowledged  Whether the acknowledgement to the customer was queued.
+     * @return int How many administrators were told: at least one is what makes the withdrawal told. A failure after some were told does
+     *             not count them as nobody.
      */
-    public function tellWithdrawal(BillingWithdrawal $withdrawal, ?string $workspaceUlid, bool $acknowledged): void
+    public function tellWithdrawal(BillingWithdrawal $withdrawal, ?string $workspaceUlid, bool $acknowledged): int
     {
         $submittedAt = $withdrawal->submitted_at ?? now();
+        $told = 0;
 
         try {
-            $told = $this->toAdministrators(fn (): BillingAlertMail => BillingAlertMail::withdrawal(
+            $this->toAdministrators(fn (): BillingAlertMail => BillingAlertMail::withdrawal(
                 $withdrawal->stripe_customer_id,
                 $withdrawal->stripe_subscription_id,
                 $workspaceUlid,
@@ -142,10 +148,9 @@ final class BillingAlerts
                 $submittedAt,
                 $acknowledged,
                 Billing::livemode(),
-            ));
+            ), $told);
         } catch (Throwable $exception) {
-            $told = 0;
-            Log::error('The administrators could not be told of a withdrawal.', ['withdrawal' => $withdrawal->getKey(), 'exception' => $exception]);
+            Log::error('The administrators could not all be told of a withdrawal.', ['withdrawal' => $withdrawal->getKey(), 'told' => $told, 'exception' => $exception]);
         }
 
         if ($told === 0) {
@@ -158,5 +163,7 @@ final class BillingAlerts
                 'currency' => $withdrawal->currency,
             ]);
         }
+
+        return $told;
     }
 }

@@ -503,7 +503,10 @@ describe('the subscription page under the real Alpine CSP build', () => {
             name.dispatchEvent(new Event('input', { bubbles: true }));
             email.value = 'receipts@example.test';
             email.dispatchEvent(new Event('input', { bubbles: true }));
-            http.post.mockResolvedValue({ data: fresh({ withdrawn: true, withdrawal_until: null }) });
+            http.post.mockResolvedValue({
+                data: fresh({ withdrawn: true, withdrawal_until: null }),
+                meta: { acknowledged: true },
+            });
 
             buttons('Confirm the withdrawal')[0].click();
             await flush();
@@ -542,7 +545,7 @@ describe('the subscription page under the real Alpine CSP build', () => {
             expect(http.post).not.toHaveBeenCalled();
         });
 
-        it('tells why the right is gone when the server refuses, and leaves the declaration open', async () => {
+        it('tells why the right is gone when the server refuses, and closes the declaration with its button', async () => {
             await open(fresh());
             buttons('Withdraw from the contract here')[0].click();
             await flush();
@@ -552,7 +555,8 @@ describe('the subscription page under the real Alpine CSP build', () => {
             await flush();
 
             expect(notify).toHaveBeenCalledWith('danger', 'You already withdrew from this contract.');
-            expect(visible(declaration())).toBe(true);
+            expect(visible(declaration())).toBe(false);
+            expect(buttons('Confirm the withdrawal')).toHaveLength(0);
         });
 
         it('tells the owner, once it is made, that the subscription is ending', async () => {
