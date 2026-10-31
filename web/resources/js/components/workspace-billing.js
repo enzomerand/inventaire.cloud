@@ -419,11 +419,14 @@ export default function workspaceBilling() {
             return interval === 'month' || interval === 'year' ? t(`billing.interval.${interval}`) : '';
         },
 
-        /** When the period that is paid for ends, as a sentence: the subscription renews, or ends if it was canceled ("" when unknown). */
+        /**
+         * When the period that is paid for ends, as a sentence: the subscription renews, or ends if it was canceled ("" when unknown, and
+         * after a withdrawal, which ends it without waiting for that date).
+         */
         get periodText() {
             const date = dateText(this.billing?.current_period_end);
 
-            if (date === '') {
+            if (date === '' || this.billing?.withdrawn === true) {
                 return '';
             }
 

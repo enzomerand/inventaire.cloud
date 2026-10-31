@@ -17,7 +17,7 @@
 
 @section('bleed')
     <div class="landing">
-        <section class="landing-section landing-section-intro" aria-labelledby="terms-title">
+        <section class="landing-section landing-section-intro pb-4" aria-labelledby="terms-title">
             <div class="container-xl">
                 <h1 id="terms-title" class="landing-h2 landing-h1">{{ __('Terms of sale') }}</h1>
                 <p class="landing-fineprint mb-0">{{ __('Version of :date', ['date' => $termsVersionDate]) }}</p>
@@ -27,7 +27,7 @@
         <section class="landing-section-flush pb-5">
             <div class="container-xl">
                 @if ($draft)
-                    <div class="alert alert-warning" role="status">{{ __('Working version: information to be completed') }}</div>
+                    <div class="alert alert-warning text-body" role="status">{{ __('Working version: information to be completed') }}</div>
                 @endif
 
                 <article class="legal">

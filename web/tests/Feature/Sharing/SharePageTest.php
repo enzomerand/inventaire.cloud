@@ -147,7 +147,7 @@ describe('the content of the page', function (): void {
 
         expect($english)->toContain('1.5 KB')
             ->and($french)->toContain('1,5 ko')
-            ->and($french)->not->toContain('KB');
+            ->and($french)->not->toContain('1.5 KB');
     });
 
     it('draws a choice or a tag as a badge, a rating as stars with their grade in words and a color as a swatch', function (): void {

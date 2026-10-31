@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Billing;
 
-use App\Support\DisplayTime;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
@@ -14,8 +13,8 @@ use Carbon\CarbonInterface;
  * and ends at the last hour of the last day; and a period that expires on a Saturday, a Sunday or a public holiday is extended to the
  * next working day.
  *
- * Days are the days of the instance (`app.display_timezone`), not of UTC: a subscription that began at 23:30 UTC is of the next day in Paris.
- * The days are calendar days (a day that is 23 or 25 hours long because the clocks change counts as one). The answer is the last
+ * Days are the days of France, the law of the contract, whatever zone the instance displays (`app.display_timezone` defaults to UTC): a
+ * subscription that began at 23:30 UTC is of the next day. The days are calendar days (a day that is 23 or 25 hours long because the clocks change counts as one). The answer is the last
  * second of the last day, as a moment in UTC.
  *
  * The holidays are the French national ones: 1 January, Easter Monday, 1 May, 8 May, Ascension (39 days after Easter), Whit Monday (50
@@ -27,12 +26,15 @@ final class WithdrawalDeadline
     /** The days the right lasts, the day of the conclusion not counted. */
     public const DAYS = 14;
 
+    /** The zone the days are counted in. */
+    public const ZONE = 'Europe/Paris';
+
     /**
      * The last moment of the right of withdrawal for a contract concluded at a moment.
      */
     public static function end(CarbonInterface $concludedAt): CarbonImmutable
     {
-        $last = CarbonImmutable::instance($concludedAt)->setTimezone(DisplayTime::zone())->startOfDay()->addDays(self::DAYS);
+        $last = CarbonImmutable::instance($concludedAt)->setTimezone(self::ZONE)->startOfDay()->addDays(self::DAYS);
 
         while (self::isNonWorking($last)) {
             $last = $last->addDay();

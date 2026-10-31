@@ -610,6 +610,12 @@ describe('the subscription page of a workspace', () => {
             expect(component.busy).toBe(true);
         });
 
+        it('does not announce a renewal after a withdrawal', async () => {
+            await open(pro({ withdrawn: true }));
+
+            expect(component.periodText).toBe('');
+        });
+
         it('is not offered when it is already set to end, when the owner withdrew, to a member, to a Free workspace, or without Stripe', async () => {
             for (const data of [
                 pro({ cancel_at_period_end: true }),

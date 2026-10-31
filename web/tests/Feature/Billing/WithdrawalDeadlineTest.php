@@ -35,6 +35,12 @@ describe('the fourteen days', function (): void {
         'at 23:30 UTC, which is the next day in Paris' => ['2026-11-03 23:30:00', '2026-11-18T22:59:59+00:00'],
     ]);
 
+    it('are counted in the days of France whatever zone the instance displays', function (): void {
+        config(['app.display_timezone' => 'UTC']);
+
+        expect(deadlineFor('2026-11-03 23:30:00'))->toBe('2026-11-18T22:59:59+00:00');
+    });
+
     it('are counted in calendar days when the clocks change: a day of 25 hours is one day', function (string $concluded, string $ends): void {
         expect(deadlineFor($concluded))->toBe($ends);
     })->with([
