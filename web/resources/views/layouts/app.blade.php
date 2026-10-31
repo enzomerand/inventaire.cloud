@@ -25,7 +25,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
-    @php($selling = \App\Landing\PricingPlans::selling())
+    @php($plansShown = \App\Landing\PricingPlans::shown())
 
     <a class="skip-link visually-hidden-focusable" href="#main-content">{{ __('Skip to content') }}</a>
 
@@ -37,13 +37,13 @@
                 </a>
 
                 {{-- The links of the public pages (those that describe themselves with `$seo`): from the width where the header expands. The
-                     pricing page exists only where the instance sells a plan. --}}
+                     pricing page exists only where the instance sells or previews a plan. --}}
                 @isset($seo)
                     <ul class="navbar-nav flex-row d-none d-md-flex me-auto gap-3 ms-3">
                         <li class="nav-item">
                             <a class="nav-link" href="{{ \App\Support\PublicUrls::templatesPath(app()->getLocale()) }}">{{ __('Templates') }}</a>
                         </li>
-                        @if ($selling)
+                        @if ($plansShown)
                             <li class="nav-item">
                                 <a class="nav-link" href="{{ \App\Support\PublicUrls::pricingPath(app()->getLocale()) }}">{{ __('Pricing') }}</a>
                             </li>
@@ -116,11 +116,17 @@
                                         {{ __('Inventory templates') }}
                                     </a>
                                 </li>
-                                @if ($selling)
+                                @if ($plansShown)
                                     <li class="list-inline-item">
                                         <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::pricingPath(app()->getLocale()) }}">
                                             <x-tabler-tag aria-hidden="true" />
                                             {{ __('Pricing') }}
+                                        </a>
+                                    </li>
+                                    <li class="list-inline-item">
+                                        <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::termsPath(app()->getLocale()) }}">
+                                            <x-tabler-file-text aria-hidden="true" />
+                                            {{ __('Terms of sale') }}
                                         </a>
                                     </li>
                                 @endif

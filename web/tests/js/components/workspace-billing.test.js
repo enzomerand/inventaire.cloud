@@ -163,15 +163,15 @@ describe('the subscription page of a workspace', () => {
         it('says what each interval costs, in the language of the page', async () => {
             await open(overview());
 
-            expect(component.monthPrice).toBe('€6 per month');
-            expect(component.yearPrice).toBe('€60 per year');
+            expect(component.monthPrice).toBe('€6 incl. VAT per month');
+            expect(component.yearPrice).toBe('€60 incl. VAT per year');
             expect(component.hasYearly).toBe(true);
         });
 
         it('shows the cents of a price that has some', async () => {
             await open(overview({ prices: { currency: 'eur', month: 550, year: null } }));
 
-            expect(component.monthPrice).toBe('€5.50 per month');
+            expect(component.monthPrice).toBe('€5.50 incl. VAT per month');
         });
 
         it('offers no yearly plan when the instance has no yearly Price', async () => {
@@ -184,7 +184,7 @@ describe('the subscription page of a workspace', () => {
         it('shows the figure and the code of a currency the browser does not know', async () => {
             await open(overview({ prices: { currency: 'zzzz', month: 600, year: null } }));
 
-            expect(component.monthPrice).toBe('6 ZZZZ per month');
+            expect(component.monthPrice).toBe('6 ZZZZ incl. VAT per month');
         });
 
         it('says when a Pro subscription ended', async () => {

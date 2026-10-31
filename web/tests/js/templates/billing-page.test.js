@@ -254,8 +254,8 @@ describe('the subscription page under the real Alpine CSP build', () => {
                 ['month', true, true],
                 ['year', false, true],
             ]);
-            expect(card.textContent).toContain('€6 per month');
-            expect(card.textContent).toContain('€60 per year');
+            expect(card.textContent).toContain('€6 incl. VAT per month');
+            expect(card.textContent).toContain('€60 incl. VAT per year');
             expect(buttons('Upgrade to Pro')).toHaveLength(1);
             expect(buttons('Manage the subscription')).toHaveLength(0);
             expect(shows('Only the owner manages the subscription.')).toBe(false);

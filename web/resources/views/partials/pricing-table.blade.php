@@ -6,6 +6,8 @@
     A table for a screen reader: a caption, column headers and row headers. It scrolls inside its own region when a phone is too narrow
     for it, and the region takes the keyboard focus so the table can be scrolled without a mouse.
 
+    Under the table, the link to the terms of sale (the limits of the plans are part of the contract, see legal/terms-fr).
+
     Icons: never pass a class attribute to <x-tabler-*>.
 
     `$plans` is the App\Landing\PricingPlans.
@@ -87,3 +89,7 @@
         </tbody>
     </table>
 </div>
+
+<p class="landing-fineprint">
+    <a class="landing-link" href="{{ \App\Support\PublicUrls::termsPath(app()->getLocale()) }}">{{ __('Terms of sale') }}</a>
+</p>

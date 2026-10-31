@@ -7,7 +7,10 @@
     the stylesheet shows the one of `data-period`. Without the script the switch stays hidden (`hidden`, until the component starts), the
     monthly price is shown and the yearly one follows as a line ("or ... a year"), and the button leads to the monthly plan.
 
-    The button of Pro leads to /app/billing, which a visitor who is not signed in reaches through the sign-in page and comes back to.
+    The button of Pro leads to /app/billing, which a visitor who is not signed in reaches through the sign-in page and comes back to. While
+    the instance only previews its plans (`$plans->selling` is false: nothing can be bought yet) it is a disabled "Coming soon" button, with
+    no link anywhere in the field, and nothing in the page speaks of Stripe or of cancelling. Every amount of Pro is VAT-included and says
+    so ("TTC"), and the terms of sale are linked under the plans.
     The names of the plans are <h3>: the page that includes this partial has the <h2> before.
 
     `$plans` is the App\Landing\PricingPlans.
@@ -32,8 +35,10 @@
         x-data="pricingPeriod"
         :data-period="period"
         :data-ready="ready"
-        data-href-month="{{ $proMonth }}"
-        data-href-year="{{ $proYear }}"
+        @if ($plans->selling)
+            data-href-month="{{ $proMonth }}"
+            data-href-year="{{ $proYear }}"
+        @endif
     @endif
 >
     <div class="row g-0">
@@ -89,23 +94,33 @@
                     <div class="landing-price" aria-live="polite">
                         <p class="landing-price-line landing-only-month">
                             <span class="landing-price-amount">{{ $plans->monthlyPrice() }}</span>
-                            <span class="landing-price-period">{{ __('/ month') }}</span>
+                            <span class="landing-price-period"><span class="landing-price-tax">{{ __('incl. VAT') }}</span> {{ __('/ month') }}</span>
                         </p>
                         @if ($yearly)
                             <p class="landing-price-line landing-only-year">
                                 <span class="landing-price-amount">{{ $plans->yearlyPrice() }}</span>
-                                <span class="landing-price-period">{{ __('/ year') }}</span>
+                                <span class="landing-price-period"><span class="landing-price-tax">{{ __('incl. VAT') }}</span> {{ __('/ year') }}</span>
                             </p>
-                            <p class="landing-price-note landing-only-year">{{ __('That is :price a month', ['price' => $plans->yearlyPricePerMonth()]) }}</p>
-                            <p class="landing-price-note landing-price-alt">{{ __('or :price a year', ['price' => $plans->yearlyPrice()]) }}</p>
+                            <p class="landing-price-note landing-only-year">{{ __('That is :price incl. VAT a month', ['price' => $plans->yearlyPricePerMonth()]) }}</p>
+                            <p class="landing-price-note landing-price-alt">{{ __('or :price incl. VAT a year', ['price' => $plans->yearlyPrice()]) }}</p>
                         @endif
                     </div>
 
-                    <a class="btn btn-light btn-lg" href="{{ $proMonth }}" @if ($yearly) :href="ctaHref" @endif>{{ __('Choose Pro') }}</a>
+                    @if ($plans->selling)
+                        <a class="btn btn-light btn-lg" href="{{ $proMonth }}" @if ($yearly) :href="ctaHref" @endif>{{ __('Choose Pro') }}</a>
+                    @else
+                        <button type="button" class="btn btn-light btn-lg" disabled>{{ __('Coming soon') }}</button>
+                    @endif
                 </div>
             </article>
         </div>
     </div>
 
-    <p class="landing-fineprint container-xl">{{ __('Billed by Stripe. Cancel anytime.') }}</p>
+    @if ($plans->selling)
+        <p class="landing-fineprint container-xl">{{ __('Billed by Stripe. Cancel anytime.') }}</p>
+    @endif
+    <p class="landing-fineprint container-xl">
+        {{ __('Prices include VAT.') }}
+        <a class="landing-link" href="{{ \App\Support\PublicUrls::termsPath(app()->getLocale()) }}">{{ __('Terms of sale') }}</a>
+    </p>
 </div>

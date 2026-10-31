@@ -29,8 +29,19 @@ use App\Billing\EnvironmentSetting;
 return [
 
     /*
+    | Shows the plans and the terms of sale to visitors before anything can be
+    | bought (`/pricing`, the pricing section of the home page, `/terms`), with
+    | a disabled "Coming soon" button for Pro. Nothing is sold: checkout stays
+    | closed until billing is on and the legal identity of the seller is
+    | complete. Ignored once the instance sells.
+    */
+    'pricing_preview' => EnvironmentSetting::boolean(env('BILLING_PRICING_PREVIEW'), false),
+
+    /*
     | Sends `automatic_tax[enabled]` to Stripe Checkout (Stripe Tax must be set
-    | up in the Stripe account, with the tax registrations that apply).
+    | up in the Stripe account, with the tax registrations that apply). The
+    | prices are VAT-included whatever this says: the Stripe Prices must be
+    | created with `tax_behavior=inclusive`.
     */
     'automatic_tax' => EnvironmentSetting::boolean(env('STRIPE_AUTOMATIC_TAX'), false),
 

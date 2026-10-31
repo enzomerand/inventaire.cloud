@@ -206,6 +206,11 @@ describe('the parameters of a Checkout session', function (): void {
             'billing_address_collection' => 'required',
             'tax_id_collection' => ['enabled' => true],
             'customer_update' => ['name' => 'auto', 'address' => 'auto'],
+            'consent_collection' => ['terms_of_service' => 'required'],
+            'custom_text' => [
+                'terms_of_service_acceptance' => ['message' => "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté."],
+                'submit' => ['message' => 'Commande avec obligation de paiement'],
+            ],
             'automatic_tax' => ['enabled' => false],
             'locale' => 'fr',
             'integration_identifier' => 'inventaire-cloud-pkqzrvmw',
@@ -254,6 +259,31 @@ describe('the parameters of a Checkout session', function (): void {
         expect(CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', 'en')['automatic_tax'])->toBe(['enabled' => true]);
     });
 
+    it('collect the acceptance of the terms of sale: a required box, worded for the order, with the link of the terms in the language of the person', function (string $locale, string $message, string $submit): void {
+        $parameters = CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', $locale);
+
+        expect($parameters['consent_collection'])->toBe(['terms_of_service' => 'required'])
+            ->and($parameters['custom_text']['terms_of_service_acceptance']['message'])->toBe($message)
+            ->and($parameters['custom_text']['submit']['message'])->toBe($submit)
+            ->and($parameters)->not->toHaveKey('payment_method_types');
+    })->with([
+        'French' => ['fr', "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté.", 'Commande avec obligation de paiement'],
+        'English' => ['en', 'I accept the [terms of sale](http://localhost/en/terms), I request the immediate start of the service and I acknowledge that I lose my right of withdrawal once the contract has been fully performed.', 'Order with obligation to pay'],
+        'any other language: the language of the contract' => ['de', "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté.", 'Commande avec obligation de paiement'],
+    ]);
+
+    it('build the address of the terms from APP_URL, never from the request, and keep the texts far under the 1200 characters Stripe allows', function (): void {
+        config(['app.url' => 'https://inventaire.example/']);
+
+        foreach (['fr', 'en'] as $locale) {
+            $texts = CheckoutParameters::customText($locale);
+
+            expect($texts['terms_of_service_acceptance']['message'])->toContain($locale === 'fr' ? '(https://inventaire.example/terms)' : '(https://inventaire.example/en/terms)')
+                ->and(mb_strlen($texts['terms_of_service_acceptance']['message']))->toBeLessThan(400)
+                ->and(mb_strlen($texts['submit']['message']))->toBeLessThan(100);
+        }
+    });
+
     it('speak French or English, and leave any other language to the browser', function (string $locale, string $asked): void {
         expect(CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', $locale)['locale'])->toBe($asked)
             ->and(CheckoutParameters::locale($locale))->toBe($asked);
@@ -288,6 +318,11 @@ describe('creating a Checkout session', function (): void {
                 'billing_address_collection' => 'required',
                 'tax_id_collection' => ['enabled' => 'true'],
                 'customer_update' => ['name' => 'auto', 'address' => 'auto'],
+                'consent_collection' => ['terms_of_service' => 'required'],
+                'custom_text' => [
+                    'terms_of_service_acceptance' => ['message' => "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté."],
+                    'submit' => ['message' => 'Commande avec obligation de paiement'],
+                ],
                 'automatic_tax' => ['enabled' => 'false'],
                 'locale' => 'fr',
                 'integration_identifier' => 'inventaire-cloud-pkqzrvmw',

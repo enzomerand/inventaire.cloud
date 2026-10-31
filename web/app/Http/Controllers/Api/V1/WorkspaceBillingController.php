@@ -19,6 +19,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\ManageBillingRequest;
 use App\Http\Requests\Billing\StartCheckoutRequest;
 use App\Http\Responses\ApiError;
+use App\Landing\PricingPlans;
 use App\Models\BillingAccount;
 use App\Models\User;
 use App\Models\Workspace;
@@ -94,12 +95,14 @@ final class WorkspaceBillingController extends Controller
      *    bought again), `previous_owner_subscription` when the owner is not the payer and the subscription of the payer is in play;
      * 3. the customer is made ready ({@see BillingCustomers::ensure()}) and the session is created.
      *
-     * The route paces the calls per person. `409` `billing_disabled` when the instance sells no plan; `422` (`interval_not_offered`) for a
-     * yearly plan when no yearly Price is set; `503` (`billing_unavailable`) when Stripe fails.
+     * The route paces the calls per person. `409` `billing_disabled` when the instance sells no plan (billing off, no amount, or the
+     * identity of the seller incomplete: see {@see PricingPlans::selling()}; a preview of the plans never opens a checkout); `422`
+     * (`interval_not_offered`) for a yearly plan when no yearly Price is set; `503` (`billing_unavailable`) when Stripe fails.
      */
     public function checkout(StartCheckoutRequest $request, Workspace $workspace): JsonResponse
     {
-        if (! Billing::enabled()) {
+        // Selling needs billing on and the identity of the seller complete (valid terms): a preview of the plans never opens a checkout.
+        if (! PricingPlans::selling()) {
             return $this->disabled();
         }
 

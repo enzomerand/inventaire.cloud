@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
-use App\Http\Middleware\AbortUnlessSelling;
+use App\Http\Middleware\AbortUnlessPlansShown;
 use App\Http\Middleware\UseUrlLocale;
 use App\Landing\Faq;
 use App\Landing\PricingPlans;
@@ -16,8 +16,9 @@ use Illuminate\Contracts\View\View;
 /**
  * `/pricing` (and `/{locale}/pricing`): the Free and Pro plans side by side, public and rendered by the server.
  *
- * The page exists only on an instance that sells a plan ({@see PricingPlans::selling()}): anywhere else it is a 404, as if it were not
- * there (see {@see AbortUnlessSelling}). The language is the one of the address (see {@see UseUrlLocale}).
+ * The page exists only on an instance that sells a plan or previews its plans ({@see PricingPlans::shown()}): anywhere else it is a 404, as
+ * if it were not there (see {@see AbortUnlessPlansShown}). On a preview the Pro button cannot be used yet. The language is the one of the
+ * address (see {@see UseUrlLocale}).
  */
 final class PricingPageController extends Controller
 {

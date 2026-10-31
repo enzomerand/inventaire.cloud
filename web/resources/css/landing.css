@@ -680,6 +680,11 @@
     font-size: 1rem;
 }
 
+/* "TTC" / "incl. VAT": the price is VAT-included, said next to the amount in the size of the period, not smaller. */
+.landing-price-tax {
+    font-weight: 600;
+}
+
 .landing-plan-foot .btn {
     flex: none;
 }
@@ -887,4 +892,59 @@
     font-weight: 700;
     letter-spacing: -0.025em;
     line-height: 1.05;
+}
+
+/* ----- The terms of sale (resources/views/terms.blade.php). ----- */
+/*
+ * The text is a partial of plain HTML (legal/terms-fr.blade.php), the same one that is printed in the PDF of the confirmation: it carries no
+ * class, so every rule here is on an element under `.legal`.
+ */
+.legal {
+    max-width: 52rem;
+    font-size: 1rem;
+    line-height: 1.65;
+    text-wrap: pretty;
+}
+
+.legal h2 {
+    margin: 2.5rem 0 0.75rem;
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.legal h3 {
+    margin: 1.75rem 0 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 700;
+}
+
+.legal p {
+    margin: 0 0 1rem;
+}
+
+.legal a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.legal table {
+    width: 100%;
+    margin: 0 0 1.5rem;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+.legal th,
+.legal td {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--tblr-border-color);
+    text-align: start;
+    vertical-align: top;
+}
+
+.legal thead th {
+    border-bottom-width: 2px;
+    font-weight: 700;
 }

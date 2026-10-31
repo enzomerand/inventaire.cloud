@@ -14,8 +14,8 @@ use Illuminate\Contracts\View\View;
 /**
  * `/`: the home page, which is the sales page, public and rendered by the server.
  *
- * It exists once, in the language of the request. It talks about plans and prices only on an instance that sells a plan
- * ({@see PricingPlans::selling()}); everywhere else it presents the application as free and open source.
+ * It exists once, in the language of the request. It talks about plans and prices only on an instance that sells a plan or previews its
+ * plans ({@see PricingPlans::shown()}); everywhere else it presents the application as free and open source.
  */
 final class HomePageController extends Controller
 {
@@ -33,7 +33,7 @@ final class HomePageController extends Controller
     public function __invoke(): View
     {
         $locale = app()->getLocale();
-        $plans = PricingPlans::selling() ? PricingPlans::current() : null;
+        $plans = PricingPlans::shown() ? PricingPlans::current() : null;
         $faq = Faq::home($plans);
 
         return view('home', [

@@ -10,14 +10,54 @@ use App\Models\Workspace;
 use Tests\Support\FakeStripe;
 
 /**
- * An instance that sells plans, and a Stripe for it: the secret key, the signing secret and the two Prices are set, and the network is a
- * {@see FakeStripe} that answers like the real one and refuses any other request.
+ * The legal identity of a complete seller, as `config/legal.php` holds it: every required detail is filled in, the capital too.
+ *
+ * @return array<string, string>
+ */
+function billingSellerSettings(): array
+{
+    return [
+        'legal.seller.name' => 'Palan Test',
+        'legal.seller.form' => 'SAS',
+        'legal.seller.capital' => '1 000 euros',
+        'legal.seller.address' => '1 rue de Test, 44000 Nantes',
+        'legal.seller.registration' => 'RCS Nantes 123 456 789',
+        'legal.seller.vat_number' => 'FR12345678901',
+        'legal.seller.email' => 'ventes@example.test',
+        'legal.seller.phone' => '+33 2 00 00 00 00',
+        'legal.seller.mediator_name' => 'Médiateur Test',
+        'legal.seller.mediator_address' => '2 rue du Médiateur, 75000 Paris',
+        'legal.seller.mediator_url' => 'https://mediateur.example.test',
+    ];
+}
+
+/**
+ * Gives the instance a complete seller identity, apart from the details named in `$blank` (set to an empty text): the way a test makes
+ * the seller incomplete (`billingSeller('vat_number')`).
+ *
+ * @param  string  ...$blank  The keys of `legal.seller.*` to leave blank (`vat_number`, `mediator_url`...).
+ */
+function billingSeller(string ...$blank): void
+{
+    $settings = billingSellerSettings();
+
+    foreach ($blank as $key) {
+        $settings["legal.seller.{$key}"] = '';
+    }
+
+    config($settings);
+}
+
+/**
+ * An instance that sells plans, and a Stripe for it: the secret key, the signing secret and the two Prices are set, the identity of the
+ * seller is complete (a sale needs valid terms), and the network is a {@see FakeStripe} that answers like the real one and refuses any
+ * other request. `billingSeller('vat_number')` makes the seller incomplete afterwards: the instance then sells nothing.
  *
  * @param  array<string, mixed>  $config  Settings to put over the defaults, by name (`'services.stripe.prices.yearly' => null`).
  */
 function billingOn(array $config = []): FakeStripe
 {
-    config($config + [
+    config($config + billingSellerSettings() + [
         'services.stripe.secret' => FakeStripe::SECRET,
         'services.stripe.webhook_secret' => FakeStripe::WEBHOOK_SECRET,
         'services.stripe.prices.monthly' => FakeStripe::PRICE_MONTHLY,
@@ -25,6 +65,16 @@ function billingOn(array $config = []): FakeStripe
     ]);
 
     return FakeStripe::install();
+}
+
+/**
+ * An instance that previews its plans without Stripe: nothing is bought, but the pricing page, the terms and the pricing section of the
+ * home page exist (`BILLING_PRICING_PREVIEW`).
+ */
+function billingPreview(): void
+{
+    billingOff();
+    config(['billing.pricing_preview' => true]);
 }
 
 /**
@@ -94,9 +144,10 @@ function billingSign(string $payload, ?string $secret = null, ?int $timestamp = 
  * application read its own when it booted).
  *
  * @param  array<string, string|null>  $variables  The variables to set; null removes one.
+ * @param  string  $file  The configuration file to evaluate (`billing.php`; `legal.php` for the identity of the seller).
  * @return array<string, mixed>
  */
-function billingConfigRead(array $variables): array
+function billingConfigRead(array $variables, string $file = 'billing.php'): array
 {
     $previous = [];
 
@@ -113,7 +164,7 @@ function billingConfigRead(array $variables): array
 
     try {
         /** @var array<string, mixed> $config */
-        $config = require config_path('billing.php');
+        $config = require config_path($file);
 
         return $config;
     } finally {
