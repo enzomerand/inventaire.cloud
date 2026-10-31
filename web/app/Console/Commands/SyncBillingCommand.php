@@ -8,6 +8,7 @@ use App\Billing\Billing;
 use App\Billing\BillingSync;
 use App\Billing\StripeException;
 use App\Billing\SubscriptionStatus;
+use App\Billing\Withdrawals;
 use App\Models\BillingAccount;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
@@ -35,6 +36,12 @@ use Throwable;
  * were told by the first); and the time budget ({@see self::TIME_BUDGET} seconds, not counting the call in progress), which keeps a run from still being
  * there when the next one is due. What is left is done by the next run.
  *
+ * **Before the accounts, it finishes the withdrawals that did not go through** ({@see Withdrawals::unsettled()}): a process that died
+ * between storing a declaration and acting on it leaves a subscription that goes on billing and a person who was told nothing, and the
+ * right of withdrawal does not wait. They are resumed step by step ({@see Withdrawals::resume()}: the cancellation, the acknowledgement
+ * and the mail to the administrators each remember that they were done), at most {@see self::WITHDRAWALS_PER_RUN} per run and within
+ * {@see self::WITHDRAWALS_BUDGET} seconds, so that they never wait behind the accounts and never hold them up either.
+ *
  * Scheduled hourly (`routes/console.php`); safe to run at any time and as often as wanted. An instance that does not sell plans has
  * nothing to do and says so.
  */
@@ -58,6 +65,12 @@ final class SyncBillingCommand extends Command
     /** The seconds after which no new account is started (a call in progress may take 20 more). */
     public const TIME_BUDGET = 45;
 
+    /** The withdrawals finished in one run. */
+    public const WITHDRAWALS_PER_RUN = 20;
+
+    /** The seconds after which no new withdrawal is started (a call in progress may take 20 more). */
+    public const WITHDRAWALS_BUDGET = 20;
+
     protected $signature = 'inventaire:sync-billing';
 
     protected $description = 'Read again at Stripe the subscriptions of the workspaces that were not synchronised for a few hours';
@@ -65,13 +78,15 @@ final class SyncBillingCommand extends Command
     /**
      * Synchronises the accounts that are due.
      */
-    public function handle(BillingSync $sync): int
+    public function handle(BillingSync $sync, Withdrawals $withdrawals): int
     {
         if (! Billing::enabled()) {
             $this->components->info('Billing is not enabled on this instance: nothing to synchronise.');
 
             return self::SUCCESS;
         }
+
+        $this->finishWithdrawals($withdrawals);
 
         $done = 0;
         $failed = 0;
@@ -140,6 +155,45 @@ final class SyncBillingCommand extends Command
         $this->components->info(sprintf('%d account(s) synchronised, %d failed.', $done, $failed));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Finishes the withdrawals whose follow-up did not go through, the oldest first, within a budget of their own. One that fails is
+     * written in the log and the others go on; it is tried again at the next run. Nothing in this step, not even finding them, stops the
+     * run from synchronising the accounts.
+     */
+    private function finishWithdrawals(Withdrawals $withdrawals): void
+    {
+        $started = now();
+        $finished = 0;
+
+        // Looking them up can fail too (the database): that is the end of this step only, never of the run, which goes on with the accounts.
+        try {
+            $unsettled = $withdrawals->unsettled(self::WITHDRAWALS_PER_RUN);
+        } catch (Throwable $exception) {
+            Log::error('The withdrawals to finish could not be looked up: the accounts are synchronised all the same.', ['exception' => $exception]);
+
+            return;
+        }
+
+        foreach ($unsettled as $withdrawal) {
+            if ($started->diffInSeconds(now(), true) >= self::WITHDRAWALS_BUDGET) {
+                Log::warning('The withdrawals to finish stopped early: the next run does the rest.', ['finished' => $finished]);
+
+                break;
+            }
+
+            try {
+                $withdrawals->resume($withdrawal);
+                $finished++;
+            } catch (Throwable $exception) {
+                Log::error('A withdrawal could not be finished.', ['withdrawal' => $withdrawal->getKey(), 'exception' => $exception]);
+            }
+        }
+
+        if ($finished > 0) {
+            $this->components->info(sprintf('%d withdrawal(s) followed up.', $finished));
+        }
     }
 
     /**

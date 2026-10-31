@@ -20,7 +20,8 @@ use Illuminate\Support\Facades\Gate;
  * buy Pro and manage the subscription): the API judges the person again, and the page hands the script the addresses. It is also where
  * Stripe Checkout brings the person back (`?checkout=done`), whatever the page says: nothing is believed from that address. The page
  * exists while the instance sells no plan and says so. Opening it makes the workspace the current one of the account
- * ({@see EntersWorkspace}).
+ * ({@see EntersWorkspace}). The page hands the script the name and the address of the person, with which the declaration of a withdrawal
+ * from the contract is prefilled.
  */
 final class WorkspaceBillingPageController extends Controller
 {
@@ -38,8 +39,14 @@ final class WorkspaceBillingPageController extends Controller
     {
         Gate::authorize('view', $workspace);
 
-        $this->enter($this->user($request), $workspace);
+        $user = $this->user($request);
+        $this->enter($user, $workspace);
 
-        return view('app.workspace-billing', ['workspace' => $workspace, 'activeWorkspace' => $workspace->ulid]);
+        // The name and the address the declaration of a withdrawal is prefilled with (the person edits them): the owner's own, from their account.
+        return view('app.workspace-billing', [
+            'workspace' => $workspace,
+            'activeWorkspace' => $workspace->ulid,
+            'person' => ['name' => $user->name, 'email' => $user->email],
+        ]);
     }
 }

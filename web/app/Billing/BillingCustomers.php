@@ -244,6 +244,12 @@ final class BillingCustomers
                 'interval' => null,
                 'current_period_end' => null,
                 'cancel_at_period_end' => false,
+                // What was remembered of the old subscription goes with it: its start (the window of withdrawal), and the notices that
+                // were sent for it or for its periods. A new customer's first subscription starts all of it again.
+                'started_at' => null,
+                'confirmation_sent_for' => null,
+                'cancel_notice_sent_for' => null,
+                'renewal_notice_sent_for' => null,
                 'synced_at' => null,
             ])->save();
 

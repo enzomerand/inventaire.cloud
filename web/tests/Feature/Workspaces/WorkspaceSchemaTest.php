@@ -84,6 +84,9 @@ describe('the migrations', function (): void {
         $photoEntry = require database_path('migrations/2026_12_01_000100_add_photo_entry_enabled_to_workspaces_table.php');
         // The billing account of a workspace hangs from it.
         $billingAccounts = require database_path('migrations/2026_12_02_000000_create_billing_accounts_table.php');
+        // The columns of the contract mails and the withdrawals (which point to workspaces and accounts) come after the billing accounts.
+        $contract = require database_path('migrations/2026_12_03_000000_add_contract_notices_to_billing_accounts_and_create_billing_withdrawals.php');
+        $contract->down();
         $billingAccounts->down();
         $photoEntry->down();
         $photoAnalyses->down();
@@ -119,6 +122,7 @@ describe('the migrations', function (): void {
             $photoAnalyses->up();
             $photoEntry->up();
             $billingAccounts->up();
+            $contract->up();
         }
 
         expect(Schema::hasTable('workspaces'))->toBeTrue()

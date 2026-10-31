@@ -9,14 +9,15 @@ use App\Signatures\Documenso;
 
 /**
  * The sentences the home page and its description in search engines share, so that the two say the same thing and neither promises what
- * the instance cannot do: a signed export only where Documenso is set up, a price or a plan only where the instance sells one.
+ * the instance cannot do: a signed export only where Documenso is set up, a price or a plan only where the instance shows one (it sells
+ * a plan or previews its plans).
  */
 final class Pitch
 {
     /**
      * The sentence under the title of the home page: signed exports only where signatures can be asked for.
      *
-     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it shows none.
      */
     public static function lead(?PricingPlans $plans): string
     {
@@ -29,7 +30,7 @@ final class Pitch
     /**
      * The description of the home page for search engines.
      *
-     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it shows none.
      */
     public static function description(?PricingPlans $plans): string
     {

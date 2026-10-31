@@ -317,11 +317,17 @@ describe('the workspaces page and the photo entry', function (): void {
         billingPageOffersPhotoEntry();
         $with = $queries();
         $memberships = fn (array $sql): int => count(array_filter($sql, fn (string $query): bool => str_contains($query, 'workspace_user')));
+        $accounts = fn (array $sql): int => count(array_filter($sql, fn (string $query): bool => str_contains($query, 'billing_accounts')));
 
         // No plan is read for a switch that is not on the page, and the workspaces of the person are not listed again for it: the only
         // read of them is the one of the layout (the switcher), which the page makes whatever the controller does.
-        expect(array_filter($without, fn (string $sql): bool => str_contains($sql, 'billing_accounts')))->toBe([])
-            ->and($memberships($without))->toBe(1)
+        //
+        // An instance that sells plans reads one more thing even without the photo entry (the terms of sale promise a warning before a
+        // workspace with a live subscription is deleted): the workspaces of the person once, and their plans in one query. One that sells
+        // none reads nothing of the kind.
+        expect($accounts($without))->toBe($plans ? 1 : 0)
+            ->and($memberships($without))->toBe($plans ? 2 : 1)
+            ->and($accounts($with))->toBe($plans ? 1 : 0)
             ->and($memberships($with))->toBe(2);
     })->with([
         'plans sold' => [true],

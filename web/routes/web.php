@@ -27,6 +27,7 @@ use App\Http\Controllers\Web\PricingPageController;
 use App\Http\Controllers\Web\TemplateGalleryController;
 use App\Http\Controllers\Web\TemplatePageController;
 use App\Http\Controllers\Web\TemplateUseController;
+use App\Http\Controllers\Web\TermsPageController;
 use App\Http\Controllers\Web\WorkspaceBillingPageController;
 use App\Http\Controllers\Web\WorkspaceListPageController;
 use App\Http\Controllers\Web\WorkspaceMembersPageController;
@@ -35,7 +36,8 @@ use App\Http\Controllers\Webhooks\DocumensoWebhookController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\WebManifestController;
 use App\Http\Middleware\AbortIfInstalled;
-use App\Http\Middleware\AbortUnlessSelling;
+use App\Http\Middleware\AbortUnlessPlansShown;
+use App\Http\Middleware\AbortUnlessTermsAvailable;
 use App\Http\Middleware\AuthenticateSession;
 use App\Http\Middleware\AuthorizeSetupToken;
 use App\Http\Middleware\UseUrlLocale;
@@ -67,16 +69,24 @@ Route::middleware(['throttle:public-pages', UseUrlLocale::class])->group(functio
         });
 });
 
-// The pricing page works the same way (one address per language, the language from the address). It exists on an instance that sells a
-// plan only: anywhere else it is a 404, and the guard comes before the language of the address so that the prefixed address of the
-// default language is a 404 too, not a redirect to one.
-Route::middleware(['throttle:public-pages', AbortUnlessSelling::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
+// The pricing page and the terms of sale work the same way (one address per language, the language from the address). The pricing page
+// exists on an instance that sells a plan or previews its plans (BILLING_PRICING_PREVIEW) only; the terms exist there too, and wherever a
+// subscription exists, since the mails of a contract link to them. Anywhere else they are a 404, and the guard comes before the language
+// of the address so that the prefixed address of the default language is a 404 too, not a redirect to one.
+Route::middleware(['throttle:public-pages', AbortUnlessPlansShown::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
     Route::get('/pricing', PricingPageController::class)->name('pricing.index');
 
-    Route::prefix('{locale}')->where(['locale' => $localeCodes])
-        ->name('pricing.localized.')->group(function (): void {
-            Route::get('/pricing', PricingPageController::class)->name('index');
-        });
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])->group(function (): void {
+        Route::get('/pricing', PricingPageController::class)->name('pricing.localized.index');
+    });
+});
+
+Route::middleware(['throttle:public-pages', AbortUnlessTermsAvailable::class, UseUrlLocale::class])->group(function () use ($localeCodes): void {
+    Route::get('/terms', TermsPageController::class)->name('terms.index');
+
+    Route::prefix('{locale}')->where(['locale' => $localeCodes])->group(function (): void {
+        Route::get('/terms', TermsPageController::class)->name('terms.localized.index');
+    });
 });
 
 // The documentation of the API: one page at one address, in the language of the request (the text of the document is French or

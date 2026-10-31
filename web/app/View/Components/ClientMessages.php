@@ -503,8 +503,8 @@ class ClientMessages extends Component
             'billing.previous_owner_until' => __('The subscription of the previous owner of this workspace runs until :date. You can subscribe once it has ended.'),
             'billing.plan.free' => __('Free'),
             'billing.plan.pro' => __('Pro'),
-            'billing.price.month' => __(':amount per month'),
-            'billing.price.year' => __(':amount per year'),
+            'billing.price.month' => __(':amount incl. VAT per month'),
+            'billing.price.year' => __(':amount incl. VAT per year'),
             'billing.interval.month' => __('Monthly'),
             'billing.interval.year' => __('Yearly'),
             'billing.status.active' => __('Active'),
@@ -530,6 +530,16 @@ class ClientMessages extends Component
             'billing.error.no_account' => __('This workspace has no subscription to manage yet.'),
             'billing.error.interval' => __('This billing period is not offered.'),
             'billing.error.unavailable' => __('The payment service is unavailable right now. Please try again in a moment.'),
+            'billing.error.no_live_subscription' => __('This workspace has no running subscription.'),
+            'billing.error.cancellation_scheduled' => __('The cancellation of this subscription is already scheduled.'),
+            'billing.error.withdrawal_period_over' => __('The fourteen days of the right of withdrawal are over.'),
+            'billing.error.already_withdrawn' => __('You already withdrew from this contract.'),
+            'billing.withdrawn' => __('Your withdrawal is recorded and your subscription is ending. You receive the acknowledgement at the address you gave.'),
+            'billing.notice.withdrawn' => __('Your withdrawal is recorded. An acknowledgement is on its way to :email.'),
+            'billing.notice.withdrawn_pending' => __('Your withdrawal is recorded. The acknowledgement will follow by email.'),
+            'billing.withdrawal.until' => __('You can withdraw until :moment.'),
+            'billing.withdrawal.contract' => __(':plan subscription, :interval, ordered on :date'),
+            'workspaces.confirm_delete_subscription' => __('Its Pro subscription ends at once, and the period in progress is not refunded, subject to your right of withdrawal and the legal guarantee. If you are within the 14 days of withdrawal, withdraw from the contract first from its Subscription page: deleting the workspace removes that page.'),
         ];
     }
 

@@ -1,7 +1,7 @@
 {{--
     The pricing page: the Free and Pro plans side by side, their comparison line by line, and the questions about billing. Public and
-    drawn by the server. It exists on an instance that sells a plan only (App\Http\Controllers\Web\PricingPageController answers 404
-    elsewhere), in one address per language like the templates.
+    drawn by the server. It exists on an instance that sells or previews a plan only (App\Http\Controllers\Web\PricingPageController answers
+    404 elsewhere), in one address per language like the templates. Every amount is VAT-included and says so.
 
     `$plans` is the App\Landing\PricingPlans, `$faq` the billing questions (App\Landing\Faq).
 --}}
@@ -16,7 +16,7 @@
         <section class="landing-section landing-section-intro" aria-labelledby="pricing-title">
             <div class="container-xl">
                 <h1 id="pricing-title" class="landing-h2 landing-h1">{{ __('Free to start. Pro to grow.') }}</h1>
-                <p class="landing-statement">{{ __('One plan per workspace: the owner subscribes, every member benefits. Cancel anytime.') }}</p>
+                <p class="landing-statement">{{ $plans->selling ? __('One plan per workspace: the owner subscribes, every member benefits. Cancel anytime.') : __('One plan per workspace: the owner subscribes, every member benefits.') }}</p>
             </div>
         </section>
 

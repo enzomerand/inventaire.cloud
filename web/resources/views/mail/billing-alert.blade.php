@@ -2,12 +2,14 @@
 
 @if ($problem)
 {!! __('Something about the payments needs your attention on :app:', ['app' => config('app.name')]) !!}
+@elseif ($task)
+{!! __('Something needs to be done by you on :app:', ['app' => config('app.name')]) !!}
 @else
 {!! __('Stripe reported something that needs your attention on :app:', ['app' => config('app.name')]) !!}
 @endif
 
 {!! $eventLabel !!}
-@if ($problem)
+@if ($problem || $task)
 {!! $explanation !!}
 
 @if ($objectId !== null)
@@ -16,6 +18,9 @@
 @if ($workspaceUlid !== null)
 {!! __('Workspace: :value', ['value' => $workspaceUlid]) !!}
 @endif
+@foreach ($taskLines as $line)
+{!! $line !!}
+@endforeach
 @else
 {!! __('Stripe event: :value', ['value' => $eventType]) !!}
 @if ($objectId !== null)

@@ -10,15 +10,15 @@ use App\Signatures\Documenso;
  * The questions the public pages answer, in the language of the request.
  *
  * The same list draws the visible accordion and the `FAQPage` structured data, so that the two never disagree (search engines compare
- * them). The answers say only what the instance can do: nothing about plans where none is sold, nothing about signatures where Documenso
- * is not set up, nothing about tax where Stripe does not work it out.
+ * them). The answers say only what the instance can do: nothing about plans where none is shown, nothing that promises a purchase where the
+ * plans are only previewed, nothing about signatures where Documenso is not set up.
  */
 final class Faq
 {
     /**
      * The questions of the home page.
      *
-     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it shows none.
      * @return list<array{question: string, answer: string}>
      */
     public static function home(?PricingPlans $plans): array
@@ -62,13 +62,30 @@ final class Faq
     }
 
     /**
-     * The questions about billing, on the pricing page.
+     * The questions about billing, on the pricing page. Where the plans are only previewed (nothing can be bought yet) the page answers
+     * about the VAT and says that Pro is not on sale: it promises neither a payment page, an invoice nor a cancellation. The answer about
+     * the VAT mentions the reverse charge only where Stripe Tax is on ({@see PricingPlans::$automaticTax}).
      *
      * @return list<array{question: string, answer: string}>
      */
     public static function billing(PricingPlans $plans): array
     {
-        $questions = [[
+        // The reverse charge for a business of another EU country is something Stripe Tax applies at Checkout: without it (`STRIPE_AUTOMATIC_TAX`)
+        // the invoice carries VAT whoever pays, and the page does not promise otherwise.
+        $vat = [
+            'question' => __('What about VAT?'),
+            'answer' => __('Prices include VAT, and your invoice shows the amount.')
+                .($plans->automaticTax ? ' '.__('A business established in another EU country that gives a valid VAT number can be invoiced without VAT (reverse charge).') : ''),
+        ];
+
+        if (! $plans->selling) {
+            return [[
+                'question' => __('Can I subscribe to Pro today?'),
+                'answer' => __('Not yet. Pro is not on sale for now, and the Free plan is available. The prices shown are the ones that will apply.'),
+            ], $vat];
+        }
+
+        return [[
             'question' => __('Can I cancel anytime?'),
             'answer' => __('Yes. Cancel from the customer portal. Pro stays active until the end of the period you paid for.'),
         ], [
@@ -83,15 +100,6 @@ final class Faq
         ], [
             'question' => __('Where are my invoices?'),
             'answer' => __('In the customer portal, from "Manage the subscription" on the billing page of your workspace. You can also update your card there.'),
-        ]];
-
-        if ($plans->automaticTax) {
-            $questions[] = [
-                'question' => __('What about VAT?'),
-                'answer' => __('Tax is worked out at checkout and shown on your invoice. You can add your VAT number there.'),
-            ];
-        }
-
-        return $questions;
+        ], $vat];
     }
 }

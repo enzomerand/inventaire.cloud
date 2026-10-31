@@ -42,3 +42,13 @@ Schedule::command('inventaire:sync-versions')->everyTenMinutes()->withoutOverlap
 // The lock of a run that was killed is forgotten after 55 minutes, before the next hour (the default is 24 hours). In the background: a run
 // that waits on Stripe must not hold up the other scheduled commands of the minute.
 Schedule::command('inventaire:sync-billing')->hourly()->withoutOverlapping(55)->runInBackground();
+
+// The notice of tacit renewal of the yearly subscriptions is sent a month to three months before the end of the period (article L215-1 of
+// the consumer code). Nothing to do (and said so) when the instance sells no plan. The lock of a run that was killed is forgotten after
+// 55 minutes (the default is 24 hours: no notice for a day).
+Schedule::command('inventaire:send-renewal-notices')->daily()->withoutOverlapping(55)->runInBackground();
+
+// The jobs that failed are kept for thirty days and then deleted. A failed contract mail (the confirmation, the receipt, the notice, the
+// acknowledgement of a withdrawal) holds the name and the address of the person in `failed_jobs`: that is not to be kept for ever. The lock
+// of a run that was killed is forgotten after 30 minutes, as for the other pruning (the default is 24 hours: no pruning for a day).
+Schedule::command('queue:prune-failed --hours=720')->daily()->withoutOverlapping(30);

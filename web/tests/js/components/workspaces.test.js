@@ -22,6 +22,7 @@ vi.mock('../../../resources/js/lib/i18n.js', () => ({
             'workspaces.rename_named': 'Rename :name',
             'workspaces.delete_named': 'Delete :name',
             'workspaces.confirm_delete': 'Delete :name and everything in it?',
+            'workspaces.confirm_delete_subscription': 'Its Pro subscription ends at once.',
             'workspaces.notice.created': 'Created',
             'workspaces.notice.renamed': 'Renamed',
             'workspaces.notice.deleted': 'Deleted',
@@ -106,6 +107,31 @@ describe('workspaces page', () => {
             expect(component.roleLabel(SHARED)).toBe('Viewer');
             expect(component.renameLabel(MINE)).toBe('Rename Mine');
             expect(component.deleteLabel(MINE)).toBe('Delete Mine');
+            expect(component.confirmText(MINE)).toBe('Delete Mine and everything in it?');
+        });
+
+        it('warns, before a workspace with a live subscription is deleted, that the subscription ends at once', () => {
+            component.$root.dataset.liveSubscriptions = JSON.stringify(['mine']);
+
+            component.init();
+
+            expect(component.confirmText(MINE)).toBe(
+                'Delete Mine and everything in it? Its Pro subscription ends at once.',
+            );
+            // A workspace the page does not list has none.
+            expect(component.confirmText({ ...MINE, id: 'other', name: 'Other' })).toBe(
+                'Delete Other and everything in it?',
+            );
+        });
+
+        it('does not warn on a page that lists none, or that does not say', () => {
+            component.init();
+
+            expect(component.confirmText(MINE)).toBe('Delete Mine and everything in it?');
+
+            component.$root.dataset.liveSubscriptions = '[]';
+            component.init();
+
             expect(component.confirmText(MINE)).toBe('Delete Mine and everything in it?');
         });
 

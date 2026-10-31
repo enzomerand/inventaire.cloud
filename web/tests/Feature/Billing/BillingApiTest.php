@@ -81,11 +81,15 @@ describe('the overview', function (): void {
             ->assertOk()
             ->assertExactJson(['data' => [
                 'enabled' => true,
+                'selling' => true,
                 'plan' => 'free',
                 'status' => null,
                 'interval' => null,
                 'current_period_end' => null,
                 'cancel_at_period_end' => false,
+                'started_at' => null,
+                'withdrawal_until' => null,
+                'withdrawn' => false,
                 'can_manage' => $canManage,
                 'prices' => ['currency' => 'eur', 'month' => 600, 'year' => 6000],
                 'limits' => ['inventories' => 3, 'items' => 500, 'storage_bytes' => 200000, 'members' => 3, 'share_links' => 2, 'photo_entry' => false],

@@ -35,6 +35,7 @@
         data-photo-entry-url="{{ route('api.v1.workspaces.photo-entry.update', ['workspace' => '__id__'], absolute: false) }}"
         data-photo-entry="{{ json_encode($photoEntry, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR) }}"
         data-photo-entry-unlocked="{{ json_encode($photoEntryUnlocked, JSON_THROW_ON_ERROR) }}"
+        data-live-subscriptions="{{ json_encode($liveSubscriptions ?? [], JSON_THROW_ON_ERROR) }}"
         data-billing-url="{{ route('app.workspace.billing', ['workspace' => '__id__'], absolute: false) }}"
     >
         <div class="col-12 col-lg-8">

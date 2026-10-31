@@ -206,6 +206,11 @@ describe('the parameters of a Checkout session', function (): void {
             'billing_address_collection' => 'required',
             'tax_id_collection' => ['enabled' => true],
             'customer_update' => ['name' => 'auto', 'address' => 'auto'],
+            'consent_collection' => ['terms_of_service' => 'required'],
+            'custom_text' => [
+                'terms_of_service_acceptance' => ['message' => "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté."],
+                'submit' => ['message' => 'Commande avec obligation de paiement'],
+            ],
             'automatic_tax' => ['enabled' => false],
             'locale' => 'fr',
             'integration_identifier' => 'inventaire-cloud-pkqzrvmw',
@@ -254,6 +259,31 @@ describe('the parameters of a Checkout session', function (): void {
         expect(CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', 'en')['automatic_tax'])->toBe(['enabled' => true]);
     });
 
+    it('collect the acceptance of the terms of sale: a required box, worded for the order, with the link of the terms in the language of the person', function (string $locale, string $message, string $submit): void {
+        $parameters = CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', $locale);
+
+        expect($parameters['consent_collection'])->toBe(['terms_of_service' => 'required'])
+            ->and($parameters['custom_text']['terms_of_service_acceptance']['message'])->toBe($message)
+            ->and($parameters['custom_text']['submit']['message'])->toBe($submit)
+            ->and($parameters)->not->toHaveKey('payment_method_types');
+    })->with([
+        'French' => ['fr', "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté.", 'Commande avec obligation de paiement'],
+        'English' => ['en', 'I accept the [terms of sale](http://localhost/en/terms), I request the immediate start of the service and I acknowledge that I lose my right of withdrawal once the contract has been fully performed.', 'Order with obligation to pay'],
+        'any other language: the language of the contract' => ['de', "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté.", 'Commande avec obligation de paiement'],
+    ]);
+
+    it('build the address of the terms from APP_URL, never from the request, and keep the texts far under the 1200 characters Stripe allows', function (): void {
+        config(['app.url' => 'https://inventaire.example/']);
+
+        foreach (['fr', 'en'] as $locale) {
+            $texts = CheckoutParameters::customText($locale);
+
+            expect($texts['terms_of_service_acceptance']['message'])->toContain($locale === 'fr' ? '(https://inventaire.example/terms)' : '(https://inventaire.example/en/terms)')
+                ->and(mb_strlen($texts['terms_of_service_acceptance']['message']))->toBeLessThan(400)
+                ->and(mb_strlen($texts['submit']['message']))->toBeLessThan(100);
+        }
+    });
+
     it('speak French or English, and leave any other language to the browser', function (string $locale, string $asked): void {
         expect(CheckoutParameters::make('cus_1', 'price_m', 'ulid', 'https://a.test/ok', 'https://a.test/ko', $locale)['locale'])->toBe($asked)
             ->and(CheckoutParameters::locale($locale))->toBe($asked);
@@ -288,6 +318,11 @@ describe('creating a Checkout session', function (): void {
                 'billing_address_collection' => 'required',
                 'tax_id_collection' => ['enabled' => 'true'],
                 'customer_update' => ['name' => 'auto', 'address' => 'auto'],
+                'consent_collection' => ['terms_of_service' => 'required'],
+                'custom_text' => [
+                    'terms_of_service_acceptance' => ['message' => "J'accepte les [CGV](http://localhost/terms), je demande le début immédiat du service et je reconnais perdre mon droit de rétractation une fois le contrat entièrement exécuté."],
+                    'submit' => ['message' => 'Commande avec obligation de paiement'],
+                ],
                 'automatic_tax' => ['enabled' => 'false'],
                 'locale' => 'fr',
                 'integration_identifier' => 'inventaire-cloud-pkqzrvmw',
@@ -375,6 +410,94 @@ describe('creating a portal session', function (): void {
         $this->stripe->answerWith(Http::response(['id' => 'bps_1']));
 
         expect(fn () => $this->client->createPortalSession('cus_1', 'https://inventaire.test/back', 'fr'))->toThrow(StripeException::class);
+    });
+
+    it('opens the portal on the cancellation of a subscription, with the nested form fields Stripe documents', function (): void {
+        $this->stripe->addCustomer('cus_1');
+
+        $this->client->createPortalSession('cus_1', 'https://inventaire.test/back', 'fr', 'sub_9', 'https://inventaire.test/back?cancellation=done');
+
+        $body = $this->stripe->requests[0]->body();
+        parse_str($body, $fields);
+
+        // `flow_data[type]=subscription_cancel`, `flow_data[subscription_cancel][subscription]=sub_…` and a redirect when it is done.
+        expect($fields)->toBe([
+            'customer' => 'cus_1',
+            'return_url' => 'https://inventaire.test/back',
+            'locale' => 'fr',
+            'flow_data' => [
+                'type' => 'subscription_cancel',
+                'subscription_cancel' => ['subscription' => 'sub_9'],
+                'after_completion' => ['type' => 'redirect', 'redirect' => ['return_url' => 'https://inventaire.test/back?cancellation=done']],
+            ],
+        ])->and($body)->toContain(urlencode('flow_data[type]').'=subscription_cancel')
+            ->toContain(urlencode('flow_data[subscription_cancel][subscription]').'=sub_9');
+    });
+
+    it('comes back to the return address when no other is given for the end of the cancellation', function (): void {
+        $this->stripe->addCustomer('cus_1');
+
+        $this->client->createPortalSession('cus_1', 'https://inventaire.test/back', 'en', 'sub_9');
+
+        expect($this->stripe->requests[0]->data()['flow_data']['after_completion']['redirect']['return_url'])->toBe('https://inventaire.test/back');
+    });
+
+    it('sends no flow at all when no subscription is to be cancelled', function (): void {
+        $this->stripe->addCustomer('cus_1');
+
+        $this->client->createPortalSession('cus_1', 'https://inventaire.test/back', 'en');
+
+        expect($this->stripe->requests[0]->data())->not->toHaveKey('flow_data');
+    });
+});
+
+describe('reading the latest paid invoice of a subscription', function (): void {
+    it('asks for one paid invoice of the subscription and gives back what was paid', function (): void {
+        $this->stripe->addCustomer('cus_1');
+        $subscription = $this->stripe->subscribe('cus_1');
+        $this->stripe->invoice($subscription, 500);
+        $latest = $this->stripe->invoice($subscription, 600, 'EUR');
+        $this->stripe->invoice($subscription, 700, 'eur', 'open');
+        $this->stripe->invoice($this->stripe->subscribe('cus_1'), 900);
+
+        $invoice = $this->client->latestPaidInvoice($subscription);
+
+        parse_str((string) parse_url($this->stripe->requests[0]->url(), PHP_URL_QUERY), $query);
+
+        // The newest paid one of that subscription; the unpaid and the others' are not in the way; the currency is lowercase.
+        expect($invoice)->toBe(['id' => $latest, 'amount_paid' => 600, 'currency' => 'eur'])
+            ->and($this->stripe->calls)->toBe(['GET /v1/invoices'])
+            ->and($query)->toBe(['subscription' => $subscription, 'status' => 'paid', 'limit' => '1']);
+    });
+
+    it('gives nothing when the subscription has no paid invoice', function (): void {
+        $this->stripe->addCustomer('cus_1');
+        $subscription = $this->stripe->subscribe('cus_1');
+        $this->stripe->invoice($subscription, 700, 'eur', 'open');
+
+        expect($this->client->latestPaidInvoice($subscription))->toBeNull();
+    });
+
+    it('refuses an answer that is not a list, or whose invoice has no usable amount or currency', function (mixed $body): void {
+        $this->stripe->answerWith(Http::response($body));
+
+        expect(fn () => $this->client->latestPaidInvoice('sub_1'))
+            ->toThrow(fn (StripeException $e) => expect($e->code())->toBe('invalid_response'));
+    })->with([
+        'no list' => [['object' => 'list']],
+        'an object' => [['data' => ['id' => 'in_1']]],
+        'no amount' => [['data' => [['id' => 'in_1', 'currency' => 'eur']]]],
+        'a text amount' => [['data' => [['id' => 'in_1', 'amount_paid' => '600', 'currency' => 'eur']]]],
+        'a negative amount' => [['data' => [['id' => 'in_1', 'amount_paid' => -1, 'currency' => 'eur']]]],
+        'no currency' => [['data' => [['id' => 'in_1', 'amount_paid' => 600]]]],
+        'no id' => [['data' => [['amount_paid' => 600, 'currency' => 'eur']]]],
+    ]);
+
+    it('says when Stripe fails, so that the caller can go on without the amount', function (): void {
+        $this->stripe->failNext('GET /v1/invoices', 500);
+
+        expect(fn () => $this->client->latestPaidInvoice('sub_1'))
+            ->toThrow(fn (StripeException $e) => expect($e->retryable())->toBeTrue());
     });
 });
 

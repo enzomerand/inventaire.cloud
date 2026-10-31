@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Billing;
 
 use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Landing\PricingPlans;
 use App\Signatures\Documenso;
 use App\Support\PublicUrls;
 
@@ -110,6 +111,15 @@ final class Billing
             'month' => config()->integer('billing.amounts.month'),
             'year' => self::priceFor('year') === null ? null : config()->integer('billing.amounts.year'),
         ];
+    }
+
+    /**
+     * Whether the plans and the terms of sale are shown to visitors before anything can be bought (`BILLING_PRICING_PREVIEW`). It shows
+     * pages only: it never opens a checkout (see {@see PricingPlans::shown()}).
+     */
+    public static function pricingPreview(): bool
+    {
+        return config()->boolean('billing.pricing_preview');
     }
 
     /**

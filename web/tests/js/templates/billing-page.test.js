@@ -33,6 +33,8 @@ const ROUTES = {
     'api.v1.workspaces.billing.checkout': '/api/v1/workspaces/{workspace}/billing/checkout',
     'api.v1.workspaces.billing.portal': '/api/v1/workspaces/{workspace}/billing/portal',
     'api.v1.workspaces.billing.refresh': '/api/v1/workspaces/{workspace}/billing/refresh',
+    'api.v1.workspaces.billing.cancel': '/api/v1/workspaces/{workspace}/billing/cancel',
+    'api.v1.workspaces.billing.withdraw': '/api/v1/workspaces/{workspace}/billing/withdraw',
 };
 
 /** Escapes text for an HTML attribute, like Blade's `{{ }}`. */
@@ -81,7 +83,12 @@ function render() {
             return route(found[1], found[2]);
         }
 
-        const values = { '$workspace->name': 'Shop', '$workspace->ulid': 'shop' };
+        const values = {
+            '$workspace->name': 'Shop',
+            '$workspace->ulid': 'shop',
+            "$person['name']": 'Ada Lovelace',
+            "$person['email']": 'ada@example.test',
+        };
 
         return values[expression] ?? fail(`unsupported echo {{ ${expression} }}`);
     });
@@ -95,11 +102,15 @@ function render() {
 function overview(overrides = {}) {
     return {
         enabled: true,
+        selling: true,
         plan: 'free',
         status: null,
         interval: null,
         current_period_end: null,
         cancel_at_period_end: false,
+        started_at: null,
+        withdrawal_until: null,
+        withdrawn: false,
         can_manage: true,
         prices: { currency: 'eur', month: 600, year: 6000 },
         limits: {
@@ -254,8 +265,8 @@ describe('the subscription page under the real Alpine CSP build', () => {
                 ['month', true, true],
                 ['year', false, true],
             ]);
-            expect(card.textContent).toContain('€6 per month');
-            expect(card.textContent).toContain('€60 per year');
+            expect(card.textContent).toContain('€6 incl. VAT per month');
+            expect(card.textContent).toContain('€60 incl. VAT per year');
             expect(buttons('Upgrade to Pro')).toHaveLength(1);
             expect(buttons('Manage the subscription')).toHaveLength(0);
             expect(shows('Only the owner manages the subscription.')).toBe(false);
@@ -390,6 +401,169 @@ describe('the subscription page under the real Alpine CSP build', () => {
         expect(planCard().textContent).toContain(
             'The subscription ends on December 15, 2026. Pro stays available until then.',
         );
+    });
+
+    describe('an instance that has Stripe but cannot sell yet', () => {
+        it('says "Coming soon" in place of the button that buys Pro', async () => {
+            await open(overview({ selling: false }));
+
+            expect(buttons('Upgrade to Pro')).toHaveLength(0);
+            const soon = buttons('Coming soon');
+
+            expect(soon).toHaveLength(1);
+            expect(soon[0].disabled).toBe(true);
+        });
+
+        it('has no "Coming soon" where Pro can be bought', async () => {
+            await open(overview());
+
+            expect(buttons('Coming soon')).toHaveLength(0);
+            expect(buttons('Upgrade to Pro')).toHaveLength(1);
+        });
+    });
+
+    describe('cancelling the contract', () => {
+        it('sends the browser to the portal of Stripe, opened on the cancellation', async () => {
+            await open(pro());
+            http.post.mockResolvedValue({ data: { url: 'https://billing.stripe.com/session/bps_cancel' } });
+
+            expect(buttons('Cancel your contract')).toHaveLength(1);
+
+            buttons('Cancel your contract')[0].click();
+            await flush();
+
+            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/billing/cancel', {}, { silent: true });
+            expect(redirectTo).toHaveBeenCalledWith('https://billing.stripe.com/session/bps_cancel');
+        });
+
+        it('is not there when the subscription already ends with the period, nor for a member, nor for a Free workspace', async () => {
+            for (const data of [pro({ cancel_at_period_end: true }), pro({ can_manage: false }), overview()]) {
+                await open(data);
+
+                expect(buttons('Cancel your contract')).toHaveLength(0);
+            }
+        });
+
+        it('has the subscription read when the portal brings the person back', async () => {
+            window.history.replaceState(null, '', '/app/w/shop/billing?cancellation=done');
+            http.post.mockResolvedValue({ data: pro({ cancel_at_period_end: true }) });
+
+            await open(pro());
+
+            expect(http.post).toHaveBeenCalledWith('/api/v1/workspaces/shop/billing/refresh', {}, { silent: true });
+            expect(shows('The subscription ends on December 15, 2026. Pro stays available until then.')).toBe(true);
+            expect(buttons('Cancel your contract')).toHaveLength(0);
+        });
+    });
+
+    describe('withdrawing from the contract', () => {
+        const fresh = (overrides = {}) =>
+            pro({
+                started_at: '2026-11-07T14:30:00+00:00',
+                withdrawal_until: new Date(Date.now() + 10 * 86400000).toISOString(),
+                ...overrides,
+            });
+
+        /** The declaration, once it is on the page. */
+        const declaration = () => document.querySelector('form[aria-labelledby="withdrawal-title"]');
+
+        it('offers the button only while the right can be exercised, and the declaration is closed', async () => {
+            await open(fresh());
+
+            expect(buttons('Withdraw from the contract here')).toHaveLength(1);
+            expect(visible(declaration())).toBe(false);
+
+            await open(pro());
+
+            expect(buttons('Withdraw from the contract here')).toHaveLength(0);
+        });
+
+        it('opens the declaration prefilled with the account, and the contract read-only', async () => {
+            await open(fresh());
+
+            buttons('Withdraw from the contract here')[0].click();
+            await flush();
+
+            expect(visible(declaration())).toBe(true);
+            expect(declaration().querySelector('#withdrawal-name').value).toBe('Ada Lovelace');
+            expect(declaration().querySelector('#withdrawal-email').value).toBe('ada@example.test');
+            expect(declaration().textContent).toContain('Pro subscription, Monthly, ordered on November 7, 2026');
+            expect(declaration().textContent).toContain('You can withdraw until');
+            expect(buttons('Confirm the withdrawal')).toHaveLength(1);
+            expect(buttons('Confirm the withdrawal')[0].disabled).toBe(false);
+        });
+
+        it('sends what was typed, and ends on the notice that the withdrawal is recorded', async () => {
+            await open(fresh());
+            buttons('Withdraw from the contract here')[0].click();
+            await flush();
+            const name = declaration().querySelector('#withdrawal-name');
+            const email = declaration().querySelector('#withdrawal-email');
+            name.value = 'Ada Byron';
+            name.dispatchEvent(new Event('input', { bubbles: true }));
+            email.value = 'receipts@example.test';
+            email.dispatchEvent(new Event('input', { bubbles: true }));
+            http.post.mockResolvedValue({
+                data: fresh({ withdrawn: true, withdrawal_until: null }),
+                meta: { acknowledged: true },
+            });
+
+            buttons('Confirm the withdrawal')[0].click();
+            await flush();
+
+            expect(http.post).toHaveBeenCalledWith(
+                '/api/v1/workspaces/shop/billing/withdraw',
+                { name: 'Ada Byron', email: 'receipts@example.test' },
+                { silent: true },
+            );
+            expect(visible(declaration())).toBe(false);
+            expect(buttons('Withdraw from the contract here')).toHaveLength(0);
+            expect(buttons('Cancel your contract')).toHaveLength(0);
+            expect(notify).toHaveBeenCalledWith(
+                'success',
+                'Your withdrawal is recorded. An acknowledgement is on its way to receipts@example.test.',
+            );
+        });
+
+        it('cannot be confirmed with an empty name, and can be given up', async () => {
+            await open(fresh());
+            buttons('Withdraw from the contract here')[0].click();
+            await flush();
+            const name = declaration().querySelector('#withdrawal-name');
+            name.value = '';
+            name.dispatchEvent(new Event('input', { bubbles: true }));
+            await flush();
+
+            expect(buttons('Confirm the withdrawal')[0].disabled).toBe(true);
+
+            buttons('Cancel')
+                .find((button) => declaration().contains(button))
+                .click();
+            await flush();
+
+            expect(visible(declaration())).toBe(false);
+            expect(http.post).not.toHaveBeenCalled();
+        });
+
+        it('tells why the right is gone when the server refuses, and closes the declaration with its button', async () => {
+            await open(fresh());
+            buttons('Withdraw from the contract here')[0].click();
+            await flush();
+            http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'already_withdrawn' }));
+
+            buttons('Confirm the withdrawal')[0].click();
+            await flush();
+
+            expect(notify).toHaveBeenCalledWith('danger', 'You already withdrew from this contract.');
+            expect(visible(declaration())).toBe(false);
+            expect(buttons('Confirm the withdrawal')).toHaveLength(0);
+        });
+
+        it('tells the owner, once it is made, that the subscription is ending', async () => {
+            await open(fresh({ withdrawn: true, withdrawal_until: null }));
+
+            expect(shows('Your withdrawal is recorded and your subscription is ending.')).toBe(true);
+        });
     });
 
     describe('when Stripe brings the person back', () => {

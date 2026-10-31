@@ -137,8 +137,8 @@ describe('the amounts', function (): void {
 
         expect(templateTexts($english, '//*[contains(@class, "landing-price-amount")]'))->toBe(['€0', '€6', '€60'])
             ->and(templateTexts($french, '//*[contains(@class, "landing-price-amount")]'))->toBe(['0 €', '6 €', '60 €'])
-            ->and(templateTexts($english, '//*[contains(@class, "landing-price-note") and contains(@class, "landing-only-year")]'))->toBe(['That is €5 a month'])
-            ->and(templateTexts($french, '//*[contains(@class, "landing-price-note") and contains(@class, "landing-only-year")]'))->toBe(['Soit 5 € par mois']);
+            ->and(templateTexts($english, '//*[contains(@class, "landing-price-note") and contains(@class, "landing-only-year")]'))->toBe(['That is €5 incl. VAT a month'])
+            ->and(templateTexts($french, '//*[contains(@class, "landing-price-note") and contains(@class, "landing-only-year")]'))->toBe(['Soit 5 € TTC par mois']);
     });
 
     it('are not typed in the page: other amounts, other currency, other page', function (): void {
@@ -151,8 +151,8 @@ describe('the amounts', function (): void {
         expect(templateTexts($english, '//*[contains(@class, "landing-price-amount")]'))->toBe(['£0', '£12.50', '£99.90'])
             ->and(templateTexts($french, '//*[contains(@class, "landing-price-amount")]'))->toBe(['0 £GB', '12,50 £GB', '99,90 £GB'])
             ->and(templateTexts($english, '//*[contains(@class, "landing-toggle-saving")]'))->toBe(['Save £50.10 a year'])
-            ->and(templateTexts($english, '//*[contains(@class, "landing-price-note") and contains(@class, "landing-only-year")]'))->toBe(['That is £8.33 a month'])
-            ->and(templateAttributes($english, '//head/meta[@name="description"]', 'content'))->toBe(['Compare the Free and Pro plans: inventories, items, storage, members and share links. Pro from £12.50 a month, cancel anytime.']);
+            ->and(templateTexts($english, '//*[contains(@class, "landing-price-note") and contains(@class, "landing-only-year")]'))->toBe(['That is £8.33 incl. VAT a month'])
+            ->and(templateAttributes($english, '//head/meta[@name="description"]', 'content'))->toBe(['Compare the Free and Pro plans: inventories, items, storage, members and share links. Pro from £12.50 incl. VAT a month, cancel anytime.']);
     });
 
     it('show the monthly price alone, and no switch, where there is no yearly Price', function (): void {
@@ -205,9 +205,9 @@ describe('the switch between the monthly and the yearly price', function (): voi
             ->and($plans->getAttribute('data-period'))->toBe('month')
             ->and($plans->hasAttribute('data-ready'))->toBeFalse()
             ->and($plans->getAttribute(':data-period'))->toBe('period')
-            ->and(templateTexts($page, '//*[contains(@class, "landing-only-month")]'))->toBe(['€6 / month'])
-            ->and(templateTexts($page, '//p[contains(@class, "landing-price-line") and contains(@class, "landing-only-year")]'))->toBe(['€60 / year'])
-            ->and(templateTexts($page, '//*[contains(@class, "landing-price-alt")]'))->toBe(['or €60 a year'])
+            ->and(templateTexts($page, '//*[contains(@class, "landing-only-month")]'))->toBe(['€6 incl. VAT / month'])
+            ->and(templateTexts($page, '//p[contains(@class, "landing-price-line") and contains(@class, "landing-only-year")]'))->toBe(['€60 incl. VAT / year'])
+            ->and(templateTexts($page, '//*[contains(@class, "landing-price-alt")]'))->toBe(['or €60 incl. VAT a year'])
             ->and(templateAttributes($page, '//a[normalize-space()="Choose Pro"]', 'href'))->toBe(['/app/billing?interval=month'])
             ->and(templateAttributes($page, '//a[normalize-space()="Choose Pro"]', ':href'))->toBe(['ctaHref'])
             ->and($plans->getAttribute('data-href-month'))->toBe('/app/billing?interval=month')
@@ -308,15 +308,39 @@ describe('what the instance can do', function (): void {
         expect(pricingRows(templateDom($this->get('/en/pricing')->assertOk()))['Signed official export'])->toBe(['Included', 'Included']);
     });
 
-    it('answers about tax only where Stripe works it out', function (): void {
-        $without = landingText($this->get('/en/pricing')->assertOk());
+    it('answers about VAT whether or not Stripe works the tax out: the prices include it', function (): void {
+        $text = landingText($this->get('/en/pricing')->assertOk());
 
-        expect($without)->not->toContain('What about VAT?');
+        expect($text)->toContain('What about VAT?')->toContain('Prices include VAT, and your invoice shows the amount.');
 
         config(['billing.automatic_tax' => true]);
 
         expect(landingText($this->get('/en/pricing')->assertOk()))->toContain('What about VAT?');
         expect(Faq::billing(PricingPlans::current()))->toHaveCount(6);
+    });
+
+    it('mentions the reverse charge for a business of another EU country only where Stripe Tax works the tax out, in the page and in its structured data', function (): void {
+        $off = $this->get('/en/pricing')->assertOk();
+
+        // Without Stripe Tax, Checkout applies no reverse charge: the page does not promise one, and says the same to search engines.
+        expect(landingText($off))->toContain('What about VAT?')->not->toContain('reverse charge')
+            ->and($off->getContent())->not->toContain('reverse charge');
+
+        config(['billing.automatic_tax' => true]);
+        $on = $this->get('/en/pricing')->assertOk();
+
+        expect(landingText($on))->toContain('can be invoiced without VAT (reverse charge)')
+            ->and(substr_count($on->getContent(), 'reverse charge'))->toBeGreaterThanOrEqual(2);
+    });
+
+    it('says the same in French', function (): void {
+        $off = $this->get('/pricing')->assertOk();
+
+        expect(landingText($off))->not->toContain('autoliquidation');
+
+        config(['billing.automatic_tax' => true]);
+
+        expect(landingText($this->get('/pricing')->assertOk()))->toContain('facturée hors TVA (autoliquidation)');
     });
 });
 
@@ -385,7 +409,7 @@ describe('the structured data', function (): void {
             ->and(landingJsonLdOf($response, 'WebPage'))->toMatchArray(['url' => 'http://localhost/en/pricing', 'inLanguage' => 'en'])
             ->and($offers)->toHaveCount(3)
             ->and($offers[0])->toMatchArray(['name' => 'Free', 'price' => '0'])
-            ->and($offers[1]['priceSpecification'])->toMatchArray(['price' => '6.50', 'billingDuration' => 'P1M'])
+            ->and($offers[1]['priceSpecification'])->toMatchArray(['price' => '6.50', 'billingDuration' => 'P1M', 'valueAddedTaxIncluded' => true])
             ->and($offers[2]['priceSpecification'])->toMatchArray(['price' => '60.00', 'billingDuration' => 'P1Y']);
     });
 

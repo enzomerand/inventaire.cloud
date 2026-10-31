@@ -34,6 +34,11 @@ use Illuminate\Support\Facades\Log;
  * (the page answers that the service is unavailable, the job gives up). An administrator who checked in the dashboard that the customer
  * really is gone says so with `inventaire:billing-forget`. A row with no subscription in play is cleared, and the workspace is Free.
  *
+ * **The mails the terms of sale promise** (the confirmation of a subscription that became active, the receipt of a cancellation) are queued
+ * by {@see ContractNotices} once the columns are written and the transaction is over, whichever synchronisation sees the change (the page, the
+ * webhook, the schedule), deduplicated by columns of the account; a failure to queue one never fails the synchronisation. `started_at` is
+ * the `start_date` of the subscription that was chosen, so a new subscription starts a new window of withdrawal.
+ *
  * The call to Stripe is made outside any transaction. The columns are written under the lock of the workspace ({@see Locks}, the order
  * of its documentation), by the transaction run again when the database picks it as the loser of a deadlock ({@see DeadlockRetries}),
  * and only if no read made after this one was written meanwhile: `synced_at` is the moment a read of Stripe *began*, to the microsecond
@@ -50,6 +55,7 @@ final class BillingSync
         private readonly DatabaseManager $db,
         private readonly Locks $locks,
         private readonly BillingAlerts $alerts,
+        private readonly ContractNotices $notices,
     ) {}
 
     /**
@@ -108,7 +114,16 @@ final class BillingSync
         }
 
         // Never null: the stored subscription is only spared when the caller asks for it.
-        return $this->store($account, self::columns($chosen), $readAt, false)[0] ?? $account;
+        [$stored, $wrote] = $this->store($account, self::columns($chosen), $readAt, false);
+        $stored ??= $account;
+
+        // After the transaction, and only for the read that was written: the mails are claimed by columns, so the one that was not
+        // written (a newer read got in first) leaves them to the other.
+        if ($wrote) {
+            $this->notices->afterSync($stored);
+        }
+
+        return $stored;
     }
 
     /**
@@ -169,17 +184,23 @@ final class BillingSync
     /**
      * The columns of the account for a subscription (all empty for none).
      *
+     * `started_at` is the `start_date` of the subscription. A subscription that does not end by itself forgets the receipt of its last
+     * cancellation (`cancel_notice_sent_for`), so that a second cancellation is acknowledged too.
+     *
      * @param  array<string, mixed>|null  $subscription
-     * @return array{stripe_subscription_id: string|null, status: string|null, price_id: string|null, interval: string|null, current_period_end: CarbonImmutable|null, cancel_at_period_end: bool}
+     * @return array<string, mixed>
      */
     private static function columns(?array $subscription): array
     {
         if ($subscription === null) {
-            return ['stripe_subscription_id' => null, 'status' => null, 'price_id' => null, 'interval' => null, 'current_period_end' => null, 'cancel_at_period_end' => false];
+            return ['stripe_subscription_id' => null, 'status' => null, 'price_id' => null, 'interval' => null, 'current_period_end' => null, 'cancel_at_period_end' => false, 'started_at' => null, 'cancel_notice_sent_for' => null];
         }
 
         $interval = data_get($subscription, 'items.data.0.price.recurring.interval');
         $periodEnd = data_get($subscription, 'items.data.0.current_period_end');
+        $startedAt = $subscription['start_date'] ?? null;
+        // Ending at a date that is not the end of the period (`cancel_at`) is ending all the same.
+        $cancelling = ($subscription['cancel_at_period_end'] ?? false) === true || is_int($subscription['cancel_at'] ?? null);
 
         return [
             'stripe_subscription_id' => self::text($subscription['id'] ?? null),
@@ -187,9 +208,9 @@ final class BillingSync
             'price_id' => self::text(data_get($subscription, 'items.data.0.price.id')),
             'interval' => is_string($interval) && in_array($interval, Billing::INTERVALS, true) ? $interval : null,
             'current_period_end' => is_int($periodEnd) ? CarbonImmutable::createFromTimestampUTC($periodEnd) : null,
-            // Ending at a date that is not the end of the period (`cancel_at`) is ending all the same.
-            'cancel_at_period_end' => ($subscription['cancel_at_period_end'] ?? false) === true || is_int($subscription['cancel_at'] ?? null),
-        ];
+            'cancel_at_period_end' => $cancelling,
+            'started_at' => is_int($startedAt) ? CarbonImmutable::createFromTimestampUTC($startedAt) : null,
+        ] + ($cancelling ? [] : ['cancel_notice_sent_for' => null]);
     }
 
     /**

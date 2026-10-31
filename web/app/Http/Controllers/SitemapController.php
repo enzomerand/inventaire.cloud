@@ -16,7 +16,7 @@ use XMLWriter;
  * the others.
  *
  * It lists the home page, the gallery in every language, each template in every language it is written in, the documentation of the API
- * and, on an instance that sells a plan only, the pricing page in every language. Each address
+ * and, on an instance that sells a plan only (not one that merely previews its plans), the pricing page and the terms of sale in every language. Each address
  * of a page that exists in several languages carries the `xhtml:link` alternates of all of them, itself included, and an
  * `x-default`. There is no `lastmod`: the pages are drawn from files whose date says nothing about the content.
  */
@@ -72,13 +72,16 @@ final class SitemapController extends Controller
         // The documentation of the API exists once, so it has no alternates.
         $this->entry($xml, PublicUrls::apiDocs(), []);
 
-        // The pricing page exists where a plan is sold; anywhere else it is a 404 and must not be announced.
+        // The pricing page and the terms of sale are announced where a plan is sold. A preview shows them too, but it is no sale: they stay out
+        // of the sitemap (and anywhere else they are a 404 that must not be announced).
         if (PricingPlans::selling()) {
-            $pricing = PublicUrls::alternates(PublicUrls::pricing(...));
-            $default = PublicUrls::pricing($locale);
+            foreach ([PublicUrls::pricing(...), PublicUrls::terms(...)] as $page) {
+                $addresses = PublicUrls::alternates($page);
+                $default = $page($locale);
 
-            foreach ($pricing as $address) {
-                $this->entry($xml, $address, $pricing, $default);
+                foreach ($addresses as $address) {
+                    $this->entry($xml, $address, $addresses, $default);
+                }
             }
         }
 

@@ -8,12 +8,13 @@ use App\Inventories\Templates\Template;
 use App\Landing\Faq;
 use App\Landing\Pitch;
 use App\Landing\PricingPlans;
+use App\Legal\Seller;
 use App\Services\LocaleResolver;
 use App\Support\PublicUrls;
 
 /**
- * Builds the {@see PageMeta} of the public pages: the home page, the pricing page, the documentation of the API, the gallery of templates and the
- * page of each template.
+ * Builds the {@see PageMeta} of the public pages: the home page, the pricing page, the terms of sale, the documentation of the API, the
+ * gallery of templates and the page of each template.
  *
  * A template is offered in the languages it is written in: the other languages of the application show it with the
  * texts of the default language (the language switcher links to them), but they are not listed as alternates, which
@@ -32,7 +33,7 @@ final class PublicPageMeta
      * The home page (it exists in the language of the request only: the language switcher stores the choice), with the application and
      * its questions as structured data.
      *
-     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none, and then nothing about plans or prices is said.
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it shows none, and then nothing about plans or prices is said.
      * @param  list<array{question: string, answer: string}>  $faq  The questions the page shows ({@see Faq::home()}), which the structured data repeats.
      */
     public function home(string $locale, ?PricingPlans $plans, array $faq): PageMeta
@@ -48,13 +49,16 @@ final class PublicPageMeta
 
     /**
      * The pricing page in a language: the plans, the billing questions and the breadcrumb as structured data. It exists only on an
-     * instance that sells a plan.
+     * instance that sells a plan or previews its plans.
      */
     public function pricing(PricingPlans $plans, string $locale): PageMeta
     {
         $canonical = PublicUrls::pricing($locale);
         $title = __('Pricing: Free and Pro plans');
-        $description = __('Compare the Free and Pro plans: inventories, items, storage, members and share links. Pro from :price a month, cancel anytime.', ['price' => $plans->monthlyPrice()]);
+        // A preview promises nothing that is bought: "cancel anytime" is about a subscription.
+        $description = $plans->selling
+            ? __('Compare the Free and Pro plans: inventories, items, storage, members and share links. Pro from :price incl. VAT a month, cancel anytime.', ['price' => $plans->monthlyPrice()])
+            : __('Compare the Free and Pro plans: inventories, items, storage, members and share links. Pro from :price incl. VAT a month.', ['price' => $plans->monthlyPrice()]);
 
         return new PageMeta(
             title: $title,
@@ -82,6 +86,44 @@ final class PublicPageMeta
                 $this->application($plans, $locale),
                 $this->faqPage(Faq::billing($plans)),
             ],
+        );
+    }
+
+    /**
+     * The terms of sale in a language. They ask not to be indexed while the identity of the seller is incomplete ({@see Seller::complete()}):
+     * a working version is not to be found in a search engine.
+     */
+    public function terms(string $locale): PageMeta
+    {
+        $canonical = PublicUrls::terms($locale);
+        $title = __('Terms of sale');
+        $description = __('The terms of sale of the Pro plan: price, ordering, withdrawal, renewal and cancellation.');
+
+        return new PageMeta(
+            title: $title,
+            description: $description,
+            canonical: $canonical,
+            locale: $locale,
+            alternates: PublicUrls::alternates(PublicUrls::terms(...)),
+            default: PublicUrls::terms(config()->string('app.default_locale')),
+            jsonLd: [
+                [
+                    '@type' => 'WebPage',
+                    'name' => $title,
+                    'description' => $description,
+                    'url' => $canonical,
+                    'inLanguage' => $locale,
+                    'isPartOf' => $this->site(),
+                ],
+                [
+                    '@type' => 'BreadcrumbList',
+                    'itemListElement' => [
+                        ['@type' => 'ListItem', 'position' => 1, 'name' => __('Home'), 'item' => PublicUrls::home()],
+                        ['@type' => 'ListItem', 'position' => 2, 'name' => $title, 'item' => $canonical],
+                    ],
+                ],
+            ],
+            noindex: ! Seller::complete(),
         );
     }
 
@@ -210,17 +252,17 @@ final class PublicPageMeta
 
     /**
      * The application, as structured data: free to use and open source and, on an instance that sells a plan only, what each plan costs. An
-     * instance that sells nothing has no offer at all: an offer needs a currency, and the currency is part of the billing configuration
-     * that such an instance says nothing about.
+     * instance that sells nothing has no offer at all, a preview of its plans included (an offer is something that can be bought): an offer
+     * needs a currency, and the currency is part of the billing configuration that such an instance says nothing about.
      *
-     * @param  PricingPlans|null  $plans  The plans of the instance; null when it sells none.
+     * @param  PricingPlans|null  $plans  The plans of the instance; null when it shows none.
      * @return array<string, mixed>
      */
     private function application(?PricingPlans $plans, string $locale): array
     {
         $offers = [];
 
-        if ($plans !== null) {
+        if ($plans !== null && $plans->selling) {
             $currency = strtoupper($plans->currency);
             $offers[] = ['@type' => 'Offer', 'name' => __('Free'), 'price' => '0', 'priceCurrency' => $currency];
 
@@ -239,6 +281,8 @@ final class PublicPageMeta
                         'price' => PricingPlans::decimal($cents),
                         'priceCurrency' => $currency,
                         'billingDuration' => $duration,
+                        // The amounts are VAT-included (TTC).
+                        'valueAddedTaxIncluded' => true,
                     ],
                 ];
             }
