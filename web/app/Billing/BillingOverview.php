@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Billing;
 
+use App\Landing\PricingPlans;
+use App\Models\BillingWithdrawal;
 use App\Models\Inventory;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -26,14 +28,23 @@ final class BillingOverview
      * `null` when no yearly Price is set. The usage counts the members and the invitations that are waiting together, as the limit of
      * members does.
      *
+     * `selling` is whether Pro can be bought now (billing is on and the identity of the seller is complete, see {@see PricingPlans::selling()}):
+     * an instance that has Stripe but an incomplete seller shows no way to buy. `started_at` is when the subscription began, and
+     * `withdrawal_until` the last moment of its right of withdrawal while the subscription is live, inside that window and not withdrawn
+     * from (null otherwise); `withdrawn` says a withdrawal was recorded for the subscription.
+     *
      * @param  bool  $canManage  Whether the person who asks may buy and manage the subscription (the owners).
      * @return array{
      *     enabled: bool,
+     *     selling: bool,
      *     plan: string,
      *     status: string|null,
      *     interval: string|null,
      *     current_period_end: string|null,
      *     cancel_at_period_end: bool,
+     *     started_at: string|null,
+     *     withdrawal_until: string|null,
+     *     withdrawn: bool,
      *     can_manage: bool,
      *     prices: array{currency: string, month: int, year: int|null},
      *     limits: array{inventories: int, items: int, storage_bytes: int, members: int, share_links: int, photo_entry: bool},
@@ -44,14 +55,23 @@ final class BillingOverview
     {
         $enabled = Billing::enabled();
         $account = $enabled ? $workspace->billingAccount()->first() : null;
+        // Nothing is read for a workspace with no subscription, nor while billing is off.
+        $subscription = $account?->stripe_subscription_id;
+        $withdrawn = $subscription !== null && BillingWithdrawal::query()->where('stripe_subscription_id', $subscription)->exists();
 
         return [
             'enabled' => $enabled,
+            'selling' => PricingPlans::selling(),
             'plan' => WorkspacePlan::for($workspace)->value,
             'status' => $account?->status,
             'interval' => $account?->interval,
             'current_period_end' => $account?->current_period_end?->utc()->toIso8601String(),
             'cancel_at_period_end' => $account->cancel_at_period_end ?? false,
+            'started_at' => $account?->started_at?->utc()->toIso8601String(),
+            'withdrawal_until' => $account !== null && $account->started_at !== null && ! $withdrawn && Withdrawals::isOpen($account, now())
+                ? Withdrawals::windowEnd($account->started_at)->utc()->toIso8601String()
+                : null,
+            'withdrawn' => $withdrawn,
             'can_manage' => $canManage,
             'prices' => Billing::display(),
             'limits' => [

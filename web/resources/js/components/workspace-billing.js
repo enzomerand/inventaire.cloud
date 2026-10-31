@@ -17,6 +17,13 @@
  * old owner: the API refuses the new owner (`previous_owner_subscription`, with the date the subscription ends when it does). The page
  * then says so and offers neither button; it learns it from that refusal, as the overview does not carry it.
  *
+ * The two things the terms of sale promise are here too. "Cancel your contract" asks the API for a portal page opened on the cancellation
+ * of the subscription (Stripe brings the person back with `?cancellation=done`, which has the subscription read so that the page and the
+ * receipt do not wait for the webhook). "Withdraw from the contract here" opens a declaration, offered during the fourteen days after
+ * the subscription began (the server says until when and judges again): the name and the address of the person, prefilled and editable,
+ * and the contract it is about, read-only. The overview says whether a plan can be bought at all (`selling`): an instance that has Stripe
+ * but not yet a complete seller shows a neutral "Coming soon" in place of the button that buys Pro.
+ *
  * Failures the HTTP helper already reported (network, 5xx, expired session...) are not repeated; a refusal the API explains with a code
  * is told in words of our own, because the helper trusts the message of a response only for a validation error.
  */
@@ -29,12 +36,16 @@ import { redirectTo } from '../lib/page.js';
 
 /**
  * @typedef {object} Overview What the billing endpoint of the API answers (`data`).
- * @property {boolean} enabled Whether the instance sells plans.
+ * @property {boolean} enabled Whether the instance has Stripe set up (a plan is shown).
+ * @property {boolean} selling Whether Pro can be bought now (the seller is complete as well).
  * @property {'free' | 'pro'} plan
  * @property {string | null} status Stripe's word for the subscription (`active`, `past_due`, `canceled`...).
  * @property {'month' | 'year' | null} interval
  * @property {string | null} current_period_end ISO 8601, in UTC.
  * @property {boolean} cancel_at_period_end
+ * @property {string | null} started_at ISO 8601, in UTC: when the subscription began.
+ * @property {string | null} withdrawal_until ISO 8601, in UTC: the last moment of the right of withdrawal, while it can be exercised.
+ * @property {boolean} withdrawn Whether a withdrawal was recorded for the subscription.
  * @property {boolean} can_manage Whether the person is an owner.
  * @property {{ currency: string, month: number, year: number | null }} prices Amounts in cents of the currency.
  * @property {{ inventories: number, items: number, storage_bytes: number, members: number, share_links: number, photo_entry: boolean }} limits
@@ -59,6 +70,10 @@ const MESSAGE_KEYS = {
     no_billing_account: 'billing.error.no_account',
     interval_not_offered: 'billing.error.interval',
     billing_unavailable: 'billing.error.unavailable',
+    no_live_subscription: 'billing.error.no_live_subscription',
+    cancellation_scheduled: 'billing.error.cancellation_scheduled',
+    withdrawal_period_over: 'billing.error.withdrawal_period_over',
+    already_withdrawn: 'billing.error.already_withdrawn',
 };
 
 /**
@@ -145,6 +160,18 @@ export default function workspaceBilling() {
         /** How often the person pays, as chosen in the form: `month` or `year`. */
         interval: 'month',
 
+        /** Whether the declaration of a withdrawal is open. */
+        withdrawalOpen: false,
+
+        /** True while the declaration is being sent; blocks double submits. */
+        withdrawing: false,
+
+        /** The name in the declaration, prefilled from the account. */
+        withdrawalName: '',
+
+        /** The address the acknowledgement is sent to, prefilled from the account. */
+        withdrawalEmail: '',
+
         /** Milliseconds between two readings of the overview while the payment is confirmed. */
         pollDelayMs: 3000,
 
@@ -169,6 +196,29 @@ export default function workspaceBilling() {
         /** Endpoint that has the subscription read at Stripe now (POST), from `data-refresh-url` on the component root. */
         get refreshUrl() {
             return this.rootElement.dataset.refreshUrl;
+        },
+
+        /** Endpoint that opens the portal on the cancellation of the subscription (POST), from `data-cancel-url` on the component root. */
+        get cancelUrl() {
+            return this.rootElement.dataset.cancelUrl;
+        },
+
+        /** Endpoint that records a withdrawal (POST), from `data-withdraw-url` on the component root. */
+        get withdrawUrl() {
+            return this.rootElement.dataset.withdrawUrl;
+        },
+
+        /** Whether Pro can be bought now: Stripe is set up and so is the identity of the seller (known once the overview was read). */
+        get selling() {
+            return this.billing?.selling === true;
+        },
+
+        /**
+         * Whether the page says "Coming soon" in place of the button that buys Pro: an owner of a workspace that could buy it, on an
+         * instance that has Stripe but cannot sell yet (the identity of the seller is not complete).
+         */
+        get comingSoon() {
+            return this.offered && !this.selling && this.canManage && this.upgradeCandidate;
         },
 
         /** Whether the instance does not sell plans (known once the overview was read). */
@@ -212,6 +262,7 @@ export default function workspaceBilling() {
         get canUpgrade() {
             return (
                 this.canManage &&
+                this.selling &&
                 !this.isPro &&
                 !this.confirming &&
                 !this.stillPending &&
@@ -225,7 +276,73 @@ export default function workspaceBilling() {
          * owner before still pays.
          */
         get upgradeShown() {
+            return this.selling && this.upgradeCandidate;
+        },
+
+        /** Whether the workspace is one that could buy Pro: not on it, nothing to settle, no subscription of the owner before. */
+        get upgradeCandidate() {
             return !this.isPro && !this.unsettled && !this.blockedByPreviousOwner;
+        },
+
+        /**
+         * Whether the contract can be cancelled from here: an owner, a workspace on Pro whose subscription does not already end with the
+         * period, that was not withdrawn from, and no subscription of the owner before.
+         */
+        get canCancel() {
+            return (
+                this.offered &&
+                this.canManage &&
+                this.isPro &&
+                this.billing?.cancel_at_period_end === false &&
+                !this.billing?.withdrawn &&
+                !this.blockedByPreviousOwner
+            );
+        },
+
+        /**
+         * Whether the declaration of a withdrawal is offered: an owner, while the server says the right can be exercised (a live
+         * subscription inside its fourteen days, not withdrawn from yet) and that moment has not passed on this page's clock either.
+         */
+        get canWithdraw() {
+            const until = this.billing?.withdrawal_until;
+
+            return (
+                this.offered &&
+                this.canManage &&
+                typeof until === 'string' &&
+                Date.parse(until) >= Date.now() &&
+                !this.blockedByPreviousOwner
+            );
+        },
+
+        /** The last moment of the right of withdrawal as a sentence, with the time ("" when there is none). */
+        get withdrawalUntilText() {
+            const until = this.billing?.withdrawal_until;
+            const date = typeof until === 'string' ? new Date(until) : null;
+
+            if (date === null || Number.isNaN(date.getTime())) {
+                return '';
+            }
+
+            return t('billing.withdrawal.until', {
+                moment: dateFormat({ dateStyle: 'long', timeStyle: 'short' }).format(date),
+            });
+        },
+
+        /** The contract the declaration is about, in a line: the plan, how often it is paid and when it was ordered. */
+        get withdrawalContractText() {
+            const date = dateText(this.billing?.started_at);
+
+            return t('billing.withdrawal.contract', {
+                plan: t('billing.plan.pro'),
+                interval: this.intervalLabel,
+                date: date === '' ? '-' : date,
+            });
+        },
+
+        /** Whether the declaration can be sent: something is in both fields and it is not being sent already. */
+        get canSubmitWithdrawal() {
+            return !this.withdrawing && this.withdrawalName.trim() !== '' && this.withdrawalEmail.trim() !== '';
         },
 
         /**
@@ -238,7 +355,10 @@ export default function workspaceBilling() {
 
         /** Whether the card has a button to show: an owner who is offered at least one of the two. */
         get actionsShown() {
-            return this.canManage && (this.upgradeShown || this.canOpenPortal);
+            return (
+                this.canManage &&
+                (this.upgradeShown || this.comingSoon || this.canOpenPortal || this.canCancel || this.canWithdraw)
+            );
         },
 
         /** What the page says of the subscription of the owner before, with the date it ends when it is known ("" when it was not refused). */
@@ -335,6 +455,10 @@ export default function workspaceBilling() {
                 return this.previousOwnerText;
             }
 
+            if (this.canManage && this.billing?.withdrawn === true) {
+                return t('billing.withdrawn');
+            }
+
             return this.canManage && this.unsettled ? t('billing.unsettled') : '';
         },
 
@@ -406,6 +530,9 @@ export default function workspaceBilling() {
                 // Only an owner of a workspace on an instance that sells plans has a payment to wait for.
                 if (this.offered && this.canManage && this.returnedFromCheckout()) {
                     await this.confirmPayment();
+                } else if (this.offered && this.canManage && this.returnedFromCancellation()) {
+                    // The portal brought the person back from the cancellation: read the subscription now, it is what shows "ends on".
+                    await this.pull(this.refreshUrl, 'post');
                 }
             } finally {
                 // Once the overview was read, whatever came of the wait (a person who is not an owner, an instance that sells no plan,
@@ -483,6 +610,81 @@ export default function workspaceBilling() {
         },
 
         /**
+         * Sends the owner to the page of the Stripe customer portal that cancels the contract (the subscription ends with the period).
+         *
+         * @returns {Promise<void>}
+         */
+        async cancel() {
+            if (this.busy || !this.canCancel) {
+                return;
+            }
+
+            await this.leaveFor(this.cancelUrl, {});
+        },
+
+        /**
+         * Opens the declaration of a withdrawal, with the name and the address of the account.
+         *
+         * @returns {void}
+         */
+        openWithdrawal() {
+            if (this.busy || this.withdrawing || !this.canWithdraw) {
+                return;
+            }
+
+            this.withdrawalName = this.rootElement.dataset.personName ?? '';
+            this.withdrawalEmail = this.rootElement.dataset.personEmail ?? '';
+            this.withdrawalOpen = true;
+        },
+
+        /**
+         * Closes the declaration without sending it.
+         *
+         * @returns {void}
+         */
+        closeWithdrawal() {
+            if (!this.withdrawing) {
+                this.withdrawalOpen = false;
+            }
+        },
+
+        /**
+         * Sends the declaration of a withdrawal. The server stores it, ends the subscription and sends the acknowledgement; it answers with the
+         * overview, which no longer offers the withdrawal.
+         *
+         * @returns {Promise<void>}
+         */
+        async submitWithdrawal() {
+            if (!this.canSubmitWithdrawal) {
+                return;
+            }
+
+            this.withdrawing = true;
+            const email = this.withdrawalEmail.trim();
+
+            try {
+                // Silent: a failure of the server has words of its own, which the central "server error" toast would hide.
+                const answer = await http.post(
+                    this.withdrawUrl,
+                    { name: this.withdrawalName.trim(), email },
+                    { silent: true },
+                );
+
+                this.billing = answer.data;
+                this.withdrawalOpen = false;
+                notify('success', t('billing.notice.withdrawn', { email }));
+            } catch (error) {
+                this.fail(error);
+
+                if (error instanceof HttpError) {
+                    leaveStalePage(error);
+                }
+            } finally {
+                this.withdrawing = false;
+            }
+        },
+
+        /**
          * Asks the API for the address of a page Stripe hosts and goes there.
          *
          * @param {string} url The endpoint.
@@ -514,6 +716,15 @@ export default function workspaceBilling() {
          */
         returnedFromCheckout() {
             return new URLSearchParams(window.location.search).get('checkout') === 'done';
+        },
+
+        /**
+         * Whether the customer portal brought the person back from the cancellation of the contract (`?cancellation=done`).
+         *
+         * @returns {boolean}
+         */
+        returnedFromCancellation() {
+            return new URLSearchParams(window.location.search).get('cancellation') === 'done';
         },
 
         /**
@@ -569,18 +780,20 @@ export default function workspaceBilling() {
         },
 
         /**
-         * Takes `checkout` off the address of the page, so that a reload does not wait for a payment again.
+         * Takes `checkout` and `cancellation` off the address of the page, so that a reload does not wait for a payment or read the
+         * subscription again.
          *
          * @returns {void}
          */
         dropCheckoutParameter() {
             const address = new URL(window.location.href);
 
-            if (!address.searchParams.has('checkout')) {
+            if (!address.searchParams.has('checkout') && !address.searchParams.has('cancellation')) {
                 return;
             }
 
             address.searchParams.delete('checkout');
+            address.searchParams.delete('cancellation');
             window.history.replaceState(window.history.state, '', address.pathname + address.search + address.hash);
         },
 

@@ -24,6 +24,21 @@
                     <li>{{ __('Workspace: :value', ['value' => $workspaceUlid]) }}</li>
                 @endif
             </ul>
+        @elseif ($task)
+            <p style="margin:0 0 16px;font-size:14px;line-height:1.5;">{{ __('Something needs to be done by you on :app:', ['app' => config('app.name')]) }}</p>
+            <p style="margin:0 0 8px;font-size:14px;line-height:1.5;font-weight:600;">{{ $eventLabel }}</p>
+            <p style="margin:0 0 8px;font-size:14px;line-height:1.5;">{{ $explanation }}</p>
+            <ul style="margin:0 0 24px;padding:0 0 0 20px;font-size:14px;line-height:1.6;">
+                @if ($objectId !== null)
+                    <li>{{ __('Stripe customer: :value', ['value' => $objectId]) }}</li>
+                @endif
+                @if ($workspaceUlid !== null)
+                    <li>{{ __('Workspace: :value', ['value' => $workspaceUlid]) }}</li>
+                @endif
+                @foreach ($taskLines as $line)
+                    <li>{{ $line }}</li>
+                @endforeach
+            </ul>
         @else
             <p style="margin:0 0 16px;font-size:14px;line-height:1.5;">{{ __('Stripe reported something that needs your attention on :app:', ['app' => config('app.name')]) }}</p>
             <p style="margin:0 0 8px;font-size:14px;line-height:1.5;font-weight:600;">{{ $eventLabel }}</p>

@@ -430,6 +430,15 @@ export const MESSAGES = {
     'billing.error.no_account': 'This workspace has no subscription to manage yet.',
     'billing.error.interval': 'This billing period is not offered.',
     'billing.error.unavailable': 'The payment service is unavailable right now. Please try again in a moment.',
+    'billing.error.no_live_subscription': 'This workspace has no running subscription.',
+    'billing.error.cancellation_scheduled': 'The cancellation of this subscription is already scheduled.',
+    'billing.error.withdrawal_period_over': 'The fourteen days of the right of withdrawal are over.',
+    'billing.error.already_withdrawn': 'You already withdrew from this contract.',
+    'billing.withdrawn':
+        'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.',
+    'billing.notice.withdrawn': 'Your withdrawal is recorded. An acknowledgement is on its way to :email.',
+    'billing.withdrawal.until': 'You can withdraw until :moment.',
+    'billing.withdrawal.contract': ':plan subscription, :interval, ordered on :date',
 };
 
 /**

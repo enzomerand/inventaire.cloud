@@ -26,6 +26,7 @@
 </head>
 <body>
     @php($plansShown = \App\Landing\PricingPlans::shown())
+    @php($selling = \App\Landing\PricingPlans::selling())
 
     <a class="skip-link visually-hidden-focusable" href="#main-content">{{ __('Skip to content') }}</a>
 
@@ -127,6 +128,15 @@
                                         <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ \App\Support\PublicUrls::termsPath(app()->getLocale()) }}">
                                             <x-tabler-file-text aria-hidden="true" />
                                             {{ __('Terms of sale') }}
+                                        </a>
+                                    </li>
+                                @endif
+                                @if ($selling)
+                                    {{-- The cancellation function the consumer code asks for (article L215-1-1): reachable from every page, it goes through the sign-in to the subscription page. --}}
+                                    <li class="list-inline-item">
+                                        <a class="link-secondary d-inline-flex align-items-center gap-1" href="{{ route('app.billing', absolute: false) }}">
+                                            <x-tabler-circle-x aria-hidden="true" />
+                                            {{ __('Cancel your contract') }}
                                         </a>
                                     </li>
                                 @endif

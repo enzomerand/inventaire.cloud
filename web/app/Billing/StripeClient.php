@@ -88,19 +88,31 @@ final class StripeClient
     /**
      * Creates a session of the customer portal, where the customer changes their card, reads their invoices or cancels.
      *
+     * With `$cancelSubscription` the session is a **deep link to the cancellation of that subscription** (`flow_data[type]=subscription_cancel`):
+     * the person lands on the page that asks them to confirm, with the rest of the portal hidden, and is brought back to
+     * `$afterCancellationUrl` once it is done (`flow_data[after_completion][type]=redirect`). The portal must have cancellation enabled in its
+     * configuration, otherwise Stripe refuses the session (`400`).
+     *
      * @param  string  $returnUrl  Where the portal's "back" link leads.
      * @param  string  $locale  The language of the person.
+     * @param  string|null  $cancelSubscription  The subscription (`sub_…`) the person is taken to cancel; the whole portal when null.
+     * @param  string|null  $afterCancellationUrl  Where the person is brought back once the cancellation is done; `$returnUrl` when null.
      * @return string The address of the portal page, to send the person to.
      *
      * @throws StripeException
      */
-    public function createPortalSession(string $customerId, string $returnUrl, string $locale): string
+    public function createPortalSession(string $customerId, string $returnUrl, string $locale, ?string $cancelSubscription = null, ?string $afterCancellationUrl = null): string
     {
         $call = 'POST /v1/billing_portal/sessions';
         $response = $this->post($call, '/v1/billing_portal/sessions', [
             'customer' => $customerId,
             'return_url' => $returnUrl,
             'locale' => CheckoutParameters::locale($locale),
+            'flow_data' => $cancelSubscription === null ? null : [
+                'type' => 'subscription_cancel',
+                'subscription_cancel' => ['subscription' => $cancelSubscription],
+                'after_completion' => ['type' => 'redirect', 'redirect' => ['return_url' => $afterCancellationUrl ?? $returnUrl]],
+            ],
         ]);
 
         return $this->address($call, $response);
@@ -120,6 +132,41 @@ final class StripeClient
     public function subscriptionsOf(string $customerId): array
     {
         return $this->listAll('GET /v1/subscriptions', '/v1/subscriptions', ['customer' => $customerId, 'status' => 'all'], 'subscriptions');
+    }
+
+    /**
+     * The latest invoice of a subscription that was paid (`GET /v1/invoices?subscription=…&status=paid&limit=1`, which Stripe sorts newest
+     * first): what the customer was last charged for it, to work out what a withdrawal gives back. Null when none was paid.
+     *
+     * @return array{id: string, amount_paid: int, currency: string}|null The amount in the smallest unit of the currency, the currency in lowercase.
+     *
+     * @throws StripeException Also when the invoice that is answered has no usable amount or currency.
+     */
+    public function latestPaidInvoice(string $subscriptionId): ?array
+    {
+        $call = 'GET /v1/invoices';
+        $response = $this->send($call, fn (PendingRequest $request): Response => $request
+            ->get(Billing::baseUrl().'/v1/invoices', ['subscription' => $subscriptionId, 'status' => 'paid', 'limit' => 1]));
+        $data = $response->json('data');
+
+        if (! is_array($data) || ! array_is_list($data)) {
+            throw StripeException::invalidResponse($call, 'no list of invoices');
+        }
+
+        if ($data === []) {
+            return null;
+        }
+
+        $invoice = $data[0];
+        $id = is_array($invoice) ? ($invoice['id'] ?? null) : null;
+        $amount = is_array($invoice) ? ($invoice['amount_paid'] ?? null) : null;
+        $currency = is_array($invoice) ? ($invoice['currency'] ?? null) : null;
+
+        if (! is_string($id) || preg_match('/^[A-Za-z0-9_]{1,255}\z/', $id) !== 1 || ! is_int($amount) || $amount < 0 || ! is_string($currency) || preg_match('/^[A-Za-z]{3}\z/', $currency) !== 1) {
+            throw StripeException::invalidResponse($call, 'an invoice with no usable id, amount or currency');
+        }
+
+        return ['id' => $id, 'amount_paid' => $amount, 'currency' => strtolower($currency)];
     }
 
     /**

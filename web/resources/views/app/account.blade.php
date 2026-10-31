@@ -304,6 +304,9 @@
                     </div>
                     <div class="card-body">
                         <p>{{ __('Deleting your account erases your profile and the workspaces that only you belong to, with everything in them. You simply leave the workspaces you share with other people. This cannot be undone.') }}</p>
+                        @if (\App\Billing\Billing::enabled())
+                            <p>{{ __('If one of those workspaces has a Pro subscription, it ends at once, without a refund of the period in progress.') }}</p>
+                        @endif
 
                         <div class="alert alert-danger" role="alert" x-show="error">
                             <div x-text="error"></div>

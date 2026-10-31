@@ -530,6 +530,15 @@ class ClientMessages extends Component
             'billing.error.no_account' => __('This workspace has no subscription to manage yet.'),
             'billing.error.interval' => __('This billing period is not offered.'),
             'billing.error.unavailable' => __('The payment service is unavailable right now. Please try again in a moment.'),
+            'billing.error.no_live_subscription' => __('This workspace has no running subscription.'),
+            'billing.error.cancellation_scheduled' => __('The cancellation of this subscription is already scheduled.'),
+            'billing.error.withdrawal_period_over' => __('The fourteen days of the right of withdrawal are over.'),
+            'billing.error.already_withdrawn' => __('You already withdrew from this contract.'),
+            'billing.withdrawn' => __('Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.'),
+            'billing.notice.withdrawn' => __('Your withdrawal is recorded. An acknowledgement is on its way to :email.'),
+            'billing.withdrawal.until' => __('You can withdraw until :moment.'),
+            'billing.withdrawal.contract' => __(':plan subscription, :interval, ordered on :date'),
+            'workspaces.confirm_delete_subscription' => __('Its Pro subscription ends at once, without a refund of the period in progress.'),
         ];
     }
 

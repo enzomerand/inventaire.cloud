@@ -18,17 +18,23 @@ const URL = '/api/v1/workspaces/shop/billing';
 const CHECKOUT_URL = `${URL}/checkout`;
 const PORTAL_URL = `${URL}/portal`;
 const REFRESH_URL = `${URL}/refresh`;
+const CANCEL_URL = `${URL}/cancel`;
+const WITHDRAW_URL = `${URL}/withdraw`;
 const PAGE = '/app/w/shop/billing';
 
 /** The overview of a Free workspace, as the API describes it, with what is given over it. */
 function overview(overrides = {}) {
     return {
         enabled: true,
+        selling: true,
         plan: 'free',
         status: null,
         interval: null,
         current_period_end: null,
         cancel_at_period_end: false,
+        started_at: null,
+        withdrawal_until: null,
+        withdrawn: false,
         can_manage: true,
         prices: { currency: 'eur', month: 600, year: 6000 },
         limits: {
@@ -71,7 +77,16 @@ describe('the subscription page of a workspace', () => {
         component = workspaceBilling();
         // Alpine injects $root: the element carrying x-data and the data-* attributes.
         component.$root = {
-            dataset: { url: URL, checkoutUrl: CHECKOUT_URL, portalUrl: PORTAL_URL, refreshUrl: REFRESH_URL },
+            dataset: {
+                url: URL,
+                checkoutUrl: CHECKOUT_URL,
+                portalUrl: PORTAL_URL,
+                refreshUrl: REFRESH_URL,
+                cancelUrl: CANCEL_URL,
+                withdrawUrl: WITHDRAW_URL,
+                personName: 'Ada Lovelace',
+                personEmail: 'ada@example.test',
+            },
         };
         component.pollDelayMs = 0;
     }
@@ -533,6 +548,359 @@ describe('the subscription page of a workspace', () => {
             expect(notify).toHaveBeenCalledWith('danger', 'This workspace has no subscription to manage yet.');
             expect(http.get).toHaveBeenCalledTimes(2);
             expect(component.busy).toBe(false);
+        });
+    });
+
+    describe('an instance that has Stripe but cannot sell yet', () => {
+        it('says "Coming soon" to an owner in place of the button that buys Pro, and lets nothing be bought', async () => {
+            await open(overview({ selling: false }));
+
+            expect(component.offered).toBe(true);
+            expect(component.selling).toBe(false);
+            expect(component.upgradeShown).toBe(false);
+            expect(component.canUpgrade).toBe(false);
+            expect(component.comingSoon).toBe(true);
+            expect(component.actionsShown).toBe(true);
+
+            await component.upgrade();
+
+            expect(http.post).not.toHaveBeenCalled();
+        });
+
+        it('says nothing to a member who is not an owner, and nothing to a workspace that is Pro already', async () => {
+            await open(overview({ selling: false, can_manage: false }));
+
+            expect(component.comingSoon).toBe(false);
+            expect(component.actionsShown).toBe(false);
+
+            await open(pro({ selling: false }));
+
+            expect(component.comingSoon).toBe(false);
+            // An existing subscriber still manages the subscription.
+            expect(component.canOpenPortal).toBe(true);
+        });
+
+        it('sells normally where the seller is complete', async () => {
+            await open(overview());
+
+            expect(component.comingSoon).toBe(false);
+            expect(component.upgradeShown).toBe(true);
+            expect(component.canUpgrade).toBe(true);
+        });
+
+        it('says nothing on an instance without Stripe', async () => {
+            await open(overview({ enabled: false, selling: false }));
+
+            expect(component.comingSoon).toBe(false);
+        });
+    });
+
+    describe('cancelling the contract', () => {
+        it('is offered to the owner of a workspace on Pro, and asks for the portal page of the cancellation', async () => {
+            await open(pro());
+            http.post.mockResolvedValue({ data: { url: 'https://billing.stripe.com/session/bps_cancel' } });
+
+            expect(component.canCancel).toBe(true);
+            expect(component.actionsShown).toBe(true);
+
+            await component.cancel();
+
+            expect(http.post).toHaveBeenCalledWith(CANCEL_URL, {}, { silent: true });
+            expect(redirectTo).toHaveBeenCalledWith('https://billing.stripe.com/session/bps_cancel');
+            expect(component.busy).toBe(true);
+        });
+
+        it('is not offered when it is already set to end, when the owner withdrew, to a member, to a Free workspace, or without Stripe', async () => {
+            for (const data of [
+                pro({ cancel_at_period_end: true }),
+                pro({ withdrawn: true }),
+                pro({ can_manage: false }),
+                overview(),
+                pro({ enabled: false }),
+            ]) {
+                await open(data);
+
+                expect(component.canCancel).toBe(false);
+            }
+
+            await component.cancel();
+
+            expect(http.post).not.toHaveBeenCalled();
+        });
+
+        it('is not offered to an owner the previous owner still pays for', async () => {
+            await open(pro());
+            http.post.mockRejectedValue(
+                new HttpError(409, 'Conflict', { code: 'previous_owner_subscription', ends_at: null }),
+            );
+
+            await component.cancel();
+
+            expect(component.canCancel).toBe(false);
+            expect(component.blockedByPreviousOwner).toBe(true);
+        });
+
+        it('tells why it was refused, and reads the overview again', async () => {
+            await open(pro());
+            http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'cancellation_scheduled' }));
+
+            await component.cancel();
+
+            expect(notify).toHaveBeenCalledWith(
+                'danger',
+                'The cancellation of this subscription is already scheduled.',
+            );
+            expect(http.get).toHaveBeenCalledTimes(2);
+            expect(component.busy).toBe(false);
+        });
+
+        it('says the payment service is unavailable when Stripe refuses the portal', async () => {
+            await open(pro());
+            http.post.mockRejectedValue(new HttpError(503, 'Service unavailable', { code: 'billing_unavailable' }));
+
+            await component.cancel();
+
+            expect(notify).toHaveBeenCalledWith(
+                'danger',
+                'The payment service is unavailable right now. Please try again in a moment.',
+            );
+            expect(component.busy).toBe(false);
+        });
+
+        it('does nothing twice', async () => {
+            await open(pro());
+            http.post.mockReturnValue(new Promise(() => {}));
+
+            void component.cancel();
+            await component.cancel();
+
+            expect(http.post).toHaveBeenCalledTimes(1);
+        });
+
+        it('has the subscription read when the portal brings the person back from the cancellation, and takes the parameter off', async () => {
+            window.history.replaceState(null, '', `${PAGE}?cancellation=done`);
+            http.get.mockResolvedValue({ data: pro() });
+            http.post.mockResolvedValue({ data: pro({ cancel_at_period_end: true }) });
+
+            await component.init();
+
+            expect(http.post).toHaveBeenCalledWith(REFRESH_URL, {}, { silent: true });
+            expect(component.billing.cancel_at_period_end).toBe(true);
+            expect(component.canCancel).toBe(false);
+            expect(component.confirming).toBe(false);
+            expect(window.location.search).toBe('');
+        });
+
+        it('reads nothing when a member, or an instance without Stripe, is brought back', async () => {
+            window.history.replaceState(null, '', `${PAGE}?cancellation=done`);
+
+            await open(pro({ can_manage: false }));
+
+            expect(http.post).not.toHaveBeenCalled();
+            expect(window.location.search).toBe('');
+        });
+    });
+
+    describe('withdrawing from the contract', () => {
+        const inTenDays = () => new Date(Date.now() + 10 * 86400000).toISOString();
+
+        /** A Pro workspace inside the fourteen days. */
+        function fresh(overrides = {}) {
+            return pro({ started_at: '2026-11-07T14:30:00+00:00', withdrawal_until: inTenDays(), ...overrides });
+        }
+
+        it('is offered to the owner while the server says the right can be exercised', async () => {
+            await open(fresh());
+
+            expect(component.canWithdraw).toBe(true);
+            expect(component.actionsShown).toBe(true);
+            expect(component.withdrawalOpen).toBe(false);
+            expect(component.withdrawalUntilText).toMatch(/^You can withdraw until .+\.$/);
+        });
+
+        it('is not offered to a member, after the fourteen days, once made, without Stripe, or when the server says it is over', async () => {
+            for (const data of [
+                fresh({ can_manage: false }),
+                fresh({ withdrawal_until: new Date(Date.now() - 1000).toISOString() }),
+                fresh({ withdrawal_until: null }),
+                fresh({ withdrawn: true, withdrawal_until: null }),
+                fresh({ enabled: false }),
+                overview(),
+            ]) {
+                await open(data);
+
+                expect(component.canWithdraw).toBe(false);
+            }
+
+            component.openWithdrawal();
+
+            expect(component.withdrawalOpen).toBe(false);
+        });
+
+        it('opens the declaration with the name and the address of the account, and the contract it is about', async () => {
+            await open(fresh());
+
+            component.openWithdrawal();
+
+            expect(component.withdrawalOpen).toBe(true);
+            expect(component.withdrawalName).toBe('Ada Lovelace');
+            expect(component.withdrawalEmail).toBe('ada@example.test');
+            expect(component.withdrawalContractText).toBe('Pro subscription, Monthly, ordered on November 7, 2026');
+            expect(component.canSubmitWithdrawal).toBe(true);
+        });
+
+        it('closes the declaration without sending it', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+
+            component.closeWithdrawal();
+
+            expect(component.withdrawalOpen).toBe(false);
+            expect(http.post).not.toHaveBeenCalled();
+        });
+
+        it('cannot be sent without a name or an address', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+
+            for (const [name, email] of [
+                ['  ', 'ada@example.test'],
+                ['Ada', ' '],
+            ]) {
+                component.withdrawalName = name;
+                component.withdrawalEmail = email;
+
+                expect(component.canSubmitWithdrawal).toBe(false);
+
+                await component.submitWithdrawal();
+            }
+
+            expect(http.post).not.toHaveBeenCalled();
+        });
+
+        it('sends the declaration, takes the new overview and tells where the acknowledgement goes', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            component.withdrawalName = '  Ada Byron ';
+            component.withdrawalEmail = ' receipts@example.test ';
+            http.post.mockResolvedValue({ data: fresh({ withdrawn: true, withdrawal_until: null }) });
+
+            await component.submitWithdrawal();
+
+            expect(http.post).toHaveBeenCalledWith(
+                WITHDRAW_URL,
+                { name: 'Ada Byron', email: 'receipts@example.test' },
+                { silent: true },
+            );
+            expect(component.withdrawalOpen).toBe(false);
+            expect(component.withdrawing).toBe(false);
+            expect(component.canWithdraw).toBe(false);
+            expect(component.canCancel).toBe(false);
+            expect(notify).toHaveBeenCalledWith(
+                'success',
+                'Your withdrawal is recorded. An acknowledgement is on its way to receipts@example.test.',
+            );
+            expect(component.notice).toBe(
+                'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.',
+            );
+        });
+
+        it('does not send the declaration twice', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockReturnValue(new Promise(() => {}));
+
+            void component.submitWithdrawal();
+            const states = [component.withdrawing, component.canSubmitWithdrawal];
+            await component.submitWithdrawal();
+
+            expect(states).toEqual([true, false]);
+            expect(http.post).toHaveBeenCalledTimes(1);
+        });
+
+        it('tells why the right cannot be exercised any more, keeps the declaration open and reads the overview again', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code: 'withdrawal_period_over' }));
+            http.get.mockResolvedValue({ data: fresh({ withdrawal_until: null }) });
+
+            await component.submitWithdrawal();
+
+            expect(notify).toHaveBeenCalledWith('danger', 'The fourteen days of the right of withdrawal are over.');
+            expect(http.get).toHaveBeenCalledTimes(2);
+            expect(component.withdrawing).toBe(false);
+            expect(component.canWithdraw).toBe(false);
+        });
+
+        it.each([
+            ['already_withdrawn', 'You already withdrew from this contract.'],
+            ['no_live_subscription', 'This workspace has no running subscription.'],
+        ])('tells %s in words of its own', async (code, message) => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockRejectedValue(new HttpError(409, 'Conflict', { code }));
+
+            await component.submitWithdrawal();
+
+            expect(notify).toHaveBeenCalledWith('danger', message);
+        });
+
+        it('tells what is wrong with the name or the address', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockRejectedValue(
+                new HttpError(422, 'The email field must be a valid email address.', {
+                    errors: { email: ['The email field must be a valid email address.'] },
+                }),
+            );
+
+            await component.submitWithdrawal();
+
+            expect(notify).toHaveBeenCalledWith('danger', 'The email field must be a valid email address.');
+            expect(component.withdrawalOpen).toBe(true);
+            expect(component.withdrawing).toBe(false);
+        });
+
+        it('keeps the declaration open and says what the server said when it fails', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockRejectedValue(new HttpError(500, 'Server error'));
+
+            await component.submitWithdrawal();
+
+            expect(http.post).toHaveBeenCalledWith(WITHDRAW_URL, expect.any(Object), { silent: true });
+            expect(notify).toHaveBeenCalledWith('danger', 'Server error');
+            expect(component.withdrawalOpen).toBe(true);
+            expect(component.withdrawing).toBe(false);
+        });
+
+        it('says nothing of a request that was cancelled', async () => {
+            await open(fresh());
+            component.openWithdrawal();
+            http.post.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+
+            await component.submitWithdrawal();
+
+            expect(notify).not.toHaveBeenCalled();
+            expect(component.withdrawing).toBe(false);
+        });
+
+        it('tells the owner a withdrawal was recorded, once the overview says so', async () => {
+            await open(fresh({ withdrawn: true, withdrawal_until: null }));
+
+            expect(component.notice).toBe(
+                'Your withdrawal is recorded and your subscription is ending. The acknowledgement is sent to the address you gave.',
+            );
+
+            await open(fresh({ withdrawn: true, withdrawal_until: null, can_manage: false }));
+
+            expect(component.notice).toBe('');
+        });
+
+        it('has no way to withdraw before the overview was read', () => {
+            expect(component.canWithdraw).toBe(false);
+            expect(component.withdrawalUntilText).toBe('');
+            expect(component.withdrawalContractText).toBe('Pro subscription, , ordered on -');
         });
     });
 

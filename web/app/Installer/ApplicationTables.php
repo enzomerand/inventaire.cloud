@@ -45,6 +45,7 @@ final class ApplicationTables
         'share_links',
         'photo_analyses',
         'billing_accounts',
+        'billing_withdrawals',
     ];
 
     /**

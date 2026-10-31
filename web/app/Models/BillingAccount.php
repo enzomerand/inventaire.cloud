@@ -29,6 +29,10 @@ use Illuminate\Support\Carbon;
  * @property string|null $interval `month` or `year`.
  * @property CarbonImmutable|null $current_period_end The end of the period that is paid for, in UTC.
  * @property bool $cancel_at_period_end Whether the subscription ends by itself at the end of the period.
+ * @property CarbonImmutable|null $started_at The `start_date` of that subscription: the fourteen days of the right of withdrawal count from it.
+ * @property string|null $confirmation_sent_for The subscription whose confirmation (contract, terms, withdrawal form) was queued.
+ * @property string|null $cancel_notice_sent_for The subscription whose cancellation receipt was queued, while it is set to end.
+ * @property CarbonImmutable|null $renewal_notice_sent_for The end of the period for which the notice of tacit renewal was queued.
  * @property CarbonImmutable|null $synced_at When the read of Stripe the columns above come from began, to the microsecond.
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -69,6 +73,10 @@ final class BillingAccount extends Model
         'interval',
         'current_period_end',
         'cancel_at_period_end',
+        'started_at',
+        'confirmation_sent_for',
+        'cancel_notice_sent_for',
+        'renewal_notice_sent_for',
         'synced_at',
     ];
 
@@ -90,6 +98,8 @@ final class BillingAccount extends Model
             'payer_id' => 'integer',
             'current_period_end' => 'immutable_datetime',
             'cancel_at_period_end' => 'boolean',
+            'started_at' => 'immutable_datetime',
+            'renewal_notice_sent_for' => 'immutable_datetime',
             'synced_at' => PreciseMoment::class,
         ];
     }

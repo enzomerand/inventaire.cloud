@@ -105,6 +105,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
                 Route::post('/workspaces/{workspace}/billing/checkout', [WorkspaceBillingController::class, 'checkout'])->middleware('throttle:billing-checkout')->name('workspaces.billing.checkout');
                 Route::post('/workspaces/{workspace}/billing/portal', [WorkspaceBillingController::class, 'portal'])->middleware('throttle:billing-portal')->name('workspaces.billing.portal');
                 Route::post('/workspaces/{workspace}/billing/refresh', [WorkspaceBillingController::class, 'refresh'])->middleware('throttle:billing-refresh')->name('workspaces.billing.refresh');
+                // The two things the terms of sale promise a client: cancelling the contract (the portal of Stripe opened on the cancellation) and
+                // withdrawing from it during the fourteen days that follow it (the declaration is stored, the subscription is ended at once).
+                Route::post('/workspaces/{workspace}/billing/cancel', [WorkspaceBillingController::class, 'cancel'])->middleware('throttle:billing-cancel')->name('workspaces.billing.cancel');
+                Route::post('/workspaces/{workspace}/billing/withdraw', [WorkspaceBillingController::class, 'withdraw'])->middleware('throttle:billing-withdraw')->name('workspaces.billing.withdraw');
 
                 // The photo entry: the photos of an object are sent to Claude (Anthropic) and the proposals read back until they are ready. The
                 // photos leave the instance and every analysis is paid for by it, so this is a person at their browser, never a script. The

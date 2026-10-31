@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * A Stripe for the tests, behind `Http::fake()`: it answers the calls of the API that the application makes (`/v1/customers`,
- * `/v1/checkout/sessions`, `/v1/billing_portal/sessions`, `/v1/subscriptions`) the way the real one does, with the state of
+ * `/v1/checkout/sessions`, `/v1/billing_portal/sessions`, `/v1/subscriptions`, `/v1/invoices`) the way the real one does, with the state of
  * a few customers and subscriptions, and it records every call. Any other request is refused (`Http::preventStrayRequests()`).
  *
  * A test drives it: it gives a customer a subscription in a status, changes that status, price or period end the way the customer would in
@@ -37,8 +37,11 @@ final class FakeStripe
     /** @var array<string, array<string, mixed>> The customers Stripe has, by id, as Stripe gives them. */
     public array $customers = [];
 
-    /** @var array<string, array{id: string, customer: string, status: string, price: string, interval: string, current_period_end: int, cancel_at_period_end: bool, created: int, metadata: array<string, mixed>}> The subscriptions, by id. */
+    /** @var array<string, array{id: string, customer: string, status: string, price: string, interval: string, current_period_end: int, cancel_at_period_end: bool, created: int, start_date: int, metadata: array<string, mixed>}> The subscriptions, by id. */
     public array $subscriptions = [];
+
+    /** @var array<string, array<string, mixed>> The invoices, by id, as Stripe gives them ({@see self::invoice()}). */
+    public array $invoices = [];
 
     /** @var array<string, array<string, mixed>> The Checkout sessions that were created, by id, with the parameters they were created with. */
     public array $sessions = [];
@@ -213,7 +216,33 @@ final class FakeStripe
             'current_period_end' => $periodEnd ?? now()->addMonth()->getTimestamp(),
             'cancel_at_period_end' => $cancelAtPeriodEnd,
             'created' => now()->getTimestamp() + $this->counter,
+            'start_date' => now()->getTimestamp(),
             'metadata' => [],
+        ];
+
+        return $id;
+    }
+
+    /**
+     * Gives a subscription an invoice (paid unless told otherwise).
+     *
+     * @param  int  $amountPaid  What was paid, in the smallest unit of the currency.
+     * @param  string  $status  `paid`, `open`, `void`...
+     * @return string The id of the invoice.
+     */
+    public function invoice(string $subscriptionId, int $amountPaid, string $currency = 'eur', string $status = 'paid'): string
+    {
+        $id = 'in_test'.++$this->counter;
+        $this->invoices[$id] = [
+            'id' => $id,
+            'object' => 'invoice',
+            'subscription' => $subscriptionId,
+            'customer' => $this->subscriptions[$subscriptionId]['customer'] ?? null,
+            'status' => $status,
+            'amount_paid' => $status === 'paid' ? $amountPaid : 0,
+            'amount_due' => $amountPaid,
+            'currency' => $currency,
+            'created' => now()->getTimestamp() + $this->counter,
         ];
 
         return $id;
@@ -378,6 +407,7 @@ final class FakeStripe
             'GET /v1/checkout/sessions' => $this->listSessions($request),
             'POST /v1/checkout/sessions/{id}/expire' => $this->expireSession($path),
             'GET /v1/subscriptions' => $this->listSubscriptions($request),
+            'GET /v1/invoices' => $this->listInvoices($request),
             'POST /v1/subscriptions/{id}' => $this->updateSubscription($request, $path),
             'DELETE /v1/subscriptions/{id}' => $this->deleteSubscription($path),
             default => ['status' => 404, 'body' => ['error' => ['type' => 'invalid_request_error', 'code' => 'resource_missing', 'message' => 'Unrecognized request URL.']]],
@@ -512,6 +542,27 @@ final class FakeStripe
     }
 
     /**
+     * Lists the invoices, newest first, filtered by `subscription`, `customer` and `status`, a page at a time.
+     *
+     * @return array{status: int, body: array<string, mixed>}
+     */
+    private function listInvoices(Request $request): array
+    {
+        $query = [];
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        $invoices = array_values(array_filter(
+            $this->invoices,
+            fn (array $invoice): bool => (! isset($query['subscription']) || $invoice['subscription'] === $query['subscription'])
+                && (! isset($query['customer']) || $invoice['customer'] === $query['customer'])
+                && (! isset($query['status']) || $invoice['status'] === $query['status']),
+        ));
+        usort($invoices, fn (array $a, array $b): int => $b['created'] <=> $a['created']);
+
+        return $this->page($invoices, $query, '/v1/invoices');
+    }
+
+    /**
      * Lists the Checkout sessions of a customer, a page at a time, the most recent first; `status` filters (`open`, `complete`, `expired`).
      *
      * @return array{status: int, body: array<string, mixed>}
@@ -628,7 +679,7 @@ final class FakeStripe
     /**
      * A subscription as Stripe gives it (since the version of the API of 2025: the period is on the item).
      *
-     * @param  array{id: string, customer: string, status: string, price: string, interval: string, current_period_end: int, cancel_at_period_end: bool, created: int, metadata: array<string, mixed>}  $subscription
+     * @param  array{id: string, customer: string, status: string, price: string, interval: string, current_period_end: int, cancel_at_period_end: bool, created: int, start_date: int, metadata: array<string, mixed>}  $subscription
      * @return array<string, mixed>
      */
     private function subscriptionObject(array $subscription): array
@@ -640,6 +691,7 @@ final class FakeStripe
             'status' => $subscription['status'],
             'cancel_at_period_end' => $subscription['cancel_at_period_end'],
             'created' => $subscription['created'],
+            'start_date' => $subscription['start_date'],
             'metadata' => $subscription['metadata'],
             'items' => [
                 'object' => 'list',

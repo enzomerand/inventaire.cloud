@@ -7,6 +7,13 @@ declare(strict_types=1);
 
 use App\Models\BillingAccount;
 use App\Models\Workspace;
+use Illuminate\Mail\Transport\ArrayTransport;
+use Illuminate\Support\Facades\Mail;
+use Symfony\Component\Mailer\Envelope;
+use Symfony\Component\Mailer\Exception\TransportException;
+use Symfony\Component\Mailer\SentMessage;
+use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\RawMessage;
 use Tests\Support\FakeStripe;
 
 /**
@@ -204,4 +211,46 @@ function billingWorkOnce(object $test): void
 function billingApiUri(Workspace $workspace, string $endpoint = ''): string
 {
     return "/api/v1/workspaces/{$workspace->ulid}/billing".($endpoint === '' ? '' : "/{$endpoint}");
+}
+
+/**
+ * A mail transport that keeps what it sends like the array mailer does, except for some recipients, whose mail it refuses with an
+ * exception (a mail server that is down for them), so that a mail that cannot be sent is tested end to end.
+ */
+final class BillingBreakingTransport extends ArrayTransport
+{
+    /**
+     * @param  list<string>  $addresses  The recipients whose mail fails; every recipient when empty.
+     */
+    public function __construct(private readonly array $addresses = [])
+    {
+        parent::__construct();
+    }
+
+    /**
+     * Keeps the message, or fails for the recipients it was told to fail for.
+     */
+    public function send(RawMessage $message, ?Envelope $envelope = null): ?SentMessage
+    {
+        $recipient = $message instanceof Email ? ($message->getTo()[0] ?? null)?->getAddress() : null;
+
+        if ($this->addresses === [] || in_array($recipient, $this->addresses, true)) {
+            throw new TransportException('The mail is broken on purpose.');
+        }
+
+        return parent::send($message, $envelope);
+    }
+}
+
+/**
+ * Makes the mail of some addresses (all of them when none is given) fail to go out, the others being kept like the array mailer keeps them:
+ * `sentMails()` lists those.
+ *
+ * @param  list<string>  $addresses  The recipients whose mail fails.
+ */
+function billingMailBreaksFor(array $addresses = []): void
+{
+    Mail::extend('billing-breaking', fn () => new BillingBreakingTransport($addresses));
+    config(['mail.mailers.billing-breaking' => ['transport' => 'billing-breaking'], 'mail.default' => 'billing-breaking']);
+    app('mail.manager')->purge();
 }

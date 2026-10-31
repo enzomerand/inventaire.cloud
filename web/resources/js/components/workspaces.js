@@ -57,6 +57,13 @@ export default function workspaces() {
          */
         photoEntryUnlocked: null,
 
+        /**
+         * The ULIDs of the workspaces the person owns that have a live subscription: deleting one ends it at once, without a refund of the
+         * period in progress, which the confirmation says.
+         * @type {string[]}
+         */
+        liveSubscriptions: [],
+
         /** Endpoint of the workspaces (GET, POST, PATCH, DELETE), from `data-url` on the component root. */
         get url() {
             return this.$root.dataset.url;
@@ -108,6 +115,7 @@ export default function workspaces() {
             // feature (an attribute that is missing means the same).
             this.photoEntry = JSON.parse(this.$root.dataset.photoEntry ?? 'null');
             this.photoEntryUnlocked = JSON.parse(this.$root.dataset.photoEntryUnlocked ?? 'null');
+            this.liveSubscriptions = JSON.parse(this.$root.dataset.liveSubscriptions ?? '[]');
 
             if (window.location.hash === '#create') {
                 this.$nextTick(() => this.$refs.name?.focus());
@@ -297,13 +305,17 @@ export default function workspaces() {
         },
 
         /**
-         * The question asked before a workspace is deleted.
+         * The question asked before a workspace is deleted, with the warning that its subscription ends at once when it has a live one.
          *
          * @param {import('../stores/workspaces.js').WorkspaceItem} item
          * @returns {string}
          */
         confirmText(item) {
-            return t('workspaces.confirm_delete', { name: item.name });
+            const question = t('workspaces.confirm_delete', { name: item.name });
+
+            return this.liveSubscriptions.includes(item.id)
+                ? question + ' ' + t('workspaces.confirm_delete_subscription')
+                : question;
         },
 
         /**

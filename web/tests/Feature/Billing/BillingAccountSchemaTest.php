@@ -33,7 +33,7 @@ function rawBillingAccount(int $workspaceId, array $attributes = []): void
 describe('the table of billing accounts', function (): void {
     it('has the columns the application relies on, and is one of the tables the installer knows', function (): void {
         expect(Schema::getColumnListing('billing_accounts'))
-            ->toEqualCanonicalizing(['id', 'workspace_id', 'stripe_customer_id', 'payer_id', 'stripe_subscription_id', 'status', 'price_id', 'interval', 'current_period_end', 'cancel_at_period_end', 'synced_at', 'created_at', 'updated_at'])
+            ->toEqualCanonicalizing(['id', 'workspace_id', 'stripe_customer_id', 'payer_id', 'stripe_subscription_id', 'status', 'price_id', 'interval', 'current_period_end', 'cancel_at_period_end', 'started_at', 'confirmation_sent_for', 'cancel_notice_sent_for', 'renewal_notice_sent_for', 'synced_at', 'created_at', 'updated_at'])
             ->and(ApplicationTables::owns('billing_accounts'))->toBeTrue();
     });
 

@@ -143,6 +143,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('billing-portal', fn (Request $request): Limit => Limit::perMinute(10)
             ->by('billing-portal:'.$this->signedInKey($request)));
 
+        // Cancelling opens a portal session after reading the subscription at Stripe (two calls): ten a minute per person. A withdrawal reads
+        // the subscription and the invoice, stores a declaration and sends mails, and a person makes it once: five a minute per person, so
+        // that nobody can use it to send mail to an address of their choice.
+        RateLimiter::for('billing-cancel', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('billing-cancel:'.$this->signedInKey($request)));
+        RateLimiter::for('billing-withdraw', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by('billing-withdraw:'.$this->signedInKey($request)));
+
         // Freezing an inventory as an official version locks it while every item is read (`versions_per_hour`), keyed on the user.
         RateLimiter::for('official-versions', fn (Request $request): Limit => Limit::perHour(config()->integer('inventories.versions_per_hour'))
             ->by('official-versions:'.$this->signedInKey($request)));

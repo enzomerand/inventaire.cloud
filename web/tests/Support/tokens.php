@@ -64,7 +64,7 @@ function tokenSessionOnlyRoutes(): array
         'me.deletion-code', 'me.destroy', 'admin.users.index', 'admin.users.store', 'admin.users.update', 'admin.users.destroy',
         'admin.settings.show', 'admin.settings.update', 'me.tokens.index', 'me.tokens.store', 'me.tokens.destroy', 'workspaces.transfer',
         'workspaces.photo-entry.update', 'inventories.photo-analyses.store', 'inventories.photo-analyses.show', 'workspaces.billing.show',
-        'workspaces.billing.checkout', 'workspaces.billing.portal', 'workspaces.billing.refresh',
+        'workspaces.billing.checkout', 'workspaces.billing.portal', 'workspaces.billing.refresh', 'workspaces.billing.cancel', 'workspaces.billing.withdraw',
     ]);
 }
 

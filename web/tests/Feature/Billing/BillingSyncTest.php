@@ -724,3 +724,61 @@ describe('how it is written', function (): void {
             ->and(BillingAccount::query()->findOrFail($other->id)->status)->toBeNull();
     });
 });
+
+describe('the start of the subscription', function (): void {
+    it('is the start date Stripe reports for the subscription the workspace has', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $stripe->change(array_key_first($stripe->subscriptions), ['start_date' => 1_800_000_000]);
+
+        $synced = billingSync($account);
+
+        expect($synced->started_at?->getTimestamp())->toBe(1_800_000_000)
+            ->and($account->fresh()->started_at?->toIso8601String())->toBe('2027-01-15T08:00:00+00:00');
+    });
+
+    it('starts again with a new subscription, which has a start date of its own', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $first = array_key_first($stripe->subscriptions);
+        $stripe->change($first, ['start_date' => 1_800_000_000]);
+        billingSync($account);
+
+        $stripe->setStatus($first, 'canceled');
+        $second = $stripe->subscribe($account->stripe_customer_id, 'active');
+        $stripe->change($second, ['start_date' => 1_810_000_000]);
+        $synced = billingSync($account);
+
+        expect($synced->stripe_subscription_id)->toBe($second)->and($synced->started_at?->getTimestamp())->toBe(1_810_000_000);
+    });
+
+    it('is unknown when Stripe gives none, and when the customer has no subscription any more', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $stripe->change(array_key_first($stripe->subscriptions), ['start_date' => null]);
+
+        expect(billingSync($account)->started_at)->toBeNull();
+
+        $stripe->subscriptions = [];
+        $account->forceFill(['started_at' => now()])->save();
+
+        expect(billingSync($account)->started_at)->toBeNull();
+    });
+
+    it('forgets the receipt of a cancellation once the subscription stops ending, and keeps the mails already sent otherwise', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        $id = array_key_first($stripe->subscriptions);
+        $account->forceFill(['confirmation_sent_for' => $id, 'cancel_notice_sent_for' => $id, 'renewal_notice_sent_for' => now()->addDays(60)])->save();
+        $stripe->change($id, ['cancel_at_period_end' => true]);
+
+        $ending = billingSync($account);
+
+        expect($ending->cancel_notice_sent_for)->toBe($id)->and($ending->confirmation_sent_for)->toBe($id)->and($ending->renewal_notice_sent_for)->not->toBeNull();
+
+        $stripe->change($id, ['cancel_at_period_end' => false]);
+        $kept = billingSync($account);
+
+        expect($kept->cancel_notice_sent_for)->toBeNull()->and($kept->confirmation_sent_for)->toBe($id)->and($kept->renewal_notice_sent_for)->not->toBeNull();
+    });
+});

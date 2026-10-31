@@ -146,6 +146,7 @@ const PAGE = {
     // The ULIDs of the owned workspaces whose plan includes the photo entry, as the page of the workspaces is rendered; null when the
     // instance sells no plan (none is locked).
     photoEntryUnlocked: null,
+    liveSubscriptions: [],
     // Whether the instance sells plans: the page of a workspace then links to its subscription.
     billingOffered: false,
 };
@@ -185,6 +186,7 @@ const MESSAGES = {
     'workspaces.rename_named': 'Rename :name',
     'workspaces.delete_named': 'Delete :name',
     'workspaces.confirm_delete': 'Delete :name and everything in it?',
+    'workspaces.confirm_delete_subscription': 'Its Pro subscription ends at once, without a refund.',
     'workspaces.notice.created': 'Workspace created.',
     'workspaces.notice.renamed': 'Workspace renamed.',
     'workspaces.notice.deleted': 'Workspace deleted.',
@@ -296,6 +298,11 @@ function render(path, { scannerSlot = '' } = {}) {
         PAGE.billingOffered ? body : '',
     );
 
+    // The warning on the page of the account about the subscription of a workspace that goes with it is there when the instance sells plans.
+    html = html.replace(/@if \(\\App\\Billing\\Billing::enabled\(\)\)([\s\S]*?)@endif/g, (_match, body) =>
+        PAGE.billingOffered ? body : '',
+    );
+
     // What only the owners are offered (the link to the sharing page) is in the markup, or not.
     html = html.replace(/@if \(\$abilities\['(\w+)'\]\)([\s\S]*?)@endif/g, (_match, ability, body) =>
         abilitiesOfPage()[ability] ? body : '',
@@ -349,6 +356,10 @@ function render(path, { scannerSlot = '' } = {}) {
 
         if (expression === 'json_encode($photoEntry, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR)') {
             return escape(JSON.stringify(PAGE.photoEntry));
+        }
+
+        if (expression === 'json_encode($liveSubscriptions ?? [], JSON_THROW_ON_ERROR)') {
+            return escape(JSON.stringify(PAGE.liveSubscriptions));
         }
 
         if (expression === 'json_encode($photoEntryUnlocked, JSON_THROW_ON_ERROR)') {
@@ -556,6 +567,7 @@ describe('the pages under the real Alpine CSP build', () => {
         PAGE.photoEntryKey = true;
         PAGE.photoEntry = null;
         PAGE.photoEntryUnlocked = null;
+        PAGE.liveSubscriptions = [];
         PAGE.billingOffered = false;
     });
 
@@ -770,6 +782,23 @@ describe('the pages under the real Alpine CSP build', () => {
                 'Shared',
             ]);
             expect(document.querySelector('.dropdown-toggle .app-workspace-name').textContent).toBe('Espace personnel');
+        });
+
+        it('warns that the subscription ends at once before a workspace that has one is deleted, and only that one', async () => {
+            PAGE.liveSubscriptions = ['shop'];
+            await mount('components/workspace-switcher.blade.php', 'app/workspaces.blade.php');
+
+            await press('Delete Shop', rows()[1]);
+
+            expect(rows()[1].textContent).toContain(
+                'Delete Shop and everything in it? Its Pro subscription ends at once, without a refund.',
+            );
+
+            await press('Cancel', rows()[1]);
+            await press('Delete Espace personnel', rows()[0]);
+
+            expect(rows()[0].textContent).toContain('Delete Espace personnel and everything in it?');
+            expect(rows()[0].textContent).not.toContain('Its Pro subscription');
         });
 
         it('says why the last workspace cannot be deleted, and keeps the confirmation', async () => {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Billing;
 
 use App\Mail\BillingAlertMail;
+use App\Models\BillingWithdrawal;
 use App\Models\User;
 use Closure;
 use Illuminate\Support\Facades\Cache;
@@ -115,6 +116,47 @@ final class BillingAlerts
             $this->tellProblem($kind, $customerId, $workspaceUlid, $livemode);
         } catch (Throwable $exception) {
             Log::error('The administrators could not be told of a problem with a Stripe customer.', ['kind' => $kind, 'customer' => $customerId, 'exception' => $exception]);
+        }
+    }
+
+    /**
+     * Tells the administrators that a customer withdrew from their contract and what to refund: the amount paid, the refund (the part not
+     * used) or that the amount is to be checked, the deadline, and whether the acknowledgement reached the customer. Not once a day: each
+     * withdrawal is told, once, by the request that recorded it. Never throws: the withdrawal is stored, and a mail that cannot be queued
+     * is written in the log with everything the mail would have said, so that the refund is not lost.
+     *
+     * @param  bool  $acknowledged  Whether the acknowledgement to the customer was queued.
+     */
+    public function tellWithdrawal(BillingWithdrawal $withdrawal, ?string $workspaceUlid, bool $acknowledged): void
+    {
+        $submittedAt = $withdrawal->submitted_at ?? now();
+
+        try {
+            $told = $this->toAdministrators(fn (): BillingAlertMail => BillingAlertMail::withdrawal(
+                $withdrawal->stripe_customer_id,
+                $withdrawal->stripe_subscription_id,
+                $workspaceUlid,
+                $withdrawal->amount_paid_cents,
+                $withdrawal->refund_cents,
+                $withdrawal->currency,
+                $submittedAt,
+                $acknowledged,
+                Billing::livemode(),
+            ));
+        } catch (Throwable $exception) {
+            $told = 0;
+            Log::error('The administrators could not be told of a withdrawal.', ['withdrawal' => $withdrawal->getKey(), 'exception' => $exception]);
+        }
+
+        if ($told === 0) {
+            Log::error('A customer withdrew from their contract and nobody was told to refund them: refund them in the dashboard of Stripe.', [
+                'withdrawal' => $withdrawal->getKey(),
+                'customer' => $withdrawal->stripe_customer_id,
+                'subscription' => $withdrawal->stripe_subscription_id,
+                'amount_paid_cents' => $withdrawal->amount_paid_cents,
+                'refund_cents' => $withdrawal->refund_cents,
+                'currency' => $withdrawal->currency,
+            ]);
         }
     }
 }

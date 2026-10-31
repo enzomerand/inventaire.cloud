@@ -14,10 +14,13 @@ use App\Billing\PreviousOwnerSubscriptionException;
 use App\Billing\StripeClient;
 use App\Billing\StripeException;
 use App\Billing\SubscriptionStatus;
+use App\Billing\WithdrawalRefusedException;
+use App\Billing\Withdrawals;
 use App\Billing\WorkspacePlan;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\ManageBillingRequest;
 use App\Http\Requests\Billing\StartCheckoutRequest;
+use App\Http\Requests\Billing\WithdrawFromContractRequest;
 use App\Http\Responses\ApiError;
 use App\Landing\PricingPlans;
 use App\Models\BillingAccount;
@@ -39,11 +42,17 @@ use Illuminate\Support\Facades\Log;
  * the public description of the API. Nothing is believed from the browser coming back from Stripe: the plan changes when the
  * synchronisation reads the subscription ({@see BillingSync}), and `refresh` is how the page asks for that to be done now.
  *
+ * Two more are what the terms of sale promise: the owner **cancels the contract** (`cancel`: the customer portal opened straight on the
+ * cancellation of the subscription, which ends with the period) and **withdraws from it** during the fourteen days after it began
+ * (`withdraw`, see {@see Withdrawals}: the declaration is stored, the subscription is cancelled at once, the person gets an
+ * acknowledgement and the administrators the refund to make).
+ *
  * Every answer that is not a success carries a `code` the page switches on: `billing_disabled` (the instance sells no plan),
  * `already_subscribed`, `subscription_pending`, `previous_owner_subscription` (the workspace changed hands and the subscription of the
  * owner before is still running), `checkout_in_progress` (another request, or another owner, is opening a payment page for the workspace),
- * `no_billing_account` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could not be reached or refused
- * the call).
+ * `no_billing_account`, `no_live_subscription` (nothing to cancel or withdraw from), `cancellation_scheduled`, `withdrawal_period_over`
+ * and `already_withdrawn` (`409`), `interval_not_offered` (`422`), and `billing_unavailable` (`503`: Stripe could not be reached or
+ * refused the call).
  */
 final class WorkspaceBillingController extends Controller
 {
@@ -64,6 +73,7 @@ final class WorkspaceBillingController extends Controller
         private readonly BillingCustomers $customers,
         private readonly StripeClient $stripe,
         private readonly BillingSync $sync,
+        private readonly Withdrawals $withdrawals,
     ) {}
 
     /**
@@ -210,6 +220,118 @@ final class WorkspaceBillingController extends Controller
     }
 
     /**
+     * Opens the customer portal straight on the cancellation of the subscription of the workspace (`flow_data` of type
+     * `subscription_cancel`), the "Cancel your contract" button of the terms of sale, and answers `{data: {url}}`. The person is brought
+     * back to the page with `?cancellation=done`, which has the subscription read so that the receipt does not wait for the webhook.
+     *
+     * The subscription is read first: what is cancelled is the one that is live now. `409` `billing_disabled`, `no_billing_account`,
+     * `previous_owner_subscription` (the owner is not the payer while the payer's subscription is in play: it is not theirs to cancel),
+     * `no_live_subscription` (nothing live to cancel) or `cancellation_scheduled` (it already ends with the period); `503` when Stripe
+     * fails, or refuses the session (the portal must have cancellation enabled in its configuration).
+     */
+    public function cancel(ManageBillingRequest $request, Workspace $workspace): JsonResponse
+    {
+        if (! Billing::enabled()) {
+            return $this->disabled();
+        }
+
+        $account = $this->customers->find($workspace);
+
+        if ($account === null) {
+            return $this->noAccount();
+        }
+
+        try {
+            // Read now: the row may be hours old, and what is cancelled must be what is live at Stripe.
+            $account = $this->sync->sync($account);
+        } catch (StripeException $exception) {
+            return $this->unavailable($exception, $workspace);
+        }
+
+        $refusal = $this->contractRefusal($account, $this->user($request));
+
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
+        if ($account->cancel_at_period_end) {
+            return ApiError::conflict(__('The cancellation of this subscription is already scheduled.'), 'cancellation_scheduled');
+        }
+
+        try {
+            $page = PublicUrls::to($this->pagePath($workspace));
+            $url = $this->stripe->createPortalSession($account->stripe_customer_id, $page, App::getLocale(), (string) $account->stripe_subscription_id, $page.'?cancellation=done');
+        } catch (StripeException $exception) {
+            return $this->unavailable($exception, $workspace);
+        }
+
+        return new JsonResponse(['data' => ['url' => $url]]);
+    }
+
+    /**
+     * Records the declaration of a withdrawal from the contract of the workspace (the "Withdraw from the contract here" button) and answers
+     * `201` with the overview of the workspace. See {@see Withdrawals} for the order of what happens: the declaration is judged on the
+     * subscription as Stripe reports it now (and, if Stripe cannot be reached, as it is stored: the right does not wait for Stripe), the
+     * paid invoice is read outside any transaction (a failure to read it never blocks the withdrawal), the declaration is stored under the
+     * lock of the workspace, and only then the subscription is cancelled (in the background), the acknowledgement queued and the
+     * administrators told.
+     *
+     * `409` `billing_disabled`, `no_billing_account`, `previous_owner_subscription`, `no_live_subscription`, `withdrawal_period_over`
+     * (the fourteen days from the start of the subscription are over) and `already_withdrawn`; `422` for the name and the address.
+     */
+    public function withdraw(WithdrawFromContractRequest $request, Workspace $workspace): JsonResponse
+    {
+        if (! Billing::enabled()) {
+            return $this->disabled();
+        }
+
+        $account = $this->customers->find($workspace);
+
+        if ($account === null) {
+            return $this->noAccount();
+        }
+
+        $owner = $this->user($request);
+
+        try {
+            $account = $this->sync->sync($account);
+        } catch (StripeException $exception) {
+            // The right of withdrawal does not wait for Stripe: the stored subscription is judged, and the cancellation is retried by its job.
+            Log::warning('The subscription of a workspace could not be read before a withdrawal: the stored one is used.', [
+                'workspace' => $workspace->ulid,
+                'code' => $exception->code(),
+                'status' => $exception->status(),
+            ]);
+        }
+
+        $refusal = $this->contractRefusal($account, $owner);
+
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
+        $reason = $this->withdrawals->refusal($account);
+
+        if ($reason !== null) {
+            return $this->withdrawalRefusal($reason);
+        }
+
+        $subscription = (string) $account->stripe_subscription_id;
+        // Outside any transaction; null when it cannot be read.
+        $invoice = $this->withdrawals->paidInvoice($account);
+
+        try {
+            $withdrawal = $this->withdrawals->record($workspace, $owner, $request->declaredName(), $request->declaredEmail(), $subscription, $invoice);
+        } catch (WithdrawalRefusedException $refused) {
+            return $this->withdrawalRefusal($refused->reason);
+        }
+
+        $this->withdrawals->settle($withdrawal, $account, $workspace);
+
+        return new JsonResponse(['data' => $this->overview->payload($workspace, true)], 201);
+    }
+
+    /**
      * Gives the customer of the payer their current email before the portal is opened. A customer Stripe does not know while the row says
      * the workspace has a subscription in play is told like the synchronisation tells it ({@see BillingSync::reportLostCustomer()}: the log
      * and the administrators), and the error of Stripe goes up as it would.
@@ -310,6 +432,36 @@ final class WorkspaceBillingController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Why the person may not cancel or withdraw from the contract of the workspace, from the account as it was just read; null when they
+     * may: an owner who is not the payer while the subscription of the payer is in play (it is not theirs), or no subscription that gives
+     * Pro.
+     */
+    private function contractRefusal(BillingAccount $account, User $owner): ?JsonResponse
+    {
+        if (in_array($account->status, SubscriptionStatus::CURRENT, true) && ! $this->customers->isPayer($account, $owner)) {
+            return $this->previousOwnerSubscription($account);
+        }
+
+        if ($account->stripe_subscription_id === null || ! in_array($account->status, WorkspacePlan::PRO_STATUSES, true)) {
+            return ApiError::conflict(__('This workspace has no running subscription.'), 'no_live_subscription');
+        }
+
+        return null;
+    }
+
+    /**
+     * The answer to a withdrawal that cannot be recorded, from the reason {@see Withdrawals} gives.
+     */
+    private function withdrawalRefusal(string $reason): JsonResponse
+    {
+        return match ($reason) {
+            'withdrawal_period_over' => ApiError::conflict(__('The fourteen days of the right of withdrawal are over.'), 'withdrawal_period_over'),
+            'already_withdrawn' => ApiError::conflict(__('You already withdrew from this contract.'), 'already_withdrawn'),
+            default => ApiError::conflict(__('This workspace has no running subscription.'), 'no_live_subscription'),
+        };
     }
 
     /**
