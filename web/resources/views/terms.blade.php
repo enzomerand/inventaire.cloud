@@ -24,7 +24,7 @@
             </div>
         </section>
 
-        <section class="landing-section-flush pb-5">
+        <section class="landing-section-flush pt-0 pb-5">
             <div class="container-xl">
                 @if ($draft)
                     <div class="alert alert-warning text-body" role="status">{{ __('Working version: information to be completed') }}</div>
