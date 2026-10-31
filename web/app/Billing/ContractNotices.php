@@ -114,7 +114,7 @@ final class ContractNotices
                 interval: (string) $account->interval,
                 startedAt: $account->started_at,
                 periodEnd: $account->current_period_end,
-                withdrawalUntil: $account->started_at === null ? null : Withdrawals::windowEnd($account->started_at),
+                withdrawalUntil: $account->started_at === null ? null : WithdrawalDeadline::end($account->started_at),
                 billingUrl: $this->billingUrl($workspace),
                 termsUrl: PublicUrls::terms('fr'),
                 termsVersion: Terms::VERSION,

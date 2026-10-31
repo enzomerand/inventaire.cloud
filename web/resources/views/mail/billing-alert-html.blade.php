@@ -1,6 +1,7 @@
 {{--
     HTML body of the Stripe risk alert. Self-contained on purpose: inline styles only, no image, font or script, so nothing is
-    fetched from a third party when the mail is opened. The only link is the Stripe dashboard. Nothing about the customer.
+    fetched from a third party when the mail is opened. The only link is the Stripe dashboard. Nothing about the customer. A problem and a task
+    (a withdrawal to refund) read the same way: only the sentence that opens them differs, and a task has lines of its own.
 --}}
 <!doctype html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
@@ -12,20 +13,8 @@
 <body style="margin:0;padding:24px;background:#f4f6fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1d273b;">
     <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #dce1e7;border-radius:6px;padding:32px;">
         <p style="margin:0 0 16px;font-size:16px;">{{ __('Hello,') }}</p>
-        @if ($problem)
-            <p style="margin:0 0 16px;font-size:14px;line-height:1.5;">{{ __('Something about the payments needs your attention on :app:', ['app' => config('app.name')]) }}</p>
-            <p style="margin:0 0 8px;font-size:14px;line-height:1.5;font-weight:600;">{{ $eventLabel }}</p>
-            <p style="margin:0 0 8px;font-size:14px;line-height:1.5;">{{ $explanation }}</p>
-            <ul style="margin:0 0 24px;padding:0 0 0 20px;font-size:14px;line-height:1.6;">
-                @if ($objectId !== null)
-                    <li>{{ __('Stripe customer: :value', ['value' => $objectId]) }}</li>
-                @endif
-                @if ($workspaceUlid !== null)
-                    <li>{{ __('Workspace: :value', ['value' => $workspaceUlid]) }}</li>
-                @endif
-            </ul>
-        @elseif ($task)
-            <p style="margin:0 0 16px;font-size:14px;line-height:1.5;">{{ __('Something needs to be done by you on :app:', ['app' => config('app.name')]) }}</p>
+        @if ($problem || $task)
+            <p style="margin:0 0 16px;font-size:14px;line-height:1.5;">{{ $problem ? __('Something about the payments needs your attention on :app:', ['app' => config('app.name')]) : __('Something needs to be done by you on :app:', ['app' => config('app.name')]) }}</p>
             <p style="margin:0 0 8px;font-size:14px;line-height:1.5;font-weight:600;">{{ $eventLabel }}</p>
             <p style="margin:0 0 8px;font-size:14px;line-height:1.5;">{{ $explanation }}</p>
             <ul style="margin:0 0 24px;padding:0 0 0 20px;font-size:14px;line-height:1.6;">

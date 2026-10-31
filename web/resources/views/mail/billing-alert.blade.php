@@ -9,16 +9,7 @@
 @endif
 
 {!! $eventLabel !!}
-@if ($problem)
-{!! $explanation !!}
-
-@if ($objectId !== null)
-{!! __('Stripe customer: :value', ['value' => $objectId]) !!}
-@endif
-@if ($workspaceUlid !== null)
-{!! __('Workspace: :value', ['value' => $workspaceUlid]) !!}
-@endif
-@elseif ($task)
+@if ($problem || $task)
 {!! $explanation !!}
 
 @if ($objectId !== null)

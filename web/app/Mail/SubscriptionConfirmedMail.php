@@ -28,9 +28,6 @@ final class SubscriptionConfirmedMail extends Mailable
 {
     use FormatsContractMail;
 
-    /** How many times the queue builds and sends the mail. */
-    public int $tries = 5;
-
     /** The seconds the queue lets the mail take: laying the PDF out takes well under that. */
     public int $timeout = 120;
 
@@ -60,16 +57,6 @@ final class SubscriptionConfirmedMail extends Mailable
         public readonly int $billingAccountId,
         public readonly string $subscriptionId,
     ) {}
-
-    /**
-     * The seconds to wait before each new try.
-     *
-     * @return list<int>
-     */
-    public function backoff(): array
-    {
-        return [60, 300, 900, 1800];
-    }
 
     /**
      * The subject names the application and what the mail is.

@@ -8,7 +8,6 @@ use Carbon\CarbonImmutable;
 use Database\Factories\BillingWithdrawalFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
@@ -33,8 +32,6 @@ use Illuminate\Support\Carbon;
  * @property CarbonImmutable|null $admin_told_at When the administrators were mailed what to refund; null while they were not.
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
- * @property-read Workspace|null $workspace
- * @property-read User|null $user
  */
 final class BillingWithdrawal extends Model
 {
@@ -75,25 +72,5 @@ final class BillingWithdrawal extends Model
             'acknowledged_at' => 'immutable_datetime',
             'admin_told_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * The workspace the subscription was for, while it exists.
-     *
-     * @return BelongsTo<Workspace, $this>
-     */
-    public function workspace(): BelongsTo
-    {
-        return $this->belongsTo(Workspace::class);
-    }
-
-    /**
-     * The person who declared the withdrawal, while their account exists.
-     *
-     * @return BelongsTo<User, $this>
-     */
-    public function user(): BelongsTo
-    {
-        return $this->belongsTo(User::class);
     }
 }

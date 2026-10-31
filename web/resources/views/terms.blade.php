@@ -7,9 +7,9 @@
     While the identity of the seller is incomplete the page is a working version: a banner says so, and the head asks not to be indexed
     (App\Support\Seo\PublicPageMeta::terms()).
 
-    `$seller` is the details of the seller (App\Legal\Seller), `$plans` the App\Landing\PricingPlans, `$termsVersion` the date of the
-    version (App\Legal\Terms), `$termsVersionDate` that date as a person reads it, `$draft` whether the page is a working version and
-    `$partial` the view of the text.
+    `$seller` is the details of the seller (App\Legal\Seller), `$plans` the App\Landing\PricingPlans, `$termsVersionDate` the date of
+    the version (App\Legal\Terms) as a person reads it, `$draft` whether the page is a working version and `$partial` the view of the
+    text.
 --}}
 @extends('layouts.app')
 

@@ -40,7 +40,6 @@ final class TermsPageController extends Controller
             'seo' => $this->meta->terms($locale),
             'seller' => Seller::details(),
             'plans' => PricingPlans::current(),
-            'termsVersion' => Terms::VERSION,
             'termsVersionDate' => Terms::versionDate(),
             'draft' => ! Seller::complete(),
             'partial' => $locale === 'fr' ? 'legal.terms-fr' : 'legal.terms-en',

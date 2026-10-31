@@ -6,7 +6,9 @@ use App\Billing\BillingCustomers;
 use App\Billing\BillingSync;
 use App\Billing\ContractNotices;
 use App\Legal\TermsDocument;
+use App\Mail\BillingAlertMail;
 use App\Mail\CancellationConfirmedMail;
+use App\Mail\RenewalNoticeMail;
 use App\Mail\SubscriptionConfirmedMail;
 use App\Mail\WithdrawalAcknowledgedMail;
 use App\Models\BillingAccount;
@@ -19,6 +21,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\SendQueuedMailable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\View;
@@ -762,4 +765,25 @@ describe('the schedule', function (): void {
             ->and((string) $events->first()->command)->toContain('--hours=720')
             ->and($events->first()->expression)->toBe('0 0 * * *');
     });
+});
+
+describe('the tries of the queue', function (): void {
+    it('are read by the queue from every mail about a contract and from the alerts to the administrators: five tries, with a pause that grows', function (string $which): void {
+        $mail = match ($which) {
+            'confirmation' => new SubscriptionConfirmedMail('Ada', 'Shop', 'month', now(), now()->addMonth(), now()->addDays(14), 'https://example.test/billing', 'https://example.test/terms', '2026-10-31', 1, 'sub_1'),
+            'cancellation' => new CancellationConfirmedMail('Ada', 'Shop', 'month', now()->addMonth(), 'https://example.test/billing', 1, 'sub_1'),
+            'renewal' => new RenewalNoticeMail('Ada', 'Shop', CarbonImmutable::now()->addDays(60), 'https://example.test/billing', 1),
+            'acknowledgement' => new WithdrawalAcknowledgedMail('Ada', 'ada@example.test', 'Shop', 'month', now()->subDay(), now(), now()->addDays(14), null, null, null, null, null, 1),
+            'alert of a problem' => BillingAlertMail::problem('cancellation_failed', 'cus_1', null, true),
+            'alert of a withdrawal' => BillingAlertMail::withdrawal('cus_1', 'sub_1', null, 600, 540, 'eur', now(), true, true),
+        };
+
+        // What the queue wraps the mailable in, and reads `tries`, `timeout` and `backoff()` from.
+        $job = new SendQueuedMailable($mail);
+
+        expect($job->tries)->toBe(5)
+            ->and($job->backoff())->toBe([60, 300, 900, 1800])
+            // Only the confirmation lays a PDF out: it is given more time.
+            ->and($job->timeout)->toBe($which === 'confirmation' ? 120 : null);
+    })->with(['confirmation', 'cancellation', 'renewal', 'acknowledgement', 'alert of a problem', 'alert of a withdrawal']);
 });

@@ -1,6 +1,6 @@
 {{--
     The terms of sale, in English: a translation for information (the French version prevails, see legal/terms-fr). Plain HTML only, like the
-    French partial. It receives $seller (see App\Legal\Seller), $plans (App\Landing\PricingPlans) and $termsVersion.
+    French partial. It receives $seller (see App\Legal\Seller) and $plans (App\Landing\PricingPlans).
 
     The articles of the annex are the statutory text and stay in French, word for word as in the French partial (a test compares the two).
 --}}

@@ -11,11 +11,30 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Number;
 
 /**
- * How the mails about a contract write what they say: days, moments with their zone, amounts and the period of the subscription, in the
- * language the mail is rendered in (the one of the person, set by the queue while the mail is built).
+ * What the mails about a contract (and the alerts to the administrators about the money) share: how they write what they say, in the
+ * language the mail is rendered in (the one of the person, set by the queue while the mail is built), and how the queue tries them again.
+ *
+ * Days, moments with their zone, amounts and the period of the subscription are written here. The queue reads `$tries` and `backoff()`
+ * from the mailable as it would from the class itself (a trait's members are the class's): five tries, with a pause that grows.
  */
 trait FormatsContractMail
 {
+    /**
+     * How many times the queue sends the mail: a mail about a contract, or about what the administrators owe a customer (a refund before
+     * a legal deadline), is worth more tries than the default one.
+     */
+    public int $tries = 5;
+
+    /**
+     * The seconds to wait before each new try.
+     *
+     * @return list<int>
+     */
+    public function backoff(): array
+    {
+        return [60, 300, 900, 1800];
+    }
+
     /**
      * A day as the reader writes it ("31 octobre 2026"), in the zone of the instance.
      */

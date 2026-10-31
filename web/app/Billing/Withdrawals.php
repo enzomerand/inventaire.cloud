@@ -65,24 +65,15 @@ final class Withdrawals
     ) {}
 
     /**
-     * The last moment the right of withdrawal can be exercised for a subscription that started at a moment (see {@see WithdrawalDeadline}):
-     * the last second of the fourteenth day after the one the subscription began, or of the next working day.
-     */
-    public static function windowEnd(CarbonInterface $startedAt): CarbonImmutable
-    {
-        return WithdrawalDeadline::end($startedAt);
-    }
-
-    /**
      * Whether the subscription of an account can be withdrawn from at a moment: it is live (gives Pro: active, trialing or past due), it
-     * started at a known moment, and the moment asked about is not past the end of its right ({@see self::windowEnd()}).
+     * started at a known moment, and the moment asked about is not past the end of its right ({@see WithdrawalDeadline::end()}).
      */
     public static function isOpen(BillingAccount $account, CarbonInterface $now): bool
     {
         return $account->started_at !== null
             && $account->stripe_subscription_id !== null
             && in_array($account->status, WorkspacePlan::PRO_STATUSES, true)
-            && $now->lessThanOrEqualTo(self::windowEnd($account->started_at));
+            && $now->lessThanOrEqualTo(WithdrawalDeadline::end($account->started_at));
     }
 
     /**
@@ -97,8 +88,7 @@ final class Withdrawals
      */
     public static function refundCents(int $paid, CarbonInterface $periodStart, CarbonInterface $periodEnd, CarbonInterface $declaredAt): int
     {
-        $total = max(1, (int) round(($periodEnd->getTimestamp() - $periodStart->getTimestamp()) / 86400));
-        $used = min($total, (int) ceil(max(0, $declaredAt->getTimestamp() - $periodStart->getTimestamp()) / 86400));
+        ['used' => $used, 'total' => $total] = self::days($periodStart, $periodEnd, $declaredAt);
 
         return $paid - intdiv($paid * $used, $total);
     }
@@ -130,7 +120,7 @@ final class Withdrawals
             return 'already_withdrawn';
         }
 
-        return now()->lessThanOrEqualTo(self::windowEnd($account->started_at)) ? null : 'withdrawal_period_over';
+        return now()->lessThanOrEqualTo(WithdrawalDeadline::end($account->started_at)) ? null : 'withdrawal_period_over';
     }
 
     /**
@@ -200,7 +190,7 @@ final class Withdrawals
                 throw new WithdrawalRefusedException('already_withdrawn');
             }
 
-            if ($declaredAt->greaterThan(self::windowEnd($account->started_at))) {
+            if ($declaredAt->greaterThan(WithdrawalDeadline::end($account->started_at))) {
                 throw new WithdrawalRefusedException('withdrawal_period_over');
             }
 

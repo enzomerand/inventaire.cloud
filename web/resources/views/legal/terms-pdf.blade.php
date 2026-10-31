@@ -1,7 +1,7 @@
 {{--
     The terms of sale as a PDF document, laid out by dompdf: the French text (the version that prevails, with the withdrawal form it
     ends with) in a page of its own, styled inline because the library reads no stylesheet of the application. DejaVu Sans is the font the
-    library embeds whole, so every accent is drawn. Same variables as the page: $seller, $plans, $termsVersion, and $termsVersionDate.
+    library embeds whole, so every accent is drawn. Same variables as the page: $seller, $plans and $termsVersionDate.
 --}}
 <!doctype html>
 <html lang="fr">

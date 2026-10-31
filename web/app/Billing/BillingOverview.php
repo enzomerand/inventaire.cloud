@@ -72,7 +72,7 @@ final class BillingOverview
             'cancel_at_period_end' => $account->cancel_at_period_end ?? false,
             'started_at' => $canManage ? $account?->started_at?->utc()->toIso8601String() : null,
             'withdrawal_until' => $canManage && $account !== null && $account->started_at !== null && ! $recorded && Withdrawals::isOpen($account, now())
-                ? Withdrawals::windowEnd($account->started_at)->utc()->toIso8601String()
+                ? WithdrawalDeadline::end($account->started_at)->toIso8601String()
                 : null,
             // Only while the subscription is still in play: once it is over the workspace is back on Free and has nothing to say of it.
             'withdrawn' => $recorded && in_array($account->status, SubscriptionStatus::CURRENT, true),

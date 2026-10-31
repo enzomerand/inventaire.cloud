@@ -22,9 +22,6 @@ final class RenewalNoticeMail extends Mailable
 {
     use FormatsContractMail;
 
-    /** How many times the queue sends the mail. */
-    public int $tries = 5;
-
     /**
      * @param  string  $name  The name of the person, for the greeting.
      * @param  string  $workspaceName  The workspace the contract is for.
@@ -39,16 +36,6 @@ final class RenewalNoticeMail extends Mailable
         public readonly string $billingUrl,
         public readonly int $billingAccountId,
     ) {}
-
-    /**
-     * The seconds to wait before each new try.
-     *
-     * @return list<int>
-     */
-    public function backoff(): array
-    {
-        return [60, 300, 900, 1800];
-    }
 
     /**
      * The subject names the date: it is the reason for the mail.

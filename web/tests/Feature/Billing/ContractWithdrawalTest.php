@@ -1072,6 +1072,6 @@ describe('telling the administrators of a withdrawal', function (): void {
         $mail->failed(new RuntimeException('The mail server is down.'));
 
         Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'could not be delivered after every try')
-            && $context['event'] === 'withdrawal' && $context['object'] === 'cus_1' && $context['withdrawal']['refund'] === 540 && $context['withdrawal']['subscription'] === 'sub_1')->once();
+            && $context['event'] === 'withdrawal' && $context['object'] === 'cus_1' && $context['amount'] === 540 && $context['withdrawal']['paid'] === 600 && $context['withdrawal']['subscription'] === 'sub_1')->once();
     });
 });

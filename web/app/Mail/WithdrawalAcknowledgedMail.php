@@ -24,9 +24,6 @@ final class WithdrawalAcknowledgedMail extends Mailable
 {
     use FormatsContractMail;
 
-    /** How many times the queue sends the mail. */
-    public int $tries = 5;
-
     /**
      * @param  string  $name  The name the person declared.
      * @param  string  $email  The address the person declared, where this goes.
@@ -57,16 +54,6 @@ final class WithdrawalAcknowledgedMail extends Mailable
         public readonly ?int $daysTotal,
         public readonly int $withdrawalId,
     ) {}
-
-    /**
-     * The seconds to wait before each new try.
-     *
-     * @return list<int>
-     */
-    public function backoff(): array
-    {
-        return [60, 300, 900, 1800];
-    }
 
     /**
      * The subject names the application and what the mail is.

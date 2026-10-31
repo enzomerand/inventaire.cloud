@@ -7,7 +7,6 @@ namespace App\Legal;
 use App\Inventories\Exports\PdfLibrary;
 use App\Landing\PricingPlans;
 use App\Mail\SubscriptionConfirmedMail;
-use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Support\Facades\App;
 use RuntimeException;
@@ -35,8 +34,8 @@ final class TermsDocument
         return self::inFrench(fn (): string => view('legal.terms-pdf', [
             'seller' => Seller::details(),
             'plans' => PricingPlans::current(),
-            'termsVersion' => Terms::VERSION,
-            'termsVersionDate' => CarbonImmutable::parse(Terms::VERSION)->settings(['locale' => 'fr'])->isoFormat('LL'),
+            // In French here, since the library is laid out inside `inFrench()`.
+            'termsVersionDate' => Terms::versionDate(),
         ])->render());
     }
 

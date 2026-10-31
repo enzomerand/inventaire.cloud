@@ -6,7 +6,7 @@ namespace App\Mail;
 
 use App\Billing\Currencies;
 use App\Billing\Withdrawals;
-use App\Support\DisplayTime;
+use App\Mail\Concerns\FormatsContractMail;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Mail\Mailable;
@@ -28,7 +28,7 @@ use Throwable;
  *   with two subscriptions, a mail about a contract that could not be delivered. The mail says what happened and what to do about it,
  *   the customer (`cus_…`, the only thing it says about them: no name, no address) and the workspace when it is known, and links to
  *   the customer in the dashboard;
- * - **a task for a person** ({@see self::TASKS}, built by {@see self::withdrawal()}): a customer withdrew from their contract. The
+ * - **a task for a person** (built by {@see self::withdrawal()}): a customer withdrew from their contract. The
  *   subscription is being cancelled, and the refund is not made by the application: the mail gives what was paid, what is to be
  *   refunded (or says the amount is to be checked when the invoice could not be read), the deadline and whether the acknowledgement
  *   reached the person.
@@ -41,8 +41,7 @@ use Throwable;
  */
 final class BillingAlertMail extends Mailable
 {
-    /** How many times the queue sends the mail: the alert of a withdrawal carries a legal deadline for a refund. */
-    public int $tries = 5;
+    use FormatsContractMail;
 
     /** The events that are told to the administrators, and the page of the dashboard of Stripe where their object is. */
     public const PAGES = [
@@ -75,22 +74,13 @@ final class BillingAlertMail extends Mailable
     ];
 
     /**
-     * The tasks the administrators are given, and the page of the dashboard of Stripe where to do them.
-     *
-     * - `withdrawal`: a customer withdrew from their contract; the subscription is cancelled by the application, the refund is up to a person.
-     */
-    public const TASKS = [
-        'withdrawal' => 'customers',
-    ];
-
-    /**
      * @param  string  $eventType  A key of {@see self::PAGES}, or of {@see self::PROBLEMS}.
      * @param  string|null  $objectId  The id of the dispute or of the warning (`du_…`, `issfr_…`), or of the customer (`cus_…`) for a problem; null when the event carried none.
-     * @param  int|null  $amount  What the dispute is about, in the smallest unit of its currency, null when Stripe gave none.
+     * @param  int|null  $amount  What the dispute is about, or what a withdrawal is to refund, in the smallest unit of its currency, null when it is not known.
      * @param  string|null  $currency  The lowercase ISO code of the currency of the amount.
      * @param  bool  $livemode  Whether the event comes from the live mode of Stripe, and not from its test mode.
      * @param  string|null  $workspaceUlid  The workspace a problem is about, when it is known.
-     * @param  array{subscription: string, paid: int|null, refund: int|null, submitted_at: CarbonInterface, deadline: CarbonInterface, acknowledged: bool}|null  $withdrawal  What a withdrawal gives to do (see {@see self::withdrawal()}).
+     * @param  array{subscription: string, paid: int|null, submitted_at: CarbonInterface, deadline: CarbonInterface, acknowledged: bool}|null  $withdrawal  What a withdrawal gives to do (see {@see self::withdrawal()}).
      */
     public function __construct(
         public readonly string $eventType,
@@ -133,21 +123,10 @@ final class BillingAlertMail extends Mailable
         return new self('withdrawal', $customerId, $refund, $currency, $livemode, $workspaceUlid, [
             'subscription' => $subscriptionId,
             'paid' => $paid,
-            'refund' => $refund,
             'submitted_at' => $submittedAt,
             'deadline' => CarbonImmutable::instance($submittedAt)->addDays(Withdrawals::REFUND_DAYS),
             'acknowledged' => $acknowledged,
         ]);
-    }
-
-    /**
-     * The seconds to wait before each new try.
-     *
-     * @return list<int>
-     */
-    public function backoff(): array
-    {
-        return [60, 300, 900, 1800];
     }
 
     /**
@@ -165,7 +144,6 @@ final class BillingAlertMail extends Mailable
             'withdrawal' => $this->withdrawal === null ? null : [
                 'subscription' => $this->withdrawal['subscription'],
                 'paid' => $this->withdrawal['paid'],
-                'refund' => $this->withdrawal['refund'],
                 'refund_before' => $this->withdrawal['deadline']->toIso8601String(),
             ],
             'exception' => $exception,
@@ -189,11 +167,12 @@ final class BillingAlertMail extends Mailable
     }
 
     /**
-     * Whether the mail is a task for a person (a withdrawal to refund), and not an event of Stripe nor a problem.
+     * Whether the mail is a task for a person (a withdrawal to refund, which is what carries the details of one), and not an event of
+     * Stripe nor a problem.
      */
     public function isTask(): bool
     {
-        return isset(self::TASKS[$this->eventType]);
+        return $this->withdrawal !== null;
     }
 
     /**
@@ -201,7 +180,7 @@ final class BillingAlertMail extends Mailable
      */
     public function dashboardUrl(): string
     {
-        $page = self::PAGES[$this->eventType] ?? self::PROBLEMS[$this->eventType] ?? self::TASKS[$this->eventType] ?? 'payments';
+        $page = self::PAGES[$this->eventType] ?? self::PROBLEMS[$this->eventType] ?? ($this->isTask() ? 'customers' : 'payments');
 
         return 'https://dashboard.stripe.com/'.($this->livemode ? '' : 'test/').$page.($this->objectId === null ? '' : '/'.$this->objectId);
     }
@@ -287,15 +266,14 @@ final class BillingAlertMail extends Mailable
 
         $currency = $this->currency;
         $paid = $this->withdrawal['paid'] !== null && $currency !== null ? $this->moneyLabel($this->withdrawal['paid'], $currency) : null;
-        $refund = $this->withdrawal['refund'] !== null && $currency !== null ? $this->moneyLabel($this->withdrawal['refund'], $currency) : null;
-        $received = DisplayTime::of($this->withdrawal['submitted_at'])->locale(app()->getLocale());
+        $refund = $this->amount !== null && $currency !== null ? $this->moneyLabel($this->amount, $currency) : null;
 
         return [
             __('Subscription: :value', ['value' => $this->withdrawal['subscription']]),
-            __('Declaration received on: :value', ['value' => $received->isoFormat('LLL').' ('.DisplayTime::offset($received).')']),
+            __('Declaration received on: :value', ['value' => self::moment($this->withdrawal['submitted_at'])]),
             $paid === null ? __('Amount paid: amount to be checked') : __('Amount paid: :value', ['value' => $paid]),
             $refund === null ? __('Refund to make: amount to be checked') : __('Refund to make: :value', ['value' => $refund]),
-            __('Refund before: :value', ['value' => DisplayTime::of($this->withdrawal['deadline'])->locale(app()->getLocale())->isoFormat('LL')]),
+            __('Refund before: :value', ['value' => self::day($this->withdrawal['deadline'])]),
             $this->withdrawal['acknowledged']
                 ? __('The acknowledgement was sent to the customer.')
                 : __('The acknowledgement could NOT be sent to the customer: write to them.'),

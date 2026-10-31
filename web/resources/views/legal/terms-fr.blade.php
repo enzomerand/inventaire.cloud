@@ -1,6 +1,6 @@
 {{--
     The terms of sale, in French (the version that prevails). Plain HTML only: the same partial is rendered on the page and in the PDF sent with
-    the confirmation of a subscription. It receives $seller (see App\Legal\Seller), $plans (App\Landing\PricingPlans) and $termsVersion.
+    the confirmation of a subscription. It receives $seller (see App\Legal\Seller) and $plans (App\Landing\PricingPlans).
 --}}
 <h2>Préambule</h2>
 <p>Les présentes conditions générales de vente (les « CGV ») régissent la souscription de l'abonnement payant « Pro » au service en ligne d'inventaire inventaire.cloud (le « Service »). Elles sont conclues entre le vendeur désigné à l'article 1 (le « Vendeur ») et toute personne qui souscrit cet abonnement (le « Client »), qu'elle agisse comme consommateur, non-professionnel ou professionnel.</p>
