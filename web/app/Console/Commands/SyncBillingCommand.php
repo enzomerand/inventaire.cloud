@@ -159,14 +159,24 @@ final class SyncBillingCommand extends Command
 
     /**
      * Finishes the withdrawals whose follow-up did not go through, the oldest first, within a budget of their own. One that fails is
-     * written in the log and the others go on; it is tried again at the next run.
+     * written in the log and the others go on; it is tried again at the next run. Nothing in this step, not even finding them, stops the
+     * run from synchronising the accounts.
      */
     private function finishWithdrawals(Withdrawals $withdrawals): void
     {
         $started = now();
         $finished = 0;
 
-        foreach ($withdrawals->unsettled(self::WITHDRAWALS_PER_RUN) as $withdrawal) {
+        // Looking them up can fail too (the database): that is the end of this step only, never of the run, which goes on with the accounts.
+        try {
+            $unsettled = $withdrawals->unsettled(self::WITHDRAWALS_PER_RUN);
+        } catch (Throwable $exception) {
+            Log::error('The withdrawals to finish could not be looked up: the accounts are synchronised all the same.', ['exception' => $exception]);
+
+            return;
+        }
+
+        foreach ($unsettled as $withdrawal) {
             if ($started->diffInSeconds(now(), true) >= self::WITHDRAWALS_BUDGET) {
                 Log::warning('The withdrawals to finish stopped early: the next run does the rest.', ['finished' => $finished]);
 

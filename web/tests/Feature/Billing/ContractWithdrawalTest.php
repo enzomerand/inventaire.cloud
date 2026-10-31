@@ -999,6 +999,26 @@ describe('finishing a withdrawal that did not go through', function (): void {
             ->and(count($team['stripe']->calls))->toBeGreaterThanOrEqual($calls);
     });
 
+    it('goes on with the accounts when the withdrawals cannot even be looked up', function (): void {
+        $stripe = billingOn();
+        $account = billingAccountAt($stripe, 'active');
+        // Never read: the account is due.
+        $account->forceFill(['synced_at' => null])->save();
+        // The database refuses anything that reads the withdrawals.
+        DB::beforeExecuting(function (string $query): void {
+            if (str_contains($query, 'billing_withdrawals')) {
+                throw new RuntimeException('The withdrawals cannot be read.');
+            }
+        });
+        Log::spy();
+
+        $this->artisan('inventaire:sync-billing')->expectsOutputToContain('1 account(s) synchronised, 0 failed.')->assertSuccessful();
+
+        Log::shouldHaveReceived('error')->withArgs(fn (string $message): bool => str_contains($message, 'The withdrawals to finish could not be looked up'))->once();
+        expect($stripe->count('GET /v1/subscriptions'))->toBe(1)
+            ->and($account->fresh()->synced_at)->not->toBeNull();
+    });
+
     it('finishes the oldest first and at most twenty in a run', function (): void {
         billingOn();
         contractAdmin();
